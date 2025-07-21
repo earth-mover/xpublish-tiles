@@ -1,5 +1,6 @@
 # xpublish-tiles
-Geospatial tile router for Xpublish
+
+Tile router for Xpublish
 
 ## Development
 
