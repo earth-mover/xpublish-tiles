@@ -27,6 +27,9 @@ dev = [
     "ty>=0.0.1a15",
 ]
 
+[project.entry-points."xpublish.plugin"]
+cf_wms = "xpublish_tiles.plugin:TilesPlugin"
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
