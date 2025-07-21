@@ -10,6 +10,12 @@ Sync the environment with [`uv`](https://docs.astral.sh/uv/getting-started/)
 uv sync
 ```
 
+Run the type checker
+
+```sh
+uv run ty check
+```
+
 Run the tests
 
 ```sh
