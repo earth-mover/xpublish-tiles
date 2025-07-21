@@ -5,7 +5,7 @@ from xpublish_tiles.routers.xyz import xyz_tiles_router
 
 
 class TilesPlugin(Plugin):
-    name = "tiles"
+    name: str = "tiles"
 
     app_router_prefix: str = "/tiles"
     app_router_tags: list[str] = ["tiles"]
