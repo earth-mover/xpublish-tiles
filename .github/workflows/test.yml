@@ -21,5 +21,8 @@ jobs:
       - name: Install the project
         run: uv sync --locked --dev
 
+      - name: Run Type Checker
+        run: uv run ty check
+
       - name: Run tests
         run: uv run pytest tests

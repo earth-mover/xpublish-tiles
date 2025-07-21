@@ -213,6 +213,31 @@ wheels = [
 ]
 
 [[package]]
+name = "ty"
+version = "0.0.1a15"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/28/ba/abedc672a4d706241106923595d68573e995f85aced13aa3ef2e6d5069cf/ty-0.0.1a15.tar.gz", hash = "sha256:b601eb50e981bd3fb857eb17b473cad3728dab67f53370b6790dfc342797eb20", size = 3886937, upload_time = "2025-07-18T13:02:20.017Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/17/86/4846900f8b7f3dc7c2ec4e0bbd6bc4a4797f27443d3c9878ece5dfcb1446/ty-0.0.1a15-py3-none-linux_armv6l.whl", hash = "sha256:6110b5afee7ae1b0c8d00770eef4937ed0b700b823da04db04486bc661dc0f80", size = 7807444, upload_time = "2025-07-18T13:01:47.81Z" },
+    { url = "https://files.pythonhosted.org/packages/e7/bd/b4ee15ffbf0fda9853aefb6cdfaa8d15a07af6ab1c6c874f7ad9adcdc2bd/ty-0.0.1a15-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:855401e2fc1d4376f007ef7684dd9173e6a408adc2bc4610013f40c2a1d68d0f", size = 7913908, upload_time = "2025-07-18T13:01:50.877Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/5e/c37942782de2ed347ea24227fab61ad80383cee7f339af2be65a7732c4a9/ty-0.0.1a15-py3-none-macosx_11_0_arm64.whl", hash = "sha256:a20b21ea9683d92d541de4a534b68b4b595c2d04bf77be0ebfe05c9768ef47e7", size = 7526774, upload_time = "2025-07-18T13:01:52.403Z" },
+    { url = "https://files.pythonhosted.org/packages/a4/11/8fa1eba381f2bc70eb8eccb2f93aa6f674b9578a1281cdf4984100de8009/ty-0.0.1a15-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:7648b0931177233e31d952723f068f2925696e464c436ed8bd820b775053474b", size = 7648872, upload_time = "2025-07-18T13:01:54.166Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/35/b12e34103638089848d58bb4a2813e9e77969fa7b4479212c9a263e7a176/ty-0.0.1a15-py3-none-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:c9c6b70ae331585984b79a4574f28619d5ff755515b93b5454d04f5c521ca864", size = 7647674, upload_time = "2025-07-18T13:01:56.013Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/b9/c1d8c8e268fe46a65e77b8a61ef5e76ebf6ce5eec2beeb6a063ab23042fb/ty-0.0.1a15-py3-none-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:38cae5d28b2882e66f4786825e87d500cfbb806c30bbcac745f20e459cf92482", size = 8470612, upload_time = "2025-07-18T13:01:57.526Z" },
+    { url = "https://files.pythonhosted.org/packages/16/ba/c4a246026dbdd9f537d882aa51fa34e3a43288b493952724f71a59fb93cc/ty-0.0.1a15-py3-none-manylinux_2_17_ppc64.manylinux2014_ppc64.whl", hash = "sha256:1a8de6d3185afbf7cc199932d7fc508887e7ddad95a15c930efc4b5445eae6de", size = 8928257, upload_time = "2025-07-18T13:01:59.705Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/53/7958aa2a730fea926f992cd217f33363c9d0dd0cb688a7c9afa5d083863e/ty-0.0.1a15-py3-none-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:d5a38db0c2ceb2f0c20241ef6a1a5b0996dad45532bb50661faf46f28b64b9f0", size = 8576435, upload_time = "2025-07-18T13:02:01.535Z" },
+    { url = "https://files.pythonhosted.org/packages/e7/77/6b65b83e28d162951e72212f31a1f9fdf7d30023a37702cb35d451df9fb8/ty-0.0.1a15-py3-none-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:0045fe7905813296fa821dad4aaabbe0f011ce34915fdfabf651db5b5f7b9d72", size = 8411987, upload_time = "2025-07-18T13:02:03.394Z" },
+    { url = "https://files.pythonhosted.org/packages/40/2f/c58c08165edb2e13b5c10f81fa2fc3f9c576992e7abb2c56d636245a49f6/ty-0.0.1a15-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:32deff2b8b05e8a8b8bf0f48ca1eef72ec299b9cc546ef9aba7185a033de28b1", size = 8211299, upload_time = "2025-07-18T13:02:05.662Z" },
+    { url = "https://files.pythonhosted.org/packages/0d/0b/959d4186d87fc99af7c0cb1c425d351d7204d4ed54638925c21915c338ba/ty-0.0.1a15-py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:60c330a9f37b260ebdf7d3e7e05ec483fab15116f11317ffd76b0e09598038b0", size = 7550119, upload_time = "2025-07-18T13:02:07.804Z" },
+    { url = "https://files.pythonhosted.org/packages/89/08/28b33a1125128f57b09a71d043e6ee06502c773ef0fab03fb54bd58dcfa4/ty-0.0.1a15-py3-none-musllinux_1_2_armv7l.whl", hash = "sha256:745355c15574d50229c3644e47bad1192e261faaf3a11870641b4902a8d9d8fe", size = 7672278, upload_time = "2025-07-18T13:02:09.339Z" },
+    { url = "https://files.pythonhosted.org/packages/2b/ba/5569b0a1a90d302e0636718a73a7c3d7029cfa03670f6cc716a4ab318709/ty-0.0.1a15-py3-none-musllinux_1_2_i686.whl", hash = "sha256:07d53cb7c9c322be41dc79c373024422f6c6cd9e96f658e4b1b3289fe6130274", size = 8092872, upload_time = "2025-07-18T13:02:10.871Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/f2/a6e94b8b0189af49e871210b7244c4d49c5ac9cc1167f16dd0f28e026745/ty-0.0.1a15-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:26b28ed6e6ea80766fdd2608ea6e4daeb211e8de2b4b88376f574667bb90f489", size = 8278734, upload_time = "2025-07-18T13:02:13.059Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/ae/90d6008d3afe0762d089b5b363be62c3e19d9730c0b04f823448a56aa5fa/ty-0.0.1a15-py3-none-win32.whl", hash = "sha256:42f8d40aa30ef0c2187b70528151e740b74db47eb84a568fbc636c7294a1046e", size = 7390797, upload_time = "2025-07-18T13:02:14.898Z" },
+    { url = "https://files.pythonhosted.org/packages/d4/14/fc292587c6e85e0b2584562c2cee26ece7c86e0679a690de86f53ad367bf/ty-0.0.1a15-py3-none-win_amd64.whl", hash = "sha256:2563111b072ea132443629a5fe0ec0cefed94c610cc694fc1bd2f48e179ca966", size = 7978840, upload_time = "2025-07-18T13:02:16.74Z" },
+    { url = "https://files.pythonhosted.org/packages/24/e9/4d8c22801c7348ce79456c9c071914d94783c5f575ddddb30161b98a7c34/ty-0.0.1a15-py3-none-win_arm64.whl", hash = "sha256:9ea13096dda97437284b61915da92384d283cd096dbe730a3f63ee644721d2d5", size = 7561340, upload_time = "2025-07-18T13:02:18.629Z" },
+]
+
+[[package]]
 name = "xpublish-tiles"
 version = "0.1.0"
 source = { editable = "." }
@@ -223,6 +248,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "ty" },
 ]
 
 [package.metadata]
@@ -233,4 +259,5 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=1.1.0" },
     { name = "pytest-cov", specifier = ">=6.2.1" },
     { name = "ruff", specifier = ">=0.12.4" },
+    { name = "ty", specifier = ">=0.0.1a15" },
 ]
