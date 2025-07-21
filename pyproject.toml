@@ -9,7 +9,10 @@ authors = [
     { name = "Tom Nicholas", email = "tom@earthmover.io" },
 ]
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "xarray>=2025.7.1",
+    "xpublish>=0.4.1",
+]
 
 [build-system]
 requires = ["hatchling"]
