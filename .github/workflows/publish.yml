@@ -1,0 +1,59 @@
+name: Build and Upload client to PyPI
+on:
+  push:
+    tags:
+      - '*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        type: string
+        description: "Tag to release"
+        required: true
+
+jobs:
+  build-and-publish-pypi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+
+      - name: set target
+        id: set_target
+        run: |
+          if [[ "${{ github.event.inputs.tag }}"  != "" ]]
+          then
+            echo "GITHUB_REF=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+             echo "GITHUB_REF=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{steps.set_target.outputs.GITHUB_REF}}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        name: Install Python
+        with:
+          python-version: "3.12"
+
+      - name: Install pip and hatch
+        run: |
+          python -m pip install --upgrade pip &&
+          pip install hatch
+
+      - name: Build tarball and wheels
+        run: |
+          # clean working directory
+          git clean -xdf
+          git restore -SW .
+
+          # build and publish
+          hatch build
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: ./dist
+          print-hash: true

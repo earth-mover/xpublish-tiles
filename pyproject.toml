@@ -1,0 +1,152 @@
+[project]
+name = "xpublish-tiles"
+description = "Tiles router for xpublish"
+readme = "README.md"
+authors = [
+    { name = "Matthew Iannucci", email = "matt@earthmover.io" },
+    { name = "Deepak Cherian", email = "deepak@earthmover.io" },
+    { name = "Tom Nicholas", email = "tom@earthmover.io" },
+]
+license = { text = "Apache-2.0" }
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+]
+requires-python = ">=3.11"
+dependencies = [
+    "cf-xarray>=0.10.8",
+    "cftime>=1.6.4.post1",
+    "datashader>=0.18.2",
+    "donfig>=0.8.0",
+    "morecantile>=5.4.2",
+    "numbagg>=0.9.0",
+    "numba>=0.60.0",
+    "pydantic-xml>=2.17.3",
+    "pyproj>=3.7.1",
+    "xpublish>=0.3.0",
+    "fastapi",
+    "xarray>=2025.08.0",
+    "zarr>=3.1.2",
+    "rasterix>=0.1a4",
+    "toolz>=1.0.0",
+    "cachetools>=5.5.2",
+    "tbb>=2022.2.0 ; sys_platform == 'linux'",
+    "structlog>=24.4.0",
+]
+dynamic = ["version"]
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+datashader = { git = "https://github.com/holoviz/datashader.git", rev = "main" }
+
+[tool.hatch]
+version.source = "vcs"
+build.hooks.vcs.version-file = "src/xpublish_tiles/_version.py"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/xpublish_tiles"]
+
+[project.optional-dependencies]
+testing = [
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.1.0",
+    "pytest-cov>=6.2.1",
+    "pytest-xdist>=3.6.1",
+    "syrupy>=4.9.1",
+    "hypothesis>=6.136.6",
+    "pytest-randomly>=3.16.0",
+    "matplotlib>=3.10.3",
+    "scikit-image>=0.25.2",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.4",
+    "ty>=0.0.1a15",
+    "pdbpp>=0.11.7",
+    "netcdf4>=1.7.2",
+    "pooch>=1.8.2",
+    "arraylake",
+    "icechunk",
+    "dask",
+    "ipython>=9.4.0",
+    "xpublish-tiles[testing]",
+    "coiled>=1.118.3",
+    "memray>=1.18.0",
+]
+
+[project.entry-points."xpublish.plugin"]
+tiles = "xpublish_tiles.xpublish.tiles:TilesPlugin"
+wms = "xpublish_tiles.xpublish.wms:WMSPlugin"
+
+[project.entry-points."xpublish_tiles.renderers"]
+raster = "xpublish_tiles.render.raster:DatashaderRasterRenderer"
+
+[project.scripts]
+xpublish-tiles = "xpublish_tiles.cli.main:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+minversion = "7"
+testpaths = ["tests", "integration_tests"]
+log_cli_level = "INFO"
+xfail_strict = true
+addopts = ["-ra", "--strict-config", "--strict-markers", "--dist=loadgroup"]
+filterwarnings = [
+    "ignore::morecantile.errors.PointOutsideTMSBounds",
+    "ignore::DeprecationWarning:distutils",
+    "ignore::DeprecationWarning:pyct.cmd",
+    "ignore::pydantic.warnings.PydanticDeprecatedSince20",
+]
+
+[tool.ruff]
+line-length = 90
+extend-exclude = ["*.ipynb", "doc", "_typed_ops.pyi"]
+
+[tool.ruff.lint]
+extend-select = [
+  "F",    # Pyflakes
+  "E",    # pycodestyle errors
+  "W",    # pycodestyle warnings
+  "I",    # isort
+  "UP",   # pyupgrade
+  "B",    # flake8-bugbear
+  "C4",   # flake8-comprehensions
+  "PIE",  # flake8-pie
+  "TID",  # flake8-tidy-imports (absolute imports)
+  "PGH",  # pygrep-hooks
+  "PERF", # Perflint
+  "RUF",
+]
+extend-safe-fixes = [
+  "TID252", # absolute imports
+]
+ignore = [
+  "E402",    # module level import not at top of file
+  "E501",    # line too long - let the formatter worry about that
+  "E731",    # do not assign a lambda expression, use a def
+  "UP007",   # use X | Y for type annotations
+  "C40",     # unnecessary generator, comprehension, or literal
+  "PGH003",  # type:ignore without code
+  "PIE790",  # unnecessary pass statement
+  "PERF203", # try-except within a loop incurs performance overhead
+  "RUF001",  # string contains ambiguous unicode character
+  "RUF002",  # docstring contains ambiguous acute accent unicode character
+  "RUF003",  # comment contains ambiguous no-break space unicode character
+  "RUF005",  # consider unpacking operator instead of concatenation
+  "RUF012",  # mutable class attributes
+  "B008",    # do not perform function calls in argument defaults
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["dask", "distributed", "icechunk", "xarray", "zarr"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+# Disallow all relative imports.
+ban-relative-imports = "all"
