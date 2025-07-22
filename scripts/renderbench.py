@@ -74,6 +74,7 @@ Usage examples:
 - With timeline viz: uv run renderbench.py --ntasks=10 --visual --debug
 - All options: uv run renderbench.py --ntasks=100 --cprofile --gil --visual
 """
+
 import argparse
 import asyncio
 import cProfile
@@ -86,6 +87,7 @@ from collections import defaultdict
 import datashader as dsh
 import matplotlib as mpl
 import numpy as np
+
 import xarray as xr
 import zarr
 
@@ -117,33 +119,44 @@ def render_data(data: np.ndarray):
 # Global timeline tracking for visualization
 timeline_events = []
 
-async def render_time(array, itime: int, task_id: int = None, track_timeline: bool = False, use_sync: bool = False) -> io.BytesIO:
+
+async def render_time(
+    array,
+    itime: int,
+    task_id: int | None = None,
+    track_timeline: bool = False,
+    use_sync: bool = False,
+) -> io.BytesIO:
     start_time = time.perf_counter()
-    
+
     # Log start of zarr read
     if task_id is not None:
         logging.info(f"Task {task_id}: Starting zarr read for itime={itime}")
-    
+
     if track_timeline and task_id is not None:
-        timeline_events.append(('read_start', task_id, itime, start_time))
-    
+        timeline_events.append(("read_start", task_id, itime, start_time))
+
     read_start = time.perf_counter()
     if use_sync:
         # Use synchronous zarr API
         data = array[itime, :, :]
     else:
         # Use asynchronous zarr API
-        data = await array._async_array.getitem(selection=(itime, slice(None), slice(None)))
+        data = await array._async_array.getitem(
+            selection=(itime, slice(None), slice(None))
+        )
     read_end = time.perf_counter()
-    
+
     # Log completion of zarr read, start of rendering
     if task_id is not None:
-        logging.info(f"Task {task_id}: Zarr read complete for itime={itime} ({read_end - read_start:.3f}s), starting render")
-    
+        logging.info(
+            f"Task {task_id}: Zarr read complete for itime={itime} ({read_end - read_start:.3f}s), starting render"
+        )
+
     if track_timeline and task_id is not None:
-        timeline_events.append(('read_end', task_id, itime, read_end))
-        timeline_events.append(('render_start', task_id, itime, read_end))
-    
+        timeline_events.append(("read_end", task_id, itime, read_end))
+        timeline_events.append(("render_start", task_id, itime, read_end))
+
     render_start = time.perf_counter()
     result = render_data(
         xr.DataArray(
@@ -154,24 +167,26 @@ async def render_time(array, itime: int, task_id: int = None, track_timeline: bo
         )
     )
     render_end = time.perf_counter()
-    
+
     # Log completion
     if task_id is not None:
         total_time = render_end - start_time
-        logging.info(f"Task {task_id}: Render complete for itime={itime} ({render_end - render_start:.3f}s), total: {total_time:.3f}s")
-    
+        logging.info(
+            f"Task {task_id}: Render complete for itime={itime} ({render_end - render_start:.3f}s), total: {total_time:.3f}s"
+        )
+
     if track_timeline and task_id is not None:
-        timeline_events.append(('render_end', task_id, itime, render_end))
-    
+        timeline_events.append(("render_end", task_id, itime, render_end))
+
     return result
 
 
 def get_icechunk_repository(path: str, mode: str = "r"):
     """Get an icechunk repository for reading or writing"""
     from icechunk import Repository, local_filesystem_storage
-    
+
     storage = local_filesystem_storage(path)
-    
+
     if mode == "w":
         # Create new repository
         return Repository.create(storage)
@@ -182,16 +197,17 @@ def get_icechunk_repository(path: str, mode: str = "r"):
 
 def setup_dataset(format_type: str = "zarr"):
     """Set up the benchmark dataset using either zarr or icechunk format"""
-    import distributed
     import numpy as np
+
+    import distributed
     import xarray as xr
-    
+
     print(f"Setting up dataset in {format_type} format...")
-    
+
     # Create dask client
     client = distributed.Client()
     print(f"Dask client: {client}")
-    
+
     try:
         # Load and process the dataset
         ds = (
@@ -199,12 +215,13 @@ def setup_dataset(format_type: str = "zarr"):
             .isel(time=slice(100))
             .interp(lon=np.linspace(200, 330, 2400), lat=np.linspace(75, 15, 3600))
         )
-        
+
         if format_type == "icechunk":
             from icechunk.xarray import to_icechunk
+
             filename = "airt4.icechunk"
             print(f"Writing to {filename} using icechunk...")
-            
+
             # Create repository and writable session
             repo = get_icechunk_repository(filename, mode="w")
             session = repo.writable_session("main")
@@ -214,11 +231,11 @@ def setup_dataset(format_type: str = "zarr"):
             filename = "airt4.zarr"
             print(f"Writing to {filename} using zarr...")
             ds.to_zarr(filename, encoding={"air": dict(chunks=(1, 200, 200))}, mode="w")
-        
+
         print(f"Dataset created successfully: {filename}")
         print(f"Shape: {ds.air.shape}")
         print(f"Chunks: {ds.air.chunks}")
-        
+
     finally:
         client.close()
 
@@ -227,27 +244,27 @@ def visualize_timeline():
     """Create a visual timeline using colored blocks"""
     if not timeline_events:
         return
-    
+
     # Get timeline bounds
     start_time = min(event[3] for event in timeline_events)
     end_time = max(event[3] for event in timeline_events)
     duration = end_time - start_time
-    
+
     # Get unique tasks
     tasks = sorted(set(event[1] for event in timeline_events))
-    
+
     # ANSI color codes for different phases
     colors = {
-        'read': '\033[94m',     # Blue
-        'render': '\033[92m',   # Green
-        'idle': '\033[90m',     # Gray
-        'reset': '\033[0m'      # Reset
+        "read": "\033[94m",  # Blue
+        "render": "\033[92m",  # Green
+        "idle": "\033[90m",  # Gray
+        "reset": "\033[0m",  # Reset
     }
-    
+
     print(f"\n📊 Timeline Visualization (Total: {duration:.3f}s)")
     print(f"{'Task':<6} {'itime':<6} Timeline (■ = read, ■ = render, · = idle)")
     print("-" * 80)
-    
+
     # Create timeline for each task
     timeline_width = 60
     for task_id in tasks:
@@ -255,79 +272,107 @@ def visualize_timeline():
         task_events = [e for e in timeline_events if e[1] == task_id]
         if not task_events:
             continue
-            
+
         # Get itime for this task
         itime = task_events[0][2]
-        
+
         # Create timeline array
-        timeline = [' '] * timeline_width
-        
+        timeline = [" "] * timeline_width
+
         # Track current state
-        current_state = 'idle'
+        current_state = "idle"
         last_time = start_time
-        
+
         for event_type, _, _, event_time in sorted(task_events, key=lambda x: x[3]):
             # Fill previous state up to this event
             start_pos = int((last_time - start_time) / duration * timeline_width)
             end_pos = int((event_time - start_time) / duration * timeline_width)
-            
-            char = '■' if current_state == 'read' else ('■' if current_state == 'render' else '·')
-            color = colors.get(current_state, colors['reset'])
-            
+
+            char = (
+                "■"
+                if current_state == "read"
+                else ("■" if current_state == "render" else "·")
+            )
+            color = colors.get(current_state, colors["reset"])
+
             for i in range(start_pos, min(end_pos, timeline_width)):
                 if i >= 0:
                     timeline[i] = f"{color}{char}{colors['reset']}"
-            
+
             # Update state
-            if event_type == 'read_start':
-                current_state = 'read'
-            elif event_type == 'read_end':
-                current_state = 'idle'
-            elif event_type == 'render_start':
-                current_state = 'render'
-            elif event_type == 'render_end':
-                current_state = 'idle'
-                
+            if event_type == "read_start":
+                current_state = "read"
+            elif event_type == "read_end":
+                current_state = "idle"
+            elif event_type == "render_start":
+                current_state = "render"
+            elif event_type == "render_end":
+                current_state = "idle"
+
             last_time = event_time
-        
+
         # Print the timeline
-        timeline_str = ''.join(timeline)
+        timeline_str = "".join(timeline)
         print(f"T{task_id:<5} {itime:<6} {timeline_str}")
-    
+
     print("-" * 80)
-    print(f"Legend: {colors['read']}■{colors['reset']} Reading  {colors['render']}■{colors['reset']} Rendering  · Idle")
+    print(
+        f"Legend: {colors['read']}■{colors['reset']} Reading  {colors['render']}■{colors['reset']} Rendering  · Idle"
+    )
 
 
 async def main():
     zarr.config.set({"async.concurrency": 1, "threading.max_workers": 1})
     parser = argparse.ArgumentParser(description="Benchmark async rendering tasks")
     parser.add_argument("--ntasks", type=int, default=1, help="Number of tasks to run")
-    parser.add_argument("--gil", action="store_true", help="Enable GIL contention monitoring")
-    parser.add_argument("--cprofile", action="store_true", help="Enable cProfile profiling")
-    parser.add_argument("--yappi", action="store_true", help="Enable yappi profiling (async-aware)")
-    parser.add_argument("--debug", action="store_true", help="Enable debug logging to trace task interleaving")
-    parser.add_argument("--visual", action="store_true", help="Show visual timeline with colored blocks")
-    parser.add_argument("--sync", action="store_true", help="Use synchronous zarr API instead of async")
-    parser.add_argument("--setup", action="store_true", help="Set up the benchmark dataset and exit")
-    parser.add_argument("--format", choices=["zarr", "icechunk"], default="zarr", help="Storage format to use (default: zarr)")
+    parser.add_argument(
+        "--gil", action="store_true", help="Enable GIL contention monitoring"
+    )
+    parser.add_argument(
+        "--cprofile", action="store_true", help="Enable cProfile profiling"
+    )
+    parser.add_argument(
+        "--yappi", action="store_true", help="Enable yappi profiling (async-aware)"
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging to trace task interleaving",
+    )
+    parser.add_argument(
+        "--visual", action="store_true", help="Show visual timeline with colored blocks"
+    )
+    parser.add_argument(
+        "--sync", action="store_true", help="Use synchronous zarr API instead of async"
+    )
+    parser.add_argument(
+        "--setup", action="store_true", help="Set up the benchmark dataset and exit"
+    )
+    parser.add_argument(
+        "--format",
+        choices=["zarr", "icechunk"],
+        default="zarr",
+        help="Storage format to use (default: zarr)",
+    )
     args = parser.parse_args()
-    
+
     # Handle setup mode
     if args.setup:
         setup_dataset(args.format)
         return
-    
+
     # Configure logging if debug mode enabled
     if args.debug:
         logging.basicConfig(
             level=logging.INFO,
-            format='%(asctime)s.%(msecs)03d - %(message)s',
-            datefmt='%H:%M:%S'
+            format="%(asctime)s.%(msecs)03d - %(message)s",
+            datefmt="%H:%M:%S",
         )
-    
+
     knocker = None
     if args.gil:
         from gilknocker import KnockKnock
+
         knocker = KnockKnock(1_000)
 
     # Open dataset based on format
@@ -339,7 +384,7 @@ async def main():
     else:
         filename = "airt4.zarr"
         group = zarr.open_group(filename)
-    
+
     array = group["air"]
     print(f"Loaded dataset: {filename} (shape: {array.shape})")
 
@@ -351,53 +396,67 @@ async def main():
     if args.cprofile:
         pr = cProfile.Profile()
         pr.enable()
-    
+
     if args.yappi:
         import yappi
+
         yappi.set_clock_type("WALL")
         yappi.start(builtins=True)
 
     if knocker:
         knocker.start()
-    
+
     # Start timing the main benchmark
     benchmark_start = time.perf_counter()
-        
+
     # Create ntasks coroutines with task IDs for logging/visualization
     if args.debug or args.visual:
-        tasks = [render_time(array, i % array.shape[0], task_id=i, track_timeline=args.visual, use_sync=args.sync) for i in range(args.ntasks)]
+        tasks = [
+            render_time(
+                array,
+                i % array.shape[0],
+                task_id=i,
+                track_timeline=args.visual,
+                use_sync=args.sync,
+            )
+            for i in range(args.ntasks)
+        ]
     else:
-        tasks = [render_time(array, i % array.shape[0], use_sync=args.sync) for i in range(args.ntasks)]
-    
+        tasks = [
+            render_time(array, i % array.shape[0], use_sync=args.sync)
+            for i in range(args.ntasks)
+        ]
+
     # Wait for all tasks to complete
     results = await asyncio.gather(*tasks)
-    
+
     # Stop timing
     benchmark_end = time.perf_counter()
     total_time = benchmark_end - benchmark_start
-    
+
     # Stop profiling if enabled
     if pr:
         pr.disable()
-        pr.dump_stats('renderbench.prof')
-    
+        pr.dump_stats("renderbench.prof")
+
     if args.yappi:
         import yappi
+
         yappi.stop()
-        
+
         # Save function stats
         func_stats = yappi.get_func_stats()
-        func_stats.save('renderbench_func.prof', type='pstat')
-        
-        # Save thread stats  
+        func_stats.save("renderbench_func.prof", type="pstat")
+
+        # Save thread stats
         thread_stats = yappi.get_thread_stats()
-        with open('renderbench_thread.txt', 'w') as f:
+        with open("renderbench_thread.txt", "w") as f:
             thread_stats.print_all(out=f)
-        
+
         print("Yappi profiling data saved to:")
         print("  - renderbench_func.prof (function stats)")
         print("  - renderbench_thread.txt (thread stats)")
-        
+
         # Print top functions summary
         print("\nTop 10 functions by total time:")
         func_stats.sort("ttot", "desc")
@@ -405,51 +464,54 @@ async def main():
             if i >= 10:
                 break
             print(f"{stat.name:<60} {stat.ttot:.4f}s {stat.ncall:>8} calls")
-        
+
         yappi.clear_stats()
-    
+
     print(f"Completed {args.ntasks} render tasks")
     print(f"Total execution time: {total_time:.3f}s")
     print(f"Average time per task: {total_time / args.ntasks:.3f}s")
-    print(f"Average image buffer size: {sum(len(r.getvalue()) for r in results) / len(results):.0f} bytes")
+    print(
+        f"Average image buffer size: {sum(len(r.getvalue()) for r in results) / len(results):.0f} bytes"
+    )
     print(f"Active threads: {threading.active_count()}")
-    
+
     if knocker:
         print(f"GIL contention: {knocker.contention_metric}")
-    
+
     # Show visual timeline if requested
     if args.visual:
         visualize_timeline()
-        
+
         # Show timing statistics
         if timeline_events:
             read_times = []
             render_times = []
-            
+
             # Group events by task
             task_events = defaultdict(list)
             for event in timeline_events:
                 task_events[event[1]].append(event)
-            
-            for task_id, events in task_events.items():
+
+            for events in task_events.values():
                 events = sorted(events, key=lambda x: x[3])
-                read_start = next(e[3] for e in events if e[0] == 'read_start')
-                read_end = next(e[3] for e in events if e[0] == 'read_end')
-                render_start = next(e[3] for e in events if e[0] == 'render_start')
-                render_end = next(e[3] for e in events if e[0] == 'render_end')
-                
+                read_start = next(e[3] for e in events if e[0] == "read_start")
+                read_end = next(e[3] for e in events if e[0] == "read_end")
+                render_start = next(e[3] for e in events if e[0] == "render_start")
+                render_end = next(e[3] for e in events if e[0] == "render_end")
+
                 read_times.append(read_end - read_start)
                 render_times.append(render_end - render_start)
-            
+
             avg_read = sum(read_times) / len(read_times)
             avg_render = sum(render_times) / len(render_times)
             ratio = avg_read / avg_render if avg_render > 0 else 0
-            
-            print(f"\n⏱️  Timing Analysis:")
+
+            print("\n⏱️  Timing Analysis:")
             print(f"Average read time:   {avg_read:.3f}s")
             print(f"Average render time: {avg_render:.3f}s")
             print(f"Read/Render ratio:   {ratio:.1f}:1")
             print(f"Render is {ratio:.1f}x faster than read")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
