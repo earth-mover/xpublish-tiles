@@ -9,6 +9,11 @@
 #     "zarr",
 #     "snakeviz",
 #     "gilknocker",
+#     "distributed",
+#     "icechunk",
+#     "pooch",
+#     "austin-python",
+#     "yappi",
 # ]
 # ///
 """
@@ -43,16 +48,28 @@ To run this script reproducibly with uv:
    uv run renderbench.py --ntasks=100 --cprofile
    uv run snakeviz renderbench.prof
 
-4. With GIL contention monitoring:
+4. With yappi profiling (async-aware):
+   uv run renderbench.py --ntasks=100 --yappi
+   uv run python -c "import yappi; yappi.get_func_stats().print_all()"
+
+5. With GIL contention monitoring:
    uv run renderbench.py --ntasks=100 --gil
 
-5. With visual timeline:
+6. With visual timeline:
    uv run renderbench.py --ntasks=10 --visual
 
+7. Dataset setup:
+   uv run renderbench.py --setup --format=zarr
+   uv run renderbench.py --setup --format=icechunk
+
 Usage examples:
+- Setup zarr dataset: uv run renderbench.py --setup --format=zarr
+- Setup icechunk dataset: uv run renderbench.py --setup --format=icechunk
 - Basic async benchmark: uv run renderbench.py --ntasks=100
+- Benchmark icechunk: uv run renderbench.py --ntasks=100 --format=icechunk
 - Sync vs async comparison: uv run renderbench.py --ntasks=10 --visual --sync
 - With profiling: uv run renderbench.py --ntasks=100 --cprofile
+- With yappi profiling: uv run renderbench.py --ntasks=100 --yappi
 - With GIL monitoring: uv run renderbench.py --ntasks=100 --gil
 - With timeline viz: uv run renderbench.py --ntasks=10 --visual --debug
 - All options: uv run renderbench.py --ntasks=100 --cprofile --gil --visual
@@ -149,6 +166,63 @@ async def render_time(array, itime: int, task_id: int = None, track_timeline: bo
     return result
 
 
+def get_icechunk_repository(path: str, mode: str = "r"):
+    """Get an icechunk repository for reading or writing"""
+    from icechunk import Repository, local_filesystem_storage
+    
+    storage = local_filesystem_storage(path)
+    
+    if mode == "w":
+        # Create new repository
+        return Repository.create(storage)
+    else:
+        # Open existing repository
+        return Repository.open(storage)
+
+
+def setup_dataset(format_type: str = "zarr"):
+    """Set up the benchmark dataset using either zarr or icechunk format"""
+    import distributed
+    import numpy as np
+    import xarray as xr
+    
+    print(f"Setting up dataset in {format_type} format...")
+    
+    # Create dask client
+    client = distributed.Client()
+    print(f"Dask client: {client}")
+    
+    try:
+        # Load and process the dataset
+        ds = (
+            xr.tutorial.open_dataset("air_temperature", chunks={"time": 1})
+            .isel(time=slice(100))
+            .interp(lon=np.linspace(200, 330, 2400), lat=np.linspace(75, 15, 3600))
+        )
+        
+        if format_type == "icechunk":
+            from icechunk.xarray import to_icechunk
+            filename = "airt4.icechunk"
+            print(f"Writing to {filename} using icechunk...")
+            
+            # Create repository and writable session
+            repo = get_icechunk_repository(filename, mode="w")
+            session = repo.writable_session("main")
+            to_icechunk(ds, session)
+            session.commit("Initial dataset creation")
+        else:
+            filename = "airt4.zarr"
+            print(f"Writing to {filename} using zarr...")
+            ds.to_zarr(filename, encoding={"air": dict(chunks=(1, 200, 200))}, mode="w")
+        
+        print(f"Dataset created successfully: {filename}")
+        print(f"Shape: {ds.air.shape}")
+        print(f"Chunks: {ds.air.chunks}")
+        
+    finally:
+        client.close()
+
+
 def visualize_timeline():
     """Create a visual timeline using colored blocks"""
     if not timeline_events:
@@ -230,10 +304,18 @@ async def main():
     parser.add_argument("--ntasks", type=int, default=1, help="Number of tasks to run")
     parser.add_argument("--gil", action="store_true", help="Enable GIL contention monitoring")
     parser.add_argument("--cprofile", action="store_true", help="Enable cProfile profiling")
+    parser.add_argument("--yappi", action="store_true", help="Enable yappi profiling (async-aware)")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging to trace task interleaving")
     parser.add_argument("--visual", action="store_true", help="Show visual timeline with colored blocks")
     parser.add_argument("--sync", action="store_true", help="Use synchronous zarr API instead of async")
+    parser.add_argument("--setup", action="store_true", help="Set up the benchmark dataset and exit")
+    parser.add_argument("--format", choices=["zarr", "icechunk"], default="zarr", help="Storage format to use (default: zarr)")
     args = parser.parse_args()
+    
+    # Handle setup mode
+    if args.setup:
+        setup_dataset(args.format)
+        return
     
     # Configure logging if debug mode enabled
     if args.debug:
@@ -248,8 +330,18 @@ async def main():
         from gilknocker import KnockKnock
         knocker = KnockKnock(1_000)
 
-    group = zarr.open_group("airt4.zarr")
+    # Open dataset based on format
+    if args.format == "icechunk":
+        filename = "airt4.icechunk"
+        repo = get_icechunk_repository(filename, mode="r")
+        session = repo.readonly_session("main")
+        group = zarr.open_group(session.store, mode="r")
+    else:
+        filename = "airt4.zarr"
+        group = zarr.open_group(filename)
+    
     array = group["air"]
+    print(f"Loaded dataset: {filename} (shape: {array.shape})")
 
     # pre-compile
     await render_time(array, 0)
@@ -259,9 +351,17 @@ async def main():
     if args.cprofile:
         pr = cProfile.Profile()
         pr.enable()
+    
+    if args.yappi:
+        import yappi
+        yappi.set_clock_type("WALL")
+        yappi.start(builtins=True)
 
     if knocker:
         knocker.start()
+    
+    # Start timing the main benchmark
+    benchmark_start = time.perf_counter()
         
     # Create ntasks coroutines with task IDs for logging/visualization
     if args.debug or args.visual:
@@ -272,12 +372,45 @@ async def main():
     # Wait for all tasks to complete
     results = await asyncio.gather(*tasks)
     
+    # Stop timing
+    benchmark_end = time.perf_counter()
+    total_time = benchmark_end - benchmark_start
+    
     # Stop profiling if enabled
     if pr:
         pr.disable()
         pr.dump_stats('renderbench.prof')
     
+    if args.yappi:
+        import yappi
+        yappi.stop()
+        
+        # Save function stats
+        func_stats = yappi.get_func_stats()
+        func_stats.save('renderbench_func.prof', type='pstat')
+        
+        # Save thread stats  
+        thread_stats = yappi.get_thread_stats()
+        with open('renderbench_thread.txt', 'w') as f:
+            thread_stats.print_all(out=f)
+        
+        print("Yappi profiling data saved to:")
+        print("  - renderbench_func.prof (function stats)")
+        print("  - renderbench_thread.txt (thread stats)")
+        
+        # Print top functions summary
+        print("\nTop 10 functions by total time:")
+        func_stats.sort("ttot", "desc")
+        for i, stat in enumerate(func_stats):
+            if i >= 10:
+                break
+            print(f"{stat.name:<60} {stat.ttot:.4f}s {stat.ncall:>8} calls")
+        
+        yappi.clear_stats()
+    
     print(f"Completed {args.ntasks} render tasks")
+    print(f"Total execution time: {total_time:.3f}s")
+    print(f"Average time per task: {total_time / args.ntasks:.3f}s")
     print(f"Average image buffer size: {sum(len(r.getvalue()) for r in results) / len(results):.0f} bytes")
     print(f"Active threads: {threading.active_count()}")
     
