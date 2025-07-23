@@ -7,6 +7,7 @@ from typing import Any, NewType, Self
 
 import numpy as np
 import pyproj
+import pyproj.aoi
 
 import xarray as xr
 from xpublish_tiles.render import Renderer
@@ -59,7 +60,7 @@ class QueryParams:
     cmap: str
     colorscalerange: tuple[Number, Number] | None = None
 
-    def get_renderer(self) -> type[Renderer]:
+    def get_renderer(self) -> Renderer:
         if self.style is Style.RASTER:
             return DatashaderRasterRenderer()
         else:
