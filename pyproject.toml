@@ -33,8 +33,8 @@ dev = [
 ]
 
 [project.entry-points."xpublish.plugin"]
-tiles = "xpublish_tiles.plugins.tiles:TilesPlugin"
-wms = "xpublish_tiles.plugins.wms:WMSPlugin"
+tiles = "xpublish_tiles.xpublish.tiles:TilesPlugin"
+wms = "xpublish_tiles.xpublish.wms:WMSPlugin"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
