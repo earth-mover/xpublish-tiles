@@ -26,5 +26,5 @@ uv run ty check
 Run the tests
 
 ```sh
-uv run pytest tests
+uv run pytest tests --where=local
 ```
