@@ -1,6 +1,7 @@
 """OGC Web Map Service XPublish Plugin"""
 
 from enum import Enum
+
 from fastapi import APIRouter
 from xpublish import Dependencies, Plugin, hookimpl
 
