@@ -26,7 +26,7 @@ def test_wms_query_discriminator():
         layers="layer1",
         styles="raster/magma",
         crs="EPSG:3857",
-        tile="1,1,1",
+        bbox="0,0,1,1",
         width=100,
         height=100,
         colorscalerange="0,100",
@@ -43,7 +43,7 @@ def test_wms_query_discriminator():
         layers="layer1",
         styles="raster/default",
         crs="EPSG:3857",
-        tile="1,1,1",
+        bbox="0,0,1,1",
         width=100,
         height=100,
         autoscale=True,
@@ -88,7 +88,7 @@ def test_wms_query_discriminator():
             autoscale=False,
         )
 
-    with pytest.raises(ValueError, match="bbox or tile must be specified"):
+    with pytest.raises(ValueError, match="bbox must be specified"):
         WMSQuery(
             service="WMS",
             version="1.3.0",
@@ -96,22 +96,6 @@ def test_wms_query_discriminator():
             layers="layer1",
             styles="raster/default",
             crs="EPSG:3857",
-            width=100,
-            height=100,
-            colorscalerange="0,100",
-            autoscale=True,
-        )
-
-    # Fail because tile and crs are not valid
-    with pytest.raises(ValueError, match="tile is only supported for EPSG:3857"):
-        WMSQuery(
-            service="WMS",
-            version="1.3.0",
-            request="GetMap",
-            layers="layer1",
-            styles="raster/default",
-            crs="EPSG:4326",
-            tile="1,1,1",
             width=100,
             height=100,
             colorscalerange="0,100",
@@ -149,7 +133,7 @@ def test_wms_query_discriminator():
             layers="layer1",
             styles="raster",
             crs="EPSG:3857",
-            tile="1,1,1",
+            bbox="0,0,1,1",
             width=100,
             height=100,
             colorscalerange="0,100",
@@ -176,7 +160,7 @@ def test_wms_query_discriminator():
         service="WMS",
         version="1.3.0",
         request="GetLegendGraphic",
-        layers="layer1",
+        layer="layer1",
         width=100,
         height=100,
         vertical=True,
