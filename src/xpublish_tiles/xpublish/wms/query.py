@@ -141,7 +141,7 @@ class WMSGetMapQuery(WMSBaseQuery):
         if v.colorscalerange is None and not v.autoscale:
             raise ValueError("colorscalerange is required when autoscale is False")
         if v.bbox is None:
-            raise ValueError("bbox or tile must be specified")
+            raise ValueError("bbox must be specified")
         return v
 
 
@@ -227,6 +227,7 @@ WMSQueryType = Union[
     WMSGetCapabilitiesQuery,
     WMSGetMapQuery,
     WMSGetFeatureInfoQuery,
+    WMSGetLegendGraphicQuery,
 ]
 
 
@@ -258,6 +259,7 @@ WMS_FILTERED_QUERY_PARAMS = {
     "version",
     "request",
     "layers",
+    "layer",
     "layername",
     "query_layers",
     "styles",
@@ -269,6 +271,7 @@ WMS_FILTERED_QUERY_PARAMS = {
     "height",
     "colorscalerange",
     "autoscale",
+    "vertical",
     "item",
     "day",
     "range",
