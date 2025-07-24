@@ -5,7 +5,7 @@ from enum import Enum
 from fastapi import APIRouter, HTTPException
 from xpublish import Dependencies, Plugin, hookimpl
 
-from .models import (
+from tiles.models import (
     ConformanceDeclaration,
     Link,
     TileMatrixSet,
@@ -13,7 +13,7 @@ from .models import (
     TileSetMetadata,
     TilesLandingPage,
 )
-from .tile_matrix import TILE_MATRIX_SETS, TILE_MATRIX_SET_SUMMARIES
+from tiles.tile_matrix import TILE_MATRIX_SET_SUMMARIES, TILE_MATRIX_SETS
 
 
 class TilesPlugin(Plugin):
