@@ -2,17 +2,17 @@
 
 from enum import Enum
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from xpublish import Dependencies, Plugin, hookimpl
 
-from tiles.models import (
+from .models import (
     ConformanceDeclaration,
-    Link,
-    TileMatrixSet,
     TileMatrixSets,
     TileSetMetadata,
     TilesLandingPage,
+    Link,
 )
+from .tile_matrix import TILE_MATRIX_SETS, TILE_MATRIX_SET_SUMMARIES
 
 
 class TilesPlugin(Plugin):
@@ -43,62 +43,21 @@ class TilesPlugin(Plugin):
         @router.get("/tileMatrixSets", response_model=TileMatrixSets)
         async def get_tile_matrix_sets():
             """List available tile matrix sets"""
-            return TileMatrixSets(
-                tileMatrixSets=[
-                    {
-                        "id": "WebMercatorQuad",
-                        "title": "Web Mercator Quad",
-                        "uri": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
-                        "crs": "http://www.opengis.net/def/crs/EPSG/0/3857",
-                        "links": [
-                            Link(
-                                href="/tiles/tileMatrixSets/WebMercatorQuad",
-                                rel="self",
-                                type="application/json",
-                                title="Web Mercator Quad tile matrix set",
-                            )
-                        ],
-                    }
-                ]
-            )
+            summaries = [
+                summary_func() for summary_func in TILE_MATRIX_SET_SUMMARIES.values()
+            ]
+            return TileMatrixSets(tileMatrixSets=summaries)
 
-        @router.get("/tileMatrixSets/{tileMatrixSetId}", response_model=TileMatrixSet)
+        @router.get("/tileMatrixSets/{tileMatrixSetId}")
         async def get_tile_matrix_set(tileMatrixSetId: str):
             """Get specific tile matrix set definition"""
-            if tileMatrixSetId == "WebMercatorQuad":
-                return TileMatrixSet(
-                    id="WebMercatorQuad",
-                    title="Web Mercator Quad",
-                    uri="http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
-                    crs="http://www.opengis.net/def/crs/EPSG/0/3857",
-                    tileMatrices=[
-                        {
-                            "id": "0",
-                            "scaleDenominator": 559082264.029,
-                            "topLeftCorner": [-20037508.3428, 20037508.3428],
-                            "tileWidth": 256,
-                            "tileHeight": 256,
-                            "matrixWidth": 1,
-                            "matrixHeight": 1,
-                        },
-                        {
-                            "id": "1",
-                            "scaleDenominator": 279541132.015,
-                            "topLeftCorner": [-20037508.3428, 20037508.3428],
-                            "tileWidth": 256,
-                            "tileHeight": 256,
-                            "matrixWidth": 2,
-                            "matrixHeight": 2,
-                        },
-                    ],
+            if tileMatrixSetId not in TILE_MATRIX_SETS:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Tile matrix set '{tileMatrixSetId}' not found",
                 )
-            else:
-                # Return 404 or empty for unknown tile matrix sets
-                return TileMatrixSet(
-                    id=tileMatrixSetId,
-                    crs="unknown",
-                    tileMatrices=[],
-                )
+
+            return TILE_MATRIX_SETS[tileMatrixSetId]()
 
         return router
 
