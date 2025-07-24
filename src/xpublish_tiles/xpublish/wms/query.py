@@ -1,4 +1,4 @@
-from typing import Any, Literal, Optional, Union, cast
+from typing import Any, Literal, Optional, Union, cast, overload
 
 from pydantic import (
     AliasChoices,
@@ -233,6 +233,71 @@ WMSQueryType = Union[
 
 class WMSQuery(RootModel):
     root: WMSQueryType = Field(discriminator="request")
+
+    @overload
+    def __init__(
+        self,
+        *,
+        service: Literal["WMS"],
+        version: Literal["1.1.1", "1.3.0"],
+        request: Literal["GetCapabilities"],
+    ) -> None: ...
+
+    @overload
+    def __init__(
+        self,
+        *,
+        service: Literal["WMS"],
+        version: Literal["1.1.1", "1.3.0"],
+        request: Literal["GetMap"],
+        layers: str,
+        width: int,
+        height: int,
+        bbox: str | tuple[float, float, float, float] | None = None,
+        styles: str | tuple[str, str] = ("raster", "default"),
+        crs: Literal["EPSG:4326", "EPSG:3857"] = "EPSG:4326",
+        time: str | None = None,
+        elevation: str | None = None,
+        colorscalerange: str | tuple[float, float] | None = None,
+        autoscale: bool = False,
+    ) -> None: ...
+
+    @overload
+    def __init__(
+        self,
+        *,
+        service: Literal["WMS"],
+        version: Literal["1.1.1", "1.3.0"],
+        request: Literal["GetFeatureInfo", "GetTimeseries", "GetVerticalProfile"],
+        query_layers: str,
+        bbox: str | tuple[float, float, float, float],
+        width: int,
+        height: int,
+        x: int,
+        y: int,
+        crs: Literal["EPSG:4326"] = "EPSG:4326",
+        time: str | None = None,
+        elevation: str | None = None,
+    ) -> None: ...
+
+    @overload
+    def __init__(
+        self,
+        *,
+        service: Literal["WMS"],
+        version: Literal["1.1.1", "1.3.0"],
+        request: Literal["GetLegendGraphic"],
+        layer: str,
+        width: int,
+        height: int,
+        colorscalerange: str | tuple[float, float],
+        vertical: bool = False,
+        autoscale: bool = False,
+        styles: str | tuple[str, str] = ("raster", "default"),
+    ) -> None: ...
+
+    def __init__(self, **data: Any) -> None:
+        super().__init__(data)
 
     @model_validator(mode="before")
     def lower_case_dict(cls, values: Any) -> Any:
