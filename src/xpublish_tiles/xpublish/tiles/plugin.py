@@ -5,14 +5,15 @@ from enum import Enum
 from fastapi import APIRouter, HTTPException
 from xpublish import Dependencies, Plugin, hookimpl
 
-from tiles.models import (
+from .models import (
     ConformanceDeclaration,
     Link,
+    TileMatrixSet,
     TileMatrixSets,
     TileSetMetadata,
     TilesLandingPage,
 )
-from tiles.tile_matrix import TILE_MATRIX_SET_SUMMARIES, TILE_MATRIX_SETS
+from .tile_matrix import TILE_MATRIX_SETS, TILE_MATRIX_SET_SUMMARIES
 
 
 class TilesPlugin(Plugin):
@@ -48,7 +49,7 @@ class TilesPlugin(Plugin):
             ]
             return TileMatrixSets(tileMatrixSets=summaries)
 
-        @router.get("/tileMatrixSets/{tileMatrixSetId}")
+        @router.get("/tileMatrixSets/{tileMatrixSetId}", response_model=TileMatrixSet)
         async def get_tile_matrix_set(tileMatrixSetId: str):
             """Get specific tile matrix set definition"""
             if tileMatrixSetId not in TILE_MATRIX_SETS:
