@@ -20,4 +20,12 @@ def xpublish_client(xpublish_app):
 def test_app_router(xpublish_client):
     response = xpublish_client.get("/datasets/air/tiles")
     assert response.status_code == 200
-    assert response.json() == {"message": "Hello, Tiles!"}
+
+    data = response.json()
+    assert data["title"] == "Dataset Tiles"
+    assert data["description"] == "Tiles for this dataset"
+    assert len(data["links"]) == 1
+    assert data["links"][0]["href"] == "./WebMercatorQuad"
+    assert data["links"][0]["rel"] == "item"
+    assert data["links"][0]["type"] == "application/json"
+    assert data["links"][0]["title"] == "WebMercatorQuad tileset"

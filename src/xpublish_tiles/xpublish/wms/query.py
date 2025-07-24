@@ -100,6 +100,10 @@ class WMSGetMapQuery(WMSBaseQuery):
         None,
         description="Bounding box to use for the query in the format 'minx,miny,maxx,maxy'",
     )
+    tile: Optional[str] = Field(
+        None,
+        description="Tile coordinates in the format 'z,x,y' for EPSG:3857 only",
+    )
     width: int = Field(
         ...,
         description="The width of the image to return in pixels",
@@ -140,8 +144,10 @@ class WMSGetMapQuery(WMSBaseQuery):
     ) -> "WMSGetMapQuery":
         if v.colorscalerange is None and not v.autoscale:
             raise ValueError("colorscalerange is required when autoscale is False")
-        if v.bbox is None:
+        if v.bbox is None and v.tile is None:
             raise ValueError("bbox or tile must be specified")
+        if v.tile is not None and v.crs != "EPSG:3857":
+            raise ValueError("tile is only supported for EPSG:3857")
         return v
 
 
@@ -198,7 +204,9 @@ class WMSGetLegendGraphicQuery(WMSBaseQuery):
     """WMS GetLegendGraphic query"""
 
     request: Literal["GetLegendGraphic"] = Field(..., description="Request type")
-    layer: str
+    layers: str = Field(
+        validation_alias=AliasChoices("layer", "layers"),
+    )
     width: int
     height: int
     vertical: bool = False
@@ -227,6 +235,7 @@ WMSQueryType = Union[
     WMSGetCapabilitiesQuery,
     WMSGetMapQuery,
     WMSGetFeatureInfoQuery,
+    WMSGetLegendGraphicQuery,
 ]
 
 
@@ -258,6 +267,7 @@ WMS_FILTERED_QUERY_PARAMS = {
     "version",
     "request",
     "layers",
+    "layer",
     "layername",
     "query_layers",
     "styles",
@@ -265,10 +275,12 @@ WMS_FILTERED_QUERY_PARAMS = {
     "time",
     "elevation",
     "bbox",
+    "tile",
     "width",
     "height",
     "colorscalerange",
     "autoscale",
+    "vertical",
     "item",
     "day",
     "range",

@@ -8,7 +8,13 @@ from xpublish import Dependencies, Plugin, hookimpl
 
 import xarray as xr
 from xpublish_tiles.utils import lower_case_keys
-from xpublish_tiles.xpublish.wms.query import WMS_FILTERED_QUERY_PARAMS, WMSQuery
+from xpublish_tiles.xpublish.wms.query import (
+    WMS_FILTERED_QUERY_PARAMS,
+    WMSQuery,
+    WMSGetCapabilitiesQuery,
+    WMSGetMapQuery,
+    WMSGetFeatureInfoQuery,
+)
 
 
 class WMSPlugin(Plugin):
@@ -39,14 +45,14 @@ class WMSPlugin(Plugin):
                     extra_query_params[query_key] = query_params[query_key]
                     del query_params[query_key]
 
-            match wms_query:
-                case WMSQuery.GetCapabilities():
+            match wms_query.root:
+                case WMSGetCapabilitiesQuery():
                     # TODO: Implement GetCapabilities response
                     return {"message": "GetCapabilities"}
-                case WMSQuery.GetMap():
+                case WMSGetMapQuery():
                     # TODO: Implement GetMap response
                     return {"message": "GetMap"}
-                case WMSQuery.GetFeatureInfo():
+                case WMSGetFeatureInfoQuery():
                     # TODO: Implement GetFeatureInfo response
                     return {"message": "GetFeatureInfo"}
 
