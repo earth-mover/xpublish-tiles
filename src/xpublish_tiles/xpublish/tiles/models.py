@@ -1,6 +1,7 @@
 """OGC Tiles API data models"""
 
-from typing import List, Optional
+from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -16,14 +17,14 @@ class Link(BaseModel):
 class ConformanceDeclaration(BaseModel):
     """OGC API conformance declaration"""
 
-    conformsTo: List[str]
+    conformsTo: list[str]
 
 
 class BoundingBox(BaseModel):
     """Bounding box definition"""
 
-    lowerLeft: List[float]  # [minX, minY]
-    upperRight: List[float]  # [maxX, maxY]
+    lowerLeft: list[float]  # [minX, minY]
+    upperRight: list[float]  # [maxX, maxY]
     crs: Optional[str] = None
 
 
@@ -32,7 +33,7 @@ class TileMatrix(BaseModel):
 
     id: str
     scaleDenominator: float
-    topLeftCorner: List[float]
+    topLeftCorner: list[float]
     tileWidth: int
     tileHeight: int
     matrixWidth: int
@@ -46,7 +47,7 @@ class TileMatrixSet(BaseModel):
     title: Optional[str] = None
     uri: Optional[str] = None
     crs: str
-    tileMatrices: List[TileMatrix]
+    tileMatrices: list[TileMatrix]
 
 
 class TileMatrixSetSummary(BaseModel):
@@ -56,13 +57,13 @@ class TileMatrixSetSummary(BaseModel):
     title: Optional[str] = None
     uri: Optional[str] = None
     crs: str
-    links: List[Link]
+    links: list[Link]
 
 
 class TileMatrixSets(BaseModel):
     """Collection of tile matrix sets"""
 
-    tileMatrixSets: List[TileMatrixSetSummary]
+    tileMatrixSets: list[TileMatrixSetSummary]
 
 
 class TileSetMetadata(BaseModel):
@@ -72,7 +73,7 @@ class TileSetMetadata(BaseModel):
     tileMatrixSetURI: str
     crs: str
     dataType: str  # "map", "vector", "coverage"
-    links: List[Link]
+    links: list[Link]
     boundingBox: Optional[BoundingBox] = None
 
 
@@ -81,4 +82,4 @@ class TilesLandingPage(BaseModel):
 
     title: str
     description: Optional[str] = None
-    links: List[Link]
+    links: list[Link]

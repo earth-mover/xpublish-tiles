@@ -1,6 +1,6 @@
 """Tile matrix set definitions for OGC Tiles API"""
 
-from .models import TileMatrix, TileMatrixSet, TileMatrixSetSummary, Link
+from tiles.models import Link, TileMatrix, TileMatrixSet, TileMatrixSetSummary
 
 
 def get_web_mercator_quad() -> TileMatrixSet:
