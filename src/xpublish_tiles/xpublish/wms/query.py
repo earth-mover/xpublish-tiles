@@ -73,51 +73,6 @@ class WMSGetCapabilitiesQuery(WMSBaseQuery):
     request: Literal["GetCapabilities"] = Field(..., description="Request type")
 
 
-class WMSGetMetadataQuery(WMSBaseQuery):
-    """WMS GetMetadata query"""
-
-    request: Literal["GetMetadata"] = Field(..., description="Request type")
-    layername: Optional[str] = Field(
-        None,
-        description="Name of the layer to get metadata for",
-        validation_alias=AliasChoices("layername", "layers", "query_layers"),
-    )
-    item: Literal["layerdetails", "timesteps", "minmax", "menu"] = Field(
-        ...,
-        description="The type of GetMetadata request",
-    )
-    day: Optional[str] = Field(
-        None,
-        description="Optional day to get timesteps for in Y-m-d format. Only valid when item=timesteps and layer has a time dimension",
-    )
-    range: Optional[str] = Field(
-        None,
-        description="Optional range to get timesteps for in Y-m-dTH:M:SZ/Y-m-dTH:M:SZ format. Only valid when item=timesteps and layer has a time dimension",
-    )
-    bbox: Optional[tuple[float, float, float, float]] = Field(
-        None,
-        description="Bounding box to use for calculating min and max in the format 'minx,miny,maxx,maxy'",
-    )
-    crs: Literal["EPSG:4326", "EPSG:3857"] = Field(
-        "EPSG:4326",
-        description="Coordinate reference system to use for the query. EPSG:4326 and EPSG:3857 are supported for this request",
-        validation_alias=AliasChoices("crs", "srs"),
-    )
-    time: Optional[str] = Field(
-        None,
-        description="Optional time to get the min and max for in Y-m-dTH:M:SZ format. Only valid when the layer has a time dimension",
-    )
-    elevation: Optional[str] = Field(
-        None,
-        description="Optional elevation to get the min and max for. Only valid when the layer has an elevation dimension",
-    )
-
-    @field_validator("bbox", mode="before")
-    @classmethod
-    def validate_bbox(cls, v: str | None) -> tuple[float, float, float, float] | None:
-        return validate_bbox(v)
-
-
 class WMSGetMapQuery(WMSBaseQuery):
     """WMS GetMap query"""
 
@@ -132,7 +87,6 @@ class WMSGetMapQuery(WMSBaseQuery):
     crs: Literal["EPSG:4326", "EPSG:3857"] = Field(
         "EPSG:4326",
         description="Coordinate reference system to use for the query. EPSG:4326 and EPSG:3857 are supported for this request",
-        validation_alias=AliasChoices("crs", "srs"),
     )
     time: Optional[str] = Field(
         None,
@@ -212,7 +166,6 @@ class WMSGetFeatureInfoQuery(WMSBaseQuery):
     crs: Literal["EPSG:4326"] = Field(
         "EPSG:4326",
         description="Coordinate reference system to use for the query. Currently only EPSG:4326 is supported for this request",
-        validation_alias=AliasChoices("crs", "srs"),
     )
     bbox: tuple[float, float, float, float] = Field(
         ...,
@@ -241,13 +194,11 @@ class WMSGetFeatureInfoQuery(WMSBaseQuery):
         return validate_bbox(v)
 
 
-class WMSGetLegendInfoQuery(WMSBaseQuery):
-    """WMS GetLegendInfo query"""
+class WMSGetLegendGraphicQuery(WMSBaseQuery):
+    """WMS GetLegendGraphic query"""
 
     request: Literal["GetLegendGraphic"] = Field(..., description="Request type")
-    layers: str = Field(
-        validation_alias=AliasChoices("layername", "layers", "query_layers"),
-    )
+    layer: str
     width: int
     height: int
     vertical: bool = False
@@ -274,10 +225,8 @@ class WMSGetLegendInfoQuery(WMSBaseQuery):
 
 WMSQueryType = Union[
     WMSGetCapabilitiesQuery,
-    WMSGetMetadataQuery,
     WMSGetMapQuery,
     WMSGetFeatureInfoQuery,
-    WMSGetLegendInfoQuery,
 ]
 
 
@@ -295,7 +244,7 @@ class WMSQuery(RootModel):
                 if isinstance(ret_v, str):
                     if ret_k == "item":
                         ret_v = ret_v.lower()
-                    elif ret_k == "crs" or ret_k == "srs":
+                    elif ret_k == "crs":
                         ret_v = ret_v.upper()
 
                 ret_dict[ret_k] = ret_v
@@ -313,7 +262,6 @@ WMS_FILTERED_QUERY_PARAMS = {
     "query_layers",
     "styles",
     "crs",
-    "srs",
     "time",
     "elevation",
     "bbox",
