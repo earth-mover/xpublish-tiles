@@ -12,7 +12,7 @@ The goal of this project is to transform xarray datasets to raster, vector and o
 ### Key Commands
 - **Environment sync**: `uv sync`
 - **Type check**: `uv run ty check`
-- **Run tests**: `uv run pytest tests`
+- **Run unit tests**: `uv run pytest tests --where=local`
 - **Run pre-commit checks**: `pre-commit run --all-files`
 
 # important-instruction-reminders
