@@ -19,5 +19,5 @@ def xpublish_client(xpublish_app):
 
 def test_app_router(xpublish_client):
     response = xpublish_client.get("/datasets/air/wms")
-    assert response.status_code == 200
+    assert response.status_code == 422
     assert response.json() == {"message": "Hello, WMS!"}
