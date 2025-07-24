@@ -10,10 +10,10 @@ import xarray as xr
 from xpublish_tiles.utils import lower_case_keys
 from xpublish_tiles.xpublish.wms.query import (
     WMS_FILTERED_QUERY_PARAMS,
-    WMSQuery,
     WMSGetCapabilitiesQuery,
-    WMSGetMapQuery,
     WMSGetFeatureInfoQuery,
+    WMSGetMapQuery,
+    WMSQuery,
 )
 
 
