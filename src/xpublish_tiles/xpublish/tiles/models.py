@@ -4,6 +4,7 @@ import re
 from enum import Enum
 from typing import Any, Optional, Union
 
+import pyproj
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -53,6 +54,26 @@ class CRSType(BaseModel):
                 return f"EPSG:{self.referenceSystem.code}"
             return self.referenceSystem.code
         return None
+
+    def to_pyproj_crs(self) -> Optional[pyproj.CRS]:
+        """Convert CRS to pyproj.CRS object for coordinate transformations
+
+        Returns:
+            pyproj.CRS object if conversion successful, None otherwise
+
+        Raises:
+            pyproj.exceptions.CRSError: If CRS string is invalid
+        """
+        epsg_string = self.to_epsg_string()
+        if epsg_string is None:
+            return None
+
+        try:
+            return pyproj.CRS.from_user_input(epsg_string)
+        except Exception:
+            # If pyproj can't parse the CRS string, return None
+            # This allows the caller to handle the error appropriately
+            return None
 
 
 class Link(BaseModel):

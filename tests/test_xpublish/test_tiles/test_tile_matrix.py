@@ -1,3 +1,4 @@
+import pyproj
 import pytest
 
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
@@ -47,9 +48,8 @@ class TestExtractTileBboxAndCrs:
         """Test bbox extraction for zoom level 0 (single tile covering world)"""
         bbox, crs = extract_tile_bbox_and_crs("WebMercatorQuad", 0, 0, 0)
 
-        assert (
-            crs == "http://www.opengis.net/def/crs/EPSG/0/3857"
-        )  # Zoom 0 should cover the entire Web Mercator extent
+        assert isinstance(crs, pyproj.CRS)
+        assert crs.to_epsg() == 3857  # Web Mercator EPSG code
         expected_min_x = -20037508.3428
         expected_max_x = 20037508.3428
         expected_min_y = -20037508.3428
@@ -65,8 +65,9 @@ class TestExtractTileBboxAndCrs:
         # Test top-left tile (0,0)
         bbox, crs = extract_tile_bbox_and_crs("WebMercatorQuad", 1, 0, 0)
 
+        assert isinstance(crs, pyproj.CRS)
         assert (
-            crs == "http://www.opengis.net/def/crs/EPSG/0/3857"
+            crs.to_epsg() == 3857
         )  # At zoom 1, we have 2x2 tiles, each covering half the world extent
         expected_min_x = -20037508.3428
         expected_max_x = 0.0
@@ -94,7 +95,8 @@ class TestExtractTileBboxAndCrs:
         """Test bbox extraction for higher zoom level"""
         bbox, crs = extract_tile_bbox_and_crs("WebMercatorQuad", 5, 10, 15)
 
-        assert crs == "http://www.opengis.net/def/crs/EPSG/0/3857"
+        assert isinstance(crs, pyproj.CRS)
+        assert crs.to_epsg() == 3857
         assert len(bbox) == 4
 
         # Verify bbox format [minX, minY, maxX, maxY]
@@ -142,7 +144,7 @@ class TestExtractTileBboxAndCrs:
 
         assert isinstance(bbox, list)
         assert len(bbox) == 4
-        assert isinstance(crs, str)
+        assert isinstance(crs, pyproj.CRS)
 
         # Verify coordinate order
         min_x, min_y, max_x, max_y = bbox
