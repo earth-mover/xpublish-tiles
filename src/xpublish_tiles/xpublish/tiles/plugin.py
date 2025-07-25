@@ -39,9 +39,9 @@ class TilesPlugin(Plugin):
             """OGC API conformance declaration"""
             return ConformanceDeclaration(
                 conformsTo=[
-                    "http://www.opengis.net/spec/ogcapi-common-1/1.0/conf/core",
-                    "http://www.opengis.net/spec/ogcapi-common-2/1.0/conf/collections",
                     "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/core",
+                    "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/tileset",
+                    "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/tilesets-list",
                 ]
             )
 
