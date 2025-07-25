@@ -7,12 +7,11 @@ from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import Dataset
 from xpublish_tiles.xpublish.tiles.models import (
-    BoundingBox,
     ConformanceDeclaration,
+    DataType,
     Layer,
     Link,
     TileMatrixSet,
-    TileMatrixSetLimit,
     TileMatrixSets,
     TileSetMetadata,
     TilesetsList,
@@ -21,7 +20,10 @@ from xpublish_tiles.xpublish.tiles.models import (
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     TILE_MATRIX_SETS,
+    extract_dataset_bounds,
     extract_tile_bbox_and_crs,
+    get_all_tile_matrix_set_ids,
+    get_tile_matrix_limits,
 )
 
 
@@ -85,28 +87,7 @@ class TilesPlugin(Plugin):
             tilesets = []
 
             # Extract dataset bounds if available
-            dataset_bounds = None
-            try:
-                # Try to get bounds from dataset coordinates
-                if hasattr(dataset, "bounds"):
-                    bounds = dataset.bounds
-                    dataset_bounds = BoundingBox(
-                        lowerLeft=[float(bounds[0]), float(bounds[1])],
-                        upperRight=[float(bounds[2]), float(bounds[3])],
-                        crs="http://www.opengis.net/def/crs/EPSG/0/4326",
-                    )
-                elif "lat" in dataset.coords and "lon" in dataset.coords:
-                    lat_min, lat_max = float(dataset.lat.min()), float(dataset.lat.max())
-                    lon_min, lon_max = float(dataset.lon.min()), float(dataset.lon.max())
-                    dataset_bounds = BoundingBox(
-                        lowerLeft=[lon_min, lat_min],
-                        upperRight=[lon_max, lat_max],
-                        crs="http://www.opengis.net/def/crs/EPSG/0/4326",
-                        orderedAxes=["X", "Y"],
-                    )
-            except Exception:
-                # If we can't extract bounds, that's okay
-                pass
+            dataset_bounds = extract_dataset_bounds(dataset)
 
             # Get dataset metadata
             dataset_attrs = dataset.attrs
@@ -118,8 +99,8 @@ class TilesPlugin(Plugin):
             elif not isinstance(keywords, list):
                 keywords = []
 
-            # For now, create one tileset entry per supported tile matrix set
-            supported_tms = ["WebMercatorQuad"]  # Can be expanded
+            # Create one tileset entry per supported tile matrix set
+            supported_tms = get_all_tile_matrix_set_ids()
 
             for tms_id in supported_tms:
                 if tms_id in TILE_MATRIX_SETS:
@@ -132,7 +113,7 @@ class TilesPlugin(Plugin):
                             id=var_name,
                             title=var_data.attrs.get("long_name", var_name),
                             description=var_data.attrs.get("description", ""),
-                            dataType="coverage",
+                            dataType=DataType.COVERAGE,
                             boundingBox=dataset_bounds,
                             crs=tms_summary.crs,
                             links=[
@@ -147,21 +128,8 @@ class TilesPlugin(Plugin):
                         )
                         layers.append(layer)
 
-                    # Define tile matrix limits (example for zoom levels 0-18)
-                    tileMatrixSetLimits = []
-                    if tms_id == "WebMercatorQuad":
-                        # Add limits for a few zoom levels as example
-                        for z in range(19):
-                            max_tiles = 2**z - 1
-                            tileMatrixSetLimits.append(
-                                TileMatrixSetLimit(
-                                    tileMatrix=str(z),
-                                    minTileRow=0,
-                                    maxTileRow=max_tiles,
-                                    minTileCol=0,
-                                    maxTileCol=max_tiles,
-                                )
-                            )
+                    # Define tile matrix limits
+                    tileMatrixSetLimits = get_tile_matrix_limits(tms_id)
 
                     tileset = TilesetSummary(
                         title=f"{title} - {tms_id}",
@@ -169,7 +137,7 @@ class TilesPlugin(Plugin):
                         or f"Tiles for {title} in {tms_id} projection",
                         tileMatrixSetURI=tms_summary.uri,
                         crs=tms_summary.crs,
-                        dataType="map",  # Could be "coverage" for gridded data
+                        dataType=DataType.MAP,
                         links=[
                             Link(
                                 href=f"./{tms_id}",
@@ -205,7 +173,7 @@ class TilesPlugin(Plugin):
                 title=f"Dataset tiles in {tileMatrixSetId}",
                 tileMatrixSetURI=f"http://www.opengis.net/def/tilematrixset/OGC/1.0/{tileMatrixSetId}",
                 crs="http://www.opengis.net/def/crs/EPSG/0/3857",
-                dataType="map",
+                dataType=DataType.MAP,
                 links=[
                     Link(
                         href=f"./{tileMatrixSetId}/{{tileMatrix}}/{{tileRow}}/{{tileCol}}",

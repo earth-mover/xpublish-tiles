@@ -1,9 +1,14 @@
 """Tile matrix set definitions for OGC Tiles API"""
 
+from typing import Optional
+
+from xarray import Dataset
 from xpublish_tiles.xpublish.tiles.models import (
+    BoundingBox,
     Link,
     TileMatrix,
     TileMatrixSet,
+    TileMatrixSetLimit,
     TileMatrixSetSummary,
 )
 
@@ -119,3 +124,76 @@ def extract_tile_bbox_and_crs(
     crs = tile_matrix_set.crs
 
     return bbox, crs
+
+
+def extract_dataset_bounds(dataset: Dataset) -> Optional[BoundingBox]:
+    """Extract geographic bounds from a dataset.
+
+    TODO: This functionality may be handled by the tile rendering pipeline in the future.
+
+    Args:
+        dataset: xarray Dataset to extract bounds from
+
+    Returns:
+        BoundingBox object if bounds can be extracted, None otherwise
+    """
+    try:
+        # Try to get bounds from dataset bounds attribute
+        if hasattr(dataset, "bounds"):
+            bounds = dataset.bounds
+            return BoundingBox(
+                lowerLeft=[float(bounds[0]), float(bounds[1])],
+                upperRight=[float(bounds[2]), float(bounds[3])],
+                crs="http://www.opengis.net/def/crs/EPSG/0/4326",
+            )
+        # Try to extract from lat/lon coordinates
+        elif "lat" in dataset.coords and "lon" in dataset.coords:
+            lat_min, lat_max = float(dataset.lat.min()), float(dataset.lat.max())
+            lon_min, lon_max = float(dataset.lon.min()), float(dataset.lon.max())
+            return BoundingBox(
+                lowerLeft=[lon_min, lat_min],
+                upperRight=[lon_max, lat_max],
+                crs="http://www.opengis.net/def/crs/EPSG/0/4326",
+                orderedAxes=["X", "Y"],
+            )
+    except Exception:
+        # If we can't extract bounds, return None
+        pass
+    return None
+
+
+def get_tile_matrix_limits(
+    tms_id: str, zoom_levels: Optional[range] = None
+) -> list[TileMatrixSetLimit]:
+    """Generate tile matrix limits for the specified zoom levels.
+
+    TODO: Calculate actual limits based on dataset bounds instead of full world coverage.
+
+    Args:
+        tms_id: Tile matrix set identifier
+        zoom_levels: Range of zoom levels to generate limits for (default: 0-18)
+
+    Returns:
+        List of TileMatrixSetLimit objects
+    """
+    if zoom_levels is None:
+        zoom_levels = range(19)  # 0-18
+
+    limits = []
+    for z in zoom_levels:
+        max_tiles = 2**z - 1
+        limits.append(
+            TileMatrixSetLimit(
+                tileMatrix=str(z),
+                minTileRow=0,
+                maxTileRow=max_tiles,
+                minTileCol=0,
+                maxTileCol=max_tiles,
+            )
+        )
+    return limits
+
+
+def get_all_tile_matrix_set_ids() -> list[str]:
+    """Get list of all available tile matrix set IDs."""
+    return list(TILE_MATRIX_SETS.keys())

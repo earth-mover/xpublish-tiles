@@ -1,6 +1,7 @@
 """OGC Tiles API data models"""
 
 import re
+from enum import Enum
 from typing import Any, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
@@ -120,13 +121,21 @@ class TileMatrixSets(BaseModel):
     tileMatrixSets: list[TileMatrixSetSummary]
 
 
+class DataType(str, Enum):
+    """Valid data types as defined in OGC Tiles specification"""
+
+    MAP = "map"
+    VECTOR = "vector"
+    COVERAGE = "coverage"
+
+
 class TileSetMetadata(BaseModel):
     """Metadata for a tileset applied to a specific dataset"""
 
     title: Optional[str] = None
     tileMatrixSetURI: str
     crs: Union[str, CRSType]
-    dataType: str  # "map", "vector", "coverage"
+    dataType: Union[DataType, str]  # "map", "vector", "coverage"
     links: list[Link]
     boundingBox: Optional[BoundingBox] = None
 
@@ -180,7 +189,7 @@ class Layer(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     keywords: Optional[str] = None
-    dataType: Optional[str] = None
+    dataType: Optional[Union[DataType, str]] = None
     geometryDimension: Optional[int] = None
     featureType: Optional[str] = None
     attribution: Optional[str] = None
@@ -220,7 +229,7 @@ class TilesetSummary(BaseModel):
 
     title: Optional[str] = None
     description: Optional[str] = None
-    dataType: str  # "map", "vector", "coverage"
+    dataType: Union[DataType, str]  # "map", "vector", "coverage"
     crs: Union[str, CRSType]
     tileMatrixSetURI: Optional[str] = None
     links: list[Link]
