@@ -1,8 +1,57 @@
 """OGC Tiles API data models"""
 
-from typing import Optional
+import re
+from typing import Any, Optional, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
+
+
+class MD_ReferenceSystem(BaseModel):
+    """ISO 19115 MD_ReferenceSystem data structure"""
+
+    code: Optional[str] = None
+    codeSpace: Optional[str] = None
+    version: Optional[str] = None
+
+
+class CRSType(BaseModel):
+    """CRS definition supporting URI, WKT2, or ISO 19115 MD_ReferenceSystem"""
+
+    uri: Optional[str] = Field(None, description="A reference to a CRS, typically EPSG")
+    wkt: Optional[Any] = Field(None, description="WKT2 CRS definition")
+    referenceSystem: Optional[MD_ReferenceSystem] = Field(
+        None, description="ISO 19115 reference system"
+    )
+
+    @field_validator("uri")
+    @classmethod
+    def validate_uri(cls, v):
+        if v is not None and not isinstance(v, str):
+            raise ValueError("URI must be a string")
+        return v
+
+    def to_epsg_string(self) -> Optional[str]:
+        """Convert CRS to EPSG string format for pyproj"""
+        if self.uri:
+            # Handle OGC URI format: http://www.opengis.net/def/crs/EPSG/0/4326
+            ogc_match = re.search(r"/epsg/\d+/(\d+)$", self.uri.lower())
+            if ogc_match:
+                return f"EPSG:{ogc_match.group(1)}"
+            # Handle simple EPSG format: epsg:4326 or epsg/4326
+            epsg_match = re.search(r"epsg[:/](\d+)", self.uri.lower())
+            if epsg_match:
+                return f"EPSG:{epsg_match.group(1)}"
+            return self.uri
+        elif self.wkt:
+            return str(self.wkt)
+        elif self.referenceSystem and self.referenceSystem.code:
+            if (
+                self.referenceSystem.codeSpace
+                and "epsg" in self.referenceSystem.codeSpace.lower()
+            ):
+                return f"EPSG:{self.referenceSystem.code}"
+            return self.referenceSystem.code
+        return None
 
 
 class Link(BaseModel):
@@ -25,7 +74,7 @@ class BoundingBox(BaseModel):
 
     lowerLeft: list[float]  # [minX, minY]
     upperRight: list[float]  # [maxX, maxY]
-    crs: Optional[str] = None
+    crs: Optional[Union[str, CRSType]] = None
 
 
 class TileMatrix(BaseModel):
@@ -46,7 +95,7 @@ class TileMatrixSet(BaseModel):
     id: str
     title: Optional[str] = None
     uri: Optional[str] = None
-    crs: str
+    crs: Union[str, CRSType]
     tileMatrices: list[TileMatrix]
 
 
@@ -56,7 +105,7 @@ class TileMatrixSetSummary(BaseModel):
     id: str
     title: Optional[str] = None
     uri: Optional[str] = None
-    crs: str
+    crs: Union[str, CRSType]
     links: list[Link]
 
 
@@ -71,7 +120,7 @@ class TileSetMetadata(BaseModel):
 
     title: Optional[str] = None
     tileMatrixSetURI: str
-    crs: str
+    crs: Union[str, CRSType]
     dataType: str  # "map", "vector", "coverage"
     links: list[Link]
     boundingBox: Optional[BoundingBox] = None

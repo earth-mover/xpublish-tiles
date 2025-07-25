@@ -71,3 +71,51 @@ TILE_MATRIX_SETS = {
 TILE_MATRIX_SET_SUMMARIES = {
     "WebMercatorQuad": get_web_mercator_quad_summary,
 }
+
+
+def extract_tile_bbox_and_crs(
+    tileMatrixSetId: str, tileMatrix: int, tileRow: int, tileCol: int
+) -> tuple[list[float], str]:
+    """Extract bounding box and CRS from tile coordinates.
+
+    Args:
+        tileMatrixSetId: ID of the tile matrix set
+        tileMatrix: Zoom level/tile matrix ID
+        tileRow: Row index of the tile
+        tileCol: Column index of the tile
+
+    Returns:
+        tuple: (bbox as [minX, minY, maxX, maxY], crs)
+
+    Raises:
+        ValueError: If tile matrix set or tile matrix not found
+    """
+    if tileMatrixSetId not in TILE_MATRIX_SETS:
+        raise ValueError(f"Tile matrix set '{tileMatrixSetId}' not found")
+
+    tile_matrix_set = TILE_MATRIX_SETS[tileMatrixSetId]()
+
+    tile_matrix_def = None
+    for tm in tile_matrix_set.tileMatrices:
+        if tm.id == str(tileMatrix):
+            tile_matrix_def = tm
+            break
+
+    if not tile_matrix_def:
+        raise ValueError(f"Tile matrix '{tileMatrix}' not found")
+
+    origin_x, origin_y = tile_matrix_def.topLeftCorner
+    tile_width = tile_matrix_def.tileWidth
+    tile_height = tile_matrix_def.tileHeight
+
+    pixel_size = tile_matrix_def.scaleDenominator * 0.00028
+
+    min_x = origin_x + (tileCol * tile_width * pixel_size)
+    max_x = origin_x + ((tileCol + 1) * tile_width * pixel_size)
+    max_y = origin_y - (tileRow * tile_height * pixel_size)
+    min_y = origin_y - ((tileRow + 1) * tile_height * pixel_size)
+
+    bbox = [min_x, min_y, max_x, max_y]
+    crs = tile_matrix_set.crs
+
+    return bbox, crs
