@@ -74,11 +74,9 @@ TILE_MATRIX_SET_SUMMARIES = {
 
 
 def extract_tile_bbox_and_crs(
-    tileMatrixSetId: str, 
-    tileMatrix: int, 
-    tileRow: int, 
-    tileCol: int
-) -> tuple[list[float], str]:    """Extract bounding box and CRS from tile coordinates.
+    tileMatrixSetId: str, tileMatrix: int, tileRow: int, tileCol: int
+) -> tuple[list[float], str]:
+    """Extract bounding box and CRS from tile coordinates.
 
     Args:
         tileMatrixSetId: ID of the tile matrix set

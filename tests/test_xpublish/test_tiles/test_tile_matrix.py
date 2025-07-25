@@ -41,12 +41,15 @@ class TestTileMatrixFunctions:
         assert len(summary.links) == 1
         assert summary.links[0].href == "/tiles/tileMatrixSets/WebMercatorQuad"
 
+
 class TestExtractTileBboxAndCrs:
     def test_extract_tile_bbox_zoom_0(self):
         """Test bbox extraction for zoom level 0 (single tile covering world)"""
         bbox, crs = extract_tile_bbox_and_crs("WebMercatorQuad", 0, 0, 0)
-        
-        assert crs == "http://www.opengis.net/def/crs/EPSG/0/3857"        # Zoom 0 should cover the entire Web Mercator extent
+
+        assert (
+            crs == "http://www.opengis.net/def/crs/EPSG/0/3857"
+        )  # Zoom 0 should cover the entire Web Mercator extent
         expected_min_x = -20037508.3428
         expected_max_x = 20037508.3428
         expected_min_y = -20037508.3428
@@ -61,8 +64,10 @@ class TestExtractTileBboxAndCrs:
         """Test bbox extraction for zoom level 1"""
         # Test top-left tile (0,0)
         bbox, crs = extract_tile_bbox_and_crs("WebMercatorQuad", 1, 0, 0)
-        
-        assert crs == "http://www.opengis.net/def/crs/EPSG/0/3857"        # At zoom 1, we have 2x2 tiles, each covering half the world extent
+
+        assert (
+            crs == "http://www.opengis.net/def/crs/EPSG/0/3857"
+        )  # At zoom 1, we have 2x2 tiles, each covering half the world extent
         expected_min_x = -20037508.3428
         expected_max_x = 0.0
         expected_min_y = 0.0
@@ -88,8 +93,9 @@ class TestExtractTileBboxAndCrs:
     def test_extract_tile_bbox_higher_zoom(self):
         """Test bbox extraction for higher zoom level"""
         bbox, crs = extract_tile_bbox_and_crs("WebMercatorQuad", 5, 10, 15)
-        
-        assert crs == "http://www.opengis.net/def/crs/EPSG/0/3857"        assert len(bbox) == 4
+
+        assert crs == "http://www.opengis.net/def/crs/EPSG/0/3857"
+        assert len(bbox) == 4
 
         # Verify bbox format [minX, minY, maxX, maxY]
         assert bbox[0] < bbox[2]  # minX < maxX
