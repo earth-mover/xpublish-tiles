@@ -1,7 +1,9 @@
+import numpy as np
 import pytest
 import xpublish
 from fastapi.testclient import TestClient
 
+import xarray as xr
 from xpublish_tiles.xpublish.tiles import TilesPlugin
 
 
@@ -17,15 +19,151 @@ def xpublish_client(xpublish_app):
     return TestClient(app)
 
 
-def test_app_router(xpublish_client):
-    response = xpublish_client.get("/datasets/air/tiles")
+def test_tilesets_list_endpoint(xpublish_client):
+    """Test the enhanced tilesets list endpoint at /tiles/"""
+    response = xpublish_client.get("/datasets/air/tiles/")
     assert response.status_code == 200
 
     data = response.json()
-    assert data["title"] == "Dataset Tiles"
-    assert data["description"] == "Tiles for this dataset"
-    assert len(data["links"]) == 1
-    assert data["links"][0]["href"] == "./WebMercatorQuad"
-    assert data["links"][0]["rel"] == "item"
-    assert data["links"][0]["type"] == "application/json"
-    assert data["links"][0]["title"] == "WebMercatorQuad tileset"
+    assert "tilesets" in data
+    assert len(data["tilesets"]) >= 1
+
+    # Check the first tileset
+    tileset = data["tilesets"][0]
+    assert "title" in tileset
+    assert "crs" in tileset
+    assert "dataType" in tileset
+    assert tileset["dataType"] in ["map", "vector", "coverage"]
+    assert "links" in tileset
+    assert len(tileset["links"]) >= 2  # self and tiling-scheme links
+
+    # Check for enhanced fields
+    assert "tileMatrixSetURI" in tileset
+    assert "tileMatrixSetLimits" in tileset
+    assert isinstance(tileset["tileMatrixSetLimits"], list)
+    assert len(tileset["tileMatrixSetLimits"]) > 0
+
+    # Check tile matrix set limits structure
+    limit = tileset["tileMatrixSetLimits"][0]
+    assert "tileMatrix" in limit
+    assert "minTileRow" in limit
+    assert "maxTileRow" in limit
+    assert "minTileCol" in limit
+    assert "maxTileCol" in limit
+
+    # Check layers if present
+    if tileset.get("layers"):
+        layer = tileset["layers"][0]
+        assert "id" in layer
+        assert "dataType" in layer
+        assert "links" in layer
+
+
+def test_tilesets_list_with_metadata():
+    """Test that dataset metadata is properly included in the tilesets response"""
+    # Create a dataset with rich metadata
+    data = xr.Dataset(
+        {
+            "temperature": xr.DataArray(
+                np.random.randn(90, 180),
+                dims=["lat", "lon"],
+                coords={
+                    "lat": np.linspace(-90, 90, 90),
+                    "lon": np.linspace(-180, 180, 180),
+                },
+                attrs={
+                    "long_name": "Surface Temperature",
+                    "description": "Global surface temperature data",
+                    "units": "degC",
+                },
+            )
+        },
+        attrs={
+            "title": "Global Climate Data",
+            "description": "Sample global climate dataset",
+            "keywords": "climate, temperature, global",
+            "attribution": "Test Data Corporation",
+            "license": "CC-BY-4.0",
+            "version": "1.0.0",
+            "contact": "data@example.com",
+        },
+    )
+
+    # Create app with the metadata-rich dataset
+    rest = xpublish.Rest({"climate": data}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    # Test the endpoint
+    response = client.get("/datasets/climate/tiles/")
+    assert response.status_code == 200
+
+    data = response.json()
+    tileset = data["tilesets"][0]
+
+    # Check that metadata fields are populated
+    assert tileset["title"] == "Global Climate Data - WebMercatorQuad"
+    assert tileset["description"] == "Sample global climate dataset"
+    assert tileset["keywords"] == ["climate", "temperature", "global"]
+    assert tileset["attribution"] == "Test Data Corporation"
+    assert tileset["license"] == "CC-BY-4.0"
+    assert tileset["version"] == "1.0.0"
+    assert tileset["pointOfContact"] == "data@example.com"
+    assert tileset["mediaTypes"] == ["image/png", "image/jpeg"]
+
+    # Check bounding box
+    assert "boundingBox" in tileset
+    bbox = tileset["boundingBox"]
+    assert bbox["lowerLeft"] == [-180.0, -90.0]
+    assert bbox["upperRight"] == [180.0, 90.0]
+    assert "crs" in bbox
+
+    # Check layers
+    assert "layers" in tileset
+    assert len(tileset["layers"]) == 1
+    layer = tileset["layers"][0]
+    assert layer["id"] == "temperature"
+    assert layer["title"] == "Surface Temperature"
+    assert layer["description"] == "Global surface temperature data"
+
+
+def test_helper_functions():
+    """Test the helper functions for extracting bounds and generating limits"""
+    from xpublish_tiles.xpublish.tiles.tile_matrix import (
+        extract_dataset_bounds,
+        get_all_tile_matrix_set_ids,
+        get_tile_matrix_limits,
+    )
+
+    # Test dataset bounds extraction
+    data = xr.Dataset(
+        {
+            "temp": xr.DataArray(
+                np.random.randn(10, 20),
+                dims=["lat", "lon"],
+                coords={
+                    "lat": np.linspace(-45, 45, 10),
+                    "lon": np.linspace(-90, 90, 20),
+                },
+            )
+        }
+    )
+
+    bounds = extract_dataset_bounds(data)
+    assert bounds is not None
+    assert bounds.lowerLeft == [-90.0, -45.0]
+    assert bounds.upperRight == [90.0, 45.0]
+    assert bounds.crs == "http://www.opengis.net/def/crs/EPSG/0/4326"
+
+    # Test getting all TMS IDs
+    tms_ids = get_all_tile_matrix_set_ids()
+    assert isinstance(tms_ids, list)
+    assert "WebMercatorQuad" in tms_ids
+    assert len(tms_ids) >= 1
+
+    # Test tile matrix limits generation
+    limits = get_tile_matrix_limits("WebMercatorQuad", range(3))  # Just 0-2
+    assert len(limits) == 3
+    assert limits[0].tileMatrix == "0"
+    assert limits[0].maxTileRow == 0  # 2^0 - 1 = 0
+    assert limits[1].maxTileRow == 1  # 2^1 - 1 = 1
+    assert limits[2].maxTileRow == 3  # 2^2 - 1 = 3

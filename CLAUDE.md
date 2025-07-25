@@ -7,6 +7,10 @@ The goal of this project is to transform xarray datasets to raster, vector and o
 * `xpublish_tiles.xpublish.tiles.TilesPlugin`: An [OGC Tiles](https://www.ogc.org/standards/ogcapi-tiles/) conformant plugin for serving raster, vector and other types of tiles.
 * `xpublish_tiles.xpublish.wms.WMSPlugin`: An [OGC Web Map Service](https://www.ogc.org/standards/wms/) conformant plugin for serving raster, vector and other types of tiles.
 
+### Background Information
+
+The WMS and Tiles specifications are available in in the `docs` directory for reference.
+
 ## Development Workflow
 
 ### Key Commands

@@ -2,21 +2,28 @@
 
 from enum import Enum
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from xpublish import Dependencies, Plugin, hookimpl
 
+from xarray import Dataset
 from xpublish_tiles.xpublish.tiles.models import (
     ConformanceDeclaration,
+    DataType,
+    Layer,
     Link,
     TileMatrixSet,
     TileMatrixSets,
     TileSetMetadata,
-    TilesLandingPage,
+    TilesetsList,
+    TilesetSummary,
 )
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     TILE_MATRIX_SETS,
+    extract_dataset_bounds,
     extract_tile_bbox_and_crs,
+    get_all_tile_matrix_set_ids,
+    get_tile_matrix_limits,
 )
 
 
@@ -39,9 +46,9 @@ class TilesPlugin(Plugin):
             """OGC API conformance declaration"""
             return ConformanceDeclaration(
                 conformsTo=[
-                    "http://www.opengis.net/spec/ogcapi-common-1/1.0/conf/core",
-                    "http://www.opengis.net/spec/ogcapi-common-2/1.0/conf/collections",
                     "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/core",
+                    "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/tileset",
+                    "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/tilesets-list",
                 ]
             )
 
@@ -73,21 +80,91 @@ class TilesPlugin(Plugin):
             prefix=self.dataset_router_prefix, tags=self.dataset_router_tags
         )
 
-        @router.get("/", response_model=TilesLandingPage)
-        async def get_dataset_tiles_landing():
-            """Dataset tiles landing page"""
-            return TilesLandingPage(
-                title="Dataset Tiles",
-                description="Tiles for this dataset",
-                links=[
-                    Link(
-                        href="./WebMercatorQuad",
-                        rel="item",
-                        type="application/json",
-                        title="WebMercatorQuad tileset",
+        @router.get("/", response_model=TilesetsList)
+        async def get_dataset_tiles_list(dataset: Dataset = Depends(deps.dataset)):  # noqa: B008
+            """List of available tilesets for this dataset"""
+            # Get dataset variables that can be tiled
+            tilesets = []
+
+            # Extract dataset bounds if available
+            dataset_bounds = extract_dataset_bounds(dataset)
+
+            # Get dataset metadata
+            dataset_attrs = dataset.attrs
+            title = dataset_attrs.get("title", "Dataset")
+            description = dataset_attrs.get("description", "")
+            keywords = dataset_attrs.get("keywords", "")
+            if isinstance(keywords, str):
+                keywords = [k.strip() for k in keywords.split(",") if k.strip()]
+            elif not isinstance(keywords, list):
+                keywords = []
+
+            # Create one tileset entry per supported tile matrix set
+            supported_tms = get_all_tile_matrix_set_ids()
+
+            for tms_id in supported_tms:
+                if tms_id in TILE_MATRIX_SETS:
+                    tms_summary = TILE_MATRIX_SET_SUMMARIES[tms_id]()
+
+                    # Create layers for each data variable
+                    layers = []
+                    for var_name, var_data in dataset.data_vars.items():
+                        layer = Layer(
+                            id=var_name,
+                            title=var_data.attrs.get("long_name", var_name),
+                            description=var_data.attrs.get("description", ""),
+                            dataType=DataType.COVERAGE,
+                            boundingBox=dataset_bounds,
+                            crs=tms_summary.crs,
+                            links=[
+                                Link(
+                                    href=f"./{tms_id}/{var_name}/{{tileMatrix}}/{{tileRow}}/{{tileCol}}",
+                                    rel="item",
+                                    type="image/png",
+                                    title=f"Tiles for {var_name}",
+                                    templated=True,
+                                )
+                            ],
+                        )
+                        layers.append(layer)
+
+                    # Define tile matrix limits
+                    tileMatrixSetLimits = get_tile_matrix_limits(tms_id)
+
+                    tileset = TilesetSummary(
+                        title=f"{title} - {tms_id}",
+                        description=description
+                        or f"Tiles for {title} in {tms_id} projection",
+                        tileMatrixSetURI=tms_summary.uri,
+                        crs=tms_summary.crs,
+                        dataType=DataType.MAP,
+                        links=[
+                            Link(
+                                href=f"./{tms_id}",
+                                rel="self",
+                                type="application/json",
+                                title=f"Tileset metadata for {tms_id}",
+                            ),
+                            Link(
+                                href=f"/tileMatrixSets/{tms_id}",
+                                rel="http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
+                                type="application/json",
+                                title=f"Definition of {tms_id}",
+                            ),
+                        ],
+                        tileMatrixSetLimits=tileMatrixSetLimits,
+                        layers=layers if layers else None,
+                        boundingBox=dataset_bounds,
+                        keywords=keywords if keywords else None,
+                        attribution=dataset_attrs.get("attribution"),
+                        license=dataset_attrs.get("license"),
+                        version=dataset_attrs.get("version"),
+                        pointOfContact=dataset_attrs.get("contact"),
+                        mediaTypes=["image/png", "image/jpeg"],
                     )
-                ],
-            )
+                    tilesets.append(tileset)
+
+            return TilesetsList(tilesets=tilesets)
 
         @router.get("/{tileMatrixSetId}", response_model=TileSetMetadata)
         async def get_dataset_tileset_metadata(tileMatrixSetId: str):
@@ -96,7 +173,7 @@ class TilesPlugin(Plugin):
                 title=f"Dataset tiles in {tileMatrixSetId}",
                 tileMatrixSetURI=f"http://www.opengis.net/def/tilematrixset/OGC/1.0/{tileMatrixSetId}",
                 crs="http://www.opengis.net/def/crs/EPSG/0/3857",
-                dataType="map",
+                dataType=DataType.MAP,
                 links=[
                     Link(
                         href=f"./{tileMatrixSetId}/{{tileMatrix}}/{{tileRow}}/{{tileCol}}",
