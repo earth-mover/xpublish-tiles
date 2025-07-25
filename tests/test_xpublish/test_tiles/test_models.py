@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from xpublish_tiles.xpublish.tiles.models import CRSType, MD_ReferenceSystem, BoundingBox
+from xpublish_tiles.xpublish.tiles.models import BoundingBox, CRSType, MD_ReferenceSystem
 
 
 class TestCRSType:
