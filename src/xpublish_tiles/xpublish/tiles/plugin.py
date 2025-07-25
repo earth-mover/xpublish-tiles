@@ -16,6 +16,7 @@ from xpublish_tiles.xpublish.tiles.models import (
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     TILE_MATRIX_SETS,
+    extract_tile_bbox_and_crs,
 )
 
 
@@ -111,13 +112,22 @@ class TilesPlugin(Plugin):
             tileMatrixSetId: str, tileMatrix: int, tileRow: int, tileCol: int
         ):
             """Get individual tile from this dataset"""
-            # Return placeholder response for now
+            try:
+                bbox, crs = extract_tile_bbox_and_crs(
+                    tileMatrixSetId, tileMatrix, tileRow, tileCol
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=404, detail=str(e))
+
+            # TODO: Pass bbox and crs to rendering pipeline
             return {
                 "message": f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}",
                 "tileMatrixSetId": tileMatrixSetId,
                 "tileMatrix": tileMatrix,
                 "tileRow": tileRow,
                 "tileCol": tileCol,
+                "bbox": bbox,
+                "crs": crs,
             }
 
         return router
