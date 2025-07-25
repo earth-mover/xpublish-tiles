@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import Dataset
+from xpublish_tiles.utils import create_tileset_metadata
 from xpublish_tiles.xpublish.tiles.models import (
     ConformanceDeclaration,
     DataType,
@@ -172,22 +173,15 @@ class TilesPlugin(Plugin):
             return TilesetsList(tilesets=tilesets)
 
         @router.get("/{tileMatrixSetId}", response_model=TileSetMetadata)
-        async def get_dataset_tileset_metadata(tileMatrixSetId: str):
+        async def get_dataset_tileset_metadata(
+            tileMatrixSetId: str,
+            dataset: Dataset = Depends(deps.dataset),  # noqa: B008
+        ):
             """Get tileset metadata for this dataset"""
-            return TileSetMetadata(
-                title=f"Dataset tiles in {tileMatrixSetId}",
-                tileMatrixSetURI=f"http://www.opengis.net/def/tilematrixset/OGC/1.0/{tileMatrixSetId}",
-                crs="http://www.opengis.net/def/crs/EPSG/0/3857",
-                dataType=DataType.MAP,
-                links=[
-                    Link(
-                        href=f"./{tileMatrixSetId}/{{tileMatrix}}/{{tileRow}}/{{tileCol}}",
-                        rel="item",
-                        type="image/png",
-                        title="Tile",
-                    )
-                ],
-            )
+            try:
+                return create_tileset_metadata(dataset, tileMatrixSetId)
+            except ValueError as e:
+                raise HTTPException(status_code=404, detail=str(e)) from e
 
         @router.get("/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}")
         async def get_dataset_tile(
