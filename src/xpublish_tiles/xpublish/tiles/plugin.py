@@ -21,6 +21,7 @@ from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     TILE_MATRIX_SETS,
     extract_dataset_bounds,
+    extract_dimension_extents,
     extract_tile_bbox_and_crs,
     get_all_tile_matrix_set_ids,
     get_tile_matrix_limits,
@@ -109,6 +110,9 @@ class TilesPlugin(Plugin):
                     # Create layers for each data variable
                     layers = []
                     for var_name, var_data in dataset.data_vars.items():
+                        # Extract dimension information for this variable
+                        dimensions = extract_dimension_extents(var_data)
+
                         layer = Layer(
                             id=var_name,
                             title=var_data.attrs.get("long_name", var_name),
@@ -116,6 +120,7 @@ class TilesPlugin(Plugin):
                             dataType=DataType.COVERAGE,
                             boundingBox=dataset_bounds,
                             crs=tms_summary.crs,
+                            dimensions=dimensions if dimensions else None,
                             links=[
                                 Link(
                                     href=f"./{tms_id}/{var_name}/{{tileMatrix}}/{{tileRow}}/{{tileCol}}",

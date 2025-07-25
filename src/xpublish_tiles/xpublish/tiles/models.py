@@ -203,6 +203,26 @@ class PropertySchema(BaseModel):
     uomURI: Optional[str] = None
 
 
+class DimensionType(str, Enum):
+    """Types of dimensions supported"""
+
+    TEMPORAL = "temporal"
+    VERTICAL = "vertical"
+    CUSTOM = "custom"
+
+
+class DimensionExtent(BaseModel):
+    """Extent information for a dimension"""
+
+    name: str
+    type: DimensionType
+    extent: list[Union[str, float, int]]  # [min, max] or list of discrete values
+    values: Optional[list[Union[str, float, int]]] = None  # Available discrete values
+    units: Optional[str] = None
+    description: Optional[str] = None
+    default: Optional[Union[str, float, int]] = None
+
+
 class Layer(BaseModel):
     """Layer definition within a tileset"""
 
@@ -232,6 +252,7 @@ class Layer(BaseModel):
     style: Optional[Style] = None
     geoDataClasses: Optional[list[str]] = None
     propertiesSchema: Optional[dict[str, PropertySchema]] = None
+    dimensions: Optional[list[DimensionExtent]] = None
     links: Optional[list[Link]] = None
 
 
