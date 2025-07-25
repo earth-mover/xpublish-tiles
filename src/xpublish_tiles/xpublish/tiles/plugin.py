@@ -2,13 +2,17 @@
 
 from enum import Enum
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from xpublish import Dependencies, Plugin, hookimpl
 
+from xarray import Dataset
 from xpublish_tiles.xpublish.tiles.models import (
+    BoundingBox,
     ConformanceDeclaration,
+    Layer,
     Link,
     TileMatrixSet,
+    TileMatrixSetLimit,
     TileMatrixSets,
     TileSetMetadata,
     TilesetsList,
@@ -75,21 +79,94 @@ class TilesPlugin(Plugin):
         )
 
         @router.get("/", response_model=TilesetsList)
-        async def get_dataset_tiles_list(dataset=deps.dataset):
+        async def get_dataset_tiles_list(dataset: Dataset = Depends(deps.dataset)):  # noqa: B008
             """List of available tilesets for this dataset"""
             # Get dataset variables that can be tiled
             tilesets = []
 
+            # Extract dataset bounds if available
+            dataset_bounds = None
+            try:
+                # Try to get bounds from dataset coordinates
+                if hasattr(dataset, "bounds"):
+                    bounds = dataset.bounds
+                    dataset_bounds = BoundingBox(
+                        lowerLeft=[float(bounds[0]), float(bounds[1])],
+                        upperRight=[float(bounds[2]), float(bounds[3])],
+                        crs="http://www.opengis.net/def/crs/EPSG/0/4326",
+                    )
+                elif "lat" in dataset.coords and "lon" in dataset.coords:
+                    lat_min, lat_max = float(dataset.lat.min()), float(dataset.lat.max())
+                    lon_min, lon_max = float(dataset.lon.min()), float(dataset.lon.max())
+                    dataset_bounds = BoundingBox(
+                        lowerLeft=[lon_min, lat_min],
+                        upperRight=[lon_max, lat_max],
+                        crs="http://www.opengis.net/def/crs/EPSG/0/4326",
+                        orderedAxes=["X", "Y"],
+                    )
+            except Exception:
+                # If we can't extract bounds, that's okay
+                pass
+
+            # Get dataset metadata
+            dataset_attrs = dataset.attrs
+            title = dataset_attrs.get("title", "Dataset")
+            description = dataset_attrs.get("description", "")
+            keywords = dataset_attrs.get("keywords", "")
+            if isinstance(keywords, str):
+                keywords = [k.strip() for k in keywords.split(",") if k.strip()]
+            elif not isinstance(keywords, list):
+                keywords = []
+
             # For now, create one tileset entry per supported tile matrix set
-            # In the future, this could be expanded to create separate tilesets
-            # for each variable in the dataset
             supported_tms = ["WebMercatorQuad"]  # Can be expanded
 
             for tms_id in supported_tms:
                 if tms_id in TILE_MATRIX_SETS:
                     tms_summary = TILE_MATRIX_SET_SUMMARIES[tms_id]()
+
+                    # Create layers for each data variable
+                    layers = []
+                    for var_name, var_data in dataset.data_vars.items():
+                        layer = Layer(
+                            id=var_name,
+                            title=var_data.attrs.get("long_name", var_name),
+                            description=var_data.attrs.get("description", ""),
+                            dataType="coverage",
+                            boundingBox=dataset_bounds,
+                            crs=tms_summary.crs,
+                            links=[
+                                Link(
+                                    href=f"./{tms_id}/{var_name}/{{tileMatrix}}/{{tileRow}}/{{tileCol}}",
+                                    rel="item",
+                                    type="image/png",
+                                    title=f"Tiles for {var_name}",
+                                    templated=True,
+                                )
+                            ],
+                        )
+                        layers.append(layer)
+
+                    # Define tile matrix limits (example for zoom levels 0-18)
+                    tileMatrixSetLimits = []
+                    if tms_id == "WebMercatorQuad":
+                        # Add limits for a few zoom levels as example
+                        for z in range(19):
+                            max_tiles = 2**z - 1
+                            tileMatrixSetLimits.append(
+                                TileMatrixSetLimit(
+                                    tileMatrix=str(z),
+                                    minTileRow=0,
+                                    maxTileRow=max_tiles,
+                                    minTileCol=0,
+                                    maxTileCol=max_tiles,
+                                )
+                            )
+
                     tileset = TilesetSummary(
-                        title=f"Dataset tiles in {tms_id}",
+                        title=f"{title} - {tms_id}",
+                        description=description
+                        or f"Tiles for {title} in {tms_id} projection",
                         tileMatrixSetURI=tms_summary.uri,
                         crs=tms_summary.crs,
                         dataType="map",  # Could be "coverage" for gridded data
@@ -107,6 +184,15 @@ class TilesPlugin(Plugin):
                                 title=f"Definition of {tms_id}",
                             ),
                         ],
+                        tileMatrixSetLimits=tileMatrixSetLimits,
+                        layers=layers if layers else None,
+                        boundingBox=dataset_bounds,
+                        keywords=keywords if keywords else None,
+                        attribution=dataset_attrs.get("attribution"),
+                        license=dataset_attrs.get("license"),
+                        version=dataset_attrs.get("version"),
+                        pointOfContact=dataset_attrs.get("contact"),
+                        mediaTypes=["image/png", "image/jpeg"],
                     )
                     tilesets.append(tileset)
 

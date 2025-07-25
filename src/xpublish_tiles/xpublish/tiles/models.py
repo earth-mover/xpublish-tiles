@@ -61,6 +61,10 @@ class Link(BaseModel):
     rel: str
     type: Optional[str] = None
     title: Optional[str] = None
+    templated: Optional[bool] = None
+    varBase: Optional[str] = None
+    hreflang: Optional[str] = None
+    length: Optional[int] = None
 
 
 class ConformanceDeclaration(BaseModel):
@@ -75,6 +79,7 @@ class BoundingBox(BaseModel):
     lowerLeft: list[float]  # [minX, minY]
     upperRight: list[float]  # [maxX, maxY]
     crs: Optional[Union[str, CRSType]] = None
+    orderedAxes: Optional[list[str]] = None
 
 
 class TileMatrix(BaseModel):
@@ -126,14 +131,114 @@ class TileSetMetadata(BaseModel):
     boundingBox: Optional[BoundingBox] = None
 
 
+class TileMatrixSetLimit(BaseModel):
+    """Limits for a specific tile matrix"""
+
+    tileMatrix: str
+    minTileRow: int
+    maxTileRow: int
+    minTileCol: int
+    maxTileCol: int
+
+
+class Style(BaseModel):
+    """Style definition"""
+
+    id: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    keywords: Optional[list[str]] = None
+    links: Optional[list[Link]] = None
+
+
+class PropertySchema(BaseModel):
+    """Schema definition for a property"""
+
+    title: Optional[str] = None
+    description: Optional[str] = None
+    type: Optional[str] = None
+    enum: Optional[list[str]] = None
+    format: Optional[str] = None
+    contentMediaType: Optional[str] = None
+    maximum: Optional[float] = None
+    exclusiveMaximum: Optional[float] = None
+    minimum: Optional[float] = None
+    exclusiveMinimum: Optional[float] = None
+    pattern: Optional[str] = None
+    maxItems: Optional[int] = None
+    minItems: Optional[int] = None
+    observedProperty: Optional[str] = None
+    observedPropertyURI: Optional[str] = None
+    uom: Optional[str] = None
+    uomURI: Optional[str] = None
+
+
+class Layer(BaseModel):
+    """Layer definition within a tileset"""
+
+    id: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    keywords: Optional[str] = None
+    dataType: Optional[str] = None
+    geometryDimension: Optional[int] = None
+    featureType: Optional[str] = None
+    attribution: Optional[str] = None
+    license: Optional[str] = None
+    pointOfContact: Optional[str] = None
+    publisher: Optional[str] = None
+    theme: Optional[str] = None
+    crs: Optional[Union[str, CRSType]] = None
+    epoch: Optional[float] = None
+    minScaleDenominator: Optional[float] = None
+    maxScaleDenominator: Optional[float] = None
+    minCellSize: Optional[float] = None
+    maxCellSize: Optional[float] = None
+    maxTileMatrix: Optional[str] = None
+    minTileMatrix: Optional[str] = None
+    boundingBox: Optional[BoundingBox] = None
+    created: Optional[str] = None
+    updated: Optional[str] = None
+    style: Optional[Style] = None
+    geoDataClasses: Optional[list[str]] = None
+    propertiesSchema: Optional[dict[str, PropertySchema]] = None
+    links: Optional[list[Link]] = None
+
+
+class CenterPoint(BaseModel):
+    """Center point definition"""
+
+    coordinates: list[float]
+    crs: Optional[Union[str, CRSType]] = None
+    tileMatrix: Optional[str] = None
+    scaleDenominator: Optional[float] = None
+    cellSize: Optional[float] = None
+
+
 class TilesetSummary(BaseModel):
     """Summary of a tileset in a tilesets list"""
 
     title: Optional[str] = None
-    tileMatrixSetURI: Optional[str] = None
-    crs: Union[str, CRSType]
+    description: Optional[str] = None
     dataType: str  # "map", "vector", "coverage"
+    crs: Union[str, CRSType]
+    tileMatrixSetURI: Optional[str] = None
     links: list[Link]
+    tileMatrixSetLimits: Optional[list[TileMatrixSetLimit]] = None
+    epoch: Optional[float] = None
+    layers: Optional[list[Layer]] = None
+    boundingBox: Optional[BoundingBox] = None
+    centerPoint: Optional[CenterPoint] = None
+    style: Optional[Style] = None
+    attribution: Optional[str] = None
+    license: Optional[str] = None
+    accessConstraints: Optional[str] = None
+    keywords: Optional[list[str]] = None
+    version: Optional[str] = None
+    created: Optional[str] = None
+    updated: Optional[str] = None
+    pointOfContact: Optional[str] = None
+    mediaTypes: Optional[list[str]] = None
 
 
 class TilesetsList(BaseModel):
