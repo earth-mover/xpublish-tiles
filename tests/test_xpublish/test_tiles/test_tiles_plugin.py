@@ -72,9 +72,29 @@ def test_tilesets_list_with_metadata():
                 np.random.randn(12, 90, 180),
                 dims=["time", "lat", "lon"],
                 coords={
-                    "time": time_coords,
-                    "lat": np.linspace(-90, 90, 90),
-                    "lon": np.linspace(-180, 180, 180),
+                    "time": (
+                        ["time"],
+                        time_coords,
+                        {"axis": "T", "standard_name": "time"},
+                    ),
+                    "lat": (
+                        ["lat"],
+                        np.linspace(-90, 90, 90),
+                        {
+                            "axis": "Y",
+                            "standard_name": "latitude",
+                            "units": "degrees_north",
+                        },
+                    ),
+                    "lon": (
+                        ["lon"],
+                        np.linspace(-180, 180, 180),
+                        {
+                            "axis": "X",
+                            "standard_name": "longitude",
+                            "units": "degrees_east",
+                        },
+                    ),
                 },
                 attrs={
                     "long_name": "Surface Temperature",
@@ -158,19 +178,44 @@ def test_multi_dimensional_dataset():
                 np.random.randn(6, 5, 3, 90, 180),
                 dims=["time", "elevation", "scenario", "lat", "lon"],
                 coords={
-                    "time": time_coords,
+                    "time": (
+                        ["time"],
+                        time_coords,
+                        {"axis": "T", "standard_name": "time"},
+                    ),
                     "elevation": (
                         ["elevation"],
                         elevation_coords,
-                        {"units": "meters", "long_name": "Elevation above sea level"},
+                        {
+                            "units": "meters",
+                            "long_name": "Elevation above sea level",
+                            "axis": "Z",
+                            "positive": "up",
+                        },
                     ),
                     "scenario": (
                         ["scenario"],
                         scenario_coords,
                         {"long_name": "Climate scenario"},
                     ),
-                    "lat": np.linspace(-90, 90, 90),
-                    "lon": np.linspace(-180, 180, 180),
+                    "lat": (
+                        ["lat"],
+                        np.linspace(-90, 90, 90),
+                        {
+                            "axis": "Y",
+                            "standard_name": "latitude",
+                            "units": "degrees_north",
+                        },
+                    ),
+                    "lon": (
+                        ["lon"],
+                        np.linspace(-180, 180, 180),
+                        {
+                            "axis": "X",
+                            "standard_name": "longitude",
+                            "units": "degrees_east",
+                        },
+                    ),
                 },
                 attrs={
                     "long_name": "Air Temperature",
@@ -238,10 +283,27 @@ def test_dimension_extraction_utilities():
         np.random.randn(4, 3, 10, 20),
         dims=["time", "depth", "lat", "lon"],
         coords={
-            "time": time_coords,
-            "depth": (["depth"], [0, 10, 50], {"units": "m", "long_name": "Ocean depth"}),
-            "lat": np.linspace(-5, 5, 10),
-            "lon": np.linspace(-10, 10, 20),
+            "time": (["time"], time_coords, {"axis": "T", "standard_name": "time"}),
+            "depth": (
+                ["depth"],
+                [0, 10, 50],
+                {
+                    "units": "m",
+                    "long_name": "Ocean depth",
+                    "axis": "Z",
+                    "positive": "down",
+                },
+            ),
+            "lat": (
+                ["lat"],
+                np.linspace(-5, 5, 10),
+                {"axis": "Y", "standard_name": "latitude", "units": "degrees_north"},
+            ),
+            "lon": (
+                ["lon"],
+                np.linspace(-10, 10, 20),
+                {"axis": "X", "standard_name": "longitude", "units": "degrees_east"},
+            ),
         },
     )
 
@@ -273,8 +335,24 @@ def test_no_dimensions_dataset():
                 np.random.randn(90, 180),
                 dims=["lat", "lon"],
                 coords={
-                    "lat": np.linspace(-90, 90, 90),
-                    "lon": np.linspace(-180, 180, 180),
+                    "lat": (
+                        ["lat"],
+                        np.linspace(-90, 90, 90),
+                        {
+                            "axis": "Y",
+                            "standard_name": "latitude",
+                            "units": "degrees_north",
+                        },
+                    ),
+                    "lon": (
+                        ["lon"],
+                        np.linspace(-180, 180, 180),
+                        {
+                            "axis": "X",
+                            "standard_name": "longitude",
+                            "units": "degrees_east",
+                        },
+                    ),
                 },
                 attrs={"long_name": "Temperature"},
             )
@@ -294,6 +372,57 @@ def test_no_dimensions_dataset():
     # Should have no dimensions (or dimensions should be None/empty)
     dimensions = layer.get("dimensions")
     assert dimensions is None or len(dimensions) == 0
+
+
+def test_cf_axis_detection():
+    """Test that CF axis detection works correctly"""
+    import pandas as pd
+
+    from xpublish_tiles.xpublish.tiles.tile_matrix import extract_dimension_extents
+
+    # Create dataset with non-standard dimension names but proper CF attributes
+    time_coords = pd.date_range("2022-01-01", periods=3, freq="ME")
+
+    data_array = xr.DataArray(
+        np.random.randn(3, 2, 5, 8),
+        dims=["month", "level", "y_coord", "x_coord"],  # Non-standard names
+        coords={
+            "month": (["month"], time_coords, {"axis": "T", "standard_name": "time"}),
+            "level": (
+                ["level"],
+                [1000, 500],
+                {"axis": "Z", "units": "hPa", "positive": "down"},
+            ),
+            "y_coord": (
+                ["y_coord"],
+                np.linspace(40, 50, 5),
+                {"axis": "Y", "standard_name": "latitude"},
+            ),
+            "x_coord": (
+                ["x_coord"],
+                np.linspace(-10, 0, 8),
+                {"axis": "X", "standard_name": "longitude"},
+            ),
+        },
+    )
+
+    dimensions = extract_dimension_extents(data_array)
+
+    # Should detect temporal and vertical dimensions despite non-standard names
+    assert len(dimensions) == 2
+
+    # Check that CF axis detection worked
+    dim_names = {d.name for d in dimensions}
+    assert "month" in dim_names  # Detected as temporal via CF axis T
+    assert "level" in dim_names  # Detected as vertical via CF axis Z
+
+    # Verify types are correctly assigned
+    month_dim = next(d for d in dimensions if d.name == "month")
+    level_dim = next(d for d in dimensions if d.name == "level")
+
+    assert month_dim.type.value == "temporal"
+    assert level_dim.type.value == "vertical"
+    assert level_dim.units == "hPa"
 
 
 def test_helper_functions():

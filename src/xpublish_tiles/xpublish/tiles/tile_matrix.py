@@ -216,34 +216,58 @@ def get_all_tile_matrix_set_ids() -> list[str]:
 def extract_dimension_extents(data_array) -> list:
     """Extract dimension extent information from an xarray DataArray.
 
+    Uses cf_xarray to detect CF-compliant axes for robust dimension classification.
+
     Args:
         data_array: xarray DataArray to extract dimensions from
 
     Returns:
         List of DimensionExtent objects for non-spatial dimensions
     """
+    import cf_xarray as cfxr  # noqa: F401 - needed to enable .cf accessor
     import numpy as np
     import pandas as pd
 
     from xpublish_tiles.xpublish.tiles.models import DimensionExtent, DimensionType
 
     dimensions = []
-    spatial_dims = {"lat", "latitude", "y", "lon", "longitude", "x"}
+
+    # Get CF axes information
+    try:
+        cf_axes = data_array.cf.axes
+    except Exception:
+        # Fallback if cf_xarray fails
+        cf_axes = {}
+
+    # Identify spatial and temporal dimensions using CF conventions
+    spatial_dims = set()
+    temporal_dims = set()
+    vertical_dims = set()
+
+    # Add CF-detected spatial dimensions (X, Y axes)
+    spatial_dims.update(cf_axes.get("X", []))
+    spatial_dims.update(cf_axes.get("Y", []))
+
+    # Add CF-detected temporal dimensions (T axis)
+    temporal_dims.update(cf_axes.get("T", []))
+
+    # Add CF-detected vertical dimensions (Z axis)
+    vertical_dims.update(cf_axes.get("Z", []))
 
     for dim_name in data_array.dims:
-        # Skip spatial dimensions
-        if dim_name.lower() in spatial_dims:
+        # Skip spatial dimensions (X, Y axes)
+        if dim_name in spatial_dims:
             continue
 
         coord = data_array.coords.get(dim_name)
         if coord is None:
             continue
 
-        # Determine dimension type
+        # Determine dimension type using CF axes
         dim_type = DimensionType.CUSTOM
-        if dim_name.lower() in {"time", "t"}:
+        if dim_name in temporal_dims:
             dim_type = DimensionType.TEMPORAL
-        elif dim_name.lower() in {"z", "depth", "elevation", "level", "height"}:
+        elif dim_name in vertical_dims:
             dim_type = DimensionType.VERTICAL
 
         # Extract coordinate values
