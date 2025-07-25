@@ -1,5 +1,6 @@
 """Tests for OGC Tiles API data models"""
 
+import pyproj
 import pytest
 from pydantic import ValidationError
 
@@ -92,6 +93,58 @@ class TestCRSType:
         """Test EPSG string conversion from empty CRS"""
         crs = CRSType()
         assert crs.to_epsg_string() is None
+
+    def test_to_pyproj_crs_from_uri_epsg(self):
+        """Test pyproj.CRS conversion from EPSG URI"""
+        crs = CRSType(uri="http://www.opengis.net/def/crs/EPSG/0/4326")
+        pyproj_crs = crs.to_pyproj_crs()
+
+        assert pyproj_crs is not None
+        assert isinstance(pyproj_crs, pyproj.CRS)
+        assert pyproj_crs.to_epsg() == 4326
+
+    def test_to_pyproj_crs_from_uri_web_mercator(self):
+        """Test pyproj.CRS conversion from Web Mercator EPSG URI"""
+        crs = CRSType(uri="http://www.opengis.net/def/crs/EPSG/0/3857")
+        pyproj_crs = crs.to_pyproj_crs()
+
+        assert pyproj_crs is not None
+        assert isinstance(pyproj_crs, pyproj.CRS)
+        assert pyproj_crs.to_epsg() == 3857
+
+    def test_to_pyproj_crs_from_wkt(self):
+        """Test pyproj.CRS conversion from WKT"""
+        # Use a simple WGS84 WKT string
+        wkt_string = 'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]'
+        crs = CRSType(wkt=wkt_string)
+        pyproj_crs = crs.to_pyproj_crs()
+
+        assert pyproj_crs is not None
+        assert isinstance(pyproj_crs, pyproj.CRS)
+        # WKT should create a valid CRS (can't easily test EPSG code due to WKT variations)
+
+    def test_to_pyproj_crs_from_reference_system(self):
+        """Test pyproj.CRS conversion from MD_ReferenceSystem"""
+        ref_sys = MD_ReferenceSystem(code="4326", codeSpace="EPSG")
+        crs = CRSType(referenceSystem=ref_sys)
+        pyproj_crs = crs.to_pyproj_crs()
+
+        assert pyproj_crs is not None
+        assert isinstance(pyproj_crs, pyproj.CRS)
+        assert pyproj_crs.to_epsg() == 4326
+
+    def test_to_pyproj_crs_empty(self):
+        """Test pyproj.CRS conversion from empty CRS"""
+        crs = CRSType()
+        pyproj_crs = crs.to_pyproj_crs()
+        assert pyproj_crs is None
+
+    def test_to_pyproj_crs_invalid(self):
+        """Test pyproj.CRS conversion with invalid CRS string"""
+        crs = CRSType(uri="invalid:crs:string")
+        pyproj_crs = crs.to_pyproj_crs()
+        # Should return None for invalid CRS strings
+        assert pyproj_crs is None
 
 
 class TestMD_ReferenceSystem:

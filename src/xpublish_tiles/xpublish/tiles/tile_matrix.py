@@ -2,9 +2,12 @@
 
 from typing import Optional
 
+import pyproj
+
 from xarray import Dataset
 from xpublish_tiles.xpublish.tiles.models import (
     BoundingBox,
+    CRSType,
     Link,
     TileMatrix,
     TileMatrixSet,
@@ -80,7 +83,7 @@ TILE_MATRIX_SET_SUMMARIES = {
 
 def extract_tile_bbox_and_crs(
     tileMatrixSetId: str, tileMatrix: int, tileRow: int, tileCol: int
-) -> tuple[list[float], str]:
+) -> tuple[list[float], pyproj.CRS]:
     """Extract bounding box and CRS from tile coordinates.
 
     Args:
@@ -90,10 +93,10 @@ def extract_tile_bbox_and_crs(
         tileCol: Column index of the tile
 
     Returns:
-        tuple: (bbox as [minX, minY, maxX, maxY], crs)
+        tuple: (bbox as [minX, minY, maxX, maxY], pyproj.CRS object)
 
     Raises:
-        ValueError: If tile matrix set or tile matrix not found
+        ValueError: If tile matrix set or tile matrix not found, or CRS conversion fails
     """
     if tileMatrixSetId not in TILE_MATRIX_SETS:
         raise ValueError(f"Tile matrix set '{tileMatrixSetId}' not found")
@@ -121,9 +124,20 @@ def extract_tile_bbox_and_crs(
     min_y = origin_y - ((tileRow + 1) * tile_height * pixel_size)
 
     bbox = [min_x, min_y, max_x, max_y]
-    crs = tile_matrix_set.crs
 
-    return bbox, crs
+    # Convert CRS to pyproj.CRS object
+    if isinstance(tile_matrix_set.crs, str):
+        # Handle string CRS (URI format)
+        crs_type = CRSType(uri=tile_matrix_set.crs)
+        pyproj_crs = crs_type.to_pyproj_crs()
+    else:
+        # Handle CRSType object
+        pyproj_crs = tile_matrix_set.crs.to_pyproj_crs()
+
+    if pyproj_crs is None:
+        raise ValueError(f"Could not convert CRS '{tile_matrix_set.crs}' to pyproj.CRS")
+
+    return bbox, pyproj_crs
 
 
 def extract_dataset_bounds(dataset: Dataset) -> Optional[BoundingBox]:
