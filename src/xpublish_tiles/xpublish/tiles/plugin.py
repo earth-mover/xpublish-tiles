@@ -11,7 +11,8 @@ from xpublish_tiles.xpublish.tiles.models import (
     TileMatrixSet,
     TileMatrixSets,
     TileSetMetadata,
-    TilesLandingPage,
+    TilesetsList,
+    TilesetSummary,
 )
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
@@ -73,21 +74,43 @@ class TilesPlugin(Plugin):
             prefix=self.dataset_router_prefix, tags=self.dataset_router_tags
         )
 
-        @router.get("/", response_model=TilesLandingPage)
-        async def get_dataset_tiles_landing():
-            """Dataset tiles landing page"""
-            return TilesLandingPage(
-                title="Dataset Tiles",
-                description="Tiles for this dataset",
-                links=[
-                    Link(
-                        href="./WebMercatorQuad",
-                        rel="item",
-                        type="application/json",
-                        title="WebMercatorQuad tileset",
+        @router.get("/", response_model=TilesetsList)
+        async def get_dataset_tiles_list(dataset=deps.dataset):
+            """List of available tilesets for this dataset"""
+            # Get dataset variables that can be tiled
+            tilesets = []
+
+            # For now, create one tileset entry per supported tile matrix set
+            # In the future, this could be expanded to create separate tilesets
+            # for each variable in the dataset
+            supported_tms = ["WebMercatorQuad"]  # Can be expanded
+
+            for tms_id in supported_tms:
+                if tms_id in TILE_MATRIX_SETS:
+                    tms_summary = TILE_MATRIX_SET_SUMMARIES[tms_id]()
+                    tileset = TilesetSummary(
+                        title=f"Dataset tiles in {tms_id}",
+                        tileMatrixSetURI=tms_summary.uri,
+                        crs=tms_summary.crs,
+                        dataType="map",  # Could be "coverage" for gridded data
+                        links=[
+                            Link(
+                                href=f"./{tms_id}",
+                                rel="self",
+                                type="application/json",
+                                title=f"Tileset metadata for {tms_id}",
+                            ),
+                            Link(
+                                href=f"/tileMatrixSets/{tms_id}",
+                                rel="http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
+                                type="application/json",
+                                title=f"Definition of {tms_id}",
+                            ),
+                        ],
                     )
-                ],
-            )
+                    tilesets.append(tileset)
+
+            return TilesetsList(tilesets=tilesets)
 
         @router.get("/{tileMatrixSetId}", response_model=TileSetMetadata)
         async def get_dataset_tileset_metadata(tileMatrixSetId: str):

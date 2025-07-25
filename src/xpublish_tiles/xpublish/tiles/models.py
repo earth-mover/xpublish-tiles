@@ -126,6 +126,23 @@ class TileSetMetadata(BaseModel):
     boundingBox: Optional[BoundingBox] = None
 
 
+class TilesetSummary(BaseModel):
+    """Summary of a tileset in a tilesets list"""
+
+    title: Optional[str] = None
+    tileMatrixSetURI: Optional[str] = None
+    crs: Union[str, CRSType]
+    dataType: str  # "map", "vector", "coverage"
+    links: list[Link]
+
+
+class TilesetsList(BaseModel):
+    """List of available tilesets"""
+
+    tilesets: list[TilesetSummary]
+    links: Optional[list[Link]] = None
+
+
 class TilesLandingPage(BaseModel):
     """Landing page for a dataset's tiles"""
 
