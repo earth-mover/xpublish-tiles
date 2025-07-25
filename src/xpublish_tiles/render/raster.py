@@ -9,11 +9,15 @@ import matplotlib as mpl  # type: ignore
 import numpy as np
 
 import xarray as xr
-from xpublish_tiles.pipeline import DataType, GridType, ImageFormat
 from xpublish_tiles.render import Renderer
-
-if TYPE_CHECKING:
-    from xpublish_tiles.pipeline import RenderContext
+from xpublish_tiles.types import (
+    DataType,
+    GridType,
+    ImageFormat,
+    NullRenderContext,
+    PopulatedRenderContext,
+    RenderContext,
+)
 
 logger = logging.getLogger("xpublish-tiles")
 
@@ -65,6 +69,10 @@ class DatashaderRasterRenderer(Renderer):
     ):
         self.validate(contexts)
         (context,) = contexts.values()
+        if isinstance(context, NullRenderContext):
+            raise NotImplementedError("no overlap with requested bbox.")
+        if TYPE_CHECKING:
+            assert isinstance(context, PopulatedRenderContext)
         bbox = context.bbox
         data = self.maybe_cast_data(context.da)
         cvs = dsh.Canvas(
@@ -75,7 +83,6 @@ class DatashaderRasterRenderer(Renderer):
         )
 
         if context.grid in (
-            GridType.REGULAR,
             GridType.RECTILINEAR,
             GridType.CURVILINEAR,
         ):

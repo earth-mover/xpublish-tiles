@@ -12,8 +12,8 @@ def pytest_addoption(parser):
         "--where",
         action="store",
         choices=["local", "arraylake"],
-        required=True,
-        help="Storage backend: 'local' for local filesystem or 'arraylake' for Arraylake",
+        default="local",
+        help="Storage backend: 'local' for local filesystem or 'arraylake' for Arraylake (default: local)",
     )
     parser.addoption(
         "--prefix",
