@@ -1,6 +1,6 @@
 """Tile matrix set definitions for OGC Tiles API"""
 
-from typing import Optional
+from typing import Optional, Union
 
 import pyproj
 
@@ -211,3 +211,88 @@ def get_tile_matrix_limits(
 def get_all_tile_matrix_set_ids() -> list[str]:
     """Get list of all available tile matrix set IDs."""
     return list(TILE_MATRIX_SETS.keys())
+
+
+def extract_dimension_extents(data_array) -> list:
+    """Extract dimension extent information from an xarray DataArray.
+
+    Args:
+        data_array: xarray DataArray to extract dimensions from
+
+    Returns:
+        List of DimensionExtent objects for non-spatial dimensions
+    """
+    import numpy as np
+    import pandas as pd
+
+    from xpublish_tiles.xpublish.tiles.models import DimensionExtent, DimensionType
+
+    dimensions = []
+    spatial_dims = {"lat", "latitude", "y", "lon", "longitude", "x"}
+
+    for dim_name in data_array.dims:
+        # Skip spatial dimensions
+        if dim_name.lower() in spatial_dims:
+            continue
+
+        coord = data_array.coords.get(dim_name)
+        if coord is None:
+            continue
+
+        # Determine dimension type
+        dim_type = DimensionType.CUSTOM
+        if dim_name.lower() in {"time", "t"}:
+            dim_type = DimensionType.TEMPORAL
+        elif dim_name.lower() in {"z", "depth", "elevation", "level", "height"}:
+            dim_type = DimensionType.VERTICAL
+
+        # Extract coordinate values
+        values = coord.values
+
+        # Handle different coordinate types
+        values_list: list[Union[str, float, int]]
+        extent: list[Union[str, float, int]]
+
+        if np.issubdtype(values.dtype, np.datetime64):
+            # Convert datetime to ISO strings
+            if hasattr(values, "astype"):
+                datetime_series = pd.to_datetime(values)
+                formatted_series = datetime_series.strftime("%Y-%m-%dT%H:%M:%SZ")
+                str_values = list(formatted_series)
+            else:
+                str_values = [
+                    pd.to_datetime(val).strftime("%Y-%m-%dT%H:%M:%SZ") for val in values
+                ]
+            extent = [str_values[0], str_values[-1]]
+            values_list = list(str_values)
+        elif np.issubdtype(values.dtype, np.number):
+            # Numeric coordinates
+            extent = [float(values.min()), float(values.max())]
+            values_list = [float(val) for val in values]
+        else:
+            # String/categorical coordinates
+            values_list = [str(val) for val in values]
+            extent = values_list  # For categorical, extent is all values
+
+        # Get units and description from attributes
+        units = coord.attrs.get("units")
+        description = coord.attrs.get("long_name") or coord.attrs.get("description")
+
+        # Determine default value (first value)
+        default = values_list[0] if values_list else None
+
+        # Limit values list size for performance
+        limited_values = values_list if len(values_list) <= 100 else None
+
+        dimension = DimensionExtent(
+            name=dim_name,
+            type=dim_type,
+            extent=extent,
+            values=limited_values,
+            units=units,
+            description=description,
+            default=default,
+        )
+        dimensions.append(dimension)
+
+    return dimensions
