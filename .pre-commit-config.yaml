@@ -26,4 +26,5 @@ repos:
     rev: v2.3.0
     hooks:
       - id: codespell
+        exclude: ^(docs/.*|tests/__snapshots__/.*)$
         args: ["--skip", "./docs"]

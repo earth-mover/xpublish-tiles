@@ -41,6 +41,11 @@ def _normalize_longitudes_to_180(result: xr.DataArray, x_coord_name: str) -> xr.
     lon_coord = result.coords[x_coord_name]
     lon_values = lon_coord.data
 
+    # Handle empty arrays
+    # FIXME: delete
+    if lon_values.size == 0:
+        return result
+
     # Check if coordinates span the 180°/360° boundary before conversion
     original_min, original_max = lon_values.min(), lon_values.max()
     spans_180_boundary = (
@@ -116,6 +121,26 @@ def _handle_longitude_selection(
             bbox_west += 360
         if bbox_east < 0:
             bbox_east += 360
+
+        # Handle case where converted bbox crosses 360°/0° boundary
+        if bbox_west > bbox_east:
+            # Need to select two ranges: [bbox_west, 360] and [0, bbox_east]
+            # For xarray slice, we can't easily do this, so expand to include the wrap-around
+            # Select from bbox_west to 360, then from 0 to bbox_east
+            # This means selecting everything from min(0, bbox_west) to max(360, bbox_east)
+            # But that would select too much. Instead, we need a different approach.
+
+            # For now, let's select the larger continuous range
+            # Check which range is larger: [bbox_west, 360] or [0, bbox_east]
+            range1_size = 360 - bbox_west  # [bbox_west, 360]
+            range2_size = bbox_east - 0  # [0, bbox_east]
+
+            if range1_size >= range2_size:
+                # Select [bbox_west, 360] -> extend bbox_east to 360
+                bbox_east = 360
+            else:
+                # Select [0, bbox_east] -> set bbox_west to 0
+                bbox_west = 0
 
     return slice(bbox_west, bbox_east)
 

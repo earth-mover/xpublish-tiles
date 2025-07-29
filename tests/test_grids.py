@@ -3,12 +3,12 @@
 
 import cf_xarray as cfxr
 import cf_xarray.datasets
-import morecantile
 import pytest
 from pyproj import CRS
 from pyproj.aoi import BBox
 
 import xarray as xr
+from tests.tiles import TILES
 from xpublish_tiles.grids import Curvilinear, GridSystem, Rectilinear, guess_grid_system
 
 HRRR_CRS_WKT = "".join(
@@ -121,32 +121,13 @@ def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> Non
 
 
 # Problematic tiles that test edge cases
-PROBLEMATIC_TILES = [
-    # Equator crossing tiles (z=2, y=1 and y=2 cross equator)
-    (2, 0, 1),  # Tile crossing equator (northern hemisphere)
-    (2, 0, 2),  # Tile crossing equator (southern hemisphere)
-    # Anti-meridian crossing tiles (x=0 and x=max cross 180°/-180°)
-    (3, 0, 4),  # Tile crossing anti-meridian (left side)
-    (3, 7, 4),  # Tile crossing anti-meridian (right side)
-    # Near-polar tiles
-    (4, 8, 0),  # Near north pole
-    (4, 8, 15),  # Near south pole
-    # Higher zoom problematic cases
-    (6, 0, 32),  # Anti-meridian at higher zoom
-    (6, 63, 32),  # Anti-meridian at higher zoom (other side)
-    (5, 16, 15),  # Equator crossing at zoom 5
-    (5, 16, 16),  # Equator crossing at zoom 5 (other side)
-]
 
 
-@pytest.mark.parametrize("z,x,y", PROBLEMATIC_TILES)
-def test_subset(global_datasets, z, x, y):
-    """Test subsetting with problematic tiles that span equator, anti-meridian, and poles."""
+@pytest.mark.parametrize("tile,tms", TILES)
+def test_subset(global_datasets, tile, tms):
+    """Test subsetting with tiles that span equator, anti-meridian, and poles."""
     ds = global_datasets
     grid = guess_grid_system(ds, "foo")
-
-    tms = morecantile.tms.get("WebMercatorQuad")
-    tile = morecantile.Tile(x=x, y=y, z=z)
     geo_bounds = tms.bounds(tile)
     bbox_geo = BBox(
         west=geo_bounds[0], south=geo_bounds[1], east=geo_bounds[2], north=geo_bounds[3]
@@ -172,5 +153,11 @@ def test_subset(global_datasets, z, x, y):
 
     # Coordinates should be within the bbox bounds (in -180→180 format)
     # Since Web Mercator tiles never cross anti-meridian, we can use simple bounds checking
-    assert lon_min >= bbox_geo.west, f"Longitude too low: {lon_min} < {bbox_geo.west}"
-    assert lon_max <= bbox_geo.east, f"Longitude too high: {lon_max} > {bbox_geo.east}"
+    # Use small tolerance for floating point precision
+    tolerance = 1e-10
+    assert (
+        lon_min >= bbox_geo.west - tolerance
+    ), f"Longitude too low: {lon_min} < {bbox_geo.west}"
+    assert (
+        lon_max <= bbox_geo.east + tolerance
+    ), f"Longitude too high: {lon_max} > {bbox_geo.east}"

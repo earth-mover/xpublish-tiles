@@ -34,6 +34,7 @@ dev = [
     "ty>=0.0.1a15",
     "pdbpp>=0.11.7",
     "netcdf4>=1.7.2",
+    "pooch>=1.8.2",
     "arraylake",
     "icechunk",
     "syrupy>=4.9.1",

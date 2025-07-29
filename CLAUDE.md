@@ -27,3 +27,4 @@ NEVER proactively create documentation files (*.md) or README files. Only create
 ALWAYS run pre-commit checks before committing.
 ALWAYS put imports at the top of the file unless you need to avoid circular import issues.
 Do not add obvious or silly comments. Code should be self-explanatory.
+For pytest fixtures, prefer separate independent parametrized inputs over using itertools.product() for cleaner test combinations.
