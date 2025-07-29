@@ -1,122 +1,33 @@
 import asyncio
-import enum
 import io
-from dataclasses import dataclass
-from numbers import Number
-from typing import Any, NewType, Self
+from functools import lru_cache, partial
+from typing import Any, cast
 
-import numpy as np
 import pyproj
 import pyproj.aoi
 
 import xarray as xr
-from xpublish_tiles.render import Renderer
-from xpublish_tiles.render.raster import DatashaderRasterRenderer
+from xpublish_tiles.grids import Curvilinear, Rectilinear, guess_grid_system
+from xpublish_tiles.types import (
+    DataType,
+    OutputBBox,
+    OutputCRS,
+    PopulatedRenderContext,
+    QueryParams,
+    ValidatedArray,
+)
 
-InputCRS = NewType("InputCRS", pyproj.CRS)
-OutputCRS = NewType("OutputCRS", pyproj.CRS)
-InputBBox = NewType("InputBBox", pyproj.aoi.BBox)
-OutputBBox = NewType("OutputBBox", pyproj.aoi.BBox)
-
-
-class ImageFormat(enum.StrEnum):
-    PNG = enum.auto()
-    JPEG = enum.auto()
-
-
-class GridType(enum.Enum):
-    REGULAR = enum.auto()
-    RECTILINEAR = enum.auto()
-    CURVILINEAR = enum.auto()
-    TRIANGULAR = enum.auto()
-    POLYGONS = enum.auto()
-    DGGS = enum.auto()
-
-
-class DataType(enum.Enum):
-    DISCRETE = enum.auto()
-    CONTINUOUS = enum.auto()
-
-
-class Style(enum.Enum):
-    RASTER = enum.auto()
-    QUIVER = enum.auto()
-    NUMPY = enum.auto()
-    VECTOR = enum.auto()
-
-
-class QueryParams:
-    variables: list[str]
-    crs: OutputCRS
-    bbox: OutputBBox
-    # decision: are time and vertical special?
-    #    they are not; only selection is allowed
-    #    notice that we are effectively interpolating along X, Y
-    #    so there is some "interpretation" here
-    selectors: dict[str, Any]
-    style: Style
-    width: int
-    height: int
-    cmap: str
-    colorscalerange: tuple[Number, Number] | None = None
-
-    def get_renderer(self) -> Renderer:
-        if self.style is Style.RASTER:
-            return DatashaderRasterRenderer()
-        else:
-            raise NotImplementedError("Unknown style type: %r" % self.style)  # noqa: UP031
-
-
-@dataclass
-class ValidatedArray:
-    """ """
-
-    da: xr.DataArray
-    datatype: DataType
-    grid: GridType
-    bbox: InputBBox
-    crs: InputCRS
-    # all vars needed to construct a *horizontal* mesh for the dataarray
-    # X, Y are in the input data CRS
-    X: np.ndarray
-    Y: np.ndarray
-    # TODO: for Tri
-    nvertex: np.ndarray
-
-
-@dataclass
-class RenderContext:
-    """all information needed to render the output"""
-
-    da: xr.DataArray
-    datatype: DataType
-    grid: GridType
-    bbox: OutputBBox
-    # all vars needed to construct a *horizontal* mesh for the dataarray
-    # X, Y have been transformed to the output CRS
-    X: np.ndarray
-    Y: np.ndarray
-    # TODO: for Tri
-    nvertex: np.ndarray | None = None
-
-    async def async_load(self) -> Self:
-        new_data = await self.da.async_load()
-        return type(self)(
-            da=new_data,
-            datatype=self.datatype,
-            grid=self.grid,
-            bbox=self.bbox,
-            X=self.X,
-            Y=self.Y,
-            nvertex=self.nvertex,
-        )
+# https://pyproj4.github.io/pyproj/stable/advanced_examples.html#caching-pyproj-objects
+transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=True))
 
 
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = apply_query(ds, variables=query.variables, selectors=query.selectors)
     subsets = subset_to_bbox(validated, bbox=query.bbox, crs=query.crs)
-    contexts = await asyncio.gather(*(sub.async_load() for sub in subsets.values()))
-    context_dict = dict(zip(subsets.keys(), contexts, strict=True))
+    loaded_contexts = await asyncio.gather(
+        *(sub.async_load() for sub in subsets.values())
+    )
+    context_dict = dict(zip(subsets.keys(), loaded_contexts, strict=True))
 
     buffer = io.BytesIO()
     renderer = query.get_renderer()
@@ -132,25 +43,71 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     return buffer
 
 
+def _infer_datatype(array: xr.DataArray) -> DataType:
+    # return DataType.DISCRETE if array.cf.is_flag_variable else DataType.CONTINUOUS
+    # FIXME: enable DISCRETE detection soon, for CTrees.
+    return DataType.CONTINUOUS
+
+
+# FIXME: apply a decorator to time this
 def apply_query(
     ds: xr.Dataset, *, variables: list[str], selectors: dict[str, Any]
 ) -> dict[str, ValidatedArray]:
     """
     This method does all automagic detection necessary for the rest of the pipeline to work.
     """
-    # For each var:
-    #     infer data crs
-    #     get X, Y
-    #     apply the right index????
-    #     infer data type
-    #     infer GridType
-    #     construct ValidatedArray?
-    raise NotImplementedError("apply_query not yet implemented")
+    validated: dict[str, ValidatedArray] = {}
+    ds = ds.cf.sel(**selectors)
+    for name in variables:
+        grid_system = guess_grid_system(ds, name)
+        array = ds.cf[name]
+        validated[name] = ValidatedArray(
+            da=array,
+            grid=grid_system,
+            datatype=_infer_datatype(array),
+        )
+    return validated
 
 
 def subset_to_bbox(
     validated: dict[str, ValidatedArray], *, bbox: OutputBBox, crs: OutputCRS
-) -> dict[str, RenderContext]:
+) -> dict[str, PopulatedRenderContext]:
     # transform desired bbox to input data?
     # transform coordinates to output CRS
-    raise NotImplementedError("subset_to_bbox not yet implemented")
+    result = {}
+    for var_name, array in validated.items():
+        grid = array.grid
+        if not isinstance(grid, Rectilinear | Curvilinear):
+            raise NotImplementedError(f"{grid=!r} not supported yet.")
+        # Cast to help type checker understand narrowed type
+        grid = cast(Rectilinear | Curvilinear, grid)
+        input_to_output = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
+        output_to_input = transformer_from_crs(crs_from=crs, crs_to=grid.crs)
+
+        # FIXME: check bounds overlap, return NullRenderContext if applicable
+
+        input_bbox = output_to_input.transform_bounds(
+            left=bbox.west, right=bbox.east, top=bbox.north, bottom=bbox.south
+        )
+        subset = grid.sel(
+            array.da,
+            bbox=pyproj.aoi.BBox(
+                west=input_bbox[0],
+                east=input_bbox[2],
+                south=input_bbox[1],
+                north=input_bbox[3],
+            ),
+        )
+
+        bx, by = xr.broadcast(subset[grid.X], subset[grid.Y])
+        newX, newY = input_to_output.transform(bx.data, by.data)
+        newda = array.da.assign_coords(
+            {bx.name: bx.copy(data=newX), by.name: by.copy(data=newY)}
+        )
+        result[var_name] = PopulatedRenderContext(
+            da=newda,
+            grid=grid,
+            datatype=array.datatype,
+            bbox=bbox,
+        )
+    return result

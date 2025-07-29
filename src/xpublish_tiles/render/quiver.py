@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from xpublish_tiles.pipeline import RenderContext
+    from xpublish_tiles.types import RenderContext
 
 
 class QuiverRenderer:

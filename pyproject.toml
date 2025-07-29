@@ -11,7 +11,9 @@ authors = [
 requires-python = ">=3.11"
 dependencies = [
     "cf-xarray>=0.10.6",
+    "cftime>=1.6.4.post1",
     "datashader>=0.18.1",
+    "numbagg>=0.9.0",
     "pyproj>=3.7.1",
     "xarray>=2025.7.1",
     "xpublish>=0.4.1",
@@ -33,6 +35,9 @@ dev = [
     "pooch>=1.8.2",
     "arraylake",
     "icechunk",
+    "netcdf4>=1.7.2",
+    "pdbpp>=0.11.7",
+    "morecantile>=5.4.2",
 ]
 
 [project.entry-points."xpublish.plugin"]
