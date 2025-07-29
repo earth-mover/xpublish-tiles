@@ -206,10 +206,44 @@ class Rectilinear(GridSystem):
         else:
             slicers[self.Y] = slice(bbox.north, bbox.south)
 
-        # Handle longitude (X coordinate) using helper function
-        lon_slice = _handle_longitude_selection(da[self.X], bbox, self.crs.is_geographic)
-        slicers[self.X] = lon_slice
-        result = da.sel(slicers)
+        # Handle longitude (X coordinate)
+        if self.crs.is_geographic:
+            # For geographic coordinates, we may need special handling for 0-360 data
+            lon_values = da[self.X].data
+            lon_min, lon_max = lon_values.min().item(), lon_values.max().item()
+            uses_0_360 = lon_min >= 0 and lon_max > 180
+
+            if uses_0_360 and bbox.west < 0:
+                # Convert bbox to 0-360 convention
+                bbox_west_360 = bbox.west + 360
+                bbox_east_360 = bbox.east + 360 if bbox.east < 0 else bbox.east
+
+                if bbox_west_360 > bbox_east_360:
+                    # Bbox crosses 360/0 boundary - need to select two ranges
+                    # Select data from [bbox_west_360, 360] and [0, bbox_east_360]
+                    da1 = da.sel(
+                        {self.Y: slicers[self.Y], self.X: slice(bbox_west_360, 360)}
+                    )
+                    da2 = da.sel(
+                        {self.Y: slicers[self.Y], self.X: slice(0, bbox_east_360)}
+                    )
+                    # Concatenate along longitude dimension
+                    result = xr.concat([da1, da2], dim=self.X)
+                else:
+                    # Normal case - single range
+                    slicers[self.X] = slice(bbox_west_360, bbox_east_360)
+                    result = da.sel(slicers)
+            else:
+                # Use the helper function for other cases
+                lon_slice = _handle_longitude_selection(
+                    da[self.X], bbox, self.crs.is_geographic
+                )
+                slicers[self.X] = lon_slice
+                result = da.sel(slicers)
+        else:
+            # Non-geographic coordinates
+            slicers[self.X] = slice(bbox.west, bbox.east)
+            result = da.sel(slicers)
 
         # Convert longitude coordinates to -180→180 convention for consistent output
         if self.crs.is_geographic:
