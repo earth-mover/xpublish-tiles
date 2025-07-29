@@ -26,34 +26,7 @@ class DatashaderRasterRenderer(Renderer):
         assert len(context) == 1
 
     def maybe_cast_data(self, data) -> xr.DataArray:  # type: ignore[name-defined]
-        kind = data.dtype.kind
-        itemsize = data.dtype.itemsize
-
-        # numba only supports float32 and float64. Cast everything else
-        if kind == "f" and itemsize not in [4, 8]:
-            logger.warning(
-                "DataArray dtype is %s, which is not a floating point type "
-                "of size 32 or 64. This will result in a slow render.",
-                data.dtype,
-            )
-        if itemsize < 4:
-            logger.warning(
-                "DataArray dtype is 16-bit. This must be converted to 32-bit before rendering."
-            )
-            data = data.astype(np.float32)
-        elif itemsize < 8:
-            # FIXME: this makes no sense.
-            logger.warning(
-                "DataArray dtype is 32-bit. This must be converted to 64-bit before rendering."
-            )
-            data = data.astype(np.float64)
-        else:
-            raise ValueError(
-                "DataArray dtype is %s, which is not a floating point type "  # noqa: UP031
-                "greater than 64-bit. This is not currently supported." % data.dtype
-            )
-
-        return data
+        return data.astype(np.float64, copy=False)
 
     def render(
         self,
