@@ -3,9 +3,11 @@
 from enum import Enum
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import Dataset
+from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.types import QueryParams
 from xpublish_tiles.utils import parse_colorscalerange, parse_style
 from xpublish_tiles.xpublish.tiles.metadata import create_tileset_metadata
@@ -207,25 +209,24 @@ class TilesPlugin(Plugin):
             except ValueError as e:
                 raise HTTPException(status_code=404, detail=str(e)) from e
 
-            parsed_colorscalerange= parse_colorscalerange(colorscalerange)
+            parsed_colorscalerange = parse_colorscalerange(colorscalerange)
             parsed_style, cmap = parse_style(style)
-            params = QueryParams(
+            render_params = QueryParams(
                 variables=variables,
                 style=parsed_style,
                 colorscalerange=parsed_colorscalerange,
                 cmap=cmap,
+                crs=crs,
+                bbox=bbox,
+                width=width,
+                height=height,
+                selectors={},
             )
-            # pipeline(dataset, params)
+            buffer = await pipeline(dataset, render_params)
 
-            # TODO: Pass bbox and crs to rendering pipeline
-            return {
-                "message": f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}",
-                "tileMatrixSetId": tileMatrixSetId,
-                "tileMatrix": tileMatrix,
-                "tileRow": tileRow,
-                "tileCol": tileCol,
-                "bbox": bbox,
-                "crs": crs,
-            }
+            return StreamingResponse(
+                buffer,
+                media_type="image/png",
+            )
 
         return router
