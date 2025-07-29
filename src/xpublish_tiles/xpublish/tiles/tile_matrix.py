@@ -122,7 +122,7 @@ def extract_tile_bbox_and_crs(
     max_y = origin_y - (tileRow * tile_height * pixel_size)
     min_y = origin_y - ((tileRow + 1) * tile_height * pixel_size)
 
-    bbox = OutputBBox(west=min_x, south=min_y, east=max_x, north=max_y)
+    bbox = OutputBBox([min_x, min_y, max_x, max_y])
 
     # Convert CRS to pyproj.CRS object
     if isinstance(tile_matrix_set.crs, str):

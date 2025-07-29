@@ -1,7 +1,7 @@
 import pytest
 
-from xpublish_tiles.types import Style
-from xpublish_tiles.utils import parse_colorscalerange, parse_style
+from xpublish_tiles.types import ImageFormat, Style
+from xpublish_tiles.utils import parse_colorscalerange, parse_image_format, parse_style
 
 
 class TestUnpackColorscalerange:
@@ -205,3 +205,134 @@ class TestParseStyle:
             result = parse_style(f"{style_str}/test_colormap")
             assert result[0] == expected_enum
             assert result[1] == "test_colormap"
+
+
+class TestParseImageFormat:
+    """Test cases for the parse_image_format function"""
+
+    def test_valid_png_format(self):
+        """Test parsing valid PNG format"""
+        result = parse_image_format("png")
+        assert result == ImageFormat.PNG
+
+    def test_valid_jpeg_format(self):
+        """Test parsing valid JPEG format"""
+        result = parse_image_format("jpeg")
+        assert result == ImageFormat.JPEG
+
+    def test_valid_uppercase_png(self):
+        """Test parsing uppercase PNG format"""
+        result = parse_image_format("PNG")
+        assert result == ImageFormat.PNG
+
+    def test_valid_uppercase_jpeg(self):
+        """Test parsing uppercase JPEG format"""
+        result = parse_image_format("JPEG")
+        assert result == ImageFormat.JPEG
+
+    def test_valid_mixed_case_png(self):
+        """Test parsing mixed case PNG format"""
+        result = parse_image_format("PnG")
+        assert result == ImageFormat.PNG
+
+    def test_valid_mixed_case_jpeg(self):
+        """Test parsing mixed case JPEG format"""
+        result = parse_image_format("JpEg")
+        assert result == ImageFormat.JPEG
+
+    def test_valid_mime_type_png(self):
+        """Test parsing PNG with MIME type prefix"""
+        result = parse_image_format("image/png")
+        assert result == ImageFormat.PNG
+
+    def test_valid_mime_type_jpeg(self):
+        """Test parsing JPEG with MIME type prefix"""
+        result = parse_image_format("image/jpeg")
+        assert result == ImageFormat.JPEG
+
+    def test_valid_mime_type_uppercase(self):
+        """Test parsing uppercase MIME type"""
+        result = parse_image_format("image/PNG")
+        assert result == ImageFormat.PNG
+
+    def test_valid_mime_type_mixed_case(self):
+        """Test parsing mixed case MIME type"""
+        result = parse_image_format("IMAGE/jpeg")
+        assert result == ImageFormat.JPEG
+
+    def test_valid_custom_mime_prefix(self):
+        """Test parsing with custom prefix before slash"""
+        result = parse_image_format("application/png")
+        assert result == ImageFormat.PNG
+
+    def test_invalid_multiple_slashes(self):
+        """Test error handling for multiple slashes"""
+        with pytest.raises(ValueError, match="Invalid image format: image/sub/jpeg"):
+            parse_image_format("image/sub/jpeg")
+
+    def test_invalid_format_name(self):
+        """Test error handling for invalid format name"""
+        with pytest.raises(ValueError, match="Invalid image format: gif"):
+            parse_image_format("gif")
+
+    def test_invalid_mime_type_format(self):
+        """Test error handling for invalid MIME type format"""
+        with pytest.raises(ValueError, match="Invalid image format: image/gif"):
+            parse_image_format("image/gif")
+
+    def test_invalid_empty_string(self):
+        """Test error handling for empty string"""
+        with pytest.raises(ValueError, match="Invalid image format: "):
+            parse_image_format("")
+
+    def test_invalid_only_slash(self):
+        """Test error handling for only slash"""
+        with pytest.raises(ValueError, match="Invalid image format: /"):
+            parse_image_format("/")
+
+    def test_invalid_slash_prefix_only(self):
+        """Test error handling for slash prefix with no format"""
+        with pytest.raises(ValueError, match="Invalid image format: image/"):
+            parse_image_format("image/")
+
+    def test_invalid_numeric_format(self):
+        """Test error handling for numeric format"""
+        with pytest.raises(ValueError, match="Invalid image format: 123"):
+            parse_image_format("123")
+
+    def test_invalid_special_characters(self):
+        """Test error handling for special characters"""
+        with pytest.raises(ValueError, match=r"Invalid image format: png@#\$"):
+            parse_image_format("png@#$")
+
+    def test_return_type(self):
+        """Test that function returns correct type"""
+        result = parse_image_format("png")
+        assert isinstance(result, ImageFormat)
+
+    def test_all_valid_enum_values(self):
+        """Test all valid ImageFormat enum values"""
+        test_cases = [
+            ("png", ImageFormat.PNG),
+            ("jpeg", ImageFormat.JPEG),
+            ("PNG", ImageFormat.PNG),
+            ("JPEG", ImageFormat.JPEG),
+            ("image/png", ImageFormat.PNG),
+            ("image/jpeg", ImageFormat.JPEG),
+        ]
+
+        for format_str, expected_enum in test_cases:
+            result = parse_image_format(format_str)
+            assert result == expected_enum
+
+    def test_edge_case_whitespace(self):
+        """Test parsing format with whitespace"""
+        with pytest.raises(ValueError, match="Invalid image format:  png "):
+            parse_image_format(" png ")
+
+    def test_edge_case_common_aliases(self):
+        """Test error handling for common format aliases"""
+        invalid_aliases = ["jpg", "image/jpg", "JPG"]
+        for alias in invalid_aliases:
+            with pytest.raises(ValueError, match=f"Invalid image format: {alias}"):
+                parse_image_format(alias)
