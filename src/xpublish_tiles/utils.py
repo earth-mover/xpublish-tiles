@@ -21,6 +21,15 @@ def lower_case_keys(d: Any) -> dict[str, Any]:
         return {k.lower(): v for k, v in dict(d).items()}
 
 
+def unpack_colorscalerange(raw_value: str) -> tuple[float, float]:
+    """Unpack a color scale range string into a tuple of floats"""
+    try:
+        min_val, max_val = map(float, raw_value.split(","))
+        return min_val, max_val
+    except ValueError as e:
+        raise ValueError(f"Invalid color scale range format: {raw_value}") from e
+
+
 def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSetMetadata:
     """Create tileset metadata for a dataset and tile matrix set"""
     # Get tile matrix set summary

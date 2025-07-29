@@ -2,10 +2,12 @@
 
 from enum import Enum
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import Dataset
+from xpublish_tiles import pipeline
+from xpublish_tiles.types import QueryParams
 from xpublish_tiles.utils import create_tileset_metadata
 from xpublish_tiles.xpublish.tiles.models import (
     ConformanceDeclaration,
@@ -185,7 +187,17 @@ class TilesPlugin(Plugin):
 
         @router.get("/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}")
         async def get_dataset_tile(
-            tileMatrixSetId: str, tileMatrix: int, tileRow: int, tileCol: int
+            request: Request,
+            tileMatrixSetId: str,
+            tileMatrix: int,
+            tileRow: int,
+            tileCol: int,
+            variables: list[str],
+            colorscalerange: str,
+            style: str = "raster/default",
+            width: int = 256,
+            height: int = 256,
+            dataset: Dataset = Depends(deps.dataset),  # noqa: B008
         ):
             """Get individual tile from this dataset"""
             try:
@@ -194,6 +206,9 @@ class TilesPlugin(Plugin):
                 )
             except ValueError as e:
                 raise HTTPException(status_code=404, detail=str(e)) from e
+
+            params = QueryParams(variables=variables, style=style)
+            pipeline(dataset, params)
 
             # TODO: Pass bbox and crs to rendering pipeline
             return {
