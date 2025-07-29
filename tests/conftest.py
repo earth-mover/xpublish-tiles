@@ -3,6 +3,7 @@ from itertools import product
 import arraylake as al
 import numpy as np
 import pytest
+from syrupy.extensions.image import PNGImageSnapshotExtension
 
 import icechunk
 import xarray as xr
@@ -117,3 +118,8 @@ def global_datasets(request):
         ),
     ]
     yield uniform_grid(dims=tuple(dims), dtype=np.float32, attrs={})
+
+
+@pytest.fixture
+def png_snapshot(snapshot):
+    return snapshot.use_extension(PNGImageSnapshotExtension)
