@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import Dataset
+from xpublish_tiles.types import QueryParams
+from xpublish_tiles.utils import parse_colorscalerange, parse_style
 from xpublish_tiles.xpublish.tiles.metadata import create_tileset_metadata
 from xpublish_tiles.xpublish.tiles.models import (
     ConformanceDeclaration,
@@ -205,14 +207,14 @@ class TilesPlugin(Plugin):
             except ValueError as e:
                 raise HTTPException(status_code=404, detail=str(e)) from e
 
-            # parsed_colorscalerange= parse_colorscalerange(colorscalerange)
-            # parsed_style, cmap = parse_style(style)
-            # params = QueryParams(
-            #     variables=variables,
-            #     style=parsed_style,
-            #     colorscalerange=parsed_colorscalerange,
-            #     cmap=cmap,
-            # )
+            parsed_colorscalerange= parse_colorscalerange(colorscalerange)
+            parsed_style, cmap = parse_style(style)
+            params = QueryParams(
+                variables=variables,
+                style=parsed_style,
+                colorscalerange=parsed_colorscalerange,
+                cmap=cmap,
+            )
             # pipeline(dataset, params)
 
             # TODO: Pass bbox and crs to rendering pipeline

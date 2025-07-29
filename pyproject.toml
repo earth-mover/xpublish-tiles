@@ -37,6 +37,7 @@ dev = [
     "arraylake",
     "icechunk",
     "syrupy>=4.9.1",
+    "pooch>=1.8.2",
 ]
 
 [project.entry-points."xpublish.plugin"]
