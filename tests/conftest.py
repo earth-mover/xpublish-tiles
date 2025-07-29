@@ -3,6 +3,7 @@ from itertools import product
 import arraylake as al
 import numpy as np
 import pytest
+from syrupy.extensions.image import PNGImageSnapshotExtension
 
 import icechunk
 import xarray as xr
@@ -117,3 +118,37 @@ def global_datasets(request):
         ),
     ]
     yield uniform_grid(dims=tuple(dims), dtype=np.float32, attrs={})
+
+
+@pytest.fixture
+def png_snapshot(snapshot):
+    """PNG snapshot with custom numpy array comparison for robustness."""
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    class RobustPNGSnapshotExtension(PNGImageSnapshotExtension):
+        def matches(self, *, serialized_data: bytes, snapshot_data: bytes) -> bool:
+            """
+            Compare PNG images as numpy arrays instead of raw bytes.
+            This is more robust against compression differences and platform variations.
+            """
+            try:
+                # Convert both images to numpy arrays
+                actual_img = Image.open(io.BytesIO(serialized_data))
+                expected_img = Image.open(io.BytesIO(snapshot_data))
+
+                actual_array = np.array(actual_img)
+                expected_array = np.array(expected_img)
+
+                # Use numpy array equality comparison
+                return np.array_equal(actual_array, expected_array)
+
+            except Exception:
+                # Fallback to byte comparison if image parsing fails
+                return super().matches(
+                    serialized_data=serialized_data, snapshot_data=snapshot_data
+                )
+
+    return snapshot.use_extension(RobustPNGSnapshotExtension)
