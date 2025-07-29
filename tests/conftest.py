@@ -1,8 +1,12 @@
+from itertools import product
+
 import arraylake as al
+import numpy as np
 import pytest
 
 import icechunk
 import xarray as xr
+from tests.datasets import Dim, uniform_grid
 
 ARRAYLAKE_REPO = "earthmover-integration/tiles-datasets-develop"
 
@@ -77,3 +81,39 @@ def generate_repo(where: str, prefix: str):
 @pytest.fixture
 def repo(where, prefix):
     return generate_repo(where, prefix)
+
+
+@pytest.fixture(
+    params=tuple(map(",".join, product(["-90->90", "90->-90"], ["-180->180", "0->360"])))
+)
+def global_datasets(request):
+    param = request.param
+    dims = []
+
+    nlat, nlon = 720, 1441
+    lats = np.linspace(-90, 90, nlat)
+    if "90->-90" in param:
+        lats = lats[::-1]
+
+    if "-180->180" in param:
+        lons = np.linspace(-180, 180, nlon)
+    else:
+        lons = np.linspace(0, 360, nlon)
+
+    dims = [
+        Dim(
+            name="latitude",
+            size=nlat,
+            chunk_size=nlat,
+            data=lats,
+            attrs={"standard_name": "latitude"},
+        ),
+        Dim(
+            name="longitude",
+            size=nlon,
+            chunk_size=nlon,
+            data=lons,
+            attrs={"standard_name": "longitude"},
+        ),
+    ]
+    yield uniform_grid(dims=tuple(dims), dtype=np.float32, attrs={})
