@@ -1,15 +1,6 @@
 from typing import Any
 
-from xarray import Dataset
-from xpublish_tiles.xpublish.tiles.models import (
-    DataType,
-    Link,
-    TileSetMetadata,
-)
-from xpublish_tiles.xpublish.tiles.tile_matrix import (
-    TILE_MATRIX_SET_SUMMARIES,
-    extract_dataset_bounds,
-)
+from xpublish_tiles.types import ImageFormat, Style
 
 
 def lower_case_keys(d: Any) -> dict[str, Any]:
@@ -21,41 +12,35 @@ def lower_case_keys(d: Any) -> dict[str, Any]:
         return {k.lower(): v for k, v in dict(d).items()}
 
 
-def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSetMetadata:
-    """Create tileset metadata for a dataset and tile matrix set"""
-    # Get tile matrix set summary
-    if tile_matrix_set_id not in TILE_MATRIX_SET_SUMMARIES:
-        raise ValueError(f"Tile matrix set '{tile_matrix_set_id}' not found")
+def parse_colorscalerange(raw_value: str) -> tuple[float, float]:
+    """Unpack a color scale range string from "min,max" into a tuple of floats"""
+    try:
+        min_val, max_val = map(float, raw_value.split(","))
+        return min_val, max_val
+    except ValueError as e:
+        raise ValueError(f"Invalid color scale range format: {raw_value}") from e
 
-    tms_summary = TILE_MATRIX_SET_SUMMARIES[tile_matrix_set_id]()
 
-    # Extract dataset metadata
-    dataset_attrs = dataset.attrs
-    title = dataset_attrs.get("title", "Dataset")
+def parse_style(raw_value: str) -> tuple[Style, str]:
+    """Parse a style string from "style/colormap" into a tuple of Style and colormap"""
+    try:
+        style, value = raw_value.split("/", 1)
+        return Style[style.upper()], value
+    except ValueError as e:
+        raise ValueError(f"Invalid style format: {raw_value}") from e
+    except KeyError as e:
+        raise ValueError(f"Invalid style format: {raw_value}") from e
 
-    # Extract dataset bounds
-    dataset_bounds = extract_dataset_bounds(dataset)
 
-    # Create main tileset metadata
-    return TileSetMetadata(
-        title=f"{title} - {tile_matrix_set_id}",
-        tileMatrixSetURI=tms_summary.uri,
-        crs=tms_summary.crs,
-        dataType=DataType.MAP,
-        links=[
-            Link(
-                href=f"./{tile_matrix_set_id}/{{tileMatrix}}/{{tileRow}}/{{tileCol}}",
-                rel="item",
-                type="image/png",
-                title="Tile",
-                templated=True,
-            ),
-            Link(
-                href=f"/tileMatrixSets/{tile_matrix_set_id}",
-                rel="http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
-                type="application/json",
-                title=f"Definition of {tile_matrix_set_id}",
-            ),
-        ],
-        boundingBox=dataset_bounds,
-    )
+def parse_image_format(raw_value: str) -> ImageFormat:
+    """Parse an image format string from "format" or "image/format" into a string"""
+    try:
+        if "/" in raw_value:
+            _, format_str = raw_value.split("/", 1)
+        else:
+            format_str = raw_value
+        return ImageFormat(format_str.lower())
+    except ValueError as e:
+        raise ValueError(f"Invalid image format: {raw_value}") from e
+    except KeyError as e:
+        raise ValueError(f"Invalid image format: {raw_value}") from e

@@ -1,12 +1,17 @@
 """OGC Tiles API XPublish Plugin"""
 
 from enum import Enum
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import Dataset
-from xpublish_tiles.utils import create_tileset_metadata
+from xpublish_tiles.pipeline import pipeline
+from xpublish_tiles.types import QueryParams
+from xpublish_tiles.utils import parse_colorscalerange, parse_image_format, parse_style
+from xpublish_tiles.xpublish.tiles.metadata import create_tileset_metadata
 from xpublish_tiles.xpublish.tiles.models import (
     ConformanceDeclaration,
     DataType,
@@ -185,7 +190,18 @@ class TilesPlugin(Plugin):
 
         @router.get("/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}")
         async def get_dataset_tile(
-            tileMatrixSetId: str, tileMatrix: int, tileRow: int, tileCol: int
+            request: Request,
+            tileMatrixSetId: str,
+            tileMatrix: int,
+            tileRow: int,
+            tileCol: int,
+            variables: list[str],
+            colorscalerange: str,
+            style: str = "raster/default",
+            width: int = 256,
+            height: int = 256,
+            f: Literal["image/png", "image/jpeg"] = "image/png",
+            dataset: Dataset = Depends(deps.dataset),  # noqa: B008
         ):
             """Get individual tile from this dataset"""
             try:
@@ -195,15 +211,26 @@ class TilesPlugin(Plugin):
             except ValueError as e:
                 raise HTTPException(status_code=404, detail=str(e)) from e
 
-            # TODO: Pass bbox and crs to rendering pipeline
-            return {
-                "message": f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}",
-                "tileMatrixSetId": tileMatrixSetId,
-                "tileMatrix": tileMatrix,
-                "tileRow": tileRow,
-                "tileCol": tileCol,
-                "bbox": bbox,
-                "crs": crs,
-            }
+            parsed_colorscalerange = parse_colorscalerange(colorscalerange)
+            parsed_style, cmap = parse_style(style)
+            parsed_image_format = parse_image_format(f)
+            render_params = QueryParams(
+                variables=variables,
+                style=parsed_style,
+                colorscalerange=parsed_colorscalerange,
+                cmap=cmap,
+                crs=crs,
+                bbox=bbox,
+                width=width,
+                height=height,
+                format=parsed_image_format,
+                selectors={},
+            )
+            buffer = await pipeline(dataset, render_params)
+
+            return StreamingResponse(
+                buffer,
+                media_type="image/png",
+            )
 
         return router

@@ -45,6 +45,7 @@ class QueryParams:
     width: int
     height: int
     cmap: str
+    format: ImageFormat
     colorscalerange: tuple[float, float] | None = None
 
     def get_renderer(self):
