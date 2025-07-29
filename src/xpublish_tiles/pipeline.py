@@ -3,6 +3,7 @@ import io
 from functools import lru_cache, partial
 from typing import Any, cast
 
+import numpy as np
 import pyproj
 import pyproj.aoi
 
@@ -19,6 +20,36 @@ from xpublish_tiles.types import (
 
 # https://pyproj4.github.io/pyproj/stable/advanced_examples.html#caching-pyproj-objects
 transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=True))
+
+
+def pad_bbox(
+    bbox: pyproj.aoi.BBox, da: xr.DataArray, x_dim: str, y_dim: str
+) -> pyproj.aoi.BBox:
+    """
+    Extend bbox slightly to account for discrete coordinate sampling.
+    This prevents transparency gaps at tile edges due to coordinate resolution.
+    """
+    x_coord = da[x_dim]
+    y_coord = da[y_dim]
+
+    # Calculate coordinate spacing (use median to handle irregular grids)
+    if x_coord.size > 1:
+        x_spacing = np.median(np.diff(x_coord.values))
+    else:
+        x_spacing = 0
+
+    if y_coord.size > 1:
+        y_spacing = np.median(np.diff(y_coord.values))
+    else:
+        y_spacing = 0
+
+    # Extend bbox by half a coordinate spacing on each side
+    return pyproj.aoi.BBox(
+        west=bbox.west - abs(x_spacing) * 0.5,
+        east=bbox.east + abs(x_spacing) * 0.5,
+        south=bbox.south - abs(y_spacing) * 0.5,
+        north=bbox.north + abs(y_spacing) * 0.5,
+    )
 
 
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
@@ -90,15 +121,17 @@ def subset_to_bbox(
         input_bbox = output_to_input.transform_bounds(
             left=bbox.west, right=bbox.east, top=bbox.north, bottom=bbox.south
         )
-        subset = grid.sel(
-            array.da,
-            bbox=pyproj.aoi.BBox(
-                west=input_bbox[0],
-                east=input_bbox[2],
-                south=input_bbox[1],
-                north=input_bbox[3],
-            ),
+
+        # Create input bbox and extend it to prevent coordinate sampling gaps
+        input_bbox_obj = pyproj.aoi.BBox(
+            west=input_bbox[0],
+            east=input_bbox[2],
+            south=input_bbox[1],
+            north=input_bbox[3],
         )
+        extended_bbox = pad_bbox(input_bbox_obj, array.da, grid.X, grid.Y)
+
+        subset = grid.sel(array.da, bbox=extended_bbox)
 
         bx, by = xr.broadcast(subset[grid.X], subset[grid.Y])
         newX, newY = input_to_output.transform(bx.data, by.data)

@@ -69,9 +69,9 @@ async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot):
     content = result.read()
     assert len(content) > 0
 
-    # Check for transparent pixels - there should be very few (< 2% tolerance for edge effects)
+    # Check for transparent pixels - there should be none
     transparent_percent = check_transparent_pixels(content)
-    assert transparent_percent < 2.0, (
+    assert transparent_percent == 0, (
         f"Found {transparent_percent:.1f}% transparent pixels in tile "
         f"{tile} with TMS {tms.id}. This indicates a data transformation issue."
     )
