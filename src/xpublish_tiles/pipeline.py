@@ -3,7 +3,6 @@ import io
 from functools import lru_cache, partial
 from typing import Any, cast
 
-import numpy as np
 import pyproj
 import pyproj.aoi
 
@@ -32,23 +31,26 @@ def pad_bbox(
     x_coord = da[x_dim]
     y_coord = da[y_dim]
 
-    # Calculate coordinate spacing (use median to handle irregular grids)
+    # Calculate coordinate spacing (use first difference for consistency across platforms)
     if x_coord.size > 1:
-        x_spacing = np.median(np.diff(x_coord.values))
+        x_spacing = float(x_coord.values[1] - x_coord.values[0])
     else:
-        x_spacing = 0
+        x_spacing = 0.0
 
     if y_coord.size > 1:
-        y_spacing = np.median(np.diff(y_coord.values))
+        y_spacing = float(y_coord.values[1] - y_coord.values[0])
     else:
-        y_spacing = 0
+        y_spacing = 0.0
 
     # Extend bbox by half a coordinate spacing on each side
+    x_pad = abs(x_spacing) * 0.5
+    y_pad = abs(y_spacing) * 0.5
+
     return pyproj.aoi.BBox(
-        west=bbox.west - abs(x_spacing) * 0.5,
-        east=bbox.east + abs(x_spacing) * 0.5,
-        south=bbox.south - abs(y_spacing) * 0.5,
-        north=bbox.north + abs(y_spacing) * 0.5,
+        west=float(bbox.west - x_pad),
+        east=float(bbox.east + x_pad),
+        south=float(bbox.south - y_pad),
+        north=float(bbox.north + y_pad),
     )
 
 
