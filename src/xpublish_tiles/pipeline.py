@@ -101,7 +101,7 @@ def subset_to_bbox(
 
         bx, by = xr.broadcast(subset[grid.X], subset[grid.Y])
         newX, newY = input_to_output.transform(bx.data, by.data)
-        newda = array.da.assign_coords(
+        newda = subset.assign_coords(
             {bx.name: bx.copy(data=newX), by.name: by.copy(data=newY)}
         )
         result[var_name] = PopulatedRenderContext(

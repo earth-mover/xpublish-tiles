@@ -1,6 +1,5 @@
 import enum
 from dataclasses import dataclass
-from numbers import Number
 from typing import Any, NewType, Self
 
 import pyproj
@@ -20,15 +19,6 @@ class ImageFormat(enum.StrEnum):
     JPEG = enum.auto()
 
 
-class GridType(enum.Enum):
-    # REGULAR = enum.auto()
-    RECTILINEAR = enum.auto()
-    CURVILINEAR = enum.auto()
-    TRIANGULAR = enum.auto()
-    POLYGONS = enum.auto()
-    DGGS = enum.auto()
-
-
 class DataType(enum.Enum):
     DISCRETE = enum.auto()
     CONTINUOUS = enum.auto()
@@ -41,6 +31,7 @@ class Style(enum.Enum):
     VECTOR = enum.auto()
 
 
+@dataclass
 class QueryParams:
     variables: list[str]
     crs: OutputCRS
@@ -54,7 +45,7 @@ class QueryParams:
     width: int
     height: int
     cmap: str
-    colorscalerange: tuple[Number, Number] | None = None
+    colorscalerange: tuple[float, float] | None = None
 
     def get_renderer(self):
         from xpublish_tiles.render.raster import DatashaderRasterRenderer
@@ -93,7 +84,8 @@ class PopulatedRenderContext(RenderContext):
     bbox: OutputBBox
 
     async def async_load(self) -> Self:
-        new_data = await self.da.async_load()
+        # new_data = await self.da.async_load()
+        new_data = self.da.load()
         return type(self)(
             da=new_data, datatype=self.datatype, grid=self.grid, bbox=self.bbox
         )

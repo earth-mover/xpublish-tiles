@@ -1,7 +1,6 @@
 import io
 import logging
-from numbers import Number
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import datashader as dsh  # type: ignore
 import datashader.transfer_functions as tf  # type: ignore
@@ -9,10 +8,10 @@ import matplotlib as mpl  # type: ignore
 import numpy as np
 
 import xarray as xr
+from xpublish_tiles.grids import Curvilinear, Rectilinear
 from xpublish_tiles.render import Renderer
 from xpublish_tiles.types import (
     DataType,
-    GridType,
     ImageFormat,
     NullRenderContext,
     PopulatedRenderContext,
@@ -64,7 +63,7 @@ class DatashaderRasterRenderer(Renderer):
         width: int,
         height: int,
         cmap: str,
-        colorscalerange: tuple[Number, Number] | None = None,
+        colorscalerange: tuple[float, float] | None = None,
         format: ImageFormat = ImageFormat.PNG,
     ):
         self.validate(contexts)
@@ -82,13 +81,14 @@ class DatashaderRasterRenderer(Renderer):
             y_range=(bbox.south, bbox.north),
         )
 
-        if context.grid in (
-            GridType.RECTILINEAR,
-            GridType.CURVILINEAR,
-        ):
-            mesh = cvs.quadmesh(data, x="x", y="y")
+        if isinstance(context.grid, Rectilinear | Curvilinear):
+            # Use the actual coordinate names from the grid system
+            grid = cast(Rectilinear | Curvilinear, context.grid)
+            mesh = cvs.quadmesh(data, x=grid.X, y=grid.Y)
         else:
-            raise NotImplementedError
+            raise NotImplementedError(
+                f"Grid type {type(context.grid)} not supported by DatashaderRasterRenderer"
+            )
 
         if context.datatype is DataType.CONTINUOUS:
             shaded = tf.shade(
