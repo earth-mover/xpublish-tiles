@@ -30,6 +30,7 @@ dev = [
     "pytest>=8.4.1",
     "pytest-asyncio>=1.1.0",
     "pytest-cov>=6.2.1",
+    "pytest-xdist>=3.6.1",
     "ruff>=0.12.4",
     "ty>=0.0.1a15",
     "pdbpp>=0.11.7",
@@ -52,7 +53,7 @@ minversion = "7"
 testpaths = ["tests", "integration_tests"]
 log_cli_level = "INFO"
 xfail_strict = true
-addopts = ["-ra", "--strict-config", "--strict-markers"]
+addopts = ["-ra", "--strict-config", "--strict-markers", "-n", "auto"]
 
 [tool.ruff]
 line-length = 90
