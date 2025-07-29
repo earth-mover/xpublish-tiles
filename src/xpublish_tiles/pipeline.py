@@ -120,18 +120,11 @@ def subset_to_bbox(
 
         # FIXME: check bounds overlap, return NullRenderContext if applicable
 
+        # Create input bbox and extend it to prevent coordinate sampling gaps
         input_bbox = output_to_input.transform_bounds(
             left=bbox.west, right=bbox.east, top=bbox.north, bottom=bbox.south
         )
-
-        # Create input bbox and extend it to prevent coordinate sampling gaps
-        input_bbox_obj = pyproj.aoi.BBox(
-            west=input_bbox[0],
-            east=input_bbox[2],
-            south=input_bbox[1],
-            north=input_bbox[3],
-        )
-        extended_bbox = pad_bbox(input_bbox_obj, array.da, grid.X, grid.Y)
+        extended_bbox = pad_bbox(input_bbox, array.da, grid.X, grid.Y)
 
         subset = grid.sel(array.da, bbox=extended_bbox)
 
