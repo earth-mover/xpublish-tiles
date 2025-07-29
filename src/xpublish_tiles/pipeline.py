@@ -38,6 +38,7 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
         height=query.height,
         cmap=query.cmap,
         colorscalerange=query.colorscalerange,
+        format=query.format,
     )
     buffer.seek(0)
     return buffer
