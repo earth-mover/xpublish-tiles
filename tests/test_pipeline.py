@@ -69,7 +69,7 @@ async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot):
     content = result.read()
     assert len(content) > 0
 
-    # Check for transparent pixels - there should be none
+    # Check for transparent pixels - there should be none with bbox padding
     transparent_percent = check_transparent_pixels(content)
     assert transparent_percent == 0, (
         f"Found {transparent_percent:.1f}% transparent pixels in tile "
