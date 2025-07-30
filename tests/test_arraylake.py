@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from icechunk.xarray import to_icechunk
-from tests.datasets import Dataset, Dim, raster_grid, uniform_grid
+from xpublish_tiles.datasets import Dataset, Dim, raster_grid, uniform_grid
 
 ARRAYLAKE_REPO = "earthmover-integration/tiles-datasets-develop"
 
