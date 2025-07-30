@@ -10,6 +10,7 @@ import xarray as xr
 from xpublish_tiles.grids import Curvilinear, Rectilinear, guess_grid_system
 from xpublish_tiles.types import (
     DataType,
+    NullRenderContext,
     OutputBBox,
     OutputCRS,
     PopulatedRenderContext,
@@ -19,6 +20,85 @@ from xpublish_tiles.types import (
 
 # https://pyproj4.github.io/pyproj/stable/advanced_examples.html#caching-pyproj-objects
 transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=True))
+
+
+def check_bbox_overlap(
+    input_bbox: pyproj.aoi.BBox, grid_bbox: pyproj.aoi.BBox, is_geographic: bool
+) -> bool:
+    """Check if bboxes overlap, handling longitude wrapping for geographic data."""
+    # Standard intersection check
+    if input_bbox.intersects(grid_bbox):
+        return True
+
+    # For geographic data, check longitude wrapping
+    if is_geographic:
+        # Try converting input bbox to both 0-360 and -180-180 conventions to see if either overlaps
+
+        # Convert input bbox to -180 to 180 range
+        normalized_west = ((input_bbox.west + 180) % 360) - 180
+        normalized_east = ((input_bbox.east + 180) % 360) - 180
+
+        # Handle the case where normalization creates an anti-meridian crossing
+        if normalized_west > normalized_east:
+            # Check both parts: [normalized_west, 180] and [-180, normalized_east]
+            bbox1 = pyproj.aoi.BBox(
+                west=normalized_west,
+                south=input_bbox.south,
+                east=180.0,
+                north=input_bbox.north,
+            )
+            bbox2 = pyproj.aoi.BBox(
+                west=-180.0,
+                south=input_bbox.south,
+                east=normalized_east,
+                north=input_bbox.north,
+            )
+            if bbox1.intersects(grid_bbox) or bbox2.intersects(grid_bbox):
+                return True
+        else:
+            # Normal case - single normalized bbox
+            normalized_input = pyproj.aoi.BBox(
+                west=normalized_west,
+                south=input_bbox.south,
+                east=normalized_east,
+                north=input_bbox.north,
+            )
+            if normalized_input.intersects(grid_bbox):
+                return True
+
+        # Also try converting input bbox to 0-360 range
+        wrapped_west_360 = input_bbox.west % 360
+        wrapped_east_360 = input_bbox.east % 360
+
+        # Handle case where wrapping creates crossing at 0°/360°
+        if wrapped_west_360 > wrapped_east_360:
+            # Check both parts: [wrapped_west_360, 360] and [0, wrapped_east_360]
+            bbox1 = pyproj.aoi.BBox(
+                west=wrapped_west_360,
+                south=input_bbox.south,
+                east=360.0,
+                north=input_bbox.north,
+            )
+            bbox2 = pyproj.aoi.BBox(
+                west=0.0,
+                south=input_bbox.south,
+                east=wrapped_east_360,
+                north=input_bbox.north,
+            )
+            if bbox1.intersects(grid_bbox) or bbox2.intersects(grid_bbox):
+                return True
+        else:
+            # Normal case - single wrapped bbox
+            wrapped_input = pyproj.aoi.BBox(
+                west=wrapped_west_360,
+                south=input_bbox.south,
+                east=wrapped_east_360,
+                north=input_bbox.north,
+            )
+            if wrapped_input.intersects(grid_bbox):
+                return True
+
+    return False
 
 
 def pad_bbox(
@@ -118,12 +198,25 @@ def subset_to_bbox(
         input_to_output = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
         output_to_input = transformer_from_crs(crs_from=crs, crs_to=grid.crs)
 
-        # FIXME: check bounds overlap, return NullRenderContext if applicable
-
-        # Create input bbox and extend it to prevent coordinate sampling gaps
-        input_bbox = output_to_input.transform_bounds(
+        # Check bounds overlap, return NullRenderContext if no overlap
+        input_bbox_tuple = output_to_input.transform_bounds(
             left=bbox.west, right=bbox.east, top=bbox.north, bottom=bbox.south
         )
+        input_bbox = pyproj.aoi.BBox(
+            west=input_bbox_tuple[0],
+            south=input_bbox_tuple[1],
+            east=input_bbox_tuple[2],
+            north=input_bbox_tuple[3],
+        )
+
+        # Check bounds overlap, accounting for longitude wrapping in geographic data
+        has_overlap = check_bbox_overlap(input_bbox, grid.bbox, grid.crs.is_geographic)
+        if not has_overlap:
+            # No overlap - return NullRenderContext
+            result[var_name] = NullRenderContext()
+            continue
+
+        # Create extended bbox to prevent coordinate sampling gaps
         extended_bbox = pad_bbox(input_bbox, array.da, grid.X, grid.Y)
 
         subset = grid.sel(array.da, bbox=extended_bbox)

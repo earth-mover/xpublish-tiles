@@ -44,10 +44,8 @@ def _normalize_longitudes_to_180(result: xr.DataArray, x_coord_name: str) -> xr.
     lon_coord = result.coords[x_coord_name]
     lon_values = lon_coord.data
 
-    # Handle empty arrays
-    # FIXME: delete
-    if lon_values.size == 0:
-        return result
+    # Assert coordinates are not empty
+    assert lon_values.size > 0, f"Empty longitude coordinate array: {x_coord_name}"
 
     # Check if coordinates span the 180°/360° boundary before conversion
     original_min, original_max = lon_values.min(), lon_values.max()

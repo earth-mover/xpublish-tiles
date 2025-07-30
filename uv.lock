@@ -1043,6 +1043,19 @@ wheels = [
 ]
 
 [[package]]
+name = "hypothesis"
+version = "6.136.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs" },
+    { name = "sortedcontainers" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e2/d6/6c45c56cdc532f25a354cf2c93a3bebc21b91b6a48125e3acfd364161447/hypothesis-6.136.6.tar.gz", hash = "sha256:2ad2e4f2012be4d41c6515b0628d84d48af6e6c38b4db50840bd9ac0899f5856", size = 458049, upload-time = "2025-07-28T09:48:02.495Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e9/e2/7fd1a9b12740b3472349f7e3c216e94b1b2e03d32c9d842284b57eb5a3f8/hypothesis-6.136.6-py3-none-any.whl", hash = "sha256:1d6296dde36d42263bd44a084c74e91467e78186676e410167f920aa0374a9e7", size = 524958, upload-time = "2025-07-28T09:47:58.938Z" },
+]
+
+[[package]]
 name = "icechunk"
 version = "1.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2385,6 +2398,15 @@ wheels = [
 ]
 
 [[package]]
+name = "sortedcontainers"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/c4/ba2f8066cceb6f23394729afe52f3bf7adec04bf9ed2c820b39e19299111/sortedcontainers-2.4.0.tar.gz", hash = "sha256:25caa5a06cc30b6b83d11423433f65d1f9d76c4c6a0c90e3379eaa43b9bfdb88", size = 30594, upload-time = "2021-05-16T22:03:42.897Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/46/9cb0e58b2deb7f82b84065f37f3bffeb12413f947f9388e4cac22c4621ce/sortedcontainers-2.4.0-py2.py3-none-any.whl", hash = "sha256:a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0", size = 29575, upload-time = "2021-05-16T22:03:41.177Z" },
+]
+
+[[package]]
 name = "sqlitedict"
 version = "2.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2669,6 +2691,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "arraylake" },
+    { name = "hypothesis" },
     { name = "icechunk" },
     { name = "netcdf4" },
     { name = "pdbpp" },
@@ -2698,6 +2721,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "arraylake" },
+    { name = "hypothesis", specifier = ">=6.136.6" },
     { name = "icechunk" },
     { name = "netcdf4", specifier = ">=1.7.2" },
     { name = "pdbpp", specifier = ">=0.11.7" },
