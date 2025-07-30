@@ -24,7 +24,7 @@ class DataType(enum.Enum):
     CONTINUOUS = enum.auto()
 
 
-class Style(enum.Enum):
+class Style(enum.StrEnum):
     RASTER = enum.auto()
     QUIVER = enum.auto()
     NUMPY = enum.auto()

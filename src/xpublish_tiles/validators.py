@@ -52,7 +52,7 @@ def validate_style(v: str | None) -> tuple[Style, str] | None:
         )
 
     try:
-        style = Style(values[0].upper())
+        style = Style(values[0].lower())
     except ValueError as e:
         raise ValueError(
             f"style {values[0]} is not valid. Options are: {', '.join(Style.__members__.keys())}",
