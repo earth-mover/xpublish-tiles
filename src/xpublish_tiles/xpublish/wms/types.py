@@ -55,7 +55,7 @@ class WMSGetMapQuery(WMSBaseQuery):
         None,
         description="Optional elevation to get map for. Only valid when the layer has an elevation dimension. When not specified, the default elevation is used",
     )
-    bbox: Optional[tuple[float, float, float, float]] = Field(
+    bbox: Optional[BBox] = Field(
         None,
         description="Bounding box to use for the query in the format 'minx,miny,maxx,maxy'",
     )
@@ -126,7 +126,7 @@ class WMSGetFeatureInfoQuery(WMSBaseQuery):
         "EPSG:4326",
         description="Coordinate reference system to use for the query. Currently only EPSG:4326 is supported for this request",
     )
-    bbox: tuple[float, float, float, float] = Field(
+    bbox: BBox = Field(
         ...,
         description="Bounding box to use for the query in the format 'minx,miny,maxx,maxy'",
     )
@@ -212,7 +212,7 @@ class WMSQuery(RootModel):
         layers: str,
         width: int,
         height: int,
-        bbox: str | tuple[float, float, float, float] | None = None,
+        bbox: str | BBox | None = None,
         styles: str | tuple[str, str] = ("raster", "default"),
         crs: Literal["EPSG:4326", "EPSG:3857"] = "EPSG:4326",
         time: str | None = None,
@@ -229,7 +229,7 @@ class WMSQuery(RootModel):
         version: Literal["1.1.1", "1.3.0"],
         request: Literal["GetFeatureInfo", "GetTimeseries", "GetVerticalProfile"],
         query_layers: str,
-        bbox: str | tuple[float, float, float, float],
+        bbox: str | BBox,
         width: int,
         height: int,
         x: int,
