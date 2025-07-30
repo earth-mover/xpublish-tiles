@@ -12,7 +12,16 @@ from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.types import QueryParams
 from xpublish_tiles.utils import parse_colorscalerange, parse_image_format, parse_style
 from xpublish_tiles.xpublish.tiles.metadata import create_tileset_metadata
-from xpublish_tiles.xpublish.tiles.models import (
+from xpublish_tiles.xpublish.tiles.tile_matrix import (
+    TILE_MATRIX_SET_SUMMARIES,
+    TILE_MATRIX_SETS,
+    extract_dataset_bounds,
+    extract_dimension_extents,
+    extract_tile_bbox_and_crs,
+    get_all_tile_matrix_set_ids,
+    get_tile_matrix_limits,
+)
+from xpublish_tiles.xpublish.tiles.types import (
     ConformanceDeclaration,
     DataType,
     Layer,
@@ -22,15 +31,6 @@ from xpublish_tiles.xpublish.tiles.models import (
     TileSetMetadata,
     TilesetsList,
     TilesetSummary,
-)
-from xpublish_tiles.xpublish.tiles.tile_matrix import (
-    TILE_MATRIX_SET_SUMMARIES,
-    TILE_MATRIX_SETS,
-    extract_dataset_bounds,
-    extract_dimension_extents,
-    extract_tile_bbox_and_crs,
-    get_all_tile_matrix_set_ids,
-    get_tile_matrix_limits,
 )
 
 

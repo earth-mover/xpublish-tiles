@@ -1,6 +1,6 @@
 import pytest
 
-from xpublish_tiles.xpublish.wms.query import (
+from xpublish_tiles.xpublish.wms.types import (
     WMSGetCapabilitiesQuery,
     WMSGetFeatureInfoQuery,
     WMSGetLegendGraphicQuery,

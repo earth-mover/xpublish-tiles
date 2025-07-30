@@ -4,7 +4,7 @@ from typing import Optional, Union
 
 from xarray import Dataset
 from xpublish_tiles.types import OutputBBox, OutputCRS
-from xpublish_tiles.xpublish.tiles.models import (
+from xpublish_tiles.xpublish.tiles.types import (
     BoundingBox,
     CRSType,
     Link,
@@ -227,7 +227,7 @@ def extract_dimension_extents(data_array) -> list:
     import numpy as np
     import pandas as pd
 
-    from xpublish_tiles.xpublish.tiles.models import DimensionExtent, DimensionType
+    from xpublish_tiles.xpublish.tiles.types import DimensionExtent, DimensionType
 
     dimensions = []
 
