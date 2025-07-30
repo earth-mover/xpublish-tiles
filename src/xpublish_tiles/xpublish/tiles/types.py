@@ -2,10 +2,18 @@
 
 import re
 from enum import Enum
-from typing import Annotated, Any, Optional, Union
+from typing import Annotated, Any, Literal, Optional, Union
 
 import pyproj
 from pydantic import BaseModel, Field, field_validator
+
+from xpublish_tiles.types import ImageFormat
+from xpublish_tiles.types import Style as CoreStyle
+from xpublish_tiles.validators import (
+    validate_colorscalerange,
+    validate_image_format,
+    validate_style,
+)
 
 
 class MD_ReferenceSystem(BaseModel):
@@ -1255,3 +1263,78 @@ class TilesLandingPage(BaseModel):
             }
         ),
     ]
+
+
+class TileQuery(BaseModel):
+    variables: Annotated[
+        list[str],
+        Field(
+            json_schema_extra={
+                "description": "List of variables to render in the tile. Raster styles only support a single variable",
+            }
+        ),
+    ]
+    colorscalerange: Annotated[
+        tuple[float, float],
+        Field(
+            json_schema_extra={
+                "description": "Range of values to scale colors to, in the format of `{min},{max}`",
+            }
+        ),
+    ]
+    style: Annotated[
+        tuple[CoreStyle, str],
+        Field(
+            default=(CoreStyle.RASTER, "default"),
+            json_schema_extra={
+                "description": "Style and colormap to use for the tile, in the format of `{style}/{colormap}`",
+            },
+        ),
+    ]
+    width: Annotated[
+        Literal[256, 512],
+        Field(
+            json_schema_extra={
+                "description": "Width of the tile in pixels, 256 or 512",
+            }
+        ),
+    ]
+    height: Annotated[
+        Literal[256, 512],
+        Field(
+            json_schema_extra={
+                "description": "Height of the tile in pixels, 256 or 512",
+            }
+        ),
+    ]
+    f: Annotated[
+        ImageFormat,
+        Field(
+            default=ImageFormat.PNG,
+            json_schema_extra={
+                "description": "Format of the tile image, in the format of `image/{png|jpeg}`",
+            },
+        ),
+    ]
+
+    @field_validator("style", mode="before")
+    @classmethod
+    def validate_style(cls, v: str | None) -> tuple[CoreStyle, str]:
+        return validate_style(v) or (CoreStyle.RASTER, "default")
+
+    @field_validator("colorscalerange", mode="before")
+    @classmethod
+    def validate_colorscalerange(cls, v: str | None) -> tuple[float, float] | None:
+        return validate_colorscalerange(v)
+
+    @field_validator("f", mode="before")
+    @classmethod
+    def validate_format(cls, v: str | None) -> ImageFormat:
+        return validate_image_format(v) or ImageFormat.PNG
+
+    @field_validator("variables")
+    @classmethod
+    def validate_variables(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("At least one variable must be specified")
+        return v

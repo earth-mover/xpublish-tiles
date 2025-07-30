@@ -1,9 +1,9 @@
 """OGC Tiles API XPublish Plugin"""
 
 from enum import Enum
-from typing import Literal
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import Dataset
@@ -24,6 +24,7 @@ from xpublish_tiles.xpublish.tiles.types import (
     Link,
     TileMatrixSet,
     TileMatrixSets,
+    TileQuery,
     TileSetMetadata,
     TilesetsList,
     TilesetSummary,
@@ -191,12 +192,7 @@ class TilesPlugin(Plugin):
             tileMatrix: int,
             tileRow: int,
             tileCol: int,
-            variables: list[str],
-            colorscalerange: str,
-            style: str = "raster/default",
-            width: int = 256,
-            height: int = 256,
-            f: Literal["image/png", "image/jpeg"] = "image/png",
+            query: Annotated[TileQuery, Query()],
             dataset: Dataset = Depends(deps.dataset),  # noqa: B008
         ):
             """Get individual tile from this dataset"""
