@@ -20,6 +20,7 @@ from xpublish_tiles.xpublish.tiles.tile_matrix import (
     get_tile_matrix_limits,
 )
 from xpublish_tiles.xpublish.tiles.types import (
+    TILES_FILTERED_QUERY_PARAMS,
     ConformanceDeclaration,
     DataType,
     Layer,
@@ -205,14 +206,7 @@ class TilesPlugin(Plugin):
             selectors = {}
             for param_name, param_value in request.query_params.items():
                 # Skip the standard tile query parameters
-                if param_name not in [
-                    "variables",
-                    "style",
-                    "colorscalerange",
-                    "f",
-                    "width",
-                    "height",
-                ]:
+                if param_name not in TILES_FILTERED_QUERY_PARAMS:
                     # Check if this parameter corresponds to a dataset dimension
                     if param_name in dataset.dims:
                         selectors[param_name] = param_value
