@@ -1,4 +1,4 @@
-from typing import Any, Literal, Optional, Union, cast, overload
+from typing import Any, Literal, Optional, Union, overload
 
 from pydantic import (
     AliasChoices,
@@ -8,55 +8,14 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pyproj.aoi import BBox
 
-
-def validate_colorscalerange(v: str | None) -> tuple[float, float] | None:
-    if v is None:
-        return None
-
-    values = v.split(",")
-    if len(values) != 2:
-        raise ValueError("colorscalerange must be in the format 'min,max'")
-
-    try:
-        min_val = float(values[0])
-        max_val = float(values[1])
-    except ValueError as e:
-        raise ValueError(
-            "colorscalerange must be in the format 'min,max' where min and max are valid floats",
-        ) from e
-    return (min_val, max_val)
-
-
-def validate_bbox(v: str | None) -> tuple[float, float, float, float] | None:
-    if v is None:
-        return None
-
-    values = v.split(",") if isinstance(v, str) else v
-    if len(values) != 4:
-        raise ValueError("bbox must be in the format 'minx,miny,maxx,maxy'")
-
-    try:
-        bbox = cast(tuple[float, float, float, float], tuple(float(x) for x in values))
-    except ValueError as e:
-        raise ValueError(
-            "bbox must be in the format 'minx,miny,maxx,maxy' where minx, miny, maxx and maxy are valid floats in the provided CRS",
-        ) from e
-
-    return bbox
-
-
-def validate_style(v: str | None) -> tuple[str, str] | None:
-    if v is None:
-        return None
-
-    values = v.split("/")
-    if len(values) != 2:
-        raise ValueError(
-            "style must be in the format 'stylename/palettename'. A common default for this is 'raster/default'",
-        )
-
-    return (values[0], values[1])
+from xpublish_tiles.types import Style
+from xpublish_tiles.validators import (
+    validate_bbox,
+    validate_colorscalerange,
+    validate_style,
+)
 
 
 class WMSBaseQuery(BaseModel):
@@ -124,12 +83,12 @@ class WMSGetMapQuery(WMSBaseQuery):
 
     @field_validator("bbox", mode="before")
     @classmethod
-    def validate_bbox(cls, v: str | None) -> tuple[float, float, float, float] | None:
+    def validate_bbox(cls, v: str | None) -> BBox | None:
         return validate_bbox(v)
 
     @field_validator("styles", mode="before")
     @classmethod
-    def validate_style(cls, v: str | None) -> tuple[str, str] | None:
+    def validate_style(cls, v: str | None) -> tuple[Style, str] | None:
         return validate_style(v)
 
     @model_validator(mode="after")
@@ -190,7 +149,7 @@ class WMSGetFeatureInfoQuery(WMSBaseQuery):
 
     @field_validator("bbox", mode="before")
     @classmethod
-    def validate_bbox(cls, v: str | None) -> tuple[float, float, float, float] | None:
+    def validate_bbox(cls, v: str | None) -> BBox | None:
         return validate_bbox(v)
 
 
@@ -219,7 +178,7 @@ class WMSGetLegendGraphicQuery(WMSBaseQuery):
 
     @field_validator("styles", mode="before")
     @classmethod
-    def validate_style(cls, v: str | None) -> tuple[str, str] | None:
+    def validate_style(cls, v: str | None) -> tuple[Style, str] | None:
         return validate_style(v)
 
 
