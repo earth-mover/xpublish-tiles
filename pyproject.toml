@@ -47,6 +47,9 @@ dev = [
 tiles = "xpublish_tiles.xpublish.tiles:TilesPlugin"
 wms = "xpublish_tiles.xpublish.wms:WMSPlugin"
 
+[project.scripts]
+xpublish-tiles = "xpublish_tiles.cli.main:main"
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

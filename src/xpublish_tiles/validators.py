@@ -5,11 +5,21 @@ from pyproj.aoi import BBox
 from xpublish_tiles.types import ImageFormat, Style
 
 
-def validate_colorscalerange(v: str | None) -> tuple[float, float] | None:
+def validate_colorscalerange(v: str | list[str] | None) -> tuple[float, float] | None:
     if v is None:
         return None
+    elif not isinstance(v, str):
+        if len(v) == 0:
+            raise ValueError("colorscalerange must be a non-empty list")
+        v = v[0]
 
-    values = v.split(",")
+    try:
+        values = v.split(",")
+    except AttributeError as e:
+        raise ValueError(
+            "colorscalerange must be a string or a list of strings delimited by commas"
+        ) from e
+
     if len(values) != 2:
         raise ValueError("colorscalerange must be in the format 'min,max'")
 
@@ -41,9 +51,16 @@ def validate_bbox(v: str | None) -> BBox | None:
     return BBox(*bbox)
 
 
-def validate_style(v: str | None) -> tuple[Style, str] | None:
+def validate_style(v: str | list[str] | None) -> tuple[Style, str] | None:
     if v is None:
         return None
+    elif not isinstance(v, str):
+        if len(v):
+            v = v[0]
+        else:
+            raise ValueError(
+                "style must be in the format 'stylename/palettename'. A common default for this is 'raster/default'"
+            )
 
     values = v.split("/")
     if len(values) != 2:

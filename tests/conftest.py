@@ -7,7 +7,7 @@ from syrupy.extensions.image import PNGImageSnapshotExtension
 
 import icechunk
 import xarray as xr
-from tests.datasets import Dim, uniform_grid
+from xpublish_tiles.datasets import Dim, uniform_grid
 
 ARRAYLAKE_REPO = "earthmover-integration/tiles-datasets-develop"
 

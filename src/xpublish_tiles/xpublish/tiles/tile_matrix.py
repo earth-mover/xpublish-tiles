@@ -2,6 +2,8 @@
 
 from typing import Optional, Union
 
+from pyproj.aoi import BBox
+
 from xarray import Dataset
 from xpublish_tiles.types import OutputBBox, OutputCRS
 from xpublish_tiles.xpublish.tiles.types import (
@@ -122,7 +124,7 @@ def extract_tile_bbox_and_crs(
     max_y = origin_y - (tileRow * tile_height * pixel_size)
     min_y = origin_y - ((tileRow + 1) * tile_height * pixel_size)
 
-    bbox = OutputBBox([min_x, min_y, max_x, max_y])
+    bbox = BBox(min_x, min_y, max_x, max_y)
 
     # Convert CRS to pyproj.CRS object
     if isinstance(tile_matrix_set.crs, str):
@@ -136,7 +138,7 @@ def extract_tile_bbox_and_crs(
     if pyproj_crs is None:
         raise ValueError(f"Could not convert CRS '{tile_matrix_set.crs}' to pyproj.CRS")
 
-    return bbox, OutputCRS(pyproj_crs)
+    return OutputBBox(bbox), OutputCRS(pyproj_crs)
 
 
 def extract_dataset_bounds(dataset: Dataset) -> Optional[BoundingBox]:

@@ -2,7 +2,7 @@
 
 import re
 from enum import Enum
-from typing import Annotated, Any, Literal, Optional, Union
+from typing import Annotated, Any, Optional, Union
 
 import pyproj
 from pydantic import BaseModel, Field, field_validator
@@ -1285,32 +1285,36 @@ class TileQuery(BaseModel):
     style: Annotated[
         tuple[CoreStyle, str],
         Field(
-            default=(CoreStyle.RASTER, "default"),
+            default="raster/viridis",
             json_schema_extra={
                 "description": "Style and colormap to use for the tile, in the format of `{style}/{colormap}`",
             },
         ),
     ]
     width: Annotated[
-        Literal[256, 512],
+        int,
         Field(
+            default=...,
+            multiple_of=256,
             json_schema_extra={
                 "description": "Width of the tile in pixels, 256 or 512",
-            }
+            },
         ),
     ]
     height: Annotated[
-        Literal[256, 512],
+        int,
         Field(
+            default=...,
+            multiple_of=256,
             json_schema_extra={
                 "description": "Height of the tile in pixels, 256 or 512",
-            }
+            },
         ),
     ]
     f: Annotated[
         ImageFormat,
         Field(
-            default=ImageFormat.PNG,
+            default="image/png",
             json_schema_extra={
                 "description": "Format of the tile image, in the format of `image/{png|jpeg}`",
             },
@@ -1319,8 +1323,8 @@ class TileQuery(BaseModel):
 
     @field_validator("style", mode="before")
     @classmethod
-    def validate_style(cls, v: str | None) -> tuple[CoreStyle, str]:
-        return validate_style(v) or (CoreStyle.RASTER, "default")
+    def validate_style(cls, v: str | None) -> tuple[CoreStyle, str] | None:
+        return validate_style(v)
 
     @field_validator("colorscalerange", mode="before")
     @classmethod
