@@ -1,9 +1,9 @@
 from xarray import Dataset
-from xpublish_tiles.xpublish.tiles.models import DataType, Link, TileSetMetadata
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     extract_dataset_bounds,
 )
+from xpublish_tiles.xpublish.tiles.types import DataType, Link, TileSetMetadata
 
 
 def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSetMetadata:

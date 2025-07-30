@@ -1,28 +1,16 @@
 """OGC Tiles API XPublish Plugin"""
 
 from enum import Enum
-from typing import Literal
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import Dataset
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.types import QueryParams
-from xpublish_tiles.utils import parse_colorscalerange, parse_image_format, parse_style
 from xpublish_tiles.xpublish.tiles.metadata import create_tileset_metadata
-from xpublish_tiles.xpublish.tiles.models import (
-    ConformanceDeclaration,
-    DataType,
-    Layer,
-    Link,
-    TileMatrixSet,
-    TileMatrixSets,
-    TileSetMetadata,
-    TilesetsList,
-    TilesetSummary,
-)
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     TILE_MATRIX_SETS,
@@ -31,6 +19,18 @@ from xpublish_tiles.xpublish.tiles.tile_matrix import (
     extract_tile_bbox_and_crs,
     get_all_tile_matrix_set_ids,
     get_tile_matrix_limits,
+)
+from xpublish_tiles.xpublish.tiles.types import (
+    ConformanceDeclaration,
+    DataType,
+    Layer,
+    Link,
+    TileMatrixSet,
+    TileMatrixSets,
+    TileQuery,
+    TileSetMetadata,
+    TilesetsList,
+    TilesetSummary,
 )
 
 
@@ -195,12 +195,7 @@ class TilesPlugin(Plugin):
             tileMatrix: int,
             tileRow: int,
             tileCol: int,
-            variables: list[str],
-            colorscalerange: str,
-            style: str = "raster/default",
-            width: int = 256,
-            height: int = 256,
-            f: Literal["image/png", "image/jpeg"] = "image/png",
+            query: Annotated[TileQuery, Query()],
             dataset: Dataset = Depends(deps.dataset),  # noqa: B008
         ):
             """Get individual tile from this dataset"""
@@ -211,19 +206,16 @@ class TilesPlugin(Plugin):
             except ValueError as e:
                 raise HTTPException(status_code=404, detail=str(e)) from e
 
-            parsed_colorscalerange = parse_colorscalerange(colorscalerange)
-            parsed_style, cmap = parse_style(style)
-            parsed_image_format = parse_image_format(f)
             render_params = QueryParams(
-                variables=variables,
-                style=parsed_style,
-                colorscalerange=parsed_colorscalerange,
-                cmap=cmap,
+                variables=query.variables,
+                style=query.style[0],
+                colorscalerange=query.colorscalerange,
+                cmap=query.style[1],
                 crs=crs,
                 bbox=bbox,
-                width=width,
-                height=height,
-                format=parsed_image_format,
+                width=query.width,
+                height=query.height,
+                format=query.f,
                 selectors={},
             )
             buffer = await pipeline(dataset, render_params)

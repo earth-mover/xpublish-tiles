@@ -1,5 +1,6 @@
 import pyproj
 import pytest
+from pyproj.aoi import BBox
 
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     extract_tile_bbox_and_crs,
@@ -55,10 +56,10 @@ class TestExtractTileBboxAndCrs:
         expected_min_y = -20037508.3428
         expected_max_y = 20037508.3428
 
-        assert abs(bbox[0] - expected_min_x) < 1  # minX
-        assert abs(bbox[1] - expected_min_y) < 1  # minY
-        assert abs(bbox[2] - expected_max_x) < 1  # maxX
-        assert abs(bbox[3] - expected_max_y) < 1  # maxY
+        assert abs(bbox.west - expected_min_x) < 1  # minX
+        assert abs(bbox.south - expected_min_y) < 1  # minY
+        assert abs(bbox.east - expected_max_x) < 1  # maxX
+        assert abs(bbox.north - expected_max_y) < 1  # maxY
 
     def test_extract_tile_bbox_zoom_1(self):
         """Test bbox extraction for zoom level 1"""
@@ -74,10 +75,10 @@ class TestExtractTileBboxAndCrs:
         expected_min_y = 0.0
         expected_max_y = 20037508.3428
 
-        assert abs(bbox[0] - expected_min_x) < 1
-        assert abs(bbox[1] - expected_min_y) < 1
-        assert abs(bbox[2] - expected_max_x) < 1
-        assert abs(bbox[3] - expected_max_y) < 1
+        assert abs(bbox.west - expected_min_x) < 1
+        assert abs(bbox.south - expected_min_y) < 1
+        assert abs(bbox.east - expected_max_x) < 1
+        assert abs(bbox.north - expected_max_y) < 1
 
         # Test bottom-right tile (1,1)
         bbox, crs = extract_tile_bbox_and_crs("WebMercatorQuad", 1, 1, 1)
@@ -86,10 +87,10 @@ class TestExtractTileBboxAndCrs:
         expected_min_y = -20037508.3428
         expected_max_y = 0.0
 
-        assert abs(bbox[0] - expected_min_x) < 1
-        assert abs(bbox[1] - expected_min_y) < 1
-        assert abs(bbox[2] - expected_max_x) < 1
-        assert abs(bbox[3] - expected_max_y) < 1
+        assert abs(bbox.west - expected_min_x) < 1
+        assert abs(bbox.south - expected_min_y) < 1
+        assert abs(bbox.east - expected_max_x) < 1
+        assert abs(bbox.north - expected_max_y) < 1
 
     def test_extract_tile_bbox_higher_zoom(self):
         """Test bbox extraction for higher zoom level"""
@@ -97,15 +98,14 @@ class TestExtractTileBboxAndCrs:
 
         assert isinstance(crs, pyproj.CRS)
         assert crs.to_epsg() == 3857
-        assert len(bbox) == 4
 
         # Verify bbox format [minX, minY, maxX, maxY]
-        assert bbox[0] < bbox[2]  # minX < maxX
-        assert bbox[1] < bbox[3]  # minY < maxY
+        assert bbox.west < bbox.east  # minX < maxX
+        assert bbox.south < bbox.north  # minY < maxY
 
         # At zoom 5, tiles should be much smaller than zoom 0
-        tile_width = bbox[2] - bbox[0]
-        tile_height = bbox[3] - bbox[1]
+        tile_width = bbox.east - bbox.west
+        tile_height = bbox.north - bbox.south
 
         # Should be 1/32 of the world extent (2^5 = 32)
         world_extent = 20037508.3428 * 2
@@ -132,28 +132,26 @@ class TestExtractTileBboxAndCrs:
 
         # Adjacent tiles should share a boundary
         # bbox1's maxX should equal bbox2's minX
-        assert abs(bbox1[2] - bbox2[0]) < 0.1
+        assert abs(bbox1.east - bbox2.west) < 0.1
 
         # Y coordinates should be the same for horizontally adjacent tiles
-        assert abs(bbox1[1] - bbox2[1]) < 0.1  # minY
-        assert abs(bbox1[3] - bbox2[3]) < 0.1  # maxY
+        assert abs(bbox1.south - bbox2.south) < 0.1  # minY
+        assert abs(bbox1.north - bbox2.north) < 0.1  # maxY
 
     def test_bbox_format(self):
         """Test that bbox is returned in correct format [minX, minY, maxX, maxY]"""
         bbox, crs = extract_tile_bbox_and_crs("WebMercatorQuad", 3, 2, 4)
 
-        assert isinstance(bbox, list)
-        assert len(bbox) == 4
+        assert isinstance(bbox, BBox)
         assert isinstance(crs, pyproj.CRS)
 
         # Verify coordinate order
-        min_x, min_y, max_x, max_y = bbox
-        assert min_x < max_x
-        assert min_y < max_y
+        assert bbox.west < bbox.east
+        assert bbox.south < bbox.north
 
         # All coordinates should be within Web Mercator bounds
         web_mercator_bound = 20037508.3428
-        assert -web_mercator_bound <= min_x <= web_mercator_bound
-        assert -web_mercator_bound <= min_y <= web_mercator_bound
-        assert -web_mercator_bound <= max_x <= web_mercator_bound
-        assert -web_mercator_bound <= max_y <= web_mercator_bound
+        assert -web_mercator_bound <= bbox.west <= web_mercator_bound
+        assert -web_mercator_bound <= bbox.south <= web_mercator_bound
+        assert -web_mercator_bound <= bbox.east <= web_mercator_bound
+        assert -web_mercator_bound <= bbox.north <= web_mercator_bound

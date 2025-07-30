@@ -1,6 +1,7 @@
 import pytest
 
-from xpublish_tiles.xpublish.wms.query import (
+from xpublish_tiles.types import Style
+from xpublish_tiles.xpublish.wms.types import (
     WMSGetCapabilitiesQuery,
     WMSGetFeatureInfoQuery,
     WMSGetLegendGraphicQuery,
@@ -34,7 +35,7 @@ def test_wms_query_discriminator():
     )
     assert isinstance(getmap_query.root, WMSGetMapQuery)
     assert getmap_query.root.colorscalerange == (0, 100)
-    assert getmap_query.root.styles == ("raster", "magma")
+    assert getmap_query.root.styles == (Style.RASTER, "magma")
 
     getmap_query_autoscale = WMSQuery(
         service="WMS",

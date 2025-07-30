@@ -4,7 +4,7 @@ import pyproj
 import pytest
 from pydantic import ValidationError
 
-from xpublish_tiles.xpublish.tiles.models import BoundingBox, CRSType, MD_ReferenceSystem
+from xpublish_tiles.xpublish.tiles.types import CRSType, MD_ReferenceSystem
 
 
 class TestCRSType:
@@ -145,45 +145,3 @@ class TestCRSType:
         pyproj_crs = crs.to_pyproj_crs()
         # Should return None for invalid CRS strings
         assert pyproj_crs is None
-
-
-class TestMD_ReferenceSystem:
-    """Test MD_ReferenceSystem model"""
-
-    def test_full_reference_system(self):
-        """Test complete MD_ReferenceSystem"""
-        ref_sys = MD_ReferenceSystem(code="4326", codeSpace="EPSG", version="8.5")
-        assert ref_sys.code == "4326"
-        assert ref_sys.codeSpace == "EPSG"
-        assert ref_sys.version == "8.5"
-
-    def test_minimal_reference_system(self):
-        """Test minimal MD_ReferenceSystem"""
-        ref_sys = MD_ReferenceSystem()
-        assert ref_sys.code is None
-        assert ref_sys.codeSpace is None
-        assert ref_sys.version is None
-
-
-class TestBoundingBoxWithCRS:
-    """Test BoundingBox with new CRS types"""
-
-    def test_bounding_box_with_string_crs(self):
-        """Test BoundingBox with string CRS (backward compatibility)"""
-        bbox = BoundingBox(
-            lowerLeft=[-180.0, -90.0], upperRight=[180.0, 90.0], crs="EPSG:4326"
-        )
-        assert bbox.crs == "EPSG:4326"
-
-    def test_bounding_box_with_crs_type(self):
-        """Test BoundingBox with CRSType"""
-        crs_type = CRSType(uri="http://www.opengis.net/def/crs/EPSG/0/4326")
-        bbox = BoundingBox(
-            lowerLeft=[-180.0, -90.0], upperRight=[180.0, 90.0], crs=crs_type
-        )
-        assert bbox.crs == crs_type
-
-    def test_bounding_box_no_crs(self):
-        """Test BoundingBox without CRS"""
-        bbox = BoundingBox(lowerLeft=[-180.0, -90.0], upperRight=[180.0, 90.0])
-        assert bbox.crs is None
