@@ -81,16 +81,16 @@ def _handle_longitude_selection(
     """
     Handle longitude coordinate selection with support for different conventions.
 
-    Since Web Mercator tiles never cross the anti-meridian, this function only needs
-    to handle coordinate convention conversion between bbox (-180→180) and data
-    (which may be 0→360).
+    This function handles coordinate convention conversion between bbox (-180→180) and data
+    (which may be 0→360), as well as anti-meridian crossing bboxes that can occur after
+    coordinate transformation from Web Mercator to geographic coordinates.
 
     Parameters
     ----------
     lon_coord : xr.DataArray
         The longitude/X coordinate array
     bbox : pyproj.aoi.BBox
-        Bounding box for selection (guaranteed not to cross anti-meridian)
+        Bounding box for selection (may cross anti-meridian after coordinate transformation)
     is_geographic : bool
         Whether the CRS is geographic (True) or projected (False)
 
@@ -98,7 +98,7 @@ def _handle_longitude_selection(
     -------
     tuple[slice, ...]
         Tuple of slices for coordinate selection. Usually one slice, but two slices
-        when bbox crosses the 360°/0° boundary in 0→360 data.
+        when bbox crosses the anti-meridian or 360°/0° boundary.
     """
     if not is_geographic:
         # For projected coordinates, treat X as regular coordinate
@@ -111,6 +111,21 @@ def _handle_longitude_selection(
     # Determine if data uses 0→360 or -180→180 convention
     uses_0_360 = lon_min >= 0 and lon_max > 180
 
+    # Handle anti-meridian crossing bboxes (west > east)
+    if bbox.west > bbox.east:
+        if uses_0_360:
+            # Data is 0→360, bbox crosses anti-meridian
+            # Convert to 0→360 convention
+            # Region 1: from west+360 to 360, Region 2: from 0 to east+360
+            west_360 = bbox.west + 360 if bbox.west < 0 else bbox.west
+            east_360 = bbox.east + 360
+            return (slice(west_360, 360.0), slice(0.0, east_360))
+        else:
+            # Data is -180→180, bbox crosses anti-meridian
+            # Region 1: from west to 180, Region 2: from -180 to east
+            return (slice(bbox.west, 180.0), slice(-180.0, bbox.east))
+
+    # No anti-meridian crossing
     bbox_west = bbox.west
     bbox_east = bbox.east
 
@@ -180,11 +195,6 @@ class Rectilinear(GridSystem):
         assert self.X in da.xindexes and self.Y in da.xindexes
         assert isinstance(da.xindexes[self.X], xr.indexes.PandasIndex)
         assert isinstance(da.xindexes[self.Y], xr.indexes.PandasIndex)
-
-        # Assert that bbox doesn't cross anti-meridian.
-        assert (
-            bbox.west <= bbox.east
-        ), f"BBox crosses anti-meridian: west={bbox.west} > east={bbox.east}"
 
         slicers = {}
         y_index = cast(xr.indexes.PandasIndex, da.xindexes[self.Y])
