@@ -107,6 +107,9 @@ def pad_bbox(
     """
     Extend bbox slightly to account for discrete coordinate sampling.
     This prevents transparency gaps at tile edges due to coordinate resolution.
+
+    The function ensures that the padded bbox does not cross the anti-meridian
+    by checking if padding would cause west > east.
     """
     x_coord = da[x_dim]
     y_coord = da[y_dim]
@@ -126,11 +129,24 @@ def pad_bbox(
     x_pad = abs(x_spacing) * 0.5
     y_pad = abs(y_spacing) * 0.5
 
+    # Calculate padded values
+    padded_west = float(bbox.west - x_pad)
+    padded_east = float(bbox.east + x_pad)
+    padded_south = float(bbox.south - y_pad)
+    padded_north = float(bbox.north + y_pad)
+
+    # Check if padding would cause anti-meridian crossing
+    # This happens when the padded west > padded east
+    if padded_west > padded_east:
+        # Don't pad in the x direction to avoid crossing
+        padded_west = float(bbox.west)
+        padded_east = float(bbox.east)
+
     return pyproj.aoi.BBox(
-        west=float(bbox.west - x_pad),
-        east=float(bbox.east + x_pad),
-        south=float(bbox.south - y_pad),
-        north=float(bbox.north + y_pad),
+        west=padded_west,
+        east=padded_east,
+        south=padded_south,
+        north=padded_north,
     )
 
 
