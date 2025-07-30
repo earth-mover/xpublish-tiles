@@ -1,7 +1,7 @@
 """Tests for tiles metadata functionality"""
 
 import numpy as np
-import pytest
+
 import xarray as xr
 
 
