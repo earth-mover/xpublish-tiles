@@ -1,6 +1,7 @@
 import pytest
 
-from xpublish_tiles.validators import validate_colorscalerange
+from xpublish_tiles.types import ImageFormat
+from xpublish_tiles.validators import validate_colorscalerange, validate_image_format
 
 
 class TestValidateColorscalerange:
@@ -58,3 +59,45 @@ class TestValidateColorscalerange:
             match="colorscalerange must be in the format 'min,max' where min and max are valid floats",
         ):
             validate_colorscalerange("invalid,also_invalid")
+
+
+class TestValidateImageFormat:
+    def test_valid_png_format(self):
+        result = validate_image_format("png")
+        assert result == ImageFormat.PNG
+
+    def test_valid_jpeg_format(self):
+        result = validate_image_format("jpeg")
+        assert result == ImageFormat.JPEG
+
+    def test_valid_png_format_uppercase(self):
+        result = validate_image_format("PNG")
+        assert result == ImageFormat.PNG
+
+    def test_valid_jpeg_format_uppercase(self):
+        result = validate_image_format("JPEG")
+        assert result == ImageFormat.JPEG
+
+    def test_valid_format_with_mime_type(self):
+        result = validate_image_format("image/png")
+        assert result == ImageFormat.PNG
+
+    def test_valid_format_with_mime_type_jpeg(self):
+        result = validate_image_format("image/jpeg")
+        assert result == ImageFormat.JPEG
+
+    def test_none_input(self):
+        result = validate_image_format(None)
+        assert result is None
+
+    def test_invalid_format(self):
+        with pytest.raises(
+            ValueError, match="image format gif is not valid. Options are: PNG, JPEG"
+        ):
+            validate_image_format("gif")
+
+    def test_invalid_format_with_mime_type(self):
+        with pytest.raises(
+            ValueError, match="image format gif is not valid. Options are: PNG, JPEG"
+        ):
+            validate_image_format("image/gif")
