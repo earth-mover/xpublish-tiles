@@ -23,6 +23,9 @@ def _normalize_longitudes_to_180(result: xr.DataArray, x_coord_name: str) -> xr.
     This function handles the conversion from 0→360 coordinates to -180→180,
     while preserving spatial continuity for coordinates that span the 180°/360° boundary.
 
+    The data are _not_ re-ordered to yield sorted coordinates, i.e. we are
+    assuming that the renderer can handle this.
+
     Parameters
     ----------
     result : xr.DataArray
@@ -41,10 +44,8 @@ def _normalize_longitudes_to_180(result: xr.DataArray, x_coord_name: str) -> xr.
     lon_coord = result.coords[x_coord_name]
     lon_values = lon_coord.data
 
-    # Handle empty arrays
-    # FIXME: delete
-    if lon_values.size == 0:
-        return result
+    # Assert coordinates are not empty
+    assert lon_values.size > 0, f"Empty longitude coordinate array: {x_coord_name}"
 
     # Check if coordinates span the 180°/360° boundary before conversion
     original_min, original_max = lon_values.min(), lon_values.max()
@@ -62,9 +63,8 @@ def _normalize_longitudes_to_180(result: xr.DataArray, x_coord_name: str) -> xr.
             converted_values.min(),
             converted_values.max(),
         )
-        if (
-            converted_max - converted_min > 180
-        ):  # Apparent anti-meridian crossing after conversion
+        if converted_max - converted_min > 180:
+            # Apparent anti-meridian crossing after conversion
             # Convert negative values back to positive to maintain continuity
             converted_values = np.where(
                 converted_values < 0, converted_values + 360, converted_values
@@ -77,7 +77,7 @@ def _normalize_longitudes_to_180(result: xr.DataArray, x_coord_name: str) -> xr.
 
 def _handle_longitude_selection(
     lon_coord: xr.DataArray, bbox: pyproj.aoi.BBox, is_geographic: bool
-) -> slice:
+) -> tuple[slice, ...]:
     """
     Handle longitude coordinate selection with support for different conventions.
 
@@ -96,12 +96,13 @@ def _handle_longitude_selection(
 
     Returns
     -------
-    slice
-        Single slice for coordinate selection
+    tuple[slice, ...]
+        Tuple of slices for coordinate selection. Usually one slice, but two slices
+        when bbox crosses the 360°/0° boundary in 0→360 data.
     """
     if not is_geographic:
         # For projected coordinates, treat X as regular coordinate
-        return slice(bbox.west, bbox.east)
+        return (slice(bbox.west, bbox.east),)
 
     # For geographic coordinates, handle longitude wrapping
     lon_values = lon_coord.data
@@ -110,39 +111,25 @@ def _handle_longitude_selection(
     # Determine if data uses 0→360 or -180→180 convention
     uses_0_360 = lon_min >= 0 and lon_max > 180
 
-    # Convert bbox to match data convention
     bbox_west = bbox.west
     bbox_east = bbox.east
 
-    if uses_0_360:
+    if uses_0_360 and bbox.west < 0:
         # Data is 0→360, bbox is typically -180→180
         # Convert negative longitudes to 0→360 range
-        if bbox_west < 0:
-            bbox_west += 360
-        if bbox_east < 0:
-            bbox_east += 360
+        bbox_west_360 = bbox.west + 360
+        bbox_east_360 = bbox.east + 360 if bbox.east < 0 else bbox.east
 
-        # Handle case where converted bbox crosses 360°/0° boundary
-        if bbox_west > bbox_east:
-            # Need to select two ranges: [bbox_west, 360] and [0, bbox_east]
-            # For xarray slice, we can't easily do this, so expand to include the wrap-around
-            # Select from bbox_west to 360, then from 0 to bbox_east
-            # This means selecting everything from min(0, bbox_west) to max(360, bbox_east)
-            # But that would select too much. Instead, we need a different approach.
-
-            # For now, let's select the larger continuous range
-            # Check which range is larger: [bbox_west, 360] or [0, bbox_east]
-            range1_size = 360 - bbox_west  # [bbox_west, 360]
-            range2_size = bbox_east - 0  # [0, bbox_east]
-
-            if range1_size >= range2_size:
-                # Select [bbox_west, 360] -> extend bbox_east to 360
-                bbox_east = 360
-            else:
-                # Select [0, bbox_east] -> set bbox_west to 0
-                bbox_west = 0
-
-    return slice(bbox_west, bbox_east)
+        if bbox_west_360 > bbox_east_360:
+            # Bbox crosses 360°/0° boundary - need to select two ranges
+            # Return two slices: [bbox_west_360, 360] and [0, bbox_east_360]
+            return (slice(bbox_west_360, 360), slice(0, bbox_east_360))
+        else:
+            # Normal case - single range in 0→360 convention
+            return (slice(bbox_west_360, bbox_east_360),)
+    else:
+        # Use original bbox coordinates (data is -180→180 or no negative bbox values)
+        return (slice(bbox_west, bbox_east),)
 
 
 class GridSystem:
@@ -194,7 +181,7 @@ class Rectilinear(GridSystem):
         assert isinstance(da.xindexes[self.X], xr.indexes.PandasIndex)
         assert isinstance(da.xindexes[self.Y], xr.indexes.PandasIndex)
 
-        # Assert that bbox doesn't cross anti-meridian (Web Mercator tiles never do)
+        # Assert that bbox doesn't cross anti-meridian.
         assert (
             bbox.west <= bbox.east
         ), f"BBox crosses anti-meridian: west={bbox.west} > east={bbox.east}"
@@ -206,40 +193,24 @@ class Rectilinear(GridSystem):
         else:
             slicers[self.Y] = slice(bbox.north, bbox.south)
 
-        # Handle longitude (X coordinate)
         if self.crs.is_geographic:
-            # For geographic coordinates, we may need special handling for 0-360 data
-            lon_values = da[self.X].data
-            lon_min, lon_max = lon_values.min().item(), lon_values.max().item()
-            uses_0_360 = lon_min >= 0 and lon_max > 180
+            lon_slices = _handle_longitude_selection(
+                da[self.X], bbox, self.crs.is_geographic
+            )
 
-            if uses_0_360 and bbox.west < 0:
-                # Convert bbox to 0-360 convention
-                bbox_west_360 = bbox.west + 360
-                bbox_east_360 = bbox.east + 360 if bbox.east < 0 else bbox.east
-
-                if bbox_west_360 > bbox_east_360:
-                    # Bbox crosses 360/0 boundary - need to select two ranges
-                    # Select data from [bbox_west_360, 360] and [0, bbox_east_360]
-                    da1 = da.sel(
-                        {self.Y: slicers[self.Y], self.X: slice(bbox_west_360, 360)}
-                    )
-                    da2 = da.sel(
-                        {self.Y: slicers[self.Y], self.X: slice(0, bbox_east_360)}
-                    )
-                    # Concatenate along longitude dimension
-                    result = xr.concat([da1, da2], dim=self.X)
-                else:
-                    # Normal case - single range
-                    slicers[self.X] = slice(bbox_west_360, bbox_east_360)
-                    result = da.sel(slicers)
-            else:
-                # Use the helper function for other cases
-                lon_slice = _handle_longitude_selection(
-                    da[self.X], bbox, self.crs.is_geographic
-                )
-                slicers[self.X] = lon_slice
+            if len(lon_slices) == 1:
+                # Single slice - normal case
+                slicers[self.X] = lon_slices[0]
                 result = da.sel(slicers)
+            else:
+                # Multiple slices - bbox crosses 360°/0° boundary
+                results = []
+                for lon_slice in lon_slices:
+                    subset_slicers = slicers.copy()
+                    subset_slicers[self.X] = lon_slice
+                    results.append(da.sel(subset_slicers))
+                # Concatenate along longitude dimension
+                result = xr.concat(results, dim=self.X)
         else:
             # Non-geographic coordinates
             slicers[self.X] = slice(bbox.west, bbox.east)
