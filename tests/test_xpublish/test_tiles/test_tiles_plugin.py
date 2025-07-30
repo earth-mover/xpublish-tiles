@@ -150,17 +150,23 @@ def test_tilesets_list_with_metadata():
     assert layer["title"] == "Surface Temperature"
     assert layer["description"] == "Global surface temperature data"
 
-    # Check dimensions
-    assert "dimensions" in layer
-    assert layer["dimensions"] is not None
-    assert len(layer["dimensions"]) == 1
+    # Check that dimensions are no longer in layers (moved to tileset level)
+    assert "dimensions" not in layer or layer["dimensions"] is None
 
-    time_dim = layer["dimensions"][0]
-    assert time_dim["name"] == "time"
-    assert time_dim["type"] == "temporal"
-    assert len(time_dim["values"]) == 12  # 12 monthly time steps
-    assert time_dim["extent"][0] == "2020-01-01T00:00:00Z"
-    assert time_dim["extent"][1] == "2020-12-01T00:00:00Z"
+    # Test the tileset metadata endpoint to check extents
+    metadata_response = client.get("/datasets/climate/tiles/WebMercatorQuad")
+    assert metadata_response.status_code == 200
+
+    metadata = metadata_response.json()
+    assert "extents" in metadata
+    assert metadata["extents"] is not None
+    assert "time" in metadata["extents"]
+
+    time_extent = metadata["extents"]["time"]
+    assert "interval" in time_extent
+    assert len(time_extent["interval"]) == 2
+    assert time_extent["interval"][0] == "2020-01-01T00:00:00Z"
+    assert time_extent["interval"][1] == "2020-12-01T00:00:00Z"
 
 
 def test_multi_dimensional_dataset():
@@ -242,32 +248,43 @@ def test_multi_dimensional_dataset():
     tileset = response_data["tilesets"][0]
     layer = tileset["layers"][0]
 
-    # Check that all dimensions are present
-    assert "dimensions" in layer
-    assert layer["dimensions"] is not None
-    assert len(layer["dimensions"]) == 3  # time, elevation, scenario
+    # Check that dimensions are no longer in layers (moved to tileset level)
+    assert "dimensions" not in layer or layer["dimensions"] is None
 
-    # Check time dimension
-    time_dim = next(d for d in layer["dimensions"] if d["name"] == "time")
-    assert time_dim["type"] == "temporal"
-    assert len(time_dim["values"]) == 6
-    assert time_dim["extent"][0] == "2020-01-01T00:00:00Z"
-    assert time_dim["extent"][1] == "2020-06-01T00:00:00Z"
+    # Test the tileset metadata endpoint to check extents
+    metadata_response = client.get("/datasets/climate/tiles/WebMercatorQuad")
+    assert metadata_response.status_code == 200
 
-    # Check elevation dimension
-    elevation_dim = next(d for d in layer["dimensions"] if d["name"] == "elevation")
-    assert elevation_dim["type"] == "vertical"
-    assert elevation_dim["units"] == "meters"
-    assert elevation_dim["description"] == "Elevation above sea level"
-    assert elevation_dim["extent"] == [0.0, 2000.0]
-    assert elevation_dim["values"] == [0.0, 100.0, 500.0, 1000.0, 2000.0]
+    metadata = metadata_response.json()
+    assert "extents" in metadata
+    assert metadata["extents"] is not None
+    assert len(metadata["extents"]) == 3  # time, elevation, scenario
 
-    # Check scenario dimension (custom)
-    scenario_dim = next(d for d in layer["dimensions"] if d["name"] == "scenario")
-    assert scenario_dim["type"] == "custom"
-    assert scenario_dim["description"] == "Climate scenario"
-    assert scenario_dim["extent"] == ["RCP45", "RCP85", "Historical"]
-    assert scenario_dim["values"] == ["RCP45", "RCP85", "Historical"]
+    # Check time extent
+    assert "time" in metadata["extents"]
+    time_extent = metadata["extents"]["time"]
+    assert "interval" in time_extent
+    assert len(time_extent["interval"]) == 2
+    assert time_extent["interval"][0] == "2020-01-01T00:00:00Z"
+    assert time_extent["interval"][1] == "2020-06-01T00:00:00Z"
+
+    # Check elevation extent
+    assert "elevation" in metadata["extents"]
+    elevation_extent = metadata["extents"]["elevation"]
+    assert "interval" in elevation_extent
+    assert "units" in elevation_extent
+    assert elevation_extent["units"] == "meters"
+    assert "description" in elevation_extent
+    assert elevation_extent["description"] == "Elevation above sea level"
+    assert elevation_extent["interval"] == [0.0, 2000.0]
+
+    # Check scenario extent (custom)
+    assert "scenario" in metadata["extents"]
+    scenario_extent = metadata["extents"]["scenario"]
+    assert "interval" in scenario_extent
+    assert "description" in scenario_extent
+    assert scenario_extent["description"] == "Climate scenario"
+    assert scenario_extent["interval"] == ["RCP45", "RCP85", "Historical"]
 
 
 def test_dimension_extraction_utilities():
