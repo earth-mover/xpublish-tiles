@@ -117,12 +117,6 @@ def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> Non
     assert expected == actual
 
 
-# subsetting tests
-
-
-# Problematic tiles that test edge cases
-
-
 @pytest.mark.parametrize("tile,tms", TILES)
 def test_subset(global_datasets, tile, tms):
     """Test subsetting with tiles that span equator, anti-meridian, and poles."""
