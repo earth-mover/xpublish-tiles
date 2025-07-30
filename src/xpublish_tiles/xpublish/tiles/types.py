@@ -466,6 +466,14 @@ class TileSetMetadata(BaseModel):
             }
         ),
     ] = None
+    extents: Annotated[
+        Optional[dict[str, dict[str, Any]]],
+        Field(
+            json_schema_extra={
+                "description": "Extents for additional dimensions (temporal, elevation, etc.)",
+            }
+        ),
+    ] = None
 
 
 class TileMatrixSetLimit(BaseModel):
@@ -1342,3 +1350,13 @@ class TileQuery(BaseModel):
         if not v:
             raise ValueError("At least one variable must be specified")
         return v
+
+
+TILES_FILTERED_QUERY_PARAMS: list[str] = [
+    "style",
+    "colorscalerange",
+    "f",
+    "variables",
+    "width",
+    "height",
+]
