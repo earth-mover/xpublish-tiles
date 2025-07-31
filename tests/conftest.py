@@ -10,6 +10,7 @@ import xarray as xr
 from xpublish_tiles.datasets import create_global_dataset
 
 ARRAYLAKE_REPO = "earthmover-integration/tiles-datasets-develop"
+IS_SNAPSHOT_UPDATE = False
 
 
 def pytest_addoption(parser):
@@ -98,11 +99,13 @@ def global_datasets(request):
 
 
 @pytest.fixture
-def png_snapshot(snapshot):
+def png_snapshot(snapshot, pytestconfig):
     """PNG snapshot with custom numpy array comparison for robustness."""
     import io
 
     from PIL import Image
+
+    IS_SNAPSHOT_UPDATE = pytestconfig.getoption("--snapshot-update", default=False)
 
     class RobustPNGSnapshotExtension(PNGImageSnapshotExtension):
         def matches(self, *, serialized_data: bytes, snapshot_data: bytes) -> bool:
@@ -118,9 +121,7 @@ def png_snapshot(snapshot):
             expected_array = np.array(expected_img)
 
             # Check if we're in snapshot update mode
-            import sys
-
-            if "--snapshot-update" in sys.argv:
+            if IS_SNAPSHOT_UPDATE:
                 return np.array_equal(actual_array, expected_array)
             else:
                 # Normal test run - better error messages
