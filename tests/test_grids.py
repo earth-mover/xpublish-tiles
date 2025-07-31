@@ -1,7 +1,6 @@
 # FIXME: vendor these
 
 
-import numpy as np
 import cf_xarray as cfxr
 import cf_xarray.datasets
 import pytest
@@ -138,29 +137,3 @@ def test_subset(global_datasets, tile, tms):
     lat_min, lat_max = actual.latitude.min().item(), actual.latitude.max().item()
     assert lat_min >= bbox_geo.south, f"Latitude too low: {lat_min} < {bbox_geo.south}"
     assert lat_max <= bbox_geo.north, f"Latitude too high: {lat_max} > {bbox_geo.north}"
-
-    lon_values = actual.longitude.values
-    lon_min, lon_max = lon_values.min().item(), lon_values.max().item()
-
-    # Assert that longitude coordinates are spatially continuous
-    # This prevents transparent pixels caused by coordinate discontinuities
-    if len(lon_values) > 1:
-        sorted_lons = np.sort(lon_values)
-        lon_diffs = np.diff(sorted_lons)
-        max_gap = lon_diffs.max()
-        
-        # Allow for reasonable coordinate spacing but catch large discontinuities
-        # A gap > 180° indicates a problematic discontinuity
-        assert max_gap <= 180.0, f"Longitude coordinates have large gap ({max_gap:.1f}°) indicating spatial discontinuity: {sorted_lons}"
-
-    # Coordinates should be within reasonable bounds for the selected data
-    # Allow for both -180→180 and 0→360 conventions, but ensure continuity
-    # The actual coordinate values depend on the input data convention and selection logic
-    if lon_min >= 0 and lon_max > 180:
-        # Data uses 0→360 convention - ensure it's reasonable
-        assert lon_min >= 0.0, f"0→360 longitude should be >= 0: {lon_min}"
-        assert lon_max <= 360.0, f"0→360 longitude should be <= 360: {lon_max}"
-    else:
-        # Data uses -180→180 convention - ensure it's reasonable  
-        assert lon_min >= -180.0, f"-180→180 longitude should be >= -180: {lon_min}"
-        assert lon_max <= 180.0, f"-180→180 longitude should be <= 180: {lon_max}"

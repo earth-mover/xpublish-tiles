@@ -27,6 +27,107 @@ logger = logging.getLogger("xpublish-tiles")
 transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=True))
 
 
+def has_coordinate_discontinuity(coordinates: np.ndarray) -> bool:
+    """
+    Detect coordinate discontinuities in geographic longitude coordinates.
+
+    This function analyzes longitude coordinates to detect antimeridian crossings
+    that will cause discontinuities when transformed to projected coordinate systems.
+
+    Parameters
+    ----------
+    coordinates : np.ndarray
+        Geographic longitude coordinates to analyze
+
+    Returns
+    -------
+    bool
+        True if a coordinate discontinuity is detected, False otherwise
+
+    Notes
+    -----
+    The function detects antimeridian crossings in different coordinate conventions:
+    - For -180→180 system: Looks for gaps > 180°
+    - For 0→360 system: Looks for data crossing the 180° longitude line
+
+    Examples of discontinuity cases:
+    - [-179°, -178°, ..., 178°, 179°] → Large gap when wrapped
+    - [350°, 351°, ..., 10°, 11°] → Crosses 0°/360° boundary
+    - [180°, 181°, ..., 190°] → Crosses antimeridian in 0→360 system
+    """
+    if len(coordinates) == 0:
+        return False
+
+    x_min, x_max = coordinates.min(), coordinates.max()
+    x_sorted = np.sort(coordinates)
+    gaps = np.diff(x_sorted)
+
+    if len(gaps) == 0:
+        return False
+
+    max_gap = gaps.max()
+
+    # Detect antimeridian crossing in different coordinate systems:
+    # 1. For -180→180: look for gaps > 180°
+    # 2. For 0→360: look for data crossing 180° longitude (antimeridian)
+    if max_gap > 180.0:
+        return True
+    elif x_min <= 180.0 <= x_max:  # Data crosses the antimeridian (180°/-180°)
+        return True
+
+    return False
+
+
+def fix_coordinate_discontinuities(
+    coordinates: np.ndarray, transformer: pyproj.Transformer
+) -> np.ndarray:
+    """
+    Fix coordinate discontinuities that occur during coordinate transformation.
+
+    When transforming geographic coordinates that cross the antimeridian (±180°)
+    to projected coordinates (like Web Mercator), large gaps can appear in the
+    transformed coordinate space. This function detects such gaps and applies
+    intelligent offset corrections to make coordinates continuous.
+
+    The algorithm:
+    1. Finds the largest gap in sorted coordinates
+    2. Calculates the expected coordinate space width using transformer bounds
+    3. If the gap is >30% of coordinate space width, applies an offset
+    4. Chooses which side to offset based on which has fewer coordinates
+    """
+    coords_sorted = np.sort(coordinates.flat)
+    gaps = np.diff(coords_sorted)
+
+    if len(gaps) == 0:
+        return coordinates
+
+    max_gap = gaps.max()
+
+    # Calculate coordinate space width using ±180° transform
+    # This is unavoidable since AreaOfUse for a CRS is always in lat/lon
+    x_bounds, _ = transformer.transform([-180.0, 180.0], [0.0, 0.0])
+    coordinate_space_width = abs(x_bounds[1] - x_bounds[0])
+
+    # Apply fix if gap is significant (>30% of coordinate space width)
+    if max_gap > coordinate_space_width * 0.3:
+        gap_idx = np.argmax(gaps)
+        split_value = coords_sorted[gap_idx]
+        low_side_mask = coordinates <= split_value
+        low_count = np.sum(low_side_mask)
+        if low_count < (coordinates.size / 2):
+            # More coordinates on high side, shift low side up
+            coordinates = np.where(
+                low_side_mask, coordinates + coordinate_space_width, coordinates
+            )
+        else:
+            # More coordinates on low side, shift high side down
+            coordinates = np.where(
+                ~low_side_mask, coordinates - coordinate_space_width, coordinates
+            )
+
+    return coordinates
+
+
 def check_bbox_overlap(
     input_bbox: pyproj.aoi.BBox, grid_bbox: pyproj.aoi.BBox, is_geographic: bool
 ) -> bool:
@@ -206,47 +307,19 @@ def subset_to_bbox(
         if min(subset.shape) < 2:
             raise ValueError("Tile request resulted in insufficient data for rendering.")
 
+        has_discontinuity = (
+            has_coordinate_discontinuity(subset[grid.X].data)
+            if grid.crs.is_geographic
+            else False
+        )
         bx, by = xr.broadcast(subset[grid.X], subset[grid.Y])
         newX, newY = input_to_output.transform(bx.data, by.data)
 
-        # Smart coordinate fixing: detect large gaps and apply precise corrections
-        # This fixes coordinate discontinuities that cause transparent pixels in rendered tiles
-        if grid.crs.is_geographic:
-            newX_flat = newX.flatten()
-            newX_sorted = np.sort(newX_flat)
-            gaps = np.diff(newX_sorted)
-
-            if len(gaps) > 0:
-                max_gap = gaps.max()
-
-                # Calculate coordinate space width using transformer bounds
-                x_neg180, _ = input_to_output.transform(-180.0, 0.0)
-                x_pos180, _ = input_to_output.transform(180.0, 0.0)
-                coordinate_space_width = abs(x_pos180 - x_neg180)
-
-                # Apply fix if gap is significant (>30% of coordinate space width)
-                if max_gap > coordinate_space_width * 0.3:
-                    gap_idx = np.argmax(gaps)
-                    split_value = newX_sorted[gap_idx]
-
-                    # Identify coordinates on each side of the gap
-                    low_side_mask = newX <= split_value
-                    high_side_mask = newX > split_value
-
-                    # Apply offset to the smaller group to make coordinates continuous
-                    low_count = np.sum(low_side_mask)
-                    high_count = np.sum(high_side_mask)
-
-                    if low_count < high_count:
-                        # More coordinates on high side, shift low side up
-                        newX = np.where(
-                            low_side_mask, newX + coordinate_space_width, newX
-                        )
-                    else:
-                        # More coordinates on low side, shift high side down
-                        newX = np.where(
-                            high_side_mask, newX - coordinate_space_width, newX
-                        )
+        # Fix coordinate discontinuities in transformed coordinates if detected
+        # this is important because the transformation may introduce discontinuities
+        # at the anti-meridian
+        if has_discontinuity:
+            newX = fix_coordinate_discontinuities(newX, input_to_output)
 
         newda = subset.assign_coords(
             {bx.name: bx.copy(data=newX), by.name: by.copy(data=newY)}
