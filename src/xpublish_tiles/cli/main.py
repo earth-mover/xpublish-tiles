@@ -1,6 +1,7 @@
 """Simple CLI for playing with xpublish-tiles, with a generated sample dataset"""
 
 import argparse
+from typing import cast
 
 import cf_xarray  # noqa: F401
 import numpy as np
@@ -38,12 +39,34 @@ def create_global_dataset() -> xr.Dataset:
     return uniform_grid(dims=tuple(dims), dtype=np.float32, attrs={})
 
 
-def get_dataset_for_name(name: str) -> xr.Dataset:
+def get_dataset_for_name(name: str, branch: str = "main", group: str = "") -> xr.Dataset:
     if name == "global":
         return create_global_dataset()
     elif name == "air":
         return xr.tutorial.open_dataset("air_temperature")
-    raise ValueError(f"Unknown dataset name: {name}")
+
+    try:
+        from arraylake import Client
+
+        import icechunk
+
+        client = Client()
+        repo = cast(icechunk.Repository, client.get_repo(name))
+        session = repo.readonly_session(branch=branch)
+        return xr.open_zarr(
+            session.store,
+            group=group if len(group) else None,
+            zarr_format=3,
+            consolidated=False,
+        )
+    except ImportError as ie:
+        raise ImportError(
+            f"Arraylake is not installed, no dataset available named {name}"
+        ) from ie
+    except Exception as e:
+        raise ValueError(
+            f"Error occurred while getting dataset from Arraylake: {e}"
+        ) from e
 
 
 def main():
@@ -51,14 +74,32 @@ def main():
         description="Simple CLI for playing with xpublish-tiles"
     )
     parser.add_argument(
+        "--port",
+        type=int,
+        default=8080,
+        help="Port to serve on (default: 8080)",
+    )
+    parser.add_argument(
         "--dataset",
-        choices=["global", "air"],
+        choices=["global", "air", "{arraylake-org}/{arraylake-repo}"],
         default="global",
-        help="Dataset to serve (default: global)",
+        help="Dataset to serve (default: global). If an arraylake dataset is specified, the arraylake-org and arraylake-repo must be provided, along with an optional branch and group",
+    )
+    parser.add_argument(
+        "--branch",
+        type=str,
+        default="main",
+        help="Branch to use for Arraylake (default: main). ",
+    )
+    parser.add_argument(
+        "--group",
+        type=str,
+        default="",
+        help="Group to use for Arraylake (default: '').",
     )
     args = parser.parse_args()
 
-    ds = get_dataset_for_name(args.dataset)
+    ds = get_dataset_for_name(args.dataset, args.branch, args.group)
 
     rest = xpublish.SingleDatasetRest(
         ds, plugins={"tiles": TilesPlugin(), "wms": WMSPlugin()}
