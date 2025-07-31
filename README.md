@@ -34,7 +34,7 @@ uv run pytest tests --where=local
 The package includes a command-line interface for quickly serving datasets with tiles and WMS endpoints:
 
 ```sh
-xpublish-tiles [OPTIONS]
+uv run xpublish-tiles [OPTIONS]
 ```
 
 ### Options
