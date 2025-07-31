@@ -16,29 +16,37 @@ def is_rotated_pole(crs: pyproj.CRS) -> bool:
     return crs.to_cf().get("grid_mapping_name") == "rotated_latitude_longitude"
 
 
-def _normalize_longitudes_to_180(result: xr.DataArray, x_coord_name: str) -> xr.DataArray:
+def ensure_continuous_longitudes(
+    result: xr.DataArray, x_coord_name: str, target_bbox: pyproj.aoi.BBox
+) -> xr.DataArray:
     """
-    Normalize longitude coordinates to -180→180 convention for consistent output.
+    Apply targeted longitude coordinate conversion only when needed for compatibility.
 
-    This function handles the conversion from 0→360 coordinates to -180→180,
-    while preserving spatial continuity for coordinates that span the 180°/360° boundary.
+    Conversion is applied when:
+    1. Data uses 0→360 convention AND target bbox has negative longitudes
+    2. This prevents coordinate system mismatches that cause transparent pixels
 
-    The data are _not_ re-ordered to yield sorted coordinates, i.e. we are
-    assuming that the renderer can handle this.
+    Spatial continuity is preserved because:
+    1. Coordinate transformations expect continuous input coordinates
+    2. Discontinuous coordinates like [170°, 175°, -180°, -175°] gaps in transformed coordinates
+    3. Datashader expects continuous coordinate meshes
 
     Parameters
     ----------
     result : xr.DataArray
-        Data array with longitude coordinates to normalize
+        Data array with longitude coordinates to convert
     x_coord_name : str
         Name of the longitude coordinate dimension
+    target_bbox : pyproj.aoi.BBox
+        Geographic bounding box that coordinates need to be compatible with
 
     Returns
     -------
     xr.DataArray
-        Data array with normalized longitude coordinates in -180→180 format
+        Data array with longitude coordinates converted only if needed
     """
     if x_coord_name not in result.coords:
+        # No longitude coordinate to convert
         return result
 
     lon_coord = result.coords[x_coord_name]
@@ -47,32 +55,40 @@ def _normalize_longitudes_to_180(result: xr.DataArray, x_coord_name: str) -> xr.
     # Assert coordinates are not empty
     assert lon_values.size > 0, f"Empty longitude coordinate array: {x_coord_name}"
 
-    # Check if coordinates span the 180°/360° boundary before conversion
-    original_min, original_max = lon_values.min(), lon_values.max()
-    spans_180_boundary = (
-        original_min < 180 and original_max >= 180 and (original_max - original_min) < 180
-    )
+    # Analyze data coordinate system and target bbox requirements
+    data_min, data_max = lon_values.min(), lon_values.max()
+    data_uses_0_360 = data_min >= 0 and data_max > 180
+    bbox_has_negative_lon = target_bbox.west < 0 or target_bbox.east < 0
 
-    # Convert 0→360 to -180→180
-    converted_values = ((lon_values + 180) % 360) - 180
-
-    # If original data spanned 180° boundary and conversion created apparent anti-meridian crossing,
-    # adjust the converted values to maintain spatial continuity
-    if spans_180_boundary:
-        converted_min, converted_max = (
-            converted_values.min(),
-            converted_values.max(),
+    if data_uses_0_360 and bbox_has_negative_lon:
+        # CONVERSION NEEDED: 0→360 data with western bbox (negative longitudes)
+        spans_180_boundary = (
+            data_min < 180 and data_max >= 180 and (data_max - data_min) < 180
         )
-        if converted_max - converted_min > 180:
-            # Apparent anti-meridian crossing after conversion
-            # Convert negative values back to positive to maintain continuity
-            converted_values = np.where(
-                converted_values < 0, converted_values + 360, converted_values
-            )
+        converted_values = ((lon_values + 180) % 360) - 180
+        if spans_180_boundary:
+            # SPATIAL CONTINUITY PRESERVATION:
+            # Original data spanned 180° boundary (e.g., 170° to 190°)
+            # Simple conversion would create discontinuity (170° to -170°)
+            converted_min, converted_max = converted_values.min(), converted_values.max()
+            if converted_max - converted_min > 180:
+                # Discontinuity detected after conversion - fix it
+                # Convert negative values back to positive to maintain spatial continuity
+                # Example: [170°, 175°, -180°, -175°] → [170°, 175°, 180°, 185°]
+                converted_values = np.where(
+                    converted_values < 0, converted_values + 360, converted_values
+                )
 
-    return result.assign_coords(
-        {x_coord_name: (lon_coord.dims, converted_values, lon_coord.attrs)}
-    )
+        return result.assign_coords(
+            {x_coord_name: (lon_coord.dims, converted_values, lon_coord.attrs)}
+        )
+
+    else:
+        # NO CONVERSION NEEDED: Compatible coordinate systems
+        # - Data is -180→180 (already compatible)
+        # - Data is 0→360 but bbox is eastern (no negative longitudes)
+        # - Other compatible scenarios
+        return result
 
 
 def _handle_longitude_selection(
@@ -164,7 +180,7 @@ class GridSystem:
 
 @dataclass(kw_only=True)
 class RasterAffine(GridSystem):
-    """2D horizontal grid defined by an affine transfo."""
+    """2D horizontal grid defined by an affine transform."""
 
     crs: pyproj.CRS
     bbox: pyproj.aoi.BBox
@@ -226,9 +242,9 @@ class Rectilinear(GridSystem):
             slicers[self.X] = slice(bbox.west, bbox.east)
             result = da.sel(slicers)
 
-        # Convert longitude coordinates to -180→180 convention for consistent output
+        # Apply smart longitude conversion only when needed for coordinate system compatibility
         if self.crs.is_geographic:
-            result = _normalize_longitudes_to_180(result, self.X)
+            result = ensure_continuous_longitudes(result, self.X, bbox)
 
         return result
 
@@ -270,9 +286,9 @@ class Curvilinear(GridSystem):
 
         result = da.isel(slicers)
 
-        # Convert longitude coordinates to -180→180 convention for consistent output
+        # Apply smart longitude conversion only when needed for coordinate system compatibility
         if self.crs.is_geographic:
-            result = _normalize_longitudes_to_180(result, self.X)
+            result = ensure_continuous_longitudes(result, self.X, bbox)
 
         return result
 
