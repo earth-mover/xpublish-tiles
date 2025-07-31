@@ -110,21 +110,21 @@ def png_snapshot(snapshot):
             Compare PNG images as numpy arrays instead of raw bytes.
             This is more robust against compression differences and platform variations.
             """
-            try:
-                # Convert both images to numpy arrays
-                actual_img = Image.open(io.BytesIO(serialized_data))
-                expected_img = Image.open(io.BytesIO(snapshot_data))
+            # Convert both images to numpy arrays
+            actual_img = Image.open(io.BytesIO(serialized_data))
+            expected_img = Image.open(io.BytesIO(snapshot_data))
 
-                actual_array = np.array(actual_img)
-                expected_array = np.array(expected_img)
+            actual_array = np.array(actual_img)
+            expected_array = np.array(expected_img)
 
-                # Use numpy array equality comparison
+            # Check if we're in snapshot update mode
+            import sys
+
+            if "--snapshot-update" in sys.argv:
                 return np.array_equal(actual_array, expected_array)
-
-            except Exception:
-                # Fallback to byte comparison if image parsing fails
-                return super().matches(
-                    serialized_data=serialized_data, snapshot_data=snapshot_data
-                )
+            else:
+                # Normal test run - better error messages
+                np.testing.assert_array_equal(actual_array, expected_array)
+                return True
 
     return snapshot.use_extension(RobustPNGSnapshotExtension)
