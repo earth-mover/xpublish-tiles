@@ -16,15 +16,21 @@ dependencies = [
     "matplotlib>=3.10.3",
     "morecantile>=5.4.2",
     "numbagg>=0.9.0",
+    "numba>=0.60.0",
     "pydantic-xml>=2.17.3",
     "pyproj>=3.7.1",
-    "xarray>=2025.7.1",
-    "xpublish>=0.4.1",
+    "xpublish>=0.3.0",
+    "fastapi",
+    "xarray @ git+https://github.com/dcherian/xarray.git@async.load",
+    "zarr @ git+https://github.com/zarr-developers/zarr-python.git@main",
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [dependency-groups]
 dev = [
@@ -42,6 +48,7 @@ dev = [
     "syrupy>=4.9.1",
     "pooch>=1.8.2",
     "hypothesis>=6.136.6",
+    "dask",
 ]
 
 [project.entry-points."xpublish.plugin"]
