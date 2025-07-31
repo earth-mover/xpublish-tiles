@@ -1,5 +1,7 @@
 import asyncio
 import io
+import logging
+import os
 from functools import lru_cache, partial
 from typing import Any, cast
 
@@ -18,6 +20,8 @@ from xpublish_tiles.types import (
     QueryParams,
     ValidatedArray,
 )
+
+logger = logging.getLogger("xpublish-tiles")
 
 # https://pyproj4.github.io/pyproj/stable/advanced_examples.html#caching-pyproj-objects
 transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=True))
@@ -105,9 +109,14 @@ def check_bbox_overlap(
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = apply_query(ds, variables=query.variables, selectors=query.selectors)
     subsets = subset_to_bbox(validated, bbox=query.bbox, crs=query.crs)
-    loaded_contexts = await asyncio.gather(
-        *(sub.async_load() for sub in subsets.values())
-    )
+    if int(os.environ.get("XPUBLISH_TILES_ASYNC_LOAD", "1")):
+        logger.debug("Using async_load for data loading")
+        loaded_contexts = await asyncio.gather(
+            *(sub.async_load() for sub in subsets.values())
+        )
+    else:
+        logger.debug("Using synchronous load for data loading")
+        loaded_contexts = tuple(sub.load() for sub in subsets.values())
     context_dict = dict(zip(subsets.keys(), loaded_contexts, strict=True))
 
     buffer = io.BytesIO()

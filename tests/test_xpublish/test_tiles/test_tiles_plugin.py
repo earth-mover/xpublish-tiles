@@ -150,17 +150,26 @@ def test_tilesets_list_with_metadata():
     assert layer["title"] == "Surface Temperature"
     assert layer["description"] == "Global surface temperature data"
 
-    # Check dimensions
-    assert "dimensions" in layer
-    assert layer["dimensions"] is not None
-    assert len(layer["dimensions"]) == 1
+    # Check that dimensions are no longer in layers (moved to tileset level)
+    assert "dimensions" not in layer or layer["dimensions"] is None
 
-    time_dim = layer["dimensions"][0]
-    assert time_dim["name"] == "time"
-    assert time_dim["type"] == "temporal"
-    assert len(time_dim["values"]) == 12  # 12 monthly time steps
-    assert time_dim["extent"][0] == "2020-01-01T00:00:00Z"
-    assert time_dim["extent"][1] == "2020-12-01T00:00:00Z"
+    # Check that extents are now in the layer
+    assert "extents" in layer
+    assert layer["extents"] is not None
+    assert "time" in layer["extents"]
+
+    time_extent = layer["extents"]["time"]
+    assert "interval" in time_extent
+    assert len(time_extent["interval"]) == 2
+    assert time_extent["interval"][0] == "2020-01-01T00:00:00Z"
+    assert time_extent["interval"][1] == "2020-12-01T00:00:00Z"
+
+    # Test the tileset metadata endpoint - extents should no longer be at tileset level
+    metadata_response = client.get("/datasets/climate/tiles/WebMercatorQuad")
+    assert metadata_response.status_code == 200
+
+    metadata = metadata_response.json()
+    assert "extents" not in metadata
 
 
 def test_multi_dimensional_dataset():
@@ -242,32 +251,173 @@ def test_multi_dimensional_dataset():
     tileset = response_data["tilesets"][0]
     layer = tileset["layers"][0]
 
-    # Check that all dimensions are present
-    assert "dimensions" in layer
-    assert layer["dimensions"] is not None
-    assert len(layer["dimensions"]) == 3  # time, elevation, scenario
+    # Check that dimensions are no longer in layers (moved to tileset level)
+    assert "dimensions" not in layer or layer["dimensions"] is None
 
-    # Check time dimension
-    time_dim = next(d for d in layer["dimensions"] if d["name"] == "time")
-    assert time_dim["type"] == "temporal"
-    assert len(time_dim["values"]) == 6
-    assert time_dim["extent"][0] == "2020-01-01T00:00:00Z"
-    assert time_dim["extent"][1] == "2020-06-01T00:00:00Z"
+    # Check that extents are now in the layer
+    assert "extents" in layer
+    assert layer["extents"] is not None
+    assert len(layer["extents"]) == 3  # time, elevation, scenario
 
-    # Check elevation dimension
-    elevation_dim = next(d for d in layer["dimensions"] if d["name"] == "elevation")
-    assert elevation_dim["type"] == "vertical"
-    assert elevation_dim["units"] == "meters"
-    assert elevation_dim["description"] == "Elevation above sea level"
-    assert elevation_dim["extent"] == [0.0, 2000.0]
-    assert elevation_dim["values"] == [0.0, 100.0, 500.0, 1000.0, 2000.0]
+    # Check time extent
+    assert "time" in layer["extents"]
+    time_extent = layer["extents"]["time"]
+    assert "interval" in time_extent
+    assert len(time_extent["interval"]) == 2
 
-    # Check scenario dimension (custom)
-    scenario_dim = next(d for d in layer["dimensions"] if d["name"] == "scenario")
-    assert scenario_dim["type"] == "custom"
-    assert scenario_dim["description"] == "Climate scenario"
-    assert scenario_dim["extent"] == ["RCP45", "RCP85", "Historical"]
-    assert scenario_dim["values"] == ["RCP45", "RCP85", "Historical"]
+    # Test the tileset metadata endpoint - extents should no longer be at tileset level
+    metadata_response = client.get("/datasets/climate/tiles/WebMercatorQuad")
+    assert metadata_response.status_code == 200
+
+    metadata = metadata_response.json()
+    assert "extents" not in metadata
+    assert time_extent["interval"][0] == "2020-01-01T00:00:00Z"
+    assert time_extent["interval"][1] == "2020-06-01T00:00:00Z"
+
+    # Check elevation extent (now in layer)
+    assert "elevation" in layer["extents"]
+    elevation_extent = layer["extents"]["elevation"]
+    assert "interval" in elevation_extent
+    assert "units" in elevation_extent
+    assert elevation_extent["units"] == "meters"
+    assert "description" in elevation_extent
+    assert elevation_extent["description"] == "Elevation above sea level"
+    assert elevation_extent["interval"] == [0.0, 2000.0]
+
+    # Check scenario extent (custom, now in layer)
+    assert "scenario" in layer["extents"]
+    scenario_extent = layer["extents"]["scenario"]
+    assert "interval" in scenario_extent
+    assert "description" in scenario_extent
+    assert scenario_extent["description"] == "Climate scenario"
+    assert scenario_extent["interval"] == ["RCP45", "RCP85", "Historical"]
+
+    from xpublish_tiles.xpublish.tiles.metadata import extract_dataset_extents
+
+    # Create a dataset with multiple dimensions
+    time_coords = pd.date_range("2023-01-01", periods=3, freq="H")
+    elevation_coords = [0, 100, 500]
+    scenario_coords = ["A", "B"]
+
+    dataset = xr.Dataset(
+        {
+            "temperature": xr.DataArray(
+                np.random.randn(3, 3, 2, 5, 10),
+                dims=["time", "elevation", "scenario", "lat", "lon"],
+                coords={
+                    "time": (
+                        ["time"],
+                        time_coords,
+                        {"axis": "T", "standard_name": "time"},
+                    ),
+                    "elevation": (
+                        ["elevation"],
+                        elevation_coords,
+                        {
+                            "units": "meters",
+                            "long_name": "Height above ground",
+                            "axis": "Z",
+                        },
+                    ),
+                    "scenario": (
+                        ["scenario"],
+                        scenario_coords,
+                        {"long_name": "Test scenario"},
+                    ),
+                    "lat": (
+                        ["lat"],
+                        np.linspace(-2, 2, 5),
+                        {"axis": "Y", "standard_name": "latitude"},
+                    ),
+                    "lon": (
+                        ["lon"],
+                        np.linspace(-5, 5, 10),
+                        {"axis": "X", "standard_name": "longitude"},
+                    ),
+                },
+            )
+        }
+    )
+
+    extents = extract_dataset_extents(dataset, "temperature")
+
+    # Should have 3 non-spatial dimensions
+    assert len(extents) == 3
+    assert "time" in extents
+    assert "elevation" in extents
+    assert "scenario" in extents
+
+    # Check time extent
+    time_extent = extents["time"]
+    assert "interval" in time_extent
+    assert "resolution" in time_extent
+    assert time_extent["interval"][0] == "2023-01-01T00:00:00Z"
+    assert time_extent["interval"][1] == "2023-01-01T02:00:00Z"
+    assert time_extent["resolution"] == "PT1H"  # Hourly
+
+    # Check elevation extent
+    elevation_extent = extents["elevation"]
+    assert "interval" in elevation_extent
+    assert "units" in elevation_extent
+    assert "description" in elevation_extent
+    assert "resolution" in elevation_extent
+    assert elevation_extent["interval"] == [0.0, 500.0]
+    assert elevation_extent["units"] == "meters"
+    assert elevation_extent["description"] == "Height above ground"
+    assert elevation_extent["resolution"] == 100.0  # Min step size
+
+    # Check scenario extent (categorical)
+    scenario_extent = extents["scenario"]
+    assert "interval" in scenario_extent
+    assert "description" in scenario_extent
+    assert scenario_extent["interval"] == ["A", "B"]
+    assert scenario_extent["description"] == "Test scenario"
+
+
+def test_calculate_temporal_resolution():
+    """Test the _calculate_temporal_resolution function directly"""
+    from xpublish_tiles.xpublish.tiles.metadata import _calculate_temporal_resolution
+
+    # Test hourly resolution
+    hourly_values = [
+        "2023-01-01T00:00:00Z",
+        "2023-01-01T01:00:00Z",
+        "2023-01-01T02:00:00Z",
+        "2023-01-01T03:00:00Z",
+    ]
+    assert _calculate_temporal_resolution(hourly_values) == "PT1H"
+
+    # Test daily resolution
+    daily_values = [
+        "2023-01-01T00:00:00Z",
+        "2023-01-02T00:00:00Z",
+        "2023-01-03T00:00:00Z",
+    ]
+    assert _calculate_temporal_resolution(daily_values) == "P1D"
+
+    # Test monthly resolution (approximately)
+    monthly_values = [
+        "2023-01-01T00:00:00Z",
+        "2023-02-01T00:00:00Z",
+        "2023-03-01T00:00:00Z",
+    ]
+    result = _calculate_temporal_resolution(monthly_values)
+    assert result.startswith("P") and result.endswith("D")  # Should be in days
+
+    # Test 15-minute resolution
+    minute_values = [
+        "2023-01-01T00:00:00Z",
+        "2023-01-01T00:15:00Z",
+        "2023-01-01T00:30:00Z",
+    ]
+    assert _calculate_temporal_resolution(minute_values) == "PT15M"
+
+    # Test edge cases
+    assert _calculate_temporal_resolution([]) == "PT1H"  # Empty list
+    assert (
+        _calculate_temporal_resolution(["2023-01-01T00:00:00Z"]) == "PT1H"
+    )  # Single value
+    assert _calculate_temporal_resolution([1, 2, 3]) == "PT1H"  # Non-string values
 
 
 def test_dimension_extraction_utilities():
