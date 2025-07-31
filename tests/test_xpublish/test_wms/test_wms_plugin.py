@@ -1,4 +1,3 @@
-import json
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -154,7 +153,7 @@ def test_get_capabilities_dimensions(xpublish_client):
     air_layer = next(layer for layer in child_layers if layer.get("name") == "air")
 
     # Check for dimensions
-    if "dimensions" in air_layer and air_layer["dimensions"]:
+    if air_layer.get("dimensions"):
         dimensions = air_layer["dimensions"]
         dimension_names = [dim["name"] for dim in dimensions]
 

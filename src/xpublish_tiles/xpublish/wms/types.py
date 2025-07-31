@@ -313,9 +313,7 @@ class WMSOnlineResourceResponse(
 
 
 class WMSContactInformationResponse(BaseXmlModel, tag="ContactInformation"):
-    contact_person_primary: str | None = element(
-        tag="ContactPersonPrimary", default=None
-    )
+    contact_person_primary: str | None = element(tag="ContactPersonPrimary", default=None)
     contact_position: str | None = element(tag="ContactPosition", default=None)
     contact_address: str | None = element(tag="ContactAddress", default=None)
     contact_voice_telephone: str | None = element(
@@ -369,9 +367,7 @@ class WMSStyleResponse(BaseXmlModel, tag="Style"):
     name: str = element(tag="Name")
     title: str = element(tag="Title")
     abstract: str | None = element(tag="Abstract", default=None)
-    legend_url: WMSOnlineResourceResponse | None = element(
-        tag="LegendURL", default=None
-    )
+    legend_url: WMSOnlineResourceResponse | None = element(tag="LegendURL", default=None)
 
 
 class WMSLayerResponse(BaseXmlModel, tag="Layer"):
@@ -405,12 +401,8 @@ class WMSLayerResponse(BaseXmlModel, tag="Layer"):
         tag="FeatureListURL", default=None
     )
     styles: list[WMSStyleResponse] = element(tag="Style", default=[])
-    min_scale_denominator: float | None = element(
-        tag="MinScaleDenominator", default=None
-    )
-    max_scale_denominator: float | None = element(
-        tag="MaxScaleDenominator", default=None
-    )
+    min_scale_denominator: float | None = element(tag="MinScaleDenominator", default=None)
+    max_scale_denominator: float | None = element(tag="MaxScaleDenominator", default=None)
     layers: list["WMSLayerResponse"] = element(tag="Layer", default=[])
 
 
