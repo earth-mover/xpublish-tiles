@@ -10,7 +10,10 @@ from xpublish import Dependencies, Plugin, hookimpl
 from xarray import Dataset
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.types import QueryParams
-from xpublish_tiles.xpublish.tiles.metadata import create_tileset_metadata
+from xpublish_tiles.xpublish.tiles.metadata import (
+    create_tileset_metadata,
+    extract_dataset_extents,
+)
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     TILE_MATRIX_SETS,
@@ -116,6 +119,7 @@ class TilesPlugin(Plugin):
                     # Create layers for each data variable
                     layers = []
                     for var_name, var_data in dataset.data_vars.items():
+                        extents = extract_dataset_extents(dataset, var_name)
                         layer = Layer(
                             id=var_name,
                             title=var_data.attrs.get("long_name", var_name),
@@ -125,13 +129,14 @@ class TilesPlugin(Plugin):
                             crs=tms_summary.crs,
                             links=[
                                 Link(
-                                    href=f"./{tms_id}/{var_name}/{{tileMatrix}}/{{tileRow}}/{{tileCol}}",
+                                    href=f"./{tms_id}/{{tileMatrix}}/{{tileRow}}/{{tileCol}}?variables={var_name}",
                                     rel="item",
                                     type="image/png",
                                     title=f"Tiles for {var_name}",
                                     templated=True,
                                 )
                             ],
+                            extents=extents,
                         )
                         layers.append(layer)
 

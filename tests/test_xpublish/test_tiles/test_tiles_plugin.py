@@ -153,20 +153,23 @@ def test_tilesets_list_with_metadata():
     # Check that dimensions are no longer in layers (moved to tileset level)
     assert "dimensions" not in layer or layer["dimensions"] is None
 
-    # Test the tileset metadata endpoint to check extents
-    metadata_response = client.get("/datasets/climate/tiles/WebMercatorQuad")
-    assert metadata_response.status_code == 200
+    # Check that extents are now in the layer
+    assert "extents" in layer
+    assert layer["extents"] is not None
+    assert "time" in layer["extents"]
 
-    metadata = metadata_response.json()
-    assert "extents" in metadata
-    assert metadata["extents"] is not None
-    assert "time" in metadata["extents"]
-
-    time_extent = metadata["extents"]["time"]
+    time_extent = layer["extents"]["time"]
     assert "interval" in time_extent
     assert len(time_extent["interval"]) == 2
     assert time_extent["interval"][0] == "2020-01-01T00:00:00Z"
     assert time_extent["interval"][1] == "2020-12-01T00:00:00Z"
+
+    # Test the tileset metadata endpoint - extents should no longer be at tileset level
+    metadata_response = client.get("/datasets/climate/tiles/WebMercatorQuad")
+    assert metadata_response.status_code == 200
+
+    metadata = metadata_response.json()
+    assert "extents" not in metadata
 
 
 def test_multi_dimensional_dataset():
@@ -251,26 +254,29 @@ def test_multi_dimensional_dataset():
     # Check that dimensions are no longer in layers (moved to tileset level)
     assert "dimensions" not in layer or layer["dimensions"] is None
 
-    # Test the tileset metadata endpoint to check extents
+    # Check that extents are now in the layer
+    assert "extents" in layer
+    assert layer["extents"] is not None
+    assert len(layer["extents"]) == 3  # time, elevation, scenario
+
+    # Check time extent
+    assert "time" in layer["extents"]
+    time_extent = layer["extents"]["time"]
+    assert "interval" in time_extent
+    assert len(time_extent["interval"]) == 2
+
+    # Test the tileset metadata endpoint - extents should no longer be at tileset level
     metadata_response = client.get("/datasets/climate/tiles/WebMercatorQuad")
     assert metadata_response.status_code == 200
 
     metadata = metadata_response.json()
-    assert "extents" in metadata
-    assert metadata["extents"] is not None
-    assert len(metadata["extents"]) == 3  # time, elevation, scenario
-
-    # Check time extent
-    assert "time" in metadata["extents"]
-    time_extent = metadata["extents"]["time"]
-    assert "interval" in time_extent
-    assert len(time_extent["interval"]) == 2
+    assert "extents" not in metadata
     assert time_extent["interval"][0] == "2020-01-01T00:00:00Z"
     assert time_extent["interval"][1] == "2020-06-01T00:00:00Z"
 
-    # Check elevation extent
-    assert "elevation" in metadata["extents"]
-    elevation_extent = metadata["extents"]["elevation"]
+    # Check elevation extent (now in layer)
+    assert "elevation" in layer["extents"]
+    elevation_extent = layer["extents"]["elevation"]
     assert "interval" in elevation_extent
     assert "units" in elevation_extent
     assert elevation_extent["units"] == "meters"
@@ -278,15 +284,15 @@ def test_multi_dimensional_dataset():
     assert elevation_extent["description"] == "Elevation above sea level"
     assert elevation_extent["interval"] == [0.0, 2000.0]
 
-    # Check scenario extent (custom)
-    assert "scenario" in metadata["extents"]
-    scenario_extent = metadata["extents"]["scenario"]
+    # Check scenario extent (custom, now in layer)
+    assert "scenario" in layer["extents"]
+    scenario_extent = layer["extents"]["scenario"]
     assert "interval" in scenario_extent
     assert "description" in scenario_extent
     assert scenario_extent["description"] == "Climate scenario"
     assert scenario_extent["interval"] == ["RCP45", "RCP85", "Historical"]
 
-    from xpublish_tiles.xpublish.tiles.metadata import _extract_dataset_extents
+    from xpublish_tiles.xpublish.tiles.metadata import extract_dataset_extents
 
     # Create a dataset with multiple dimensions
     time_coords = pd.date_range("2023-01-01", periods=3, freq="H")
@@ -333,7 +339,7 @@ def test_multi_dimensional_dataset():
         }
     )
 
-    extents = _extract_dataset_extents(dataset)
+    extents = extract_dataset_extents(dataset, "temperature")
 
     # Should have 3 non-spatial dimensions
     assert len(extents) == 3

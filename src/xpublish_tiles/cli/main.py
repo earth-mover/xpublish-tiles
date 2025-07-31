@@ -42,9 +42,7 @@ def get_dataset_for_name(name: str) -> xr.Dataset:
     if name == "global":
         return create_global_dataset()
     elif name == "air":
-        ds = xr.tutorial.open_dataset("air_temperature")
-        ds = ds.isel(time=0)
-        return ds
+        return xr.tutorial.open_dataset("air_temperature")
     raise ValueError(f"Unknown dataset name: {name}")
 
 
