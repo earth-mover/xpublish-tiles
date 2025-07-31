@@ -40,7 +40,9 @@ def create_global_dataset() -> xr.Dataset:
     return uniform_grid(dims=tuple(dims), dtype=np.float32, attrs={})
 
 
-def get_dataset_for_name(name: str, branch: str = "main", group: str = "") -> xr.Dataset:
+def get_dataset_for_name(
+    name: str, branch: str = "main", group: str = "", icechunk_cache: bool = False
+) -> xr.Dataset:
     if name == "global":
         return create_global_dataset()
     elif name == "air":
@@ -51,8 +53,18 @@ def get_dataset_for_name(name: str, branch: str = "main", group: str = "") -> xr
 
         import icechunk
 
+        config: icechunk.RepositoryConfig | None = None
+        if icechunk_cache:
+            config = icechunk.RepositoryConfig(
+                caching=icechunk.CachingConfig(
+                    num_bytes_chunks=1073741824,
+                    num_chunk_refs=1073741824,
+                    num_bytes_attributes=100_000_000,
+                )
+            )
+
         client = Client()
-        repo = cast(icechunk.Repository, client.get_repo(name))
+        repo = cast(icechunk.Repository, client.get_repo(name, config=config))
         session = repo.readonly_session(branch=branch)
         return xr.open_zarr(
             session.store,
@@ -97,6 +109,12 @@ def main():
         type=str,
         default="",
         help="Group to use for Arraylake (default: '').",
+    )
+    parser.add_argument(
+        "--cache",
+        action="store_true",
+        default=False,
+        help="Enable the icechunk cache for Arraylake datasets (default: False)",
     )
     args = parser.parse_args()
 
