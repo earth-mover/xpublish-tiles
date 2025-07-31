@@ -101,42 +101,6 @@ def check_bbox_overlap(
     return False
 
 
-def pad_bbox(
-    bbox: pyproj.aoi.BBox, da: xr.DataArray, x_dim: str, y_dim: str
-) -> pyproj.aoi.BBox:
-    """
-    Extend bbox slightly to account for discrete coordinate sampling.
-    This prevents transparency gaps at tile edges due to coordinate resolution.
-
-    The function ensures that the padded bbox does not cross the anti-meridian
-    by checking if padding would cause west > east.
-    """
-    x = da[x_dim].data
-    y = da[y_dim].data
-
-    # Extend bbox by one coordinate spacing on each side
-    # This is needed for high zoom tiles smaller than coordinate spacing
-    x_pad = abs(float(x[1] - x[0]))
-    y_pad = abs(float(y[1] - y[0]))
-
-    padded_west = float(bbox.west - x_pad)
-    padded_east = float(bbox.east + x_pad)
-
-    # Check if padding would cause anti-meridian crossing
-    # This happens when the padded west > padded east
-    if padded_west > padded_east:
-        # Don't pad in the x direction to avoid crossing
-        padded_west = float(bbox.west)
-        padded_east = float(bbox.east)
-
-    return pyproj.aoi.BBox(
-        west=padded_west,
-        east=padded_east,
-        south=float(bbox.south - y_pad),
-        north=float(bbox.north + y_pad),
-    )
-
-
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = apply_query(ds, variables=query.variables, selectors=query.selectors)
     subsets = subset_to_bbox(validated, bbox=query.bbox, crs=query.crs)
@@ -224,8 +188,8 @@ def subset_to_bbox(
             continue
 
         # Create extended bbox to prevent coordinate sampling gaps
-        extended_bbox = pad_bbox(input_bbox, array.da, grid.X, grid.Y)
-
+        # This is a lot easier to do in coordinate space because of anti-meridian handling
+        extended_bbox = grid.pad_bbox(input_bbox, array.da)
         subset = grid.sel(array.da, bbox=extended_bbox)
 
         # Check for insufficient data - either dimension has too few points
