@@ -1,7 +1,7 @@
 """Utilities for WMS dataset introspection and metadata extraction"""
 
+import matplotlib.pyplot as plt
 import numpy as np
-
 import xarray as xr
 from xpublish_tiles.xpublish.wms.types import (
     WMSBoundingBoxResponse,
@@ -167,6 +167,38 @@ def extract_dimensions(dataset: xr.Dataset) -> list[WMSDimensionResponse]:
     return dimensions
 
 
+def get_available_raster_styles() -> list[WMSStyleResponse]:
+    """Get all available raster styles based on matplotlib colormaps."""
+    styles = []
+
+    # Add default raster style
+    styles.append(
+        WMSStyleResponse(
+            name="raster",
+            title="Default Raster Style",
+            abstract="Default raster rendering style",
+        )
+    )
+
+    # Get all available matplotlib colormaps
+    colormaps = sorted(plt.colormaps())
+
+    for cmap_name in colormaps:
+        # Skip reversed colormaps to avoid duplication (they end with '_r')
+        if cmap_name.endswith("_r"):
+            continue
+
+        styles.append(
+            WMSStyleResponse(
+                name=f"raster/{cmap_name}",
+                title=f"Raster - {cmap_name.title()}",
+                abstract=f"Raster rendering using {cmap_name} colormap",
+            )
+        )
+
+    return styles
+
+
 def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]:
     """Extract layer information from dataset data variables.
 
@@ -207,15 +239,8 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
     # Extract dimensions
     dimensions = extract_dimensions(dataset)
 
-    # Default styles
-    default_styles = [
-        WMSStyleResponse(
-            name="default", title="Default Style", abstract="Default rendering style"
-        ),
-        WMSStyleResponse(
-            name="raster", title="Raster Style", abstract="Raster rendering style"
-        ),
-    ]
+    # Get all available raster styles
+    available_styles = get_available_raster_styles()
 
     for var_name, var in dataset.data_vars.items():
         # Extract variable metadata
@@ -230,7 +255,7 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
             ex_geographic_bounding_box=geo_bbox,
             bounding_box=bounding_boxes,
             dimensions=dimensions,
-            styles=default_styles,
+            styles=available_styles,
             queryable=True,
             opaque=False,
         )

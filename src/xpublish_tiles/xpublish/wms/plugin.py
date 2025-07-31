@@ -113,7 +113,9 @@ class WMSPlugin(Plugin):
                     xml_content = xml_str.encode("utf-8")
 
                 return Response(
-                    content=xml_content, media_type="application/vnd.ogc.wms_xml"
+                    content=xml_content,
+                    media_type="text/xml",
+                    headers={"Content-Type": "text/xml; charset=utf-8"},
                 )
 
         return router

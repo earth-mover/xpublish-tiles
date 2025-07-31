@@ -27,7 +27,7 @@ def test_get_capabilities_xml(xpublish_client):
         params={"service": "WMS", "version": "1.3.0", "request": "GetCapabilities"},
     )
     assert response.status_code == 200
-    assert response.headers["content-type"] == "application/vnd.ogc.wms_xml"
+    assert response.headers["content-type"] == "text/xml; charset=utf-8"
 
     # Parse XML to ensure it's valid
     root = ET.fromstring(response.content)
@@ -96,7 +96,7 @@ def test_get_capabilities_content_negotiation(xpublish_client):
         headers={"Accept": "application/xml"},
     )
     assert response.status_code == 200
-    assert response.headers["content-type"] == "application/vnd.ogc.wms_xml"
+    assert response.headers["content-type"] == "text/xml; charset=utf-8"
 
 
 def test_get_capabilities_layers(xpublish_client):
