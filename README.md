@@ -69,6 +69,13 @@ Once running, the server provides:
 - WMS API at `http://localhost:8080/wms/`
 - Interactive API documentation at `http://localhost:8080/docs`
 
-## Examples
+An example tile url:
+```
+http://localhost:8080/tiles/WebMercatorQuad/4/4/14?variables=2t&style=raster/viridis&colorscalerange=280,300&width=256&height=256&valid_time=2025-04-03T06:00:00
+```
+
+Where `4/4/14` represents the tile coordinates in {z}/{y}/{x}
+
+## Integration Examples
 
 - [Mapbox Usage](./examples/mapbox/)
