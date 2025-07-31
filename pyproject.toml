@@ -46,6 +46,7 @@ dev = [
     "syrupy>=4.9.1",
     "pooch>=1.8.2",
     "hypothesis>=6.136.6",
+    "dask",
 ]
 
 [project.entry-points."xpublish.plugin"]
