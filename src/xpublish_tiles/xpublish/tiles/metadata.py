@@ -29,9 +29,6 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
     # Extract dataset bounds
     dataset_bounds = extract_dataset_bounds(dataset)
 
-    # Extract dimension extents from all dataset variables
-    extents = _extract_dataset_extents(dataset)
-
     # Create main tileset metadata
     return TileSetMetadata(
         title=f"{title} - {tile_matrix_set_id}",
@@ -54,18 +51,25 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
             ),
         ],
         boundingBox=dataset_bounds,
-        extents=extents if extents else None,
     )
 
 
-def _extract_dataset_extents(dataset: Dataset) -> dict[str, dict[str, Any]]:
+def extract_dataset_extents(
+    dataset: Dataset, variable_name: str | None
+) -> dict[str, dict[str, Any]]:
     """Extract dimension extents from dataset and convert to OGC format"""
     extents = {}
 
     # Collect all dimensions from all data variables
     all_dimensions = {}
 
-    for var_data in dataset.data_vars.values():
+    # When a variable name is provided, extract dimensions from that variable only
+    if variable_name:
+        ds = dataset[[variable_name]]
+    else:
+        ds = dataset
+
+    for var_data in ds.data_vars.values():
         dimensions = extract_dimension_extents(var_data)
         for dim in dimensions:
             # Use the first occurrence of each dimension name

@@ -466,14 +466,6 @@ class TileSetMetadata(BaseModel):
             }
         ),
     ] = None
-    extents: Annotated[
-        Optional[dict[str, dict[str, Any]]],
-        Field(
-            json_schema_extra={
-                "description": "Extents for additional dimensions (temporal, elevation, etc.)",
-            }
-        ),
-    ] = None
 
 
 class TileMatrixSetLimit(BaseModel):
@@ -1000,6 +992,14 @@ class Layer(BaseModel):
         Field(
             json_schema_extra={
                 "description": "Links related to this layer",
+            }
+        ),
+    ] = None
+    extents: Annotated[
+        Optional[dict[str, dict[str, Any]]],
+        Field(
+            json_schema_extra={
+                "description": "Extents for additional dimensions (temporal, elevation, etc.)",
             }
         ),
     ] = None
