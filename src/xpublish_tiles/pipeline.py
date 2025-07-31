@@ -111,30 +111,16 @@ def pad_bbox(
     The function ensures that the padded bbox does not cross the anti-meridian
     by checking if padding would cause west > east.
     """
-    x_coord = da[x_dim]
-    y_coord = da[y_dim]
-
-    # Calculate coordinate spacing (use first difference for consistency across platforms)
-    if x_coord.size > 1:
-        x_spacing = float(x_coord.values[1] - x_coord.values[0])
-    else:
-        x_spacing = 0.0
-
-    if y_coord.size > 1:
-        y_spacing = float(y_coord.values[1] - y_coord.values[0])
-    else:
-        y_spacing = 0.0
+    x = da[x_dim].data
+    y = da[y_dim].data
 
     # Extend bbox by one coordinate spacing on each side
     # This is needed for high zoom tiles smaller than coordinate spacing
-    x_pad = abs(x_spacing)
-    y_pad = abs(y_spacing)
+    x_pad = abs(float(x[1] - x[0]))
+    y_pad = abs(float(y[1] - y[0]))
 
-    # Calculate padded values
     padded_west = float(bbox.west - x_pad)
     padded_east = float(bbox.east + x_pad)
-    padded_south = float(bbox.south - y_pad)
-    padded_north = float(bbox.north + y_pad)
 
     # Check if padding would cause anti-meridian crossing
     # This happens when the padded west > padded east
@@ -146,8 +132,8 @@ def pad_bbox(
     return pyproj.aoi.BBox(
         west=padded_west,
         east=padded_east,
-        south=padded_south,
-        north=padded_north,
+        south=float(bbox.south - y_pad),
+        north=float(bbox.north + y_pad),
     )
 
 
