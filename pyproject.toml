@@ -19,6 +19,8 @@ dependencies = [
     "numba>=0.60.0",
     "pydantic-xml>=2.17.3",
     "pyproj>=3.7.1",
+    "xpublish>=0.3.0",
+    "fastapi",
     "xarray @ git+https://github.com/dcherian/xarray.git@async.load",
     "zarr @ git+https://github.com/zarr-developers/zarr-python.git@main",
 ]

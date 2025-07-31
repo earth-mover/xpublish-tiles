@@ -88,7 +88,7 @@ class PopulatedRenderContext(RenderContext):
     bbox: OutputBBox
 
     async def async_load(self) -> Self:
-        new_data = await self.da.async_load()
+        new_data = await self.da.load_async()
         return type(self)(
             da=new_data, datatype=self.datatype, grid=self.grid, bbox=self.bbox
         )
