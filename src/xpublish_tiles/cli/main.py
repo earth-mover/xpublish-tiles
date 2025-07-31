@@ -81,7 +81,7 @@ def main():
     )
     parser.add_argument(
         "--dataset",
-        choices=["global", "air", "{arraylake-org}/{arraylake-repo}"],
+        type=str,
         default="global",
         help="Dataset to serve (default: global). If an arraylake dataset is specified, the arraylake-org and arraylake-repo must be provided, along with an optional branch and group",
     )
