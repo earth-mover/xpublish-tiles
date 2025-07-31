@@ -6,6 +6,7 @@ from typing import cast
 import cf_xarray  # noqa: F401
 import numpy as np
 import xpublish
+from fastapi.middleware.cors import CORSMiddleware
 
 import xarray as xr
 from xpublish_tiles.datasets import Dim, uniform_grid
@@ -102,6 +103,8 @@ def main():
     ds = get_dataset_for_name(args.dataset, args.branch, args.group)
 
     rest = xpublish.SingleDatasetRest(
-        ds, plugins={"tiles": TilesPlugin(), "wms": WMSPlugin()}
+        ds,
+        plugins={"tiles": TilesPlugin(), "wms": WMSPlugin()},
     )
+    rest.app.add_middleware(CORSMiddleware, allow_origins=["*"])
     rest.serve(host="0.0.0.0", port=8080)
