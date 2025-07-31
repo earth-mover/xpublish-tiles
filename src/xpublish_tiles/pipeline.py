@@ -194,6 +194,10 @@ def subset_to_bbox(
     result = {}
     for var_name, array in validated.items():
         grid = array.grid
+        # Check for insufficient data - either dimension has too few points
+        if min(array.da.shape) < 2:
+            raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
+
         if not isinstance(grid, Rectilinear | Curvilinear):
             raise NotImplementedError(f"{grid=!r} not supported yet.")
         # Cast to help type checker understand narrowed type
