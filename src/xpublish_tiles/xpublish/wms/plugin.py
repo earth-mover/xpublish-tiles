@@ -57,67 +57,66 @@ class WMSPlugin(Plugin):
                     # TODO: Implement GetFeatureInfo response
                     return {"message": "GetFeatureInfo"}
 
-        async def handle_get_capabilities(
-            request: Request, query: WMSGetCapabilitiesQuery, dataset: xr.Dataset
-        ) -> Response:
-            """Handle WMS GetCapabilities requests with content negotiation."""
-
-            # Determine response format from Accept header or format parameter
-            accept_header = request.headers.get("accept", "")
-            format_param = request.query_params.get("format", "").lower()
-
-            # Default to XML for WMS compliance
-            response_format = "xml"
-
-            if format_param:
-                if format_param in ["json", "application/json"]:
-                    response_format = "json"
-                elif format_param in ["xml", "text/xml", "application/xml"]:
-                    response_format = "xml"
-            elif "application/json" in accept_header:
-                response_format = "json"
-
-            # Get base URL from request
-            base_url = str(request.url).split("?")[0]
-
-            # Create capabilities response
-            capabilities = create_capabilities_response(
-                dataset=dataset,
-                base_url=base_url,
-                version=query.version,
-                service_title="XPublish WMS Service",
-                service_abstract="Web Map Service powered by XPublish and xarray",
-            )
-
-            if response_format == "json":
-                # Return JSON response
-                return Response(
-                    content=capabilities.model_dump_json(indent=2, exclude_none=True),
-                    media_type="application/json",
-                )
-            else:
-                # Return XML response
-                xml_content = capabilities.to_xml(
-                    xml_declaration=True, encoding="UTF-8", skip_empty=True
-                )
-
-                # Fix missing xlink namespace declaration
-                xml_str = (
-                    xml_content.decode("utf-8")
-                    if isinstance(xml_content, bytes)
-                    else xml_content
-                )
-                if "xmlns:xlink" not in xml_str and "xlink:" in xml_str:
-                    xml_str = xml_str.replace(
-                        'xmlns:ns0="http://www.opengis.net/wms"',
-                        'xmlns:ns0="http://www.opengis.net/wms" xmlns:xlink="http://www.w3.org/1999/xlink"',
-                    )
-                    xml_content = xml_str.encode("utf-8")
-
-                return Response(
-                    content=xml_content,
-                    media_type="text/xml",
-                    headers={"Content-Type": "text/xml; charset=utf-8"},
-                )
-
         return router
+
+
+async def handle_get_capabilities(
+    request: Request, query: WMSGetCapabilitiesQuery, dataset: xr.Dataset
+) -> Response:
+    """Handle WMS GetCapabilities requests with content negotiation."""
+
+    # Determine response format from Accept header or format parameter
+    accept_header = request.headers.get("accept", "")
+    format_param = request.query_params.get("format", "").lower()
+
+    # Default to XML for WMS compliance
+    response_format = "xml"
+
+    if format_param:
+        if format_param in ["json", "application/json"]:
+            response_format = "json"
+        elif format_param in ["xml", "text/xml", "application/xml"]:
+            response_format = "xml"
+    elif "application/json" in accept_header:
+        response_format = "json"
+
+    # Get base URL from request
+    base_url = str(request.url).split("?")[0]
+
+    # Create capabilities response
+    capabilities = create_capabilities_response(
+        dataset=dataset,
+        base_url=base_url,
+        version=query.version,
+        service_title="XPublish WMS Service",
+        service_abstract="Web Map Service powered by XPublish and xarray",
+    )
+
+    if response_format == "json":
+        # Return JSON response
+        return Response(
+            content=capabilities.model_dump_json(indent=2, exclude_none=True),
+            media_type="application/json",
+        )
+    else:
+        # Return XML response
+        xml_content = capabilities.to_xml(
+            xml_declaration=True, encoding="UTF-8", skip_empty=True
+        )
+
+        # Fix missing xlink namespace declaration
+        xml_str = (
+            xml_content.decode("utf-8") if isinstance(xml_content, bytes) else xml_content
+        )
+        if "xmlns:xlink" not in xml_str and "xlink:" in xml_str:
+            xml_str = xml_str.replace(
+                'xmlns:ns0="http://www.opengis.net/wms"',
+                'xmlns:ns0="http://www.opengis.net/wms" xmlns:xlink="http://www.w3.org/1999/xlink"',
+            )
+            xml_content = xml_str.encode("utf-8")
+
+        return Response(
+            content=xml_content,
+            media_type="text/xml",
+            headers={"Content-Type": "text/xml; charset=utf-8"},
+        )
