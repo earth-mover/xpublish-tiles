@@ -92,12 +92,14 @@ class WMSPlugin(Plugin):
             if response_format == "json":
                 # Return JSON response
                 return Response(
-                    content=capabilities.model_dump_json(indent=2),
+                    content=capabilities.model_dump_json(indent=2, exclude_none=True),
                     media_type="application/json",
                 )
             else:
                 # Return XML response
-                xml_content = capabilities.to_xml(xml_declaration=True, encoding="UTF-8")
+                xml_content = capabilities.to_xml(
+                    xml_declaration=True, encoding="UTF-8", skip_empty=True
+                )
 
                 # Fix missing xlink namespace declaration
                 xml_str = (
