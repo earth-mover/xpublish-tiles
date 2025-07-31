@@ -12,67 +12,44 @@ import xarray as xr
 DEFAULT_CRS = pyproj.CRS.from_epsg(4326)
 
 
+def pad_bbox(
+    bbox: pyproj.aoi.BBox, da: xr.DataArray, x_dim: str, y_dim: str
+) -> pyproj.aoi.BBox:
+    """
+    Extend bbox slightly to account for discrete coordinate sampling.
+    This prevents transparency gaps at tile edges due to coordinate resolution.
+
+    The function ensures that the padded bbox does not cross the anti-meridian
+    by checking if padding would cause west > east.
+    """
+    x = da[x_dim].data
+    y = da[y_dim].data
+
+    # Extend bbox by maximum coordinate spacing on each side
+    # This is needed for high zoom tiles smaller than coordinate spacing
+    x_pad = np.abs(np.diff(x)).max()
+    y_pad = np.abs(np.diff(y)).max()
+
+    padded_west = float(bbox.west - x_pad)
+    padded_east = float(bbox.east + x_pad)
+
+    # Check if padding would cause anti-meridian crossing
+    # This happens when the padded west > padded east
+    if padded_west > padded_east:
+        # Don't pad in the x direction to avoid crossing
+        padded_west = float(bbox.west)
+        padded_east = float(bbox.east)
+
+    return pyproj.aoi.BBox(
+        west=padded_west,
+        east=padded_east,
+        south=float(bbox.south - y_pad),
+        north=float(bbox.north + y_pad),
+    )
+
+
 def is_rotated_pole(crs: pyproj.CRS) -> bool:
     return crs.to_cf().get("grid_mapping_name") == "rotated_latitude_longitude"
-
-
-def _normalize_longitudes_to_180(result: xr.DataArray, x_coord_name: str) -> xr.DataArray:
-    """
-    Normalize longitude coordinates to -180→180 convention for consistent output.
-
-    This function handles the conversion from 0→360 coordinates to -180→180,
-    while preserving spatial continuity for coordinates that span the 180°/360° boundary.
-
-    The data are _not_ re-ordered to yield sorted coordinates, i.e. we are
-    assuming that the renderer can handle this.
-
-    Parameters
-    ----------
-    result : xr.DataArray
-        Data array with longitude coordinates to normalize
-    x_coord_name : str
-        Name of the longitude coordinate dimension
-
-    Returns
-    -------
-    xr.DataArray
-        Data array with normalized longitude coordinates in -180→180 format
-    """
-    if x_coord_name not in result.coords:
-        return result
-
-    lon_coord = result.coords[x_coord_name]
-    lon_values = lon_coord.data
-
-    # Assert coordinates are not empty
-    assert lon_values.size > 0, f"Empty longitude coordinate array: {x_coord_name}"
-
-    # Check if coordinates span the 180°/360° boundary before conversion
-    original_min, original_max = lon_values.min(), lon_values.max()
-    spans_180_boundary = (
-        original_min < 180 and original_max >= 180 and (original_max - original_min) < 180
-    )
-
-    # Convert 0→360 to -180→180
-    converted_values = ((lon_values + 180) % 360) - 180
-
-    # If original data spanned 180° boundary and conversion created apparent anti-meridian crossing,
-    # adjust the converted values to maintain spatial continuity
-    if spans_180_boundary:
-        converted_min, converted_max = (
-            converted_values.min(),
-            converted_values.max(),
-        )
-        if converted_max - converted_min > 180:
-            # Apparent anti-meridian crossing after conversion
-            # Convert negative values back to positive to maintain continuity
-            converted_values = np.where(
-                converted_values < 0, converted_values + 360, converted_values
-            )
-
-    return result.assign_coords(
-        {x_coord_name: (lon_coord.dims, converted_values, lon_coord.attrs)}
-    )
 
 
 def _handle_longitude_selection(
@@ -138,10 +115,13 @@ def _handle_longitude_selection(
         if bbox_west_360 > bbox_east_360:
             # Bbox crosses 360°/0° boundary - need to select two ranges
             # Return two slices: [bbox_west_360, 360] and [0, bbox_east_360]
-            return (slice(bbox_west_360, 360), slice(0, bbox_east_360))
+            slice1 = slice(bbox_west_360, 360)
+            slice2 = slice(0, bbox_east_360)
+            return (slice1, slice2)
         else:
-            # Normal case - single range in 0→360 convention
-            return (slice(bbox_west_360, bbox_east_360),)
+            # Single range in 0→360 convention - but need to convert coordinates for tiles at -180° boundary
+            single_slice = slice(bbox_west_360, bbox_east_360)
+            return (single_slice,)
     else:
         # Use original bbox coordinates (data is -180→180 or no negative bbox values)
         return (slice(bbox_west, bbox_east),)
@@ -161,14 +141,22 @@ class GridSystem:
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("Subclasses must implement sel method")
 
+    def pad_bbox(self, bbox: pyproj.aoi.BBox, da: xr.DataArray) -> pyproj.aoi.BBox:
+        """Extend bbox slightly to account for discrete coordinate sampling."""
+        raise NotImplementedError("Subclasses must implement pad_bbox method")
+
 
 @dataclass(kw_only=True)
 class RasterAffine(GridSystem):
-    """2D horizontal grid defined by an affine transfo."""
+    """2D horizontal grid defined by an affine transform."""
 
     crs: pyproj.CRS
     bbox: pyproj.aoi.BBox
     indexes: tuple[xr.Index, ...]
+
+    def pad_bbox(self, bbox: pyproj.aoi.BBox, da: xr.DataArray) -> pyproj.aoi.BBox:
+        """Extend bbox slightly to account for discrete coordinate sampling."""
+        raise NotImplementedError("pad_bbox not implemented for RasterAffine grids")
 
 
 @dataclass(kw_only=True)
@@ -221,16 +209,21 @@ class Rectilinear(GridSystem):
                     results.append(da.sel(subset_slicers))
                 # Concatenate along longitude dimension
                 result = xr.concat(results, dim=self.X)
+
         else:
             # Non-geographic coordinates
             slicers[self.X] = slice(bbox.west, bbox.east)
             result = da.sel(slicers)
 
-        # Convert longitude coordinates to -180→180 convention for consistent output
-        if self.crs.is_geographic:
-            result = _normalize_longitudes_to_180(result, self.X)
+        # Apply smart longitude conversion only when needed for coordinate system compatibility
+        # if self.crs.is_geographic:
+        #     result = ensure_continuous_longitudes(result, self.X, bbox)
 
         return result
+
+    def pad_bbox(self, bbox: pyproj.aoi.BBox, da: xr.DataArray) -> pyproj.aoi.BBox:
+        """Extend bbox slightly to account for discrete coordinate sampling."""
+        return pad_bbox(bbox, da, self.X, self.Y)
 
 
 @dataclass(kw_only=True)
@@ -269,12 +262,11 @@ class Curvilinear(GridSystem):
         }
 
         result = da.isel(slicers)
-
-        # Convert longitude coordinates to -180→180 convention for consistent output
-        if self.crs.is_geographic:
-            result = _normalize_longitudes_to_180(result, self.X)
-
         return result
+
+    def pad_bbox(self, bbox: pyproj.aoi.BBox, da: xr.DataArray) -> pyproj.aoi.BBox:
+        """Extend bbox slightly to account for discrete coordinate sampling."""
+        return pad_bbox(bbox, da, self.X, self.Y)
 
     # def sel_ndpoint(self, da: xr.DataArray, *, bbox: pyproj.aoi.BBox) -> xr.DataArray:
     #     # https://github.com/pydata/xarray/issues/10572
@@ -308,6 +300,14 @@ class Curvilinear(GridSystem):
 class DGGS(GridSystem):
     cells: str
     indexes: tuple[xr.Index, ...]
+
+    def sel(self, da: xr.DataArray, *, bbox: pyproj.aoi.BBox) -> xr.DataArray:
+        """Select a subset of the data array using a bounding box."""
+        raise NotImplementedError("sel not implemented for DGGS grids")
+
+    def pad_bbox(self, bbox: pyproj.aoi.BBox, da: xr.DataArray) -> pyproj.aoi.BBox:
+        """Extend bbox slightly to account for discrete coordinate sampling."""
+        raise NotImplementedError("pad_bbox not implemented for DGGS grids")
 
 
 def _guess_grid_mapping_and_crs(

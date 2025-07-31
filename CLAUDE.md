@@ -28,3 +28,8 @@ ALWAYS run pre-commit checks before committing.
 ALWAYS put imports at the top of the file unless you need to avoid circular import issues.
 Do not add obvious or silly comments. Code should be self-explanatory.
 For pytest fixtures, prefer separate independent parametrized inputs over using itertools.product() for cleaner test combinations.
+Do not recreate snapshots by default.
+Do not add unnecessary comments.
+Add imports to the top of the file unless necessary to avoid circular imports.
+Never add try/except clauses that catch Exceptions in a test.
+Never remove test cases without confirming with me first.

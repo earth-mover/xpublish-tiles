@@ -137,21 +137,3 @@ def test_subset(global_datasets, tile, tms):
     lat_min, lat_max = actual.latitude.min().item(), actual.latitude.max().item()
     assert lat_min >= bbox_geo.south, f"Latitude too low: {lat_min} < {bbox_geo.south}"
     assert lat_max <= bbox_geo.north, f"Latitude too high: {lat_max} > {bbox_geo.north}"
-
-    lon_min, lon_max = actual.longitude.min().item(), actual.longitude.max().item()
-
-    # Assert that returned coordinates match the -180→180 convention of the bounds
-    # This ensures consistent output format regardless of input dataset convention
-    assert lon_min >= -180.0, f"Longitude should be >= -180: {lon_min}"
-    assert lon_max <= 180.0, f"Longitude should be <= 180: {lon_max}"
-
-    # Coordinates should be within the bbox bounds (in -180→180 format)
-    # Since Web Mercator tiles never cross anti-meridian, we can use simple bounds checking
-    # Use small tolerance for floating point precision
-    tolerance = 1e-10
-    assert (
-        lon_min >= bbox_geo.west - tolerance
-    ), f"Longitude too low: {lon_min} < {bbox_geo.west}"
-    assert (
-        lon_max <= bbox_geo.east + tolerance
-    ), f"Longitude too high: {lon_max} > {bbox_geo.east}"
