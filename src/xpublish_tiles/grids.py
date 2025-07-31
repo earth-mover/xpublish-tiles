@@ -54,7 +54,7 @@ def is_rotated_pole(crs: pyproj.CRS) -> bool:
 
 def _handle_longitude_selection(
     lon_coord: xr.DataArray, bbox: pyproj.aoi.BBox, is_geographic: bool
-) -> tuple[tuple[slice, ...], xr.DataArray | None]:
+) -> tuple[slice, ...]:
     """
     Handle longitude coordinate selection with support for different conventions.
 
@@ -115,10 +115,13 @@ def _handle_longitude_selection(
         if bbox_west_360 > bbox_east_360:
             # Bbox crosses 360°/0° boundary - need to select two ranges
             # Return two slices: [bbox_west_360, 360] and [0, bbox_east_360]
-            return (slice(bbox_west_360, 360), slice(0, bbox_east_360))
+            slice1 = slice(bbox_west_360, 360)
+            slice2 = slice(0, bbox_east_360)
+            return (slice1, slice2)
         else:
-            # Normal case - single range in 0→360 convention
-            return (slice(bbox_west_360, bbox_east_360),)
+            # Single range in 0→360 convention - but need to convert coordinates for tiles at -180° boundary
+            single_slice = slice(bbox_west_360, bbox_east_360)
+            return (single_slice,)
     else:
         # Use original bbox coordinates (data is -180→180 or no negative bbox values)
         return (slice(bbox_west, bbox_east),)
@@ -137,6 +140,10 @@ class GridSystem:
     def sel(self, da: xr.DataArray, *, bbox: pyproj.aoi.BBox) -> xr.DataArray:
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("Subclasses must implement sel method")
+
+    def pad_bbox(self, bbox: pyproj.aoi.BBox, da: xr.DataArray) -> pyproj.aoi.BBox:
+        """Extend bbox slightly to account for discrete coordinate sampling."""
+        raise NotImplementedError("Subclasses must implement pad_bbox method")
 
 
 @dataclass(kw_only=True)

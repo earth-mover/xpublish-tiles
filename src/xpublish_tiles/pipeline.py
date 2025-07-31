@@ -3,6 +3,7 @@ import io
 from functools import lru_cache, partial
 from typing import Any, cast
 
+import numpy as np
 import pyproj
 import pyproj.aoi
 
@@ -198,6 +199,46 @@ def subset_to_bbox(
 
         bx, by = xr.broadcast(subset[grid.X], subset[grid.Y])
         newX, newY = input_to_output.transform(bx.data, by.data)
+
+        # Smart coordinate fixing: detect large gaps and apply precise corrections
+        # This fixes coordinate discontinuities that cause transparent pixels in rendered tiles
+        if grid.crs.is_geographic:
+            newX_flat = newX.flatten()
+            newX_sorted = np.sort(newX_flat)
+            gaps = np.diff(newX_sorted)
+
+            if len(gaps) > 0:
+                max_gap = gaps.max()
+
+                # Calculate coordinate space width using transformer bounds
+                x_neg180, _ = input_to_output.transform(-180.0, 0.0)
+                x_pos180, _ = input_to_output.transform(180.0, 0.0)
+                coordinate_space_width = abs(x_pos180 - x_neg180)
+
+                # Apply fix if gap is significant (>30% of coordinate space width)
+                if max_gap > coordinate_space_width * 0.3:
+                    gap_idx = np.argmax(gaps)
+                    split_value = newX_sorted[gap_idx]
+
+                    # Identify coordinates on each side of the gap
+                    low_side_mask = newX <= split_value
+                    high_side_mask = newX > split_value
+
+                    # Apply offset to the smaller group to make coordinates continuous
+                    low_count = np.sum(low_side_mask)
+                    high_count = np.sum(high_side_mask)
+
+                    if low_count < high_count:
+                        # More coordinates on high side, shift low side up
+                        newX = np.where(
+                            low_side_mask, newX + coordinate_space_width, newX
+                        )
+                    else:
+                        # More coordinates on low side, shift high side down
+                        newX = np.where(
+                            high_side_mask, newX - coordinate_space_width, newX
+                        )
+
         newda = subset.assign_coords(
             {bx.name: bx.copy(data=newX), by.name: by.copy(data=newY)}
         )
