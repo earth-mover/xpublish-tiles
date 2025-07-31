@@ -238,6 +238,10 @@ def subset_to_bbox(
 
         subset = grid.sel(array.da, bbox=extended_bbox)
 
+        # Check for insufficient data - either dimension has too few points
+        if min(subset.shape) < 2:
+            raise ValueError("Tile request resulted in insufficient data for rendering.")
+
         bx, by = xr.broadcast(subset[grid.X], subset[grid.Y])
         newX, newY = input_to_output.transform(bx.data, by.data)
         newda = subset.assign_coords(
