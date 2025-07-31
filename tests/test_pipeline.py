@@ -3,6 +3,7 @@
 import io
 
 import cf_xarray  # noqa: F401 - Enable cf accessor
+import morecantile
 import numpy as np
 import pytest
 from hypothesis import example, given
@@ -11,9 +12,22 @@ from PIL import Image
 from pyproj import CRS
 from pyproj.aoi import BBox
 
-from tests.tiles import TILES
-from xpublish_tiles.pipeline import check_bbox_overlap, pipeline
+from tests.tiles import TILES, WEBMERC_TMS
+from xpublish_tiles.datasets import create_global_dataset
+from xpublish_tiles.pipeline import (
+    check_bbox_overlap,
+    pipeline,
+)
 from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams, Style
+
+
+def is_png(buffer: io.BytesIO) -> bool:
+    """Check if a BytesIO buffer contains valid PNG data."""
+    buffer.seek(0)
+    header = buffer.read(8)
+    buffer.seek(0)
+    # PNG signature: 89 50 4E 47 0D 0A 1A 0A
+    return header == b"\x89PNG\r\n\x1a\n"
 
 
 def check_transparent_pixels(image_bytes):
@@ -75,7 +89,7 @@ def test_bbox_overlap_detection(bbox, grid_config):
     )
 
 
-def create_query_params(tile, tms):
+def create_query_params(tile, tms, *, colorscalerange=None):
     """Create QueryParams instance using test tiles and TMS."""
 
     # Convert TMS CRS to pyproj CRS
@@ -99,9 +113,26 @@ def create_query_params(tile, tms):
         width=256,
         height=256,
         cmap="viridis",
-        colorscalerange=None,
+        colorscalerange=colorscalerange,
         format=ImageFormat.PNG,
     )
+
+
+def assert_render_matches_snapshot(result: io.BytesIO, png_snapshot):
+    """Helper function to validate PNG content against snapshot."""
+    assert isinstance(result, io.BytesIO)
+    result.seek(0)
+    content = result.read()
+
+    assert len(content) > 0
+
+    # Check for transparent pixels - there should be none with bbox padding
+    transparent_percent = check_transparent_pixels(content)
+    assert (
+        transparent_percent == 0
+    ), f"Found {transparent_percent:.1f}% transparent pixels."
+
+    assert content == png_snapshot
 
 
 @pytest.mark.asyncio
@@ -111,16 +142,17 @@ async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot):
     ds = global_datasets
     query_params = create_query_params(tile, tms)
     result = await pipeline(ds, query_params)
-    assert isinstance(result, io.BytesIO)
-    result.seek(0)
-    content = result.read()
-    assert len(content) > 0
+    assert_render_matches_snapshot(result, png_snapshot)
 
-    # Check for transparent pixels - there should be none with bbox padding
-    transparent_percent = check_transparent_pixels(content)
-    assert transparent_percent == 0, (
-        f"Found {transparent_percent:.1f}% transparent pixels in tile "
-        f"{tile} with TMS {tms.id}. This indicates a data transformation issue."
-    )
 
-    assert content == png_snapshot
+@pytest.mark.asyncio
+async def test_high_zoom_tile_global_dataset(png_snapshot):
+    ds = create_global_dataset()
+    tms = WEBMERC_TMS
+
+    tile = morecantile.Tile(x=524288 + 2916, y=262144, z=20)
+
+    query_params = create_query_params(tile, tms, colorscalerange=(-1, 1))
+    # Run the full pipeline
+    result = await pipeline(ds, query_params)
+    assert_render_matches_snapshot(result, png_snapshot)

@@ -7,7 +7,7 @@ from syrupy.extensions.image import PNGImageSnapshotExtension
 
 import icechunk
 import xarray as xr
-from xpublish_tiles.datasets import Dim, uniform_grid
+from xpublish_tiles.datasets import create_global_dataset
 
 ARRAYLAKE_REPO = "earthmover-integration/tiles-datasets-develop"
 
@@ -89,35 +89,12 @@ def repo(where, prefix):
 )
 def global_datasets(request):
     param = request.param
-    dims = []
 
-    nlat, nlon = 720, 1441
-    lats = np.linspace(-90, 90, nlat)
-    if "90->-90" in param:
-        lats = lats[::-1]
+    # Parse parameters to determine coordinate ordering
+    lat_ascending = "-90->90" in param
+    lon_0_360 = "0->360" in param
 
-    if "-180->180" in param:
-        lons = np.linspace(-180, 180, nlon)
-    else:
-        lons = np.linspace(0, 360, nlon)
-
-    dims = [
-        Dim(
-            name="latitude",
-            size=nlat,
-            chunk_size=nlat,
-            data=lats,
-            attrs={"standard_name": "latitude"},
-        ),
-        Dim(
-            name="longitude",
-            size=nlon,
-            chunk_size=nlon,
-            data=lons,
-            attrs={"standard_name": "longitude"},
-        ),
-    ]
-    yield uniform_grid(dims=tuple(dims), dtype=np.float32, attrs={})
+    yield create_global_dataset(lat_ascending=lat_ascending, lon_0_360=lon_0_360)
 
 
 @pytest.fixture
@@ -125,7 +102,6 @@ def png_snapshot(snapshot):
     """PNG snapshot with custom numpy array comparison for robustness."""
     import io
 
-    import numpy as np
     from PIL import Image
 
     class RobustPNGSnapshotExtension(PNGImageSnapshotExtension):

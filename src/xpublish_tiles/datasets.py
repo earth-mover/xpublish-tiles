@@ -133,3 +133,49 @@ def raster_grid(
     ds.coords["spatial_ref"] = ((), 0, crs.to_cf())
     ds.spatial_ref.attrs["GeoTransform"] = geotransform
     return ds
+
+
+def create_global_dataset(
+    *,
+    lat_ascending: bool = True,
+    lon_0_360: bool = False,
+    nlat: int = 720,
+    nlon: int = 1441,
+) -> xr.Dataset:
+    """Create a global dataset with configurable coordinate ordering.
+
+    Args:
+        lat_ascending: If True, latitudes go from -90 to 90; if False, from 90 to -90
+        lon_0_360: If True, longitudes go from 0 to 360; if False, from -180 to 180
+        nlat: Number of latitude points
+        nlon: Number of longitude points
+
+    Returns:
+        xr.Dataset: Global dataset with specified coordinate ordering
+    """
+    lats = np.linspace(-90, 90, nlat)
+    if not lat_ascending:
+        lats = lats[::-1]
+
+    if lon_0_360:
+        lons = np.linspace(0, 360, nlon)
+    else:
+        lons = np.linspace(-180, 180, nlon)
+
+    dims = [
+        Dim(
+            name="latitude",
+            size=nlat,
+            chunk_size=nlat,
+            data=lats,
+            attrs={"standard_name": "latitude"},
+        ),
+        Dim(
+            name="longitude",
+            size=nlon,
+            chunk_size=nlon,
+            data=lons,
+            attrs={"standard_name": "longitude"},
+        ),
+    ]
+    return uniform_grid(dims=tuple(dims), dtype=np.float32, attrs={})

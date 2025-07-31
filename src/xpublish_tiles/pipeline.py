@@ -125,9 +125,10 @@ def pad_bbox(
     else:
         y_spacing = 0.0
 
-    # Extend bbox by half a coordinate spacing on each side
-    x_pad = abs(x_spacing) * 0.5
-    y_pad = abs(y_spacing) * 0.5
+    # Extend bbox by one coordinate spacing on each side
+    # This is needed for high zoom tiles smaller than coordinate spacing
+    x_pad = abs(x_spacing)
+    y_pad = abs(y_spacing)
 
     # Calculate padded values
     padded_west = float(bbox.west - x_pad)

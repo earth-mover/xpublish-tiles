@@ -3,39 +3,12 @@
 import argparse
 
 import cf_xarray  # noqa: F401
-import numpy as np
 import xpublish
 
 import xarray as xr
-from xpublish_tiles.datasets import Dim, uniform_grid
+from xpublish_tiles.datasets import create_global_dataset
 from xpublish_tiles.xpublish.tiles.plugin import TilesPlugin
 from xpublish_tiles.xpublish.wms.plugin import WMSPlugin
-
-
-def create_global_dataset() -> xr.Dataset:
-    dims = []
-
-    nlat, nlon = 720, 1441
-    lats = np.linspace(-90, 90, nlat)
-    lons = np.linspace(-180, 180, nlon)
-
-    dims = [
-        Dim(
-            name="latitude",
-            size=nlat,
-            chunk_size=nlat,
-            data=lats,
-            attrs={"standard_name": "latitude"},
-        ),
-        Dim(
-            name="longitude",
-            size=nlon,
-            chunk_size=nlon,
-            data=lons,
-            attrs={"standard_name": "longitude"},
-        ),
-    ]
-    return uniform_grid(dims=tuple(dims), dtype=np.float32, attrs={})
 
 
 def get_dataset_for_name(name: str) -> xr.Dataset:
