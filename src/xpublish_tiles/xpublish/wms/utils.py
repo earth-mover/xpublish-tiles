@@ -239,9 +239,6 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
     # Extract dimensions
     dimensions = extract_dimensions(dataset)
 
-    # Get all available raster styles
-    available_styles = get_available_raster_styles()
-
     for var_name, var in dataset.data_vars.items():
         # Extract variable metadata
         title = getattr(var, "long_name", var_name)
@@ -255,11 +252,10 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
             ex_geographic_bounding_box=geo_bbox,
             bounding_box=bounding_boxes,
             dimensions=dimensions,
-            styles=available_styles,
+            styles=[],  # Styles inherited from root layer
             queryable=True,
             opaque=False,
         )
-
         layers.append(layer)
 
     return layers
@@ -329,11 +325,13 @@ def create_capabilities_response(
     # Extract layers from dataset
     layers = extract_layers(dataset, base_url)
 
-    # Create root layer containing all data layers
+    # Create root layer containing all data layers and styles
     west, east, south, north = extract_geographic_bounds(dataset)
+    available_styles = get_available_raster_styles()
+
     root_layer = WMSLayerResponse(
-        title="Root Layer",
-        abstract="Root layer containing all available data layers",
+        title="Dataset Layers",
+        abstract="All available data layers with raster visualization styles",
         crs=["EPSG:4326", "EPSG:3857"],
         ex_geographic_bounding_box=WMSGeographicBoundingBoxResponse(
             west_bound_longitude=west,
@@ -342,6 +340,7 @@ def create_capabilities_response(
             north_bound_latitude=north,
         ),
         layers=layers,
+        styles=available_styles,  # All styles defined at root level
         queryable=False,
     )
 
