@@ -46,7 +46,7 @@ class WMSGetMapQuery(WMSBaseQuery):
     )
     crs: Literal["EPSG:4326", "EPSG:3857"] = Field(
         "EPSG:4326",
-        description="Coordinate reference system to use for the query. EPSG:4326 and EPSG:3857 are supported for this request",
+        description="Coordinate reference system to use for the query. Default is EPSG:4326",
     )
     time: str | None = Field(
         None,

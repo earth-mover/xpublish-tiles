@@ -51,11 +51,11 @@ class WMSPlugin(Plugin):
                 case WMSGetCapabilitiesQuery():
                     return await handle_get_capabilities(request, wms_query.root, dataset)
                 case WMSGetMapQuery():
-                    # TODO: Implement GetMap response
-                    return {"message": "GetMap"}
+                    return await handle_get_map(request, wms_query.root, dataset)
                 case WMSGetFeatureInfoQuery():
-                    # TODO: Implement GetFeatureInfo response
-                    return {"message": "GetFeatureInfo"}
+                    raise NotImplementedError(
+                        "GetFeatureInfo is not yet implemented. Coming Soon!"
+                    )
 
         return router
 
@@ -120,3 +120,10 @@ async def handle_get_capabilities(
             media_type="text/xml",
             headers={"Content-Type": "text/xml; charset=utf-8"},
         )
+
+
+async def handle_get_map(
+    request: Request, query: WMSGetMapQuery, dataset: xr.Dataset
+) -> Response:
+    """Handle WMS GetMap request."""
+    pass
