@@ -31,7 +31,6 @@ def test_wms_query_discriminator():
         width=100,
         height=100,
         colorscalerange="0,100",
-        format="image/png",
     )
     assert isinstance(getmap_query.root, WMSGetMapQuery)
     assert getmap_query.root.colorscalerange == (0, 100)
