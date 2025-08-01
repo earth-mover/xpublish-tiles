@@ -3,18 +3,22 @@ from typing import Any, Literal, Union, overload
 from pydantic import (
     AliasChoices,
     BaseModel,
+    ConfigDict,
     Field,
     RootModel,
     field_validator,
     model_validator,
 )
 from pydantic_xml import BaseXmlModel, attr, element
+from pyproj import CRS
 from pyproj.aoi import BBox
 
-from xpublish_tiles.types import Style
+from xpublish_tiles.types import ImageFormat, Style
 from xpublish_tiles.validators import (
     validate_bbox,
     validate_colorscalerange,
+    validate_crs,
+    validate_image_format,
     validate_style,
 )
 
@@ -36,17 +40,21 @@ class WMSGetCapabilitiesQuery(WMSBaseQuery):
 class WMSGetMapQuery(WMSBaseQuery):
     """WMS GetMap query"""
 
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+    )
+
     request: Literal["GetMap"] = Field(..., description="Request type")
     layers: str = Field(
         validation_alias=AliasChoices("layername", "layers", "query_layers"),
     )
-    styles: tuple[str, str] = Field(
-        ("raster", "default"),
-        description="Style to use for the query. Defaults to raster/default. Default may be replaced by the name of any colormap defined by matplotlibs defaults",
+    styles: tuple[Style, str] = Field(
+        (Style.RASTER, "viridis"),
+        description="Style to use for the query. Defaults to raster/default. Default may be replaced by the name of any colormap available to matplotlibs",
     )
-    crs: Literal["EPSG:4326", "EPSG:3857"] = Field(
-        "EPSG:4326",
-        description="Coordinate reference system to use for the query. EPSG:4326 and EPSG:3857 are supported for this request",
+    crs: CRS = Field(
+        CRS.from_epsg(4326),
+        description="Coordinate reference system to use for the query. Default is EPSG:4326",
     )
     time: str | None = Field(
         None,
@@ -56,8 +64,8 @@ class WMSGetMapQuery(WMSBaseQuery):
         None,
         description="Optional elevation to get map for. Only valid when the layer has an elevation dimension. When not specified, the default elevation is used",
     )
-    bbox: BBox | None = Field(
-        None,
+    bbox: BBox = Field(
+        ...,
         description="Bounding box to use for the query in the format 'minx,miny,maxx,maxy'",
     )
     width: int = Field(
@@ -70,11 +78,11 @@ class WMSGetMapQuery(WMSBaseQuery):
     )
     colorscalerange: tuple[float, float] | None = Field(
         None,
-        description="Color scale range to use for the query in the format 'min,max'",
+        description="Color scale range to use for the query in the format 'min,max'. If not specified, the default color scale range is used or if none is available it is autoscaled",
     )
-    autoscale: bool = Field(
-        False,
-        description="Whether to automatically scale the color scale range based on the data. When specified, colorscalerange is ignored",
+    format: ImageFormat = Field(
+        ImageFormat.PNG,
+        description="The format of the image to return",
     )
 
     @field_validator("colorscalerange", mode="before")
@@ -92,21 +100,23 @@ class WMSGetMapQuery(WMSBaseQuery):
     def validate_style(cls, v: str | None) -> tuple[Style, str] | None:
         return validate_style(v)
 
-    @model_validator(mode="after")
+    @field_validator("crs", mode="before")
     @classmethod
-    def validate_dependent_colorscalerange(
-        cls,
-        v: "WMSGetMapQuery",
-    ) -> "WMSGetMapQuery":
-        if v.colorscalerange is None and not v.autoscale:
-            raise ValueError("colorscalerange is required when autoscale is False")
-        if v.bbox is None:
-            raise ValueError("bbox must be specified")
-        return v
+    def validate_crs(cls, v: str | None) -> CRS | None:
+        return validate_crs(v)
+
+    @field_validator("format", mode="before")
+    @classmethod
+    def validate_format(cls, v: str | None) -> ImageFormat | None:
+        return validate_image_format(v)
 
 
 class WMSGetFeatureInfoQuery(WMSBaseQuery):
     """WMS GetFeatureInfo query"""
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+    )
 
     request: Literal["GetFeatureInfo", "GetTimeseries", "GetVerticalProfile"] = Field(
         ...,
@@ -123,7 +133,7 @@ class WMSGetFeatureInfoQuery(WMSBaseQuery):
         None,
         description="Optional elevation to get feature info for. Only valid when the layer has an elevation dimension. To get all elevations, use 'all', to get a range of elevations, use 'start/end'",
     )
-    crs: Literal["EPSG:4326"] = Field(
+    crs: CRS = Field(
         "EPSG:4326",
         description="Coordinate reference system to use for the query. Currently only EPSG:4326 is supported for this request",
     )
@@ -153,6 +163,11 @@ class WMSGetFeatureInfoQuery(WMSBaseQuery):
     def validate_bbox(cls, v: str | None) -> BBox | None:
         return validate_bbox(v)
 
+    @field_validator("crs", mode="before")
+    @classmethod
+    def validate_crs(cls, v: str | None) -> CRS | None:
+        return validate_crs(v)
+
 
 class WMSGetLegendGraphicQuery(WMSBaseQuery):
     """WMS GetLegendGraphic query"""
@@ -162,14 +177,17 @@ class WMSGetLegendGraphicQuery(WMSBaseQuery):
     width: int
     height: int
     vertical: bool = False
-    colorscalerange: tuple[float, float] = Field(
-        ...,
-        description="Color scale range to use for the query in the format 'min,max'",
+    colorscalerange: tuple[float, float] | None = Field(
+        None,
+        description="Color scale range to use for the query in the format 'min,max'. If not provided, the default will be used or autoscaled if no default is available",
     )
-    autoscale: bool = False
     styles: tuple[str, str] = Field(
         ("raster", "default"),
         description="Style to use for the query. Defaults to raster/default. Default may be replaced by the name of any colormap defined by matplotlibs defaults",
+    )
+    format: ImageFormat = Field(
+        "image/png",
+        description="Format to use for the query. Defaults to image/png",
     )
 
     @field_validator("colorscalerange", mode="before")
@@ -181,6 +199,11 @@ class WMSGetLegendGraphicQuery(WMSBaseQuery):
     @classmethod
     def validate_style(cls, v: str | None) -> tuple[Style, str] | None:
         return validate_style(v)
+
+    @field_validator("format", mode="before")
+    @classmethod
+    def validate_format(cls, v: str | None) -> ImageFormat | None:
+        return validate_image_format(v)
 
 
 WMSQueryType = Union[

@@ -1,8 +1,10 @@
 import pytest
+from pyproj import CRS
 
 from xpublish_tiles.types import ImageFormat, Style
 from xpublish_tiles.validators import (
     validate_colorscalerange,
+    validate_crs,
     validate_image_format,
     validate_style,
 )
@@ -163,3 +165,38 @@ class TestValidateStyle:
             match="style invalid is not valid. Options are: RASTER, QUIVER, NUMPY, VECTOR",
         ):
             validate_style("invalid/default")
+
+
+class TestValidateCrs:
+    def test_valid_epsg_code(self):
+        result = validate_crs("EPSG:4326")
+        assert isinstance(result, CRS)
+        assert result.to_epsg() == 4326
+
+    def test_valid_epsg_code_numeric(self):
+        result = validate_crs("4326")
+        assert isinstance(result, CRS)
+        assert result.to_epsg() == 4326
+
+    def test_valid_proj_string(self):
+        result = validate_crs("+proj=longlat +datum=WGS84 +no_defs")
+        assert isinstance(result, CRS)
+        assert result.to_epsg() == 4326
+
+    def test_valid_wkt_string(self):
+        wkt = 'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]'
+        result = validate_crs(wkt)
+        assert isinstance(result, CRS)
+        assert result.to_epsg() == 4326
+
+    def test_none_input(self):
+        result = validate_crs(None)
+        assert result is None
+
+    def test_invalid_crs_string(self):
+        with pytest.raises(ValueError, match="crs invalid_crs is not valid"):
+            validate_crs("invalid_crs")
+
+    def test_invalid_epsg_code(self):
+        with pytest.raises(ValueError, match="crs EPSG:999999 is not valid"):
+            validate_crs("EPSG:999999")

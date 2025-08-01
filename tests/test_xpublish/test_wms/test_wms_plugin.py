@@ -185,16 +185,16 @@ def test_app_router(xpublish_client):
             "version": "1.3.0",
             "request": "GetMap",
             "layers": "air",
-            "styles": "raster/default",
+            "styles": "raster/magma",
             "crs": "EPSG:3857",
-            "bbox": "0,0,1,1",
+            "bbox": "-8766409.899970, 5009377.085697, -7514065.628546, 6261721.357122",
             "width": 256,
             "height": 256,
-            "autoscale": "true",
+            "time": "2013-01-01T00:00:00",
         },
     )
     assert response.status_code == 200
-    assert response.json() == {"message": "GetMap"}
+    assert response.headers["content-type"] == "image/png"
 
     # Test invalid request (no parameters)
     response = xpublish_client.get("/datasets/air/wms")

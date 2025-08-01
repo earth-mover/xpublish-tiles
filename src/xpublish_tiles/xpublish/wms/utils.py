@@ -13,7 +13,6 @@ from xpublish_tiles.xpublish.wms.types import (
     WMSFormatResponse,
     WMSGeographicBoundingBoxResponse,
     WMSGetCapabilitiesOperationResponse,
-    WMSGetFeatureInfoOperationResponse,
     WMSGetMapOperationResponse,
     WMSHTTPResponse,
     WMSLayerResponse,
@@ -311,13 +310,6 @@ def create_capabilities_response(
             formats=[
                 WMSFormatResponse(format="image/png"),
                 WMSFormatResponse(format="image/jpeg"),
-            ],
-            dcp_type=dcp_type,
-        ),
-        get_feature_info=WMSGetFeatureInfoOperationResponse(
-            formats=[
-                WMSFormatResponse(format="application/json"),
-                WMSFormatResponse(format="text/xml"),
             ],
             dcp_type=dcp_type,
         ),

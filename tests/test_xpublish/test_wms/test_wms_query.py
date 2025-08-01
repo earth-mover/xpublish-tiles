@@ -1,6 +1,6 @@
 import pytest
 
-from xpublish_tiles.types import Style
+from xpublish_tiles.types import ImageFormat, Style
 from xpublish_tiles.xpublish.wms.types import (
     WMSGetCapabilitiesQuery,
     WMSGetFeatureInfoQuery,
@@ -31,11 +31,12 @@ def test_wms_query_discriminator():
         width=100,
         height=100,
         colorscalerange="0,100",
-        autoscale=True,
     )
     assert isinstance(getmap_query.root, WMSGetMapQuery)
     assert getmap_query.root.colorscalerange == (0, 100)
     assert getmap_query.root.styles == (Style.RASTER, "magma")
+    assert getmap_query.root.crs.to_epsg() == 3857
+    assert getmap_query.root.format == ImageFormat.PNG
 
     getmap_query_autoscale = WMSQuery(
         service="WMS",
@@ -47,10 +48,10 @@ def test_wms_query_discriminator():
         bbox="0,0,1,1",
         width=100,
         height=100,
-        autoscale=True,
     )
     assert isinstance(getmap_query_autoscale.root, WMSGetMapQuery)
     assert getmap_query_autoscale.root.colorscalerange is None
+    assert getmap_query_autoscale.root.format == ImageFormat.PNG
 
     # Fail because colorscalerange is invalid
     with pytest.raises(
@@ -68,39 +69,6 @@ def test_wms_query_discriminator():
             width=100,
             height=100,
             colorscalerange="0",
-            autoscale=True,
-        )
-
-    # Fail because colorscalerange is missing
-    with pytest.raises(
-        ValueError,
-        match="colorscalerange is required when autoscale is False",
-    ):
-        WMSQuery(
-            service="WMS",
-            version="1.3.0",
-            request="GetMap",
-            layers="layer1",
-            styles="raster/default",
-            crs="EPSG:3857",
-            bbox="0,0,1,1",
-            width=100,
-            height=100,
-            autoscale=False,
-        )
-
-    with pytest.raises(ValueError, match="bbox must be specified"):
-        WMSQuery(
-            service="WMS",
-            version="1.3.0",
-            request="GetMap",
-            layers="layer1",
-            styles="raster/default",
-            crs="EPSG:3857",
-            width=100,
-            height=100,
-            colorscalerange="0,100",
-            autoscale=True,
         )
 
     # Fail because bbox is not valid
@@ -119,26 +87,6 @@ def test_wms_query_discriminator():
             width=100,
             height=100,
             colorscalerange="0,100",
-            autoscale=True,
-        )
-
-    # Fail because style is not valid
-    with pytest.raises(
-        ValueError,
-        match="style must be in the format 'stylename/palettename'",
-    ):
-        WMSQuery(
-            service="WMS",
-            version="1.3.0",
-            request="GetMap",
-            layers="layer1",
-            styles="raster",
-            crs="EPSG:3857",
-            bbox="0,0,1,1",
-            width=100,
-            height=100,
-            colorscalerange="0,100",
-            autoscale=True,
         )
 
     getfeatureinfo_query = WMSQuery(
@@ -156,6 +104,7 @@ def test_wms_query_discriminator():
         y=50,
     )
     assert isinstance(getfeatureinfo_query.root, WMSGetFeatureInfoQuery)
+    assert getfeatureinfo_query.root.crs.to_epsg() == 4326
 
     getlegendgraphic_query = WMSQuery(
         service="WMS",
@@ -166,7 +115,6 @@ def test_wms_query_discriminator():
         height=100,
         vertical=True,
         colorscalerange="0,100",
-        autoscale=True,
         styles="raster/default",
     )
     assert isinstance(getlegendgraphic_query.root, WMSGetLegendGraphicQuery)

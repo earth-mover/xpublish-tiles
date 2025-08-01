@@ -3,11 +3,14 @@
 from enum import Enum
 from typing import Annotated
 
+import cf_xarray  # noqa: F401
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from xpublish import Dependencies, Plugin, hookimpl
 
 import xarray as xr
+from xpublish_tiles.pipeline import pipeline
+from xpublish_tiles.types import OutputBBox, OutputCRS, QueryParams
 from xpublish_tiles.utils import lower_case_keys
 from xpublish_tiles.xpublish.wms.types import (
     WMS_FILTERED_QUERY_PARAMS,
@@ -51,11 +54,11 @@ class WMSPlugin(Plugin):
                 case WMSGetCapabilitiesQuery():
                     return await handle_get_capabilities(request, wms_query.root, dataset)
                 case WMSGetMapQuery():
-                    # TODO: Implement GetMap response
-                    return {"message": "GetMap"}
+                    return await handle_get_map(request, wms_query.root, dataset)
                 case WMSGetFeatureInfoQuery():
-                    # TODO: Implement GetFeatureInfo response
-                    return {"message": "GetFeatureInfo"}
+                    raise NotImplementedError(
+                        "GetFeatureInfo is not yet implemented. Coming Soon!"
+                    )
 
         return router
 
@@ -120,3 +123,49 @@ async def handle_get_capabilities(
             media_type="text/xml",
             headers={"Content-Type": "text/xml; charset=utf-8"},
         )
+
+
+async def handle_get_map(
+    request: Request, query: WMSGetMapQuery, dataset: xr.Dataset
+) -> Response:
+    """Handle WMS GetMap request."""
+
+    # Extract dimension selectors from query parameters
+    selectors = {}
+    for param_name, param_value in request.query_params.items():
+        # Skip the standard tile query parameters
+        if param_name not in WMS_FILTERED_QUERY_PARAMS:
+            # Check if this parameter corresponds to a dataset dimension
+            if param_name in dataset.dims:
+                selectors[param_name] = param_value
+
+    # Special handling for time and vertical axes per wms spec
+    if query.time or query.elevation:
+        cf_axes = dataset.cf.axes
+        if query.time:
+            time_name = cf_axes.get("T", None)
+            if len(time_name):
+                selectors[time_name[0]] = query.time
+        if query.elevation:
+            vertical_name = cf_axes.get("Z", None)
+            if vertical_name:
+                selectors[vertical_name[0]] = query.elevation
+
+    render_params = QueryParams(
+        variables=[query.layers],  # TODO: Support multiple layers
+        style=query.styles[0],
+        colorscalerange=query.colorscalerange,
+        cmap=query.styles[1],
+        crs=OutputCRS(query.crs),
+        bbox=OutputBBox(query.bbox),
+        width=query.width,
+        height=query.height,
+        format=query.format,
+        selectors=selectors,
+    )
+    buffer = await pipeline(dataset, render_params)
+
+    return StreamingResponse(
+        buffer,
+        media_type="image/png",
+    )

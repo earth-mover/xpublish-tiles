@@ -1,6 +1,8 @@
 from typing import cast
 
+from pyproj import CRS
 from pyproj.aoi import BBox
+from pyproj.exceptions import CRSError
 
 from xpublish_tiles.types import ImageFormat, Style
 
@@ -90,4 +92,15 @@ def validate_image_format(v: str | None) -> ImageFormat | None:
     except ValueError as e:
         raise ValueError(
             f"image format {format_str} is not valid. Options are: {', '.join(ImageFormat.__members__.keys())}",
+        ) from e
+
+
+def validate_crs(v: str | None) -> CRS | None:
+    if v is None:
+        return None
+    try:
+        return CRS.from_user_input(v)
+    except CRSError as e:
+        raise ValueError(
+            f"crs {v} is not valid",
         ) from e
