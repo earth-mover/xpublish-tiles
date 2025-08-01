@@ -91,7 +91,7 @@ def main():
     )
     args = parser.parse_args()
 
-    ds = get_dataset_for_name(args.dataset, args.branch, args.group)
+    ds = get_dataset_for_name(args.dataset, args.branch, args.group, args.cache)
 
     rest = xpublish.SingleDatasetRest(
         ds,
