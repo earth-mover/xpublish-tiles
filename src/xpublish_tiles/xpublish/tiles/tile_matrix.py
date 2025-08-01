@@ -2,13 +2,13 @@
 
 from typing import Optional, Union
 
-from pyproj.aoi import BBox
+import morecantile
+import pyproj
 
 from xarray import Dataset
 from xpublish_tiles.types import OutputBBox, OutputCRS
 from xpublish_tiles.xpublish.tiles.types import (
     BoundingBox,
-    CRSType,
     Link,
     TileMatrix,
     TileMatrixSet,
@@ -85,7 +85,7 @@ TILE_MATRIX_SET_SUMMARIES = {
 def extract_tile_bbox_and_crs(
     tileMatrixSetId: str, tileMatrix: int, tileRow: int, tileCol: int
 ) -> tuple[OutputBBox, OutputCRS]:
-    """Extract bounding box and CRS from tile coordinates.
+    """Extract bounding box and CRS from tile coordinates using morecantile.
 
     Args:
         tileMatrixSetId: ID of the tile matrix set
@@ -94,51 +94,23 @@ def extract_tile_bbox_and_crs(
         tileCol: Column index of the tile
 
     Returns:
-        tuple: (bbox as [minX, minY, maxX, maxY], pyproj.CRS object)
+        tuple: (bbox as OutputBBox, OutputCRS object)
 
     Raises:
-        ValueError: If tile matrix set or tile matrix not found, or CRS conversion fails
+        ValueError: If tile matrix set not found
     """
-    if tileMatrixSetId not in TILE_MATRIX_SETS:
-        raise ValueError(f"Tile matrix set '{tileMatrixSetId}' not found")
+    tms = morecantile.tms.get(tileMatrixSetId)
+    tile = morecantile.Tile(x=tileCol, y=tileRow, z=tileMatrix)
 
-    tile_matrix_set = TILE_MATRIX_SETS[tileMatrixSetId]()
-
-    tile_matrix_def = None
-    for tm in tile_matrix_set.tileMatrices:
-        if tm.id == str(tileMatrix):
-            tile_matrix_def = tm
-            break
-
-    if not tile_matrix_def:
-        raise ValueError(f"Tile matrix '{tileMatrix}' not found")
-
-    origin_x, origin_y = tile_matrix_def.topLeftCorner
-    tile_width = tile_matrix_def.tileWidth
-    tile_height = tile_matrix_def.tileHeight
-
-    pixel_size = tile_matrix_def.scaleDenominator * 0.00028
-
-    min_x = origin_x + (tileCol * tile_width * pixel_size)
-    max_x = origin_x + ((tileCol + 1) * tile_width * pixel_size)
-    max_y = origin_y - (tileRow * tile_height * pixel_size)
-    min_y = origin_y - ((tileRow + 1) * tile_height * pixel_size)
-
-    bbox = BBox(min_x, min_y, max_x, max_y)
-
-    # Convert CRS to pyproj.CRS object
-    if isinstance(tile_matrix_set.crs, str):
-        # Handle string CRS (URI format)
-        crs_type = CRSType(uri=tile_matrix_set.crs)
-        pyproj_crs = crs_type.to_pyproj_crs()
-    else:
-        # Handle CRSType object
-        pyproj_crs = tile_matrix_set.crs.to_pyproj_crs()
-
-    if pyproj_crs is None:
-        raise ValueError(f"Could not convert CRS '{tile_matrix_set.crs}' to pyproj.CRS")
-
-    return OutputBBox(bbox), OutputCRS(pyproj_crs)
+    # Get the bounding box in the TMS's CRS (projected coordinates)
+    bbox = tms.xy_bounds(tile)
+    output_bbox = OutputBBox(
+        pyproj.aoi.BBox(
+            west=bbox.left, south=bbox.bottom, east=bbox.right, north=bbox.top
+        )
+    )
+    crs = pyproj.CRS.from_wkt(tms.crs.to_wkt())
+    return output_bbox, OutputCRS(crs)
 
 
 def extract_dataset_bounds(dataset: Dataset) -> Optional[BoundingBox]:
