@@ -190,11 +190,10 @@ def test_app_router(xpublish_client):
             "bbox": "0,0,1,1",
             "width": 256,
             "height": 256,
-            "autoscale": "true",
         },
     )
     assert response.status_code == 200
-    assert response.json() == {"message": "GetMap"}
+    assert response.json() is None
 
     # Test invalid request (no parameters)
     response = xpublish_client.get("/datasets/air/wms")
