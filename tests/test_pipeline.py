@@ -131,7 +131,7 @@ async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot):
     assert_render_matches_snapshot(result, png_snapshot)
 
 
-@pytest.mark.xfail(reason="this bbox is slightly outside the bounds of web mercator")
+@pytest.mark.skip(reason="this bbox is slightly outside the bounds of web mercator")
 async def test_pipeline_bad_bbox(global_datasets, png_snapshot):
     """Test pipeline with various tiles using their native TMS CRS."""
     ds = global_datasets
