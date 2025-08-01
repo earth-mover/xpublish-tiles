@@ -1,6 +1,6 @@
 import pytest
 
-from xpublish_tiles.types import Style
+from xpublish_tiles.types import ImageFormat, Style
 from xpublish_tiles.xpublish.wms.types import (
     WMSGetCapabilitiesQuery,
     WMSGetFeatureInfoQuery,
@@ -31,11 +31,13 @@ def test_wms_query_discriminator():
         width=100,
         height=100,
         colorscalerange="0,100",
+        format="image/png",
     )
     assert isinstance(getmap_query.root, WMSGetMapQuery)
     assert getmap_query.root.colorscalerange == (0, 100)
     assert getmap_query.root.styles == (Style.RASTER, "magma")
     assert getmap_query.root.crs.to_epsg() == 3857
+    assert getmap_query.root.format == ImageFormat.PNG
 
     getmap_query_autoscale = WMSQuery(
         service="WMS",
@@ -50,6 +52,7 @@ def test_wms_query_discriminator():
     )
     assert isinstance(getmap_query_autoscale.root, WMSGetMapQuery)
     assert getmap_query_autoscale.root.colorscalerange is None
+    assert getmap_query_autoscale.root.format == ImageFormat.PNG
 
     # Fail because colorscalerange is invalid
     with pytest.raises(

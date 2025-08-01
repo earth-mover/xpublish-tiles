@@ -13,11 +13,12 @@ from pydantic_xml import BaseXmlModel, attr, element
 from pyproj import CRS
 from pyproj.aoi import BBox
 
-from xpublish_tiles.types import Style
+from xpublish_tiles.types import ImageFormat, Style
 from xpublish_tiles.validators import (
     validate_bbox,
     validate_colorscalerange,
     validate_crs,
+    validate_image_format,
     validate_style,
 )
 
@@ -48,11 +49,11 @@ class WMSGetMapQuery(WMSBaseQuery):
         validation_alias=AliasChoices("layername", "layers", "query_layers"),
     )
     styles: tuple[Style, str] = Field(
-        ("raster/default"),
+        (Style.RASTER, "viridis"),
         description="Style to use for the query. Defaults to raster/default. Default may be replaced by the name of any colormap available to matplotlibs",
     )
     crs: CRS = Field(
-        "EPSG:4326",
+        CRS.from_epsg(4326),
         description="Coordinate reference system to use for the query. Default is EPSG:4326",
     )
     time: str | None = Field(
@@ -79,6 +80,10 @@ class WMSGetMapQuery(WMSBaseQuery):
         None,
         description="Color scale range to use for the query in the format 'min,max'. If not specified, the default color scale range is used or if none is available it is autoscaled",
     )
+    format: ImageFormat = Field(
+        ImageFormat.PNG,
+        description="The format of the image to return",
+    )
 
     @field_validator("colorscalerange", mode="before")
     @classmethod
@@ -99,6 +104,11 @@ class WMSGetMapQuery(WMSBaseQuery):
     @classmethod
     def validate_crs(cls, v: str | None) -> CRS | None:
         return validate_crs(v)
+
+    @field_validator("format", mode="before")
+    @classmethod
+    def validate_format(cls, v: str | None) -> ImageFormat | None:
+        return validate_image_format(v)
 
 
 class WMSGetFeatureInfoQuery(WMSBaseQuery):
@@ -175,6 +185,10 @@ class WMSGetLegendGraphicQuery(WMSBaseQuery):
         ("raster", "default"),
         description="Style to use for the query. Defaults to raster/default. Default may be replaced by the name of any colormap defined by matplotlibs defaults",
     )
+    format: ImageFormat = Field(
+        "image/png",
+        description="Format to use for the query. Defaults to image/png",
+    )
 
     @field_validator("colorscalerange", mode="before")
     @classmethod
@@ -185,6 +199,11 @@ class WMSGetLegendGraphicQuery(WMSBaseQuery):
     @classmethod
     def validate_style(cls, v: str | None) -> tuple[Style, str] | None:
         return validate_style(v)
+
+    @field_validator("format", mode="before")
+    @classmethod
+    def validate_format(cls, v: str | None) -> ImageFormat | None:
+        return validate_image_format(v)
 
 
 WMSQueryType = Union[
