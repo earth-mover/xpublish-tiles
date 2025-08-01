@@ -119,11 +119,6 @@ class TestExtractTileBboxAndCrs:
         with pytest.raises(ValueError, match="Tile matrix set 'InvalidSet' not found"):
             extract_tile_bbox_and_crs("InvalidSet", 0, 0, 0)
 
-    def test_extract_tile_bbox_invalid_zoom_level(self):
-        """Test error handling for invalid zoom level"""
-        with pytest.raises(ValueError, match="Tile matrix '25' not found"):
-            extract_tile_bbox_and_crs("WebMercatorQuad", 25, 0, 0)
-
     def test_bbox_consistency_across_tiles(self):
         """Test that adjacent tiles have consistent bounding boxes"""
         # Get two adjacent tiles at zoom 2

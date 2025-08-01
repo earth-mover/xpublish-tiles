@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import io
 import logging
 import os
@@ -11,6 +12,7 @@ import pyproj.aoi
 
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, Rectilinear, guess_grid_system
+from xpublish_tiles.lib import check_transparent_pixels
 from xpublish_tiles.types import (
     DataType,
     NullRenderContext,
@@ -232,6 +234,8 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
         format=query.format,
     )
     buffer.seek(0)
+    if int(os.environ.get("XPUBLISH_TILES_DEBUG_CHECKS", "0")):
+        assert check_transparent_pixels(copy.deepcopy(buffer).read()) == 0, query
     return buffer
 
 
