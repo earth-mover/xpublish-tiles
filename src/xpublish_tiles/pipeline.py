@@ -234,7 +234,7 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
         format=query.format,
     )
     buffer.seek(0)
-    if int(os.enivron.get("XPUBLISH_TILES_DEBUG_CHECKS", "0")):
+    if int(os.environ.get("XPUBLISH_TILES_DEBUG_CHECKS", "0")):
         assert check_transparent_pixels(copy.deepcopy(buffer).read()) == 0, query
     return buffer
 

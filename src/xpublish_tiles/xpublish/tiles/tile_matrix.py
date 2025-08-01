@@ -4,6 +4,7 @@ from typing import Optional, Union
 
 import morecantile
 import pyproj
+import pyproj.aoi
 
 from xarray import Dataset
 from xpublish_tiles.types import OutputBBox, OutputCRS
