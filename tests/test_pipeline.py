@@ -4,16 +4,15 @@ import io
 
 import cf_xarray  # noqa: F401 - Enable cf accessor
 import morecantile
-import numpy as np
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
-from PIL import Image
 from pyproj import CRS
 from pyproj.aoi import BBox
 
 from tests.tiles import TILES, WEBMERC_TMS
 from xpublish_tiles.datasets import create_global_dataset
+from xpublish_tiles.lib import check_transparent_pixels
 from xpublish_tiles.pipeline import (
     check_bbox_overlap,
     pipeline,
@@ -28,20 +27,6 @@ def is_png(buffer: io.BytesIO) -> bool:
     buffer.seek(0)
     # PNG signature: 89 50 4E 47 0D 0A 1A 0A
     return header == b"\x89PNG\r\n\x1a\n"
-
-
-def check_transparent_pixels(image_bytes):
-    """Check the percentage of transparent pixels in a PNG image."""
-    img = Image.open(io.BytesIO(image_bytes))
-    if img.mode != "RGBA":
-        img = img.convert("RGBA")
-
-    arr = np.array(img)
-    transparent_mask = arr[:, :, 3] == 0
-    transparent_count = np.sum(transparent_mask)
-    total_pixels = arr.shape[0] * arr.shape[1]
-
-    return (transparent_count / total_pixels) * 100
 
 
 @st.composite
@@ -142,6 +127,34 @@ async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot):
     ds = global_datasets
     query_params = create_query_params(tile, tms)
     result = await pipeline(ds, query_params)
+
+    assert_render_matches_snapshot(result, png_snapshot)
+
+
+@pytest.mark.xfail(reason="this bbox is slightly outside the bounds of web mercator")
+async def test_pipeline_bad_bbox(global_datasets, png_snapshot):
+    """Test pipeline with various tiles using their native TMS CRS."""
+    ds = global_datasets
+    query = QueryParams(
+        variables=["foo"],
+        crs=OutputCRS(CRS.from_user_input(3857)),
+        bbox=OutputBBox(
+            BBox(
+                west=-20037508.3428,
+                south=7514065.628550399,
+                east=-17532819.799950078,
+                north=10018754.17140032,
+            )
+        ),
+        selectors={},
+        style=Style.RASTER,
+        width=256,
+        height=256,
+        cmap="viridis",
+        colorscalerange=None,
+        format=ImageFormat.PNG,
+    )
+    result = await pipeline(ds, query)
     assert_render_matches_snapshot(result, png_snapshot)
 
 
