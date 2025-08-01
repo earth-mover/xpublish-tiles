@@ -3,6 +3,7 @@
 from typing import Optional, Union
 
 import morecantile
+import morecantile.errors
 import pyproj
 import pyproj.aoi
 
@@ -100,7 +101,10 @@ def extract_tile_bbox_and_crs(
     Raises:
         ValueError: If tile matrix set not found
     """
-    tms = morecantile.tms.get(tileMatrixSetId)
+    try:
+        tms = morecantile.tms.get(tileMatrixSetId)
+    except morecantile.errors.InvalidIdentifier as e:
+        raise ValueError(f"Tile matrix set '{tileMatrixSetId}' not found") from e
     tile = morecantile.Tile(x=tileCol, y=tileRow, z=tileMatrix)
 
     # Get the bounding box in the TMS's CRS (projected coordinates)
