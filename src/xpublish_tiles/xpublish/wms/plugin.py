@@ -3,6 +3,7 @@
 from enum import Enum
 from typing import Annotated
 
+import cf_xarray  # noqa: F401
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response, StreamingResponse
 from xpublish import Dependencies, Plugin, hookimpl
