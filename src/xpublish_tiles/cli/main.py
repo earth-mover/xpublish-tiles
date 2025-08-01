@@ -98,4 +98,4 @@ def main():
         plugins={"tiles": TilesPlugin(), "wms": WMSPlugin()},
     )
     rest.app.add_middleware(CORSMiddleware, allow_origins=["*"])
-    rest.serve(host="0.0.0.0", port=8080)
+    rest.serve(host="0.0.0.0", port=args.port)
