@@ -116,6 +116,8 @@ def uniform_grid(*, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str
         # Generate tanh wave data for continuous data
         data_array = generate_tanh_wave_data(dims, dtype)
 
+    attrs["valid_max"] = 1
+    attrs["valid_min"] = -1
     ds = xr.Dataset(
         {
             "foo": (tuple(d.name for d in dims), data_array, attrs),

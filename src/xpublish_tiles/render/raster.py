@@ -54,6 +54,13 @@ class DatashaderRasterRenderer(Renderer):
             y_range=(bbox.south, bbox.north),
         )
 
+        if (
+            colorscalerange is None
+            and "valid_min" in data.attrs
+            and "valid_max" in data.attrs
+        ):
+            colorscalerange = (data.attrs.get("valid_min"), data.attrs.get("valid_max"))
+
         if isinstance(context.grid, RasterAffine | Rectilinear | Curvilinear):
             # Use the actual coordinate names from the grid system
             grid = cast(RasterAffine | Rectilinear | Curvilinear, context.grid)
