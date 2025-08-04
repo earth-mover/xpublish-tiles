@@ -15,9 +15,9 @@ class TestTileMatrixFunctions:
         tms = get_web_mercator_quad()
 
         assert tms.id == "WebMercatorQuad"
-        assert tms.title == "Web Mercator Quad"
-        assert tms.crs == "http://www.opengis.net/def/crs/EPSG/0/3857"
-        assert len(tms.tileMatrices) == 22  # Zoom levels 0-21
+        assert tms.title == "Google Maps Compatible for the World"
+        assert tms.crs == "root='http://www.opengis.net/def/crs/EPSG/0/3857'"
+        assert len(tms.tileMatrices) == 25  # Zoom levels 0-24
 
         # Test zoom level 0
         zoom_0 = tms.tileMatrices[0]
@@ -38,8 +38,8 @@ class TestTileMatrixFunctions:
         summary = get_web_mercator_quad_summary()
 
         assert summary.id == "WebMercatorQuad"
-        assert summary.title == "Web Mercator Quad"
-        assert summary.crs == "http://www.opengis.net/def/crs/EPSG/0/3857"
+        assert summary.title == "Google Maps Compatible for the World"
+        assert summary.crs == "root='http://www.opengis.net/def/crs/EPSG/0/3857'"
         assert len(summary.links) == 1
         assert summary.links[0].href == "/tiles/tileMatrixSets/WebMercatorQuad"
 

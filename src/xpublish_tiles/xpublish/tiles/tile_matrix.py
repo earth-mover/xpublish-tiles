@@ -20,55 +20,47 @@ from xpublish_tiles.xpublish.tiles.types import (
 
 
 def get_web_mercator_quad() -> TileMatrixSet:
-    """Get the complete WebMercatorQuad tile matrix set definition with all zoom levels 0-21"""
+    """Get the complete WebMercatorQuad tile matrix set definition using morecantile"""
+    tms = morecantile.tms.get("WebMercatorQuad")
 
-    # Base values for WebMercator
-    origin_x = -20037508.3428
-    origin_y = 20037508.3428
-    tile_size = 256
-    base_scale_denominator = 559082264.029
-
-    tile_matrices = []
-
-    # Generate all zoom levels from 0 to 21
-    for zoom in range(22):  # 0 to 21 inclusive
-        scale_denominator = base_scale_denominator / (2**zoom)
-        matrix_size = 2**zoom
-
-        tile_matrices.append(
-            TileMatrix(
-                id=str(zoom),
-                scaleDenominator=scale_denominator,
-                topLeftCorner=[origin_x, origin_y],
-                tileWidth=tile_size,
-                tileHeight=tile_size,
-                matrixWidth=matrix_size,
-                matrixHeight=matrix_size,
-            )
+    tile_matrices = [
+        TileMatrix(
+            id=matrix.id,
+            scaleDenominator=matrix.scaleDenominator,
+            topLeftCorner=list(matrix.pointOfOrigin),
+            tileWidth=matrix.tileWidth,
+            tileHeight=matrix.tileHeight,
+            matrixWidth=matrix.matrixWidth,
+            matrixHeight=matrix.matrixHeight,
         )
+        for matrix in tms.tileMatrices
+    ]
 
     return TileMatrixSet(
-        id="WebMercatorQuad",
-        title="Web Mercator Quad",
-        uri="http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
-        crs="http://www.opengis.net/def/crs/EPSG/0/3857",
+        id=str(tms.id),
+        title=str(tms.title) if tms.title else "WebMercatorQuad",
+        uri=str(tms.uri) if tms.uri else None,
+        crs=str(tms.crs),
         tileMatrices=tile_matrices,
     )
 
 
 def get_web_mercator_quad_summary() -> TileMatrixSetSummary:
-    """Get summary information for WebMercatorQuad tile matrix set"""
+    """Get summary information for WebMercatorQuad tile matrix set using morecantile"""
+    tms = morecantile.tms.get("WebMercatorQuad")
+    tms_id = str(tms.id)
+    tms_title = str(tms.title) if tms.title else "WebMercatorQuad"
     return TileMatrixSetSummary(
-        id="WebMercatorQuad",
-        title="Web Mercator Quad",
-        uri="http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
-        crs="http://www.opengis.net/def/crs/EPSG/0/3857",
+        id=tms_id,
+        title=tms_title,
+        uri=str(tms.uri) if tms.uri else None,
+        crs=str(tms.crs),
         links=[
             Link(
-                href="/tiles/tileMatrixSets/WebMercatorQuad",
+                href=f"/tiles/tileMatrixSets/{tms_id}",
                 rel="self",
                 type="application/json",
-                title="Web Mercator Quad tile matrix set",
+                title=f"{tms_title} tile matrix set",
             )
         ],
     )
