@@ -8,7 +8,7 @@ import matplotlib as mpl  # type: ignore
 import numpy as np
 
 import xarray as xr
-from xpublish_tiles.grids import Curvilinear, Rectilinear
+from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear
 from xpublish_tiles.render import Renderer
 from xpublish_tiles.types import (
     DataType,
@@ -54,9 +54,9 @@ class DatashaderRasterRenderer(Renderer):
             y_range=(bbox.south, bbox.north),
         )
 
-        if isinstance(context.grid, Rectilinear | Curvilinear):
+        if isinstance(context.grid, RasterAffine | Rectilinear | Curvilinear):
             # Use the actual coordinate names from the grid system
-            grid = cast(Rectilinear | Curvilinear, context.grid)
+            grid = cast(RasterAffine | Rectilinear | Curvilinear, context.grid)
             mesh = cvs.quadmesh(data, x=grid.X, y=grid.Y)
         else:
             raise NotImplementedError(

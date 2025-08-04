@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import cast
 
 import numpy as np
+import rasterix
 from pyproj import CRS
 from pyproj.aoi import BBox
 
@@ -12,7 +13,14 @@ import xarray as xr
 DEFAULT_CRS = CRS.from_epsg(4326)
 
 
-def pad_bbox(bbox: BBox, da: xr.DataArray, x_dim: str, y_dim: str) -> BBox:
+def _get_xy_pad(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
+    # FIXME: use numbagg
+    x_pad = np.abs(np.diff(x)).max()
+    y_pad = np.abs(np.diff(y)).max()
+    return x_pad, y_pad
+
+
+def pad_bbox(bbox: BBox, da: xr.DataArray, *, x_pad: float, y_pad: float) -> BBox:
     """
     Extend bbox slightly to account for discrete coordinate sampling.
     This prevents transparency gaps at tile edges due to coordinate resolution.
@@ -20,14 +28,6 @@ def pad_bbox(bbox: BBox, da: xr.DataArray, x_dim: str, y_dim: str) -> BBox:
     The function ensures that the padded bbox does not cross the anti-meridian
     by checking if padding would cause west > east.
     """
-    x = da[x_dim].data
-    y = da[y_dim].data
-
-    # Extend bbox by maximum coordinate spacing on each side
-    # This is needed for high zoom tiles smaller than coordinate spacing
-    x_pad = np.abs(np.diff(x)).max()
-    y_pad = np.abs(np.diff(y)).max()
-
     padded_west = float(bbox.west - x_pad)
     padded_east = float(bbox.east + x_pad)
 
@@ -50,9 +50,7 @@ def is_rotated_pole(crs: CRS) -> bool:
     return crs.to_cf().get("grid_mapping_name") == "rotated_latitude_longitude"
 
 
-def _handle_longitude_selection(
-    lon_coord: xr.DataArray, bbox: BBox, is_geographic: bool
-) -> tuple[slice, ...]:
+def _handle_longitude_selection(lon_coord: xr.DataArray, bbox: BBox) -> tuple[slice, ...]:
     """
     Handle longitude coordinate selection with support for different conventions.
 
@@ -66,8 +64,6 @@ def _handle_longitude_selection(
         The longitude/X coordinate array
     bbox : BBox
         Bounding box for selection (may cross anti-meridian after coordinate transformation)
-    is_geographic : bool
-        Whether the CRS is geographic (True) or projected (False)
 
     Returns
     -------
@@ -75,11 +71,6 @@ def _handle_longitude_selection(
         Tuple of slices for coordinate selection. Usually one slice, but two slices
         when bbox crosses the anti-meridian or 360°/0° boundary.
     """
-    if not is_geographic:
-        # For projected coordinates, treat X as regular coordinate
-        return (slice(bbox.west, bbox.east),)
-
-    # For geographic coordinates, handle longitude wrapping
     lon_values = lon_coord.data
     lon_min, lon_max = lon_values.min().item(), lon_values.max().item()
 
@@ -133,6 +124,11 @@ class GridSystem:
     bounds, and reference frame for that specific grid system.
     """
 
+    # FIXME: do we really need these Index objects on the class?
+    #   - reconsider when we do curvilinear and triangular grids
+    #   - The ugliness is that booth would have to set the right indexes on the dataset.
+    #   - So this is do-able, but there's some strong coupling between the
+    #     plugin and the "orchestrator"
     indexes: tuple[xr.Index, ...]
 
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
@@ -144,28 +140,84 @@ class GridSystem:
         raise NotImplementedError("Subclasses must implement pad_bbox method")
 
 
+class RectilinearSelMixin:
+    """Mixin for generic rectilinear .sel"""
+
+    def sel(
+        self,
+        *,
+        da: xr.DataArray,
+        bbox: BBox,
+        xindex: xr.Index,
+        yindex: xr.Index,
+        y_is_increasing: bool,
+    ) -> xr.DataArray:
+        if y_is_increasing:
+            yslice = slice(bbox.south, bbox.north)
+        else:
+            yslice = slice(bbox.north, bbox.south)
+
+        slicers = yindex.sel({self.Y: yslice}).dim_indexers
+        if self.crs.is_geographic:
+            lon_slices = _handle_longitude_selection(da[self.X], bbox)
+            if len(lon_slices) == 1:
+                # Single slice - normal case
+                slicers |= xindex.sel({self.X: lon_slices[0]}).dim_indexers
+                result = da.isel(slicers)
+            else:
+                # Multiple slices - bbox crosses 360°/0° boundary
+                results = []
+                for lon_slice in lon_slices:
+                    subset_slicers = slicers.copy()
+                    subset_slicers.update(xindex.sel({self.X: lon_slice}).dim_indexers)
+                    results.append(da.isel(subset_slicers))
+                # Concatenate along longitude dimension
+                result = xr.concat(results, dim=self.X)
+
+        else:
+            # Non-geographic coordinates
+            slicers |= xindex.sel({self.X: slice(bbox.west, bbox.east)}).dim_indexers
+            result = da.isel(slicers)
+        return result
+
+
 @dataclass(kw_only=True)
-class RasterAffine(GridSystem):
+class RasterAffine(RectilinearSelMixin, GridSystem):
     """2D horizontal grid defined by an affine transform."""
 
     crs: CRS
     bbox: BBox
-    indexes: tuple[xr.Index, ...]
+    X: str
+    Y: str
+    indexes: tuple[rasterix.RasterIndex]
 
     def pad_bbox(self, bbox: BBox, da: xr.DataArray) -> BBox:
         """Extend bbox slightly to account for discrete coordinate sampling."""
-        raise NotImplementedError("pad_bbox not implemented for RasterAffine grids")
+        (index,) = self.indexes
+        affine = index.transform()
+        return pad_bbox(bbox, da, x_pad=affine.a, y_pad=affine.e)
+
+    def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
+        (index,) = self.indexes
+        affine = index.transform()
+        return super().sel(
+            da=da,
+            bbox=bbox,
+            xindex=index,
+            yindex=index,
+            y_is_increasing=affine.e > 0,
+        )
 
 
 @dataclass(kw_only=True)
-class Rectilinear(GridSystem):
+class Rectilinear(RectilinearSelMixin, GridSystem):
     """2D horizontal grid defined by two explicit 1D basis vectors."""
 
     crs: CRS
     bbox: BBox
     X: str
     Y: str
-    indexes: tuple[xr.Index, ...]
+    indexes: tuple[xr.indexes.PandasIndex, xr.indexes.PandasIndex]
 
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         """
@@ -179,49 +231,23 @@ class Rectilinear(GridSystem):
         simplifies the longitude handling significantly compared to arbitrary bounding boxes.
         """
         assert self.X in da.xindexes and self.Y in da.xindexes
-        assert isinstance(da.xindexes[self.X], xr.indexes.PandasIndex)
         assert isinstance(da.xindexes[self.Y], xr.indexes.PandasIndex)
-
-        slicers = {}
         y_index = cast(xr.indexes.PandasIndex, da.xindexes[self.Y])
-        if y_index.index.is_monotonic_increasing:
-            slicers[self.Y] = slice(bbox.south, bbox.north)
-        else:
-            slicers[self.Y] = slice(bbox.north, bbox.south)
-
-        if self.crs.is_geographic:
-            lon_slices = _handle_longitude_selection(
-                da[self.X], bbox, self.crs.is_geographic
-            )
-
-            if len(lon_slices) == 1:
-                # Single slice - normal case
-                slicers[self.X] = lon_slices[0]
-                result = da.sel(slicers)
-            else:
-                # Multiple slices - bbox crosses 360°/0° boundary
-                results = []
-                for lon_slice in lon_slices:
-                    subset_slicers = slicers.copy()
-                    subset_slicers[self.X] = lon_slice
-                    results.append(da.sel(subset_slicers))
-                # Concatenate along longitude dimension
-                result = xr.concat(results, dim=self.X)
-
-        else:
-            # Non-geographic coordinates
-            slicers[self.X] = slice(bbox.west, bbox.east)
-            result = da.sel(slicers)
-
-        # Apply smart longitude conversion only when needed for coordinate system compatibility
-        # if self.crs.is_geographic:
-        #     result = ensure_continuous_longitudes(result, self.X, bbox)
-
-        return result
+        return super().sel(
+            da=da,
+            bbox=bbox,
+            xindex=self.indexes[0],  # FIXME: dict instead?
+            yindex=self.indexes[1],  # FIXME: dict instead?
+            y_is_increasing=y_index.index.is_monotonic_increasing,
+        )
 
     def pad_bbox(self, bbox: BBox, da: xr.DataArray) -> BBox:
-        """Extend bbox slightly to account for discrete coordinate sampling."""
-        return pad_bbox(bbox, da, self.X, self.Y)
+        """
+        Extend bbox by maximum coordinate spacing on each side
+        This is needed for high zoom tiles smaller than coordinate spacing
+        """
+        x_pad, y_pad = _get_xy_pad(da[self.X].data, da[self.Y].data)
+        return pad_bbox(bbox, da, x_pad=x_pad, y_pad=y_pad)
 
 
 @dataclass(kw_only=True)
@@ -264,7 +290,8 @@ class Curvilinear(GridSystem):
 
     def pad_bbox(self, bbox: BBox, da: xr.DataArray) -> BBox:
         """Extend bbox slightly to account for discrete coordinate sampling."""
-        return pad_bbox(bbox, da, self.X, self.Y)
+        x_pad, y_pad = _get_xy_pad(da[self.X].data, da[self.Y].data)
+        return pad_bbox(bbox, da, x_pad=x_pad, y_pad=y_pad)
 
     # def sel_ndpoint(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
     #     # https://github.com/pydata/xarray/issues/10572
@@ -370,16 +397,30 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
             ds = ds.cf.guess_coord_axis()
             Xname, Yname = guess_coordinate_vars(ds, crs)
 
+        # TODO: we might use rasterix for when there are explicit coords too?
         if Xname is None or Yname is None:
             if grid_mapping is None:
                 raise RuntimeError("Grid system could not be inferred.")
             else:
-                # we have spatial_ref with GeoTransform hopefully.
-                # infer bbox from GeoTransform
-                # infer some dimension names
-                # assign indexes = (rasterix.RasterIndex,)
-                raise NotImplementedError(
-                    "Support for raster affine grid system not implemented yet."
+                # FIXME: use cf-xarray regexes here?
+                for x, y in (("x", "y"), ("lon", "lat"), ("longitude", "latitude")):
+                    if x in ds.dims and y in ds.dims:
+                        ds = rasterix.assign_index(ds, x_dim=x, y_dim=y)
+                        index = ds.xindexes[x]
+                        return RasterAffine(
+                            crs=crs,
+                            X=x,
+                            Y=y,
+                            bbox=BBox(
+                                west=index.bbox.left,
+                                east=index.bbox.right,
+                                south=index.bbox.bottom,
+                                north=index.bbox.top,
+                            ),
+                            indexes=(index,),
+                        )
+                raise RuntimeError(
+                    f"Creating raster affine grid system failed. Detected {grid_mapping=!r}."
                 )
 
         # FIXME: nice error here

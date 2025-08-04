@@ -11,7 +11,7 @@ import pyproj
 from pyproj.aoi import BBox
 
 import xarray as xr
-from xpublish_tiles.grids import Curvilinear, Rectilinear, guess_grid_system
+from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear, guess_grid_system
 from xpublish_tiles.lib import check_transparent_pixels
 from xpublish_tiles.types import (
     DataType,
@@ -277,10 +277,10 @@ def subset_to_bbox(
         if min(array.da.shape) < 2:
             raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
 
-        if not isinstance(grid, Rectilinear | Curvilinear):
+        if not isinstance(grid, RasterAffine | Rectilinear | Curvilinear):
             raise NotImplementedError(f"{grid=!r} not supported yet.")
         # Cast to help type checker understand narrowed type
-        grid = cast(Rectilinear | Curvilinear, grid)
+        grid = cast(RasterAffine | Rectilinear | Curvilinear, grid)
         input_to_output = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
         output_to_input = transformer_from_crs(crs_from=crs, crs_to=grid.crs)
 

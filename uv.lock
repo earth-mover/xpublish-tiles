@@ -8,6 +8,15 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "affine"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/69/98/d2f0bb06385069e799fc7d2870d9e078cfa0fa396dc8a2b81227d0da08b9/affine-2.4.0.tar.gz", hash = "sha256:a24d818d6a836c131976d22f8c27b8d3ca32d0af64c1d8d29deb7bafa4da1eea", size = 17132, upload-time = "2023-01-19T23:44:30.696Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0b/f7/85273299ab57117850cc0a936c64151171fac4da49bc6fba0dad984a7c5f/affine-2.4.0-py3-none-any.whl", hash = "sha256:8a3df80e2b2378aef598a83c1392efd47967afec4242021a0b06b4c7cbc61a92", size = 15662, upload-time = "2023-01-19T23:44:28.833Z" },
+]
+
+[[package]]
 name = "aiobotocore"
 version = "2.23.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2190,6 +2199,22 @@ wheels = [
 ]
 
 [[package]]
+name = "rasterix"
+version = "0.1a4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "affine" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "xarray" },
+    { name = "xproj" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c1/fd/68df2e84811bf7097f47047e39278c00ff1351be592d0b23d05faee0d4c4/rasterix-0.1a4.tar.gz", hash = "sha256:6955ab42d7ca3589c754bbb86d05b2f4d01a83ab97ce4b03b6526b909ac57ab7", size = 69469, upload-time = "2025-07-02T19:23:13.379Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/14/d7/41a3717ccbb042ce190cef24d2d13a6faa7901426224fa5de6d35132cb76/rasterix-0.1a4-py3-none-any.whl", hash = "sha256:aa9ebf7c5142a479f3a840da1814c2d3e36e02c41deca1b9ff04b7bf2656baf5", size = 35576, upload-time = "2025-07-02T19:23:12.218Z" },
+]
+
+[[package]]
 name = "requests"
 version = "2.32.4"
 source = { registry = "https://pypi.org/simple" }
@@ -2682,6 +2707,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "xproj"
+version = "0.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyproj" },
+    { name = "xarray" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/48/33/8c2bcceedfa13122916b6a582eedf9581682dbee329d95bcfb4c69542ade/xproj-0.2.1.tar.gz", hash = "sha256:d520c7a0df402f6a5922108ed614c8ea0ce6b04bec12c91aceb75fe3c1d3c5c3", size = 31781, upload-time = "2025-07-07T09:05:48.022Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/05/b9/b6a9cf72aef69c3e6db869dcc130e19452a658366dac9377f9cd32a76b80/xproj-0.2.1-py3-none-any.whl", hash = "sha256:d762c540c1bc4abc5955b4034b409b9b2f7733c3e49285f3aeb71f9a2dd6bf34", size = 23837, upload-time = "2025-07-07T09:05:46.889Z" },
+]
+
+[[package]]
 name = "xpublish"
 version = "0.4.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2718,6 +2756,7 @@ dependencies = [
     { name = "numbagg" },
     { name = "pydantic-xml" },
     { name = "pyproj" },
+    { name = "rasterix" },
     { name = "xarray" },
     { name = "xpublish" },
     { name = "zarr" },
@@ -2753,6 +2792,7 @@ requires-dist = [
     { name = "numbagg", specifier = ">=0.9.0" },
     { name = "pydantic-xml", specifier = ">=2.17.3" },
     { name = "pyproj", specifier = ">=3.7.1" },
+    { name = "rasterix", specifier = ">=0.1a4" },
     { name = "xarray", git = "https://github.com/dcherian/xarray.git?rev=async.load" },
     { name = "xpublish", specifier = ">=0.3.0" },
     { name = "zarr", git = "https://github.com/zarr-developers/zarr-python.git?rev=main" },
