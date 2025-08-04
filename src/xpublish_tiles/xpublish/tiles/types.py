@@ -466,6 +466,14 @@ class TileSetMetadata(BaseModel):
             }
         ),
     ] = None
+    styles: Annotated[
+        Optional[list["Style"]],
+        Field(
+            json_schema_extra={
+                "description": "Available styles for this tileset",
+            }
+        ),
+    ] = None
 
 
 class TileMatrixSetLimit(BaseModel):
@@ -1218,6 +1226,14 @@ class TilesetSummary(BaseModel):
         Field(
             json_schema_extra={
                 "description": "Supported media types for this tileset",
+            }
+        ),
+    ] = None
+    styles: Annotated[
+        Optional[list["Style"]],
+        Field(
+            json_schema_extra={
+                "description": "Available styles for this tileset",
             }
         ),
     ] = None
