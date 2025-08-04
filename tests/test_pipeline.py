@@ -177,4 +177,12 @@ async def test_projected_coordinate_data(projected_dataset_and_tile, png_snapsho
     query_params = create_query_params(tile, tms)
     # Run the full pipeline
     result = await pipeline(ds, query_params)
+
+    # Ensure the rendered image has at least some non-transparent pixels
+    result.seek(0)
+    content = result.read()
+    transparent_percent = check_transparent_pixels(content)
+    assert (
+        transparent_percent < 100
+    ), f"Rendered image is fully transparent - no data rendered ({transparent_percent:.1f}% transparent pixels)"
     assert_render_matches_snapshot(result, png_snapshot, check_transparent=False)
