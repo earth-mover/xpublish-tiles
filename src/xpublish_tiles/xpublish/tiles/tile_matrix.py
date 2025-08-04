@@ -19,69 +19,107 @@ from xpublish_tiles.xpublish.tiles.types import (
 )
 
 
-def get_web_mercator_quad() -> TileMatrixSet:
-    """Get the complete WebMercatorQuad tile matrix set definition with all zoom levels 0-21"""
+def get_tile_matrix_set(tms_id: str) -> TileMatrixSet:
+    """Get a complete tile matrix set definition for any morecantile TMS.
 
-    # Base values for WebMercator
-    origin_x = -20037508.3428
-    origin_y = 20037508.3428
-    tile_size = 256
-    base_scale_denominator = 559082264.029
+    Args:
+        tms_id: The tile matrix set identifier (e.g., 'WebMercatorQuad')
 
-    tile_matrices = []
+    Returns:
+        TileMatrixSet object with all tile matrices
 
-    # Generate all zoom levels from 0 to 21
-    for zoom in range(22):  # 0 to 21 inclusive
-        scale_denominator = base_scale_denominator / (2**zoom)
-        matrix_size = 2**zoom
+    Raises:
+        ValueError: If the TMS ID is not found in morecantile
+    """
+    try:
+        tms = morecantile.tms.get(tms_id)
+    except morecantile.errors.InvalidIdentifier as e:
+        raise ValueError(f"Tile matrix set '{tms_id}' not found") from e
 
-        tile_matrices.append(
-            TileMatrix(
-                id=str(zoom),
-                scaleDenominator=scale_denominator,
-                topLeftCorner=[origin_x, origin_y],
-                tileWidth=tile_size,
-                tileHeight=tile_size,
-                matrixWidth=matrix_size,
-                matrixHeight=matrix_size,
-            )
+    tile_matrices = [
+        TileMatrix(
+            id=matrix.id,
+            scaleDenominator=matrix.scaleDenominator,
+            topLeftCorner=list(matrix.pointOfOrigin),
+            tileWidth=matrix.tileWidth,
+            tileHeight=matrix.tileHeight,
+            matrixWidth=matrix.matrixWidth,
+            matrixHeight=matrix.matrixHeight,
         )
+        for matrix in tms.tileMatrices
+    ]
 
     return TileMatrixSet(
-        id="WebMercatorQuad",
-        title="Web Mercator Quad",
-        uri="http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
-        crs="http://www.opengis.net/def/crs/EPSG/0/3857",
+        id=str(tms.id),
+        title=str(tms.title) if tms.title else tms_id,
+        uri=str(tms.uri) if tms.uri else None,
+        crs=str(tms.crs),
         tileMatrices=tile_matrices,
     )
 
 
-def get_web_mercator_quad_summary() -> TileMatrixSetSummary:
-    """Get summary information for WebMercatorQuad tile matrix set"""
+def get_tile_matrix_set_summary(tms_id: str) -> TileMatrixSetSummary:
+    """Get summary information for any morecantile tile matrix set.
+
+    Args:
+        tms_id: The tile matrix set identifier (e.g., 'WebMercatorQuad')
+
+    Returns:
+        TileMatrixSetSummary object
+
+    Raises:
+        ValueError: If the TMS ID is not found in morecantile
+    """
+    try:
+        tms = morecantile.tms.get(tms_id)
+    except morecantile.errors.InvalidIdentifier as e:
+        raise ValueError(f"Tile matrix set '{tms_id}' not found") from e
+
+    tms_id_str = str(tms.id)
+    tms_title = str(tms.title) if tms.title else tms_id
     return TileMatrixSetSummary(
-        id="WebMercatorQuad",
-        title="Web Mercator Quad",
-        uri="http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
-        crs="http://www.opengis.net/def/crs/EPSG/0/3857",
+        id=tms_id_str,
+        title=tms_title,
+        uri=str(tms.uri) if tms.uri else None,
+        crs=str(tms.crs),
         links=[
             Link(
-                href="/tiles/tileMatrixSets/WebMercatorQuad",
+                href=f"/tiles/tileMatrixSets/{tms_id_str}",
                 rel="self",
                 type="application/json",
-                title="Web Mercator Quad tile matrix set",
+                title=f"{tms_title} tile matrix set",
             )
         ],
     )
 
 
-# Registry of available tile matrix sets
-TILE_MATRIX_SETS = {
-    "WebMercatorQuad": get_web_mercator_quad,
-}
+# Legacy functions for backward compatibility
+def get_web_mercator_quad() -> TileMatrixSet:
+    """Get the complete WebMercatorQuad tile matrix set definition using morecantile"""
+    return get_tile_matrix_set("WebMercatorQuad")
 
-TILE_MATRIX_SET_SUMMARIES = {
-    "WebMercatorQuad": get_web_mercator_quad_summary,
-}
+
+def get_web_mercator_quad_summary() -> TileMatrixSetSummary:
+    """Get summary information for WebMercatorQuad tile matrix set using morecantile"""
+    return get_tile_matrix_set_summary("WebMercatorQuad")
+
+
+# Generate registry of all available tile matrix sets from morecantile
+def _create_tms_registries() -> tuple[dict, dict]:
+    """Create registries for all available morecantile TMS."""
+    tms_sets = {}
+    tms_summaries = {}
+
+    for tms_id in morecantile.tms.list():
+        # Create lambda functions that capture the tms_id
+        tms_sets[tms_id] = lambda tid=tms_id: get_tile_matrix_set(tid)
+        tms_summaries[tms_id] = lambda tid=tms_id: get_tile_matrix_set_summary(tid)
+
+    return tms_sets, tms_summaries
+
+
+# Registry of available tile matrix sets
+TILE_MATRIX_SETS, TILE_MATRIX_SET_SUMMARIES = _create_tms_registries()
 
 
 def extract_tile_bbox_and_crs(

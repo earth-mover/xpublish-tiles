@@ -126,7 +126,9 @@ def test_tilesets_list_with_metadata():
     tileset = data["tilesets"][0]
 
     # Check that metadata fields are populated
-    assert tileset["title"] == "Global Climate Data - WebMercatorQuad"
+    # The title should contain the dataset title and a TMS name
+    assert tileset["title"].startswith("Global Climate Data - ")
+    assert " - " in tileset["title"]  # Should have format "Dataset Title - TMS_ID"
     assert tileset["description"] == "Sample global climate dataset"
     assert tileset["keywords"] == ["climate", "temperature", "global"]
     assert tileset["attribution"] == "Test Data Corporation"
