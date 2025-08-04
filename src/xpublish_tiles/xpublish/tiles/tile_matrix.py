@@ -4,6 +4,7 @@ from typing import Optional, Union
 
 import morecantile
 import morecantile.errors
+import numpy as np
 import pyproj
 import pyproj.aoi
 
@@ -176,16 +177,57 @@ def extract_dataset_bounds(dataset: Dataset) -> Optional[BoundingBox]:
                 upperRight=[float(bounds[2]), float(bounds[3])],
                 crs="http://www.opengis.net/def/crs/EPSG/0/4326",
             )
-        # Try to extract from lat/lon coordinates
-        elif "lat" in dataset.coords and "lon" in dataset.coords:
-            lat_min, lat_max = float(dataset.lat.min()), float(dataset.lat.max())
-            lon_min, lon_max = float(dataset.lon.min()), float(dataset.lon.max())
-            return BoundingBox(
-                lowerLeft=[lon_min, lat_min],
-                upperRight=[lon_max, lat_max],
-                crs="http://www.opengis.net/def/crs/EPSG/0/4326",
-                orderedAxes=["X", "Y"],
-            )
+        # Try to extract from lat/lon coordinates with various naming conventions
+        else:
+            lat_coord = None
+            lon_coord = None
+
+            # Look for latitude coordinate with common names
+            for lat_name in ["lat", "latitude", "y", "Y"]:
+                if lat_name in dataset.coords:
+                    lat_coord = dataset.coords[lat_name]
+                    break
+
+            # Look for longitude coordinate with common names
+            for lon_name in ["lon", "longitude", "x", "X"]:
+                if lon_name in dataset.coords:
+                    lon_coord = dataset.coords[lon_name]
+                    break
+
+            # Also check using CF conventions
+            if lat_coord is None or lon_coord is None:
+                try:
+                    import cf_xarray as cfxr  # noqa: F401
+
+                    # Try to find coordinates using CF standard names
+                    for coord_name, coord in dataset.coords.items():
+                        standard_name = coord.attrs.get("standard_name", "")
+                        axis = coord.attrs.get("axis", "")
+
+                        if standard_name == "latitude" or axis == "Y":
+                            lat_coord = coord
+                        elif standard_name == "longitude" or axis == "X":
+                            lon_coord = coord
+                except ImportError:
+                    pass
+
+            if lat_coord is not None and lon_coord is not None:
+                lat_min, lat_max = float(lat_coord.min()), float(lat_coord.max())
+                lon_min, lon_max = float(lon_coord.min()), float(lon_coord.max())
+
+                # Handle 0-360 longitude range by converting to -180-180
+                if lon_min >= 0 and lon_max > 180:
+                    # Convert 0-360 to -180-180
+                    lon_values = lon_coord.values
+                    lon_values = np.where(lon_values > 180, lon_values - 360, lon_values)
+                    lon_min, lon_max = float(lon_values.min()), float(lon_values.max())
+
+                return BoundingBox(
+                    lowerLeft=[lon_min, lat_min],
+                    upperRight=[lon_max, lat_max],
+                    crs="http://www.opengis.net/def/crs/EPSG/0/4326",
+                    orderedAxes=["X", "Y"],
+                )
     except Exception:
         # If we can't extract bounds, return None
         pass

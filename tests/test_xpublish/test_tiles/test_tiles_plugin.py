@@ -800,3 +800,94 @@ def test_tilejson_endpoint_invalid_tms():
 
     error = response.json()
     assert "not found" in error["detail"].lower()
+
+
+def test_tilejson_bounds_extraction():
+    """Test TileJSON bounds extraction with different coordinate naming conventions"""
+    import pandas as pd
+
+    # Test 1: Different coordinate names (latitude/longitude)
+    data1 = xr.Dataset(
+        {
+            "temp": xr.DataArray(
+                np.random.randn(3, 10, 20),
+                dims=["time", "latitude", "longitude"],
+                coords={
+                    "time": pd.date_range("2023-01-01", periods=3),
+                    "latitude": np.linspace(-45, 45, 10),
+                    "longitude": np.linspace(-90, 90, 20),
+                },
+            )
+        }
+    )
+
+    rest1 = xpublish.Rest({"test1": data1}, plugins={"tiles": TilesPlugin()})
+    client1 = TestClient(rest1.app)
+
+    response1 = client1.get("/datasets/test1/tiles/WebMercatorQuad/tilejson.json")
+    assert response1.status_code == 200
+
+    tilejson1 = response1.json()
+    bounds1 = tilejson1["bounds"]
+    assert bounds1 == [-90.0, -45.0, 90.0, 45.0]
+
+    # Test 2: 0-360 longitude range (should be converted to -180/180)
+    data2 = xr.Dataset(
+        {
+            "temp": xr.DataArray(
+                np.random.randn(3, 10, 20),
+                dims=["time", "lat", "lon"],
+                coords={
+                    "time": pd.date_range("2023-01-01", periods=3),
+                    "lat": np.linspace(-45, 45, 10),
+                    "lon": np.linspace(0, 360, 20),  # 0-360 range
+                },
+            )
+        }
+    )
+
+    rest2 = xpublish.Rest({"test2": data2}, plugins={"tiles": TilesPlugin()})
+    client2 = TestClient(rest2.app)
+
+    response2 = client2.get("/datasets/test2/tiles/WebMercatorQuad/tilejson.json")
+    assert response2.status_code == 200
+
+    tilejson2 = response2.json()
+    bounds2 = tilejson2["bounds"]
+    # Should be converted to -180/180 range
+    assert bounds2[0] < 0  # Western bound should be negative
+    assert bounds2[2] > 0  # Eastern bound should be positive
+    assert abs(bounds2[2] - bounds2[0]) > 350  # Should span most of the globe
+
+    # Test 3: CF standard names
+    data3 = xr.Dataset(
+        {
+            "temp": xr.DataArray(
+                np.random.randn(3, 10, 20),
+                dims=["time", "y", "x"],
+                coords={
+                    "time": pd.date_range("2023-01-01", periods=3),
+                    "y": (
+                        ["y"],
+                        np.linspace(-45, 45, 10),
+                        {"standard_name": "latitude", "axis": "Y"},
+                    ),
+                    "x": (
+                        ["x"],
+                        np.linspace(-90, 90, 20),
+                        {"standard_name": "longitude", "axis": "X"},
+                    ),
+                },
+            )
+        }
+    )
+
+    rest3 = xpublish.Rest({"test3": data3}, plugins={"tiles": TilesPlugin()})
+    client3 = TestClient(rest3.app)
+
+    response3 = client3.get("/datasets/test3/tiles/WebMercatorQuad/tilejson.json")
+    assert response3.status_code == 200
+
+    tilejson3 = response3.json()
+    bounds3 = tilejson3["bounds"]
+    assert bounds3 == [-90.0, -45.0, 90.0, 45.0]

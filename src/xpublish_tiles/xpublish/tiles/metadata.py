@@ -5,13 +5,13 @@ import pyproj
 from fastapi import Request
 
 from xarray import Dataset
-from xpublish_tiles.utils import get_available_raster_styles
+from xpublish_tiles.utils import extract_robust_bounds, get_available_raster_styles
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
-    extract_dataset_bounds,
     extract_dimension_extents,
 )
 from xpublish_tiles.xpublish.tiles.types import (
+    BoundingBox,
     DataType,
     DimensionType,
     Link,
@@ -33,8 +33,15 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
     dataset_attrs = dataset.attrs
     title = dataset_attrs.get("title", "Dataset")
 
-    # Extract dataset bounds
-    dataset_bounds = extract_dataset_bounds(dataset)
+    # Extract dataset bounds using robust pipeline logic
+    robust_bbox = extract_robust_bounds(dataset)
+    dataset_bounds = None
+    if robust_bbox:
+        dataset_bounds = BoundingBox(
+            lowerLeft=[robust_bbox.west, robust_bbox.south],
+            upperRight=[robust_bbox.east, robust_bbox.north],
+            crs="http://www.opengis.net/def/crs/EPSG/0/4326",
+        )
 
     # Get available styles
     style_dicts = get_available_raster_styles()
@@ -291,18 +298,18 @@ def create_tilejson(
     attribution = dataset_attrs.get("attribution")
     version = dataset_attrs.get("version")
 
-    # Get dataset bounds
-    dataset_bounds = extract_dataset_bounds(dataset)
+    # Get dataset bounds using robust pipeline logic
+    robust_bbox = extract_robust_bounds(dataset)
     bounds = None
     center = None
 
-    if dataset_bounds:
+    if robust_bbox:
         # Convert bounds to list format [west, south, east, north]
         bounds = [
-            dataset_bounds.lowerLeft[0],
-            dataset_bounds.lowerLeft[1],
-            dataset_bounds.upperRight[0],
-            dataset_bounds.upperRight[1],
+            robust_bbox.west,
+            robust_bbox.south,
+            robust_bbox.east,
+            robust_bbox.north,
         ]
 
         # Transform bounds to target CRS if needed

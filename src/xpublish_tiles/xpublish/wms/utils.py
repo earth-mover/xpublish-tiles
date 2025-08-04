@@ -3,7 +3,7 @@
 import numpy as np
 
 import xarray as xr
-from xpublish_tiles.utils import get_available_raster_styles
+from xpublish_tiles.utils import extract_robust_bounds, get_available_raster_styles
 from xpublish_tiles.xpublish.wms.types import (
     WMSBoundingBoxResponse,
     WMSCapabilitiesResponse,
@@ -24,42 +24,19 @@ from xpublish_tiles.xpublish.wms.types import (
 
 
 def extract_geographic_bounds(dataset: xr.Dataset) -> tuple[float, float, float, float]:
-    """Extract geographic bounding box from dataset coordinates.
+    """Extract geographic bounding box from dataset coordinates using robust pipeline logic.
 
     Returns:
         Tuple of (west, east, south, north) in geographic coordinates
     """
-    # Try to find longitude/latitude coordinates
-    lon_coord = None
-    lat_coord = None
+    # Use the robust bounds extraction from the pipeline
+    robust_bbox = extract_robust_bounds(dataset)
 
-    for coord_name, coord in dataset.coords.items():
-        if hasattr(coord, "standard_name"):
-            if coord.standard_name in ["longitude", "lon"]:
-                lon_coord = coord
-            elif coord.standard_name in ["latitude", "lat"]:
-                lat_coord = coord
-        elif str(coord_name).lower() in ["lon", "longitude", "x"]:
-            lon_coord = coord
-        elif str(coord_name).lower() in ["lat", "latitude", "y"]:
-            lat_coord = coord
-
-    if lon_coord is None or lat_coord is None:
-        # Fallback to first two coordinates if no standard names found
-        coords = list(dataset.coords.values())
-        if len(coords) >= 2:
-            lon_coord = coords[0]
-            lat_coord = coords[1]
-        else:
-            # Default bounds if no coordinates found
-            return -180.0, 180.0, -90.0, 90.0
-
-    west = float(lon_coord.min().values)
-    east = float(lon_coord.max().values)
-    south = float(lat_coord.min().values)
-    north = float(lat_coord.max().values)
-
-    return west, east, south, north
+    if robust_bbox:
+        return robust_bbox.west, robust_bbox.east, robust_bbox.south, robust_bbox.north
+    else:
+        # Fallback to default world bounds if extraction fails
+        return -180.0, 180.0, -90.0, 90.0
 
 
 def extract_dimensions(dataset: xr.Dataset) -> list[WMSDimensionResponse]:
