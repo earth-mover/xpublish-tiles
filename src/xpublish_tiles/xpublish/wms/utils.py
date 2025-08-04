@@ -1,9 +1,9 @@
 """Utilities for WMS dataset introspection and metadata extraction"""
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 import xarray as xr
+from xpublish_tiles.utils import get_available_raster_styles
 from xpublish_tiles.xpublish.wms.types import (
     WMSBoundingBoxResponse,
     WMSCapabilitiesResponse,
@@ -167,36 +167,18 @@ def extract_dimensions(dataset: xr.Dataset) -> list[WMSDimensionResponse]:
     return dimensions
 
 
-def get_available_raster_styles() -> list[WMSStyleResponse]:
+def get_available_wms_styles() -> list[WMSStyleResponse]:
     """Get all available raster styles based on matplotlib colormaps."""
-    styles = []
+    style_dicts = get_available_raster_styles()
 
-    # Add default raster style
-    styles.append(
+    return [
         WMSStyleResponse(
-            name="raster",
-            title="Default Raster Style",
-            abstract="Default raster rendering style",
+            name=style["id"],
+            title=style["title"],
+            abstract=style["description"],
         )
-    )
-
-    # Get all available matplotlib colormaps
-    colormaps = sorted(plt.colormaps())
-
-    for cmap_name in colormaps:
-        # Skip reversed colormaps to avoid duplication (they end with '_r')
-        if cmap_name.endswith("_r"):
-            continue
-
-        styles.append(
-            WMSStyleResponse(
-                name=f"raster/{cmap_name}",
-                title=f"Raster - {cmap_name.title()}",
-                abstract=f"Raster rendering using {cmap_name} colormap",
-            )
-        )
-
-    return styles
+        for style in style_dicts
+    ]
 
 
 def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]:
@@ -320,7 +302,7 @@ def create_capabilities_response(
 
     # Create root layer containing all data layers and styles
     west, east, south, north = extract_geographic_bounds(dataset)
-    available_styles = get_available_raster_styles()
+    available_styles = get_available_wms_styles()
 
     root_layer = WMSLayerResponse(
         title="Dataset Layers",

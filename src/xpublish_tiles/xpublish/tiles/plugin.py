@@ -10,6 +10,7 @@ from xpublish import Dependencies, Plugin, hookimpl
 from xarray import Dataset
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.types import QueryParams
+from xpublish_tiles.utils import get_available_raster_styles
 from xpublish_tiles.xpublish.tiles.metadata import (
     create_tileset_metadata,
     extract_dataset_extents,
@@ -28,6 +29,7 @@ from xpublish_tiles.xpublish.tiles.types import (
     DataType,
     Layer,
     Link,
+    Style,
     TileMatrixSet,
     TileMatrixSets,
     TileQuery,
@@ -109,6 +111,17 @@ class TilesPlugin(Plugin):
             elif not isinstance(keywords, list):
                 keywords = []
 
+            # Get available styles
+            style_dicts = get_available_raster_styles()
+            styles = [
+                Style(
+                    id=style["id"],
+                    title=style["title"],
+                    description=style["description"],
+                )
+                for style in style_dicts
+            ]
+
             # Create one tileset entry per supported tile matrix set
             supported_tms = get_all_tile_matrix_set_ids()
 
@@ -173,6 +186,7 @@ class TilesPlugin(Plugin):
                         version=dataset_attrs.get("version"),
                         pointOfContact=dataset_attrs.get("contact"),
                         mediaTypes=["image/png", "image/jpeg"],
+                        styles=styles,
                     )
                     tilesets.append(tileset)
 

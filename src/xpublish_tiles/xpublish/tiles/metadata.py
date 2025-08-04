@@ -1,6 +1,7 @@
 from typing import Any, Union
 
 from xarray import Dataset
+from xpublish_tiles.utils import get_available_raster_styles
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     extract_dataset_bounds,
@@ -10,6 +11,7 @@ from xpublish_tiles.xpublish.tiles.types import (
     DataType,
     DimensionType,
     Link,
+    Style,
     TileSetMetadata,
 )
 
@@ -28,6 +30,17 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
 
     # Extract dataset bounds
     dataset_bounds = extract_dataset_bounds(dataset)
+
+    # Get available styles
+    style_dicts = get_available_raster_styles()
+    styles = [
+        Style(
+            id=style["id"],
+            title=style["title"],
+            description=style["description"],
+        )
+        for style in style_dicts
+    ]
 
     # Create main tileset metadata
     return TileSetMetadata(
@@ -51,6 +64,7 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
             ),
         ],
         boundingBox=dataset_bounds,
+        styles=styles,
     )
 
 
