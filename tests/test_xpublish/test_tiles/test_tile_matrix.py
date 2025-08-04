@@ -3,7 +3,11 @@ import pytest
 from pyproj.aoi import BBox
 
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
+    TILE_MATRIX_SET_SUMMARIES,
+    TILE_MATRIX_SETS,
     extract_tile_bbox_and_crs,
+    get_tile_matrix_set,
+    get_tile_matrix_set_summary,
     get_web_mercator_quad,
     get_web_mercator_quad_summary,
 )
@@ -60,6 +64,94 @@ class TestExtractTileBboxAndCrs:
         assert abs(bbox.south - expected_min_y) < 1  # minY
         assert abs(bbox.east - expected_max_x) < 1  # maxX
         assert abs(bbox.north - expected_max_y) < 1  # maxY
+
+
+class TestGenericTileMatrixFunctions:
+    """Test the generic TMS functions that work with any morecantile TMS."""
+
+    @pytest.mark.parametrize(
+        "tms_id", ["WebMercatorQuad", "WGS1984Quad", "EuropeanETRS89_LAEAQuad"]
+    )
+    def test_get_tile_matrix_set(self, tms_id):
+        """Test generic tile matrix set creation for various TMS."""
+        tms = get_tile_matrix_set(tms_id)
+
+        assert tms.id == tms_id
+        assert tms.title is not None
+        assert tms.crs is not None
+        assert len(tms.tileMatrices) > 0
+
+        # Test first matrix
+        first_matrix = tms.tileMatrices[0]
+        assert first_matrix.id == "0"
+        assert first_matrix.tileWidth > 0
+        assert first_matrix.tileHeight > 0
+        assert first_matrix.matrixWidth > 0
+        assert first_matrix.matrixHeight > 0
+
+    @pytest.mark.parametrize(
+        "tms_id", ["WebMercatorQuad", "WGS1984Quad", "EuropeanETRS89_LAEAQuad"]
+    )
+    def test_get_tile_matrix_set_summary(self, tms_id):
+        """Test generic tile matrix set summary creation for various TMS."""
+        summary = get_tile_matrix_set_summary(tms_id)
+
+        assert summary.id == tms_id
+        assert summary.title is not None
+        assert summary.crs is not None
+        assert len(summary.links) == 1
+        assert summary.links[0].href == f"/tiles/tileMatrixSets/{tms_id}"
+
+    def test_get_tile_matrix_set_invalid_id(self):
+        """Test error handling for invalid TMS ID."""
+        with pytest.raises(ValueError, match="Tile matrix set 'InvalidTMS' not found"):
+            get_tile_matrix_set("InvalidTMS")
+
+    def test_get_tile_matrix_set_summary_invalid_id(self):
+        """Test error handling for invalid TMS ID in summary."""
+        with pytest.raises(ValueError, match="Tile matrix set 'InvalidTMS' not found"):
+            get_tile_matrix_set_summary("InvalidTMS")
+
+    def test_tile_matrix_sets_registry(self):
+        """Test that the TMS registry contains all expected TMS."""
+        expected_tms = [
+            "WebMercatorQuad",
+            "WGS1984Quad",
+            "WorldCRS84Quad",
+            "WorldMercatorWGS84Quad",
+            "EuropeanETRS89_LAEAQuad",
+            "CanadianNAD83_LCC",
+            "UPSArcticWGS84Quad",
+            "UPSAntarcticWGS84Quad",
+            "UTM31WGS84Quad",
+            "NZTM2000Quad",
+            "LINZAntarticaMapTilegrid",
+            "CDB1GlobalGrid",
+            "GNOSISGlobalGrid",
+        ]
+
+        for tms_id in expected_tms:
+            assert tms_id in TILE_MATRIX_SETS
+            assert tms_id in TILE_MATRIX_SET_SUMMARIES
+
+            # Test that the registry functions work
+            tms = TILE_MATRIX_SETS[tms_id]()
+            summary = TILE_MATRIX_SET_SUMMARIES[tms_id]()
+
+            assert tms.id == tms_id
+            assert summary.id == tms_id
+
+    @pytest.mark.parametrize(
+        "tms_id", ["WGS1984Quad", "WorldCRS84Quad", "EuropeanETRS89_LAEAQuad"]
+    )
+    def test_extract_tile_bbox_various_tms(self, tms_id):
+        """Test bbox extraction works with various TMS."""
+        bbox, crs = extract_tile_bbox_and_crs(tms_id, 0, 0, 0)
+
+        assert isinstance(bbox, BBox)
+        assert isinstance(crs, pyproj.CRS)
+        assert bbox.west < bbox.east
+        assert bbox.south < bbox.north
 
     def test_extract_tile_bbox_zoom_1(self):
         """Test bbox extraction for zoom level 1"""
