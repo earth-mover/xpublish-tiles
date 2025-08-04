@@ -17,10 +17,10 @@ Then you can try the examples:
 The TileJSON examples demonstrate how to use the new TileJSON 3.0.0 specification support:
 
 ### Basic TileJSON (`tilejson.html`)
-- Fetches TileJSON specification from the server
-- Displays metadata in an info panel
+- Uses TileJSON URL directly in the source configuration
+- Mapbox GL JS automatically fetches and parses the TileJSON specification
 - Uses the same parameters as the existing XYZ and WMS examples
-- Shows how TileJSON simplifies map configuration
+- Demonstrates the simplest way to use TileJSON with Mapbox GL JS
 
 ### Advanced TileJSON (`tilejson-advanced.html`)
 - Interactive controls for changing variables, styles, and parameters
