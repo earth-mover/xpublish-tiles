@@ -316,14 +316,11 @@ def create_tilejson(
     # Calculate appropriate zoom levels
     min_zoom, max_zoom = _calculate_appropriate_zoom_levels(dataset, tile_matrix_set_id)
 
-    # Build tile URL template with current query parameters
-    # Extract dataset_id from the request path
-    dataset_id = request.path_params.get("dataset_id", "")
-
-    # Build the base tile URL template manually
-    base_url = f"/datasets/{dataset_id}/tiles/{tile_matrix_set_id}/{{z}}/{{y}}/{{x}}"
-
-    # Extract query parameters, excluding TileJSON-specific ones
+    # Build tile URL template by replacing /tilejson.json with tile coordinates
+    current_path = str(request.url.path)
+    base_url = current_path.replace(
+        "/tilejson.json", "/{z}/{y}/{x}"
+    )  # Extract query parameters, excluding TileJSON-specific ones
     query_params = dict(request.query_params)
     tilejson_params = {"tilejson", "format"}  # Parameters specific to TileJSON endpoint
     filtered_params = {k: v for k, v in query_params.items() if k not in tilejson_params}
