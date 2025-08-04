@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>TileJSON - xpublish-tiles</title>
+<meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.css" rel="stylesheet">
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.js"></script>
+<style>
+body { margin: 0; padding: 0; }
+#map { position: absolute; top: 0; bottom: 0; width: 100%; }
+#info {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(255,255,255,0.9);
+    padding: 10px;
+    border-radius: 5px;
+    font-family: Arial, sans-serif;
+    font-size: 12px;
+    max-width: 300px;
+    z-index: 1000;
+}
+#info h3 { margin: 0 0 5px 0; }
+#info p { margin: 2px 0; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="info">
+    <h3>TileJSON Example</h3>
+    <p><strong>Loading TileJSON...</strong></p>
+</div>
+<script>
+	// TO MAKE THE MAP APPEAR YOU MUST
+	// ADD YOUR ACCESS TOKEN FROM
+	// https://account.mapbox.com
+	mapboxgl.accessToken = 'pk.eyJ1IjoibXBpYW5udWNjaSIsImEiOiJja3FiZHg2emEwMGNjMndvY2F6OTdpcWN3In0.rjzyODwHa4rsEy2CH7IDwQ';
+
+    // TileJSON URL with the same parameters as the existing examples
+    const tileJsonUrl = 'http://localhost:8080/datasets/earthmover-public%2Faifs-outputs/tiles/WebMercatorQuad/tilejson.json?variables=2t&style=raster/viridis&colorscalerange=280,300&width=256&height=256&valid_time=2025-04-03T06:00:00';
+
+    const map = new mapboxgl.Map({
+        container: 'map',
+        // Choose from Mapbox's core styles, or make your own style with Mapbox Studio
+        style: 'mapbox://styles/mapbox/light-v11',
+        zoom: 2,
+        center: [-71.0367, 42.3739],
+        //center: [-61.5, -4.5],
+        // transformRequest: (url, resourceType) => {
+        //     if (url.includes('localhost')) {
+        //         return {
+        //             url: url,
+        //             headers: { 'Authorization': 'Basic dGVzdF91c2VyOnRlc3RfcGFzcw==' },
+        //         };
+        //     }
+        // }
+    });
+
+    // Function to update info panel
+    function updateInfo(tilejson) {
+        const infoDiv = document.getElementById('info');
+        infoDiv.innerHTML = `
+            <h3>TileJSON Example</h3>
+            <p><strong>Name:</strong> ${tilejson.name || 'N/A'}</p>
+            <p><strong>Description:</strong> ${tilejson.description || 'N/A'}</p>
+            <p><strong>Version:</strong> ${tilejson.tilejson}</p>
+            <p><strong>Zoom:</strong> ${tilejson.minzoom}-${tilejson.maxzoom}</p>
+            <p><strong>Bounds:</strong> [${tilejson.bounds ? tilejson.bounds.map(b => b.toFixed(1)).join(', ') : 'N/A'}]</p>
+            <p><strong>Attribution:</strong> ${tilejson.attribution || 'N/A'}</p>
+            <p><strong>Tiles:</strong> ${tilejson.tiles ? tilejson.tiles.length : 0} endpoint(s)</p>
+        `;
+    }
+
+    map.on('load', async () => {
+        map.setFog({});
+
+        try {
+            // Fetch the TileJSON specification
+            const response = await fetch(tileJsonUrl);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const tilejson = await response.json();
+
+            // Update info panel with TileJSON metadata
+            updateInfo(tilejson);
+
+            // Add source using TileJSON specification
+            map.addSource('tilejson-source', {
+                'type': 'raster',
+                'tiles': tilejson.tiles,
+                'tileSize': 256,
+                'minzoom': tilejson.minzoom || 0,
+                'maxzoom': tilejson.maxzoom || 18,
+                'bounds': tilejson.bounds,
+                'attribution': tilejson.attribution
+            });
+
+            // Add layer
+            map.addLayer(
+                {
+                    'id': 'tilejson-layer',
+                    'type': 'raster',
+                    'source': 'tilejson-source',
+                    'paint': {
+                        'raster-opacity': 0.5
+                    }
+                },
+                // 'building' // Place layer under labels, roads and buildings.
+            );
+
+            // If TileJSON includes center and zoom, optionally fly to it
+            if (tilejson.center && tilejson.center.length >= 3) {
+                map.flyTo({
+                    center: [tilejson.center[0], tilejson.center[1]],
+                    zoom: tilejson.center[2]
+                });
+            }
+
+        } catch (error) {
+            console.error('Error loading TileJSON:', error);
+            document.getElementById('info').innerHTML = `
+                <h3>TileJSON Example</h3>
+                <p style="color: red;"><strong>Error:</strong> Failed to load TileJSON</p>
+                <p style="color: red; font-size: 10px;">${error.message}</p>
+                <p style="font-size: 10px;">Make sure the server is running with:</p>
+                <p style="font-size: 10px; font-family: monospace;">uv run xpublish-tiles --dataset=earthmover-public/aifs-outputs --group=2025-04-01/12z</p>
+            `;
+        }
+    });
+
+    map.on('style.load', function() {
+        map.on('click', function(e) {
+            var coordinates = e.lngLat;
+            new mapboxgl.Popup()
+                .setLngLat(coordinates)
+                .setHTML('you clicked here: <br/>' + coordinates)
+                .addTo(map);
+        });
+    });
+</script>
+
+</body>
+</html>
