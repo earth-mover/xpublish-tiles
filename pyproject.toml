@@ -50,6 +50,7 @@ dev = [
     "pooch>=1.8.2",
     "hypothesis>=6.136.6",
     "dask",
+    "ipython>=9.4.0",
 ]
 
 [project.entry-points."xpublish.plugin"]

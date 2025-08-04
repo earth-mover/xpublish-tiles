@@ -138,6 +138,9 @@ def check_bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -
 
     # For geographic data, check longitude wrapping
     if is_geographic:
+        # If the bbox spans more than 360 degrees, it covers the entire globe
+        if (input_bbox.east - input_bbox.west) >= 360:
+            return True
         # Try converting input bbox to both 0-360 and -180-180 conventions to see if either overlaps
 
         # Convert input bbox to -180 to 180 range

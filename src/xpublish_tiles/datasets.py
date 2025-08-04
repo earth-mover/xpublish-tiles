@@ -35,10 +35,11 @@ class Dataset:
         return ds
 
 
-def generate_sine_wave_data(dims: tuple[Dim, ...], dtype: npt.DTypeLike):
-    """Generate sine wave data across all dimensions.
+def generate_tanh_wave_data(dims: tuple[Dim, ...], dtype: npt.DTypeLike):
+    """Generate smooth tanh wave data across all dimensions.
 
     Fits 3 waves along each dimension using coordinate values as inputs.
+    Uses tanh to create smooth, bounded patterns in [-1, 1] range.
     For dimensions without coordinates, uses normalized indices.
     """
     chunks = tuple(d.chunk_size for d in dims)
@@ -79,10 +80,15 @@ def generate_sine_wave_data(dims: tuple[Dim, ...], dtype: npt.DTypeLike):
     # Create meshgrid with dask arrays
     grids = dask.array.meshgrid(*dask_coords, indexing="ij")
 
-    # Start with sin of the first coordinate, then multiply by sin of remaining coordinates
-    sine_data = dask.array.sin(grids[0])
-    for grid in grids[1:]:
-        sine_data = sine_data * dask.array.sin(grid)
+    # Create smooth patterns using tanh of summed sine waves
+    # tanh naturally bounds to [-1, 1] and creates smooth, flowing patterns
+    sine_sum = dask.array.zeros_like(grids[0])
+    for grid in grids:
+        sine_sum = sine_sum + dask.array.sin(grid)
+
+    # Use tanh to compress the sum into [-1, 1] range smoothly
+    # The factor 0.8 prevents saturation, keeping gradients smooth
+    sine_data = dask.array.tanh(0.8 * sine_sum)
 
     return sine_data.astype(dtype)
 
@@ -107,8 +113,8 @@ def uniform_grid(*, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str
     if "flag_values" in attrs:
         data_array = generate_flag_values_data(dims, dtype, attrs["flag_values"])
     else:
-        # Generate sine wave data for continuous data
-        data_array = generate_sine_wave_data(dims, dtype)
+        # Generate tanh wave data for continuous data
+        data_array = generate_tanh_wave_data(dims, dtype)
 
     ds = xr.Dataset(
         {

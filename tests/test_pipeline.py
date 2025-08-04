@@ -174,7 +174,7 @@ async def test_high_zoom_tile_global_dataset(png_snapshot):
 
 async def test_projected_coordinate_data(projected_dataset_and_tile, png_snapshot):
     ds, tile, tms = projected_dataset_and_tile
-    query_params = create_query_params(tile, tms, colorscalerange=(-1, 1))
+    query_params = create_query_params(tile, tms)
     # Run the full pipeline
     result = await pipeline(ds, query_params)
     assert_render_matches_snapshot(result, png_snapshot, check_transparent=False)
