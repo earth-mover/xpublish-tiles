@@ -175,14 +175,33 @@ async def test_high_zoom_tile_global_dataset(png_snapshot):
 async def test_projected_coordinate_data(projected_dataset_and_tile, png_snapshot):
     ds, tile, tms = projected_dataset_and_tile
     query_params = create_query_params(tile, tms)
-    # Run the full pipeline
     result = await pipeline(ds, query_params)
 
-    # Ensure the rendered image has at least some non-transparent pixels
     result.seek(0)
     content = result.read()
     transparent_percent = check_transparent_pixels(content)
-    assert (
-        transparent_percent < 100
-    ), f"Rendered image is fully transparent - no data rendered ({transparent_percent:.1f}% transparent pixels)"
+
+    dataset_bbox = ds.attrs["bbox"]
+    tile_bounds = tms.bounds(tile)
+    tile_bbox = BBox(
+        west=tile_bounds.left,
+        south=tile_bounds.bottom,
+        east=tile_bounds.right,
+        north=tile_bounds.top,
+    )
+
+    # Check if dataset bbox contains or intersects with tile bounds
+    overlaps = dataset_bbox.intersects(tile_bbox)
+
+    if overlaps:
+        # If tile overlaps with data, it should NOT be fully transparent
+        assert (
+            transparent_percent < 100
+        ), f"Tile overlaps dataset but rendered fully transparent ({transparent_percent:.1f}% transparent pixels)"
+    else:
+        # If tile doesn't overlap, it SHOULD be fully transparent
+        assert (
+            transparent_percent == 100
+        ), f"Tile doesn't overlap dataset but has data ({transparent_percent:.1f}% transparent pixels)"
+
     assert_render_matches_snapshot(result, png_snapshot, check_transparent=False)

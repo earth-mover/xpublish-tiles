@@ -139,11 +139,17 @@ def raster_grid(
     attrs: dict[str, Any],
     crs: Any,
     geotransform: str,
+    bbox: pyproj.aoi.BBox | None = None,
 ) -> xr.Dataset:
     ds = uniform_grid(dims=dims, dtype=dtype, attrs=attrs)
     crs = pyproj.CRS.from_user_input(crs)
     ds.coords["spatial_ref"] = ((), 0, crs.to_cf())
     ds.spatial_ref.attrs["GeoTransform"] = geotransform
+
+    # Add bounding box to dataset attributes if provided
+    if bbox is not None:
+        ds.attrs["bbox"] = bbox
+
     return ds
 
 
@@ -352,12 +358,19 @@ HRRR = Dataset(
         Dim(
             name="step",
             size=1,
-            chunk_size=19,
-            data=pd.to_timedelta(np.arange(0, 49), unit="h"),
+            chunk_size=1,
+            data=pd.to_timedelta(np.arange(0, 2), unit="h"),
         ),
     ),
     dtype=np.float32,
-    setup=partial(raster_grid, crs=HRRR_CRS_WKT, geotransform=None),
+    setup=partial(
+        raster_grid,
+        crs=HRRR_CRS_WKT,
+        geotransform=None,
+        bbox=pyproj.aoi.BBox(
+            west=-134.095480, south=21.138123, east=-60.917193, north=52.6156533
+        ),
+    ),
 )
 
 EU3035 = Dataset(
@@ -371,5 +384,8 @@ EU3035 = Dataset(
         raster_grid,
         crs="epsg:3035",
         geotransform="2635780.0 120.0 0.0 5416000.0 0.0 -120.0",
+        bbox=pyproj.aoi.BBox(
+            west=-16.0, south=32.0, east=40.0, north=84.0
+        ),  # Approximate EU coverage
     ),
 )

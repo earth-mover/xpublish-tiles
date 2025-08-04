@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from PIL import Image
+from pyproj.aoi import BBox
 from syrupy.extensions.image import PNGImageSnapshotExtension
 
 import icechunk
@@ -133,8 +134,8 @@ def global_datasets(request):
 def _get_projected_dataset_tile_params():
     params = []
     for dataset_class, tiles in [
-        (EU3035, ETRS89_TILES),
         (HRRR, HRRR_TILES),
+        (EU3035, ETRS89_TILES),
     ]:
         for tile_param in tiles:
             tile, tms = tile_param.values
@@ -149,7 +150,22 @@ def projected_dataset_and_tile(request):
     ds = dataset_class.create()
     if ds.attrs["name"] == "hrrr":
         # FIXME: make this kind of thing more explicit
-        ds = ds.isel(time=0, step=1)
+        ds = ds.isel(time=0, step=0)
+
+    # Validate that tile overlaps with dataset bounding box
+    dataset_bbox = ds.attrs["bbox"]
+    tile_bounds = tms.bounds(tile)
+    tile_bbox = BBox(
+        west=tile_bounds.left,
+        south=tile_bounds.bottom,
+        east=tile_bounds.right,
+        north=tile_bounds.top,
+    )
+
+    # Check if dataset bbox intersects with tile bounds
+    if not dataset_bbox.intersects(tile_bbox):
+        pytest.skip(f"Tile {tile} does not overlap with dataset bbox {dataset_bbox}")
+
     return (ds, tile, tms)
 
 
@@ -380,8 +396,13 @@ Change: {actual_transparent - expected_transparent:+,} pixels
                             callspec = getattr(request._pyfuncitem, "callspec", None)
                             if callspec and hasattr(callspec, "params"):
                                 params = callspec.params
+                                # Check for individual tile/tms params (test_pipeline_tiles)
                                 if "tile" in params and "tms" in params:
                                     tile_info = (params["tile"], params["tms"])
+                                # Check for projected_dataset_and_tile fixture (test_projected_coordinate_data)
+                                elif "projected_dataset_and_tile" in params:
+                                    ds, tile, tms = params["projected_dataset_and_tile"]
+                                    tile_info = (tile, tms)
                     except Exception:
                         # Parameter extraction failed
                         pass
