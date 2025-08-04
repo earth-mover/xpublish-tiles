@@ -26,7 +26,7 @@ from xpublish_tiles.validators import (
 class WMSBaseQuery(BaseModel):
     service: Literal["WMS"] = Field(..., description="Service type. Must be WMS")
     version: Literal["1.1.1", "1.3.0"] = Field(
-        ...,
+        "1.3.0",
         description="Version of the WMS service",
     )
 
@@ -174,8 +174,8 @@ class WMSGetLegendGraphicQuery(WMSBaseQuery):
 
     request: Literal["GetLegendGraphic"] = Field(..., description="Request type")
     layer: str
-    width: int
-    height: int
+    width: int = 100
+    height: int = 100
     vertical: bool = False
     colorscalerange: tuple[float, float] | None = Field(
         None,
