@@ -12,6 +12,7 @@ from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.types import QueryParams
 from xpublish_tiles.utils import get_available_raster_styles
 from xpublish_tiles.xpublish.tiles.metadata import (
+    create_tilejson,
     create_tileset_metadata,
     extract_dataset_extents,
 )
@@ -30,6 +31,7 @@ from xpublish_tiles.xpublish.tiles.types import (
     Layer,
     Link,
     Style,
+    TileJSON,
     TileMatrixSet,
     TileMatrixSets,
     TileQuery,
@@ -204,6 +206,22 @@ class TilesPlugin(Plugin):
             """Get tileset metadata for this dataset"""
             try:
                 return create_tileset_metadata(dataset, tileMatrixSetId)
+            except ValueError as e:
+                raise HTTPException(status_code=404, detail=str(e)) from e
+
+        @router.get(
+            "/{tileMatrixSetId}/tilejson.json",
+            response_model=TileJSON,
+            response_model_exclude_none=True,
+        )
+        async def get_dataset_tilejson(
+            request: Request,
+            tileMatrixSetId: str,
+            dataset: Dataset = Depends(deps.dataset),  # noqa: B008
+        ):
+            """Get TileJSON specification for this dataset and tile matrix set"""
+            try:
+                return create_tilejson(dataset, tileMatrixSetId, request)
             except ValueError as e:
                 raise HTTPException(status_code=404, detail=str(e)) from e
 

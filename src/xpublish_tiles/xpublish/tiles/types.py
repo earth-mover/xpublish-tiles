@@ -1368,6 +1368,169 @@ class TileQuery(BaseModel):
         return v
 
 
+class TileJSON(BaseModel):
+    """TileJSON 3.0.0 specification model"""
+
+    tilejson: Annotated[
+        str,
+        Field(
+            default="3.0.0",
+            json_schema_extra={
+                "description": "TileJSON specification version",
+            },
+        ),
+    ]
+    tiles: Annotated[
+        list[str],
+        Field(
+            json_schema_extra={
+                "description": "An array of tile endpoints. Each endpoint is a string URL template",
+            }
+        ),
+    ]
+    vector_layers: Annotated[
+        Optional[list[dict[str, Any]]],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "An array of vector layer objects (not applicable for raster tiles)",
+            },
+        ),
+    ] = None
+    attribution: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "Attribution text to be displayed when the map is shown to a user",
+            },
+        ),
+    ] = None
+    bounds: Annotated[
+        Optional[list[float]],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "The maximum extent of available map tiles [west, south, east, north]",
+            },
+        ),
+    ] = None
+    center: Annotated[
+        Optional[list[float]],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "The default location of the tileset in the form [longitude, latitude, zoom]",
+            },
+        ),
+    ] = None
+    data: Annotated[
+        Optional[list[str]],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "An array of data files in GeoJSON format",
+            },
+        ),
+    ] = None
+    description: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "A text description of the tileset",
+            },
+        ),
+    ] = None
+    fillzoom: Annotated[
+        Optional[int],
+        Field(
+            default=None,
+            ge=0,
+            le=30,
+            json_schema_extra={
+                "description": "The zoom level at which to switch from the raster tiles to the vector tiles",
+            },
+        ),
+    ] = None
+    grids: Annotated[
+        Optional[list[str]],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "An array of interactivity grid endpoints (not applicable for raster tiles)",
+            },
+        ),
+    ] = None
+    legend: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "A legend to be displayed with the map",
+            },
+        ),
+    ] = None
+    maxzoom: Annotated[
+        Optional[int],
+        Field(
+            default=None,
+            ge=0,
+            le=30,
+            json_schema_extra={
+                "description": "The maximum zoom level available in the tileset",
+            },
+        ),
+    ] = None
+    minzoom: Annotated[
+        Optional[int],
+        Field(
+            default=None,
+            ge=0,
+            le=30,
+            json_schema_extra={
+                "description": "The minimum zoom level available in the tileset",
+            },
+        ),
+    ] = None
+    name: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "A name describing the tileset",
+            },
+        ),
+    ] = None
+    scheme: Annotated[
+        Optional[str],
+        Field(
+            default="xyz",
+            json_schema_extra={
+                "description": "The tile scheme of the tileset (xyz or tms)",
+            },
+        ),
+    ] = None
+    template: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "A mustache template to be used to format data from grids for interaction",
+            },
+        ),
+    ] = None
+    version: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "A semver.org style version number for the tiles contained within the tileset",
+            },
+        ),
+    ] = None
+
+
 TILES_FILTERED_QUERY_PARAMS: list[str] = [
     "style",
     "colorscalerange",
