@@ -1,11 +1,13 @@
 """OGC Web Map Service XPublish Plugin"""
 
 from enum import Enum
+from io import BytesIO
 from typing import Annotated
 
 import cf_xarray  # noqa: F401
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response, StreamingResponse
+from PIL import Image
 from xpublish import Dependencies, Plugin, hookimpl
 
 import xarray as xr
@@ -16,6 +18,7 @@ from xpublish_tiles.xpublish.wms.types import (
     WMS_FILTERED_QUERY_PARAMS,
     WMSGetCapabilitiesQuery,
     WMSGetFeatureInfoQuery,
+    WMSGetLegendGraphicQuery,
     WMSGetMapQuery,
     WMSQuery,
 )
@@ -59,6 +62,8 @@ class WMSPlugin(Plugin):
                     raise NotImplementedError(
                         "GetFeatureInfo is not yet implemented. Coming Soon!"
                     )
+                case WMSGetLegendGraphicQuery():
+                    return await handle_get_legend_graphic(wms_query.root)
 
         return router
 
@@ -107,16 +112,25 @@ async def handle_get_capabilities(
             xml_declaration=True, encoding="UTF-8", skip_empty=True
         )
 
-        # Fix missing xlink namespace declaration
+        # Fix namespace prefixes for QGIS compatibility
         xml_str = (
             xml_content.decode("utf-8") if isinstance(xml_content, bytes) else xml_content
         )
+
+        # Replace ns0: prefixes with default namespace for QGIS compatibility
+        xml_str = xml_str.replace("ns0:", "")
+        xml_str = xml_str.replace(
+            'xmlns:ns0="http://www.opengis.net/wms"', 'xmlns="http://www.opengis.net/wms"'
+        )
+
+        # Ensure xlink namespace is present
         if "xmlns:xlink" not in xml_str and "xlink:" in xml_str:
             xml_str = xml_str.replace(
-                'xmlns:ns0="http://www.opengis.net/wms"',
-                'xmlns:ns0="http://www.opengis.net/wms" xmlns:xlink="http://www.w3.org/1999/xlink"',
+                'xmlns="http://www.opengis.net/wms"',
+                'xmlns="http://www.opengis.net/wms" xmlns:xlink="http://www.w3.org/1999/xlink"',
             )
-            xml_content = xml_str.encode("utf-8")
+
+        xml_content = xml_str.encode("utf-8")
 
         return Response(
             content=xml_content,
@@ -167,5 +181,22 @@ async def handle_get_map(
 
     return StreamingResponse(
         buffer,
+        media_type="image/png",
+    )
+
+
+async def handle_get_legend_graphic(query: WMSGetLegendGraphicQuery) -> Response:
+    """Handle WMS GetLegendGraphic request with a dummy PNG response."""
+
+    # Create a simple dummy PNG image
+    img = Image.new("RGB", (query.width, query.height), color="white")
+
+    # Save to BytesIO buffer
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+
+    return Response(
+        content=buffer.getvalue(),
         media_type="image/png",
     )

@@ -41,7 +41,7 @@ def test_get_capabilities_xml(xpublish_client):
     assert capability is not None
 
     # Check for layers
-    layers = root.findall(".//Layer")
+    layers = root.findall(".//{http://www.opengis.net/wms}Layer")
     assert len(layers) > 0
 
 
