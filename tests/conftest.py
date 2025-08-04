@@ -11,7 +11,8 @@ from syrupy.extensions.image import PNGImageSnapshotExtension
 
 import icechunk
 import xarray as xr
-from xpublish_tiles.datasets import create_global_dataset
+from tests.tiles import ETRS89_TILES, HRRR_TILES
+from xpublish_tiles.datasets import EU3035, HRRR, create_global_dataset
 
 ARRAYLAKE_REPO = "earthmover-integration/tiles-datasets-develop"
 IS_SNAPSHOT_UPDATE = False
@@ -126,6 +127,30 @@ def global_datasets(request):
     lon_0_360 = "0->360" in param
 
     yield create_global_dataset(lat_ascending=lat_ascending, lon_0_360=lon_0_360)
+
+
+# Create the product of datasets and their appropriate tiles
+def _get_projected_dataset_tile_params():
+    params = []
+    for dataset_class, tiles in [
+        (EU3035, ETRS89_TILES),
+        (HRRR, HRRR_TILES),
+    ]:
+        for tile_param in tiles:
+            tile, tms = tile_param.values
+            param_id = f"{dataset_class.name}_{tile_param.id}"
+            params.append(pytest.param((dataset_class, tile, tms), id=param_id))
+    return params
+
+
+@pytest.fixture(params=_get_projected_dataset_tile_params())
+def projected_dataset_and_tile(request):
+    dataset_class, tile, tms = request.param
+    ds = dataset_class.create()
+    if ds.attrs["name"] == "hrrr":
+        # FIXME: make this kind of thing more explicit
+        ds = ds.isel(time=0, step=1)
+    return (ds, tile, tms)
 
 
 @pytest.fixture

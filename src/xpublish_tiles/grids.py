@@ -4,17 +4,15 @@ from dataclasses import dataclass
 from typing import cast
 
 import numpy as np
-import pyproj
-import pyproj.aoi
+from pyproj import CRS
+from pyproj.aoi import BBox
 
 import xarray as xr
 
-DEFAULT_CRS = pyproj.CRS.from_epsg(4326)
+DEFAULT_CRS = CRS.from_epsg(4326)
 
 
-def pad_bbox(
-    bbox: pyproj.aoi.BBox, da: xr.DataArray, x_dim: str, y_dim: str
-) -> pyproj.aoi.BBox:
+def pad_bbox(bbox: BBox, da: xr.DataArray, x_dim: str, y_dim: str) -> BBox:
     """
     Extend bbox slightly to account for discrete coordinate sampling.
     This prevents transparency gaps at tile edges due to coordinate resolution.
@@ -40,7 +38,7 @@ def pad_bbox(
         padded_west = float(bbox.west)
         padded_east = float(bbox.east)
 
-    return pyproj.aoi.BBox(
+    return BBox(
         west=padded_west,
         east=padded_east,
         south=float(bbox.south - y_pad),
@@ -48,12 +46,12 @@ def pad_bbox(
     )
 
 
-def is_rotated_pole(crs: pyproj.CRS) -> bool:
+def is_rotated_pole(crs: CRS) -> bool:
     return crs.to_cf().get("grid_mapping_name") == "rotated_latitude_longitude"
 
 
 def _handle_longitude_selection(
-    lon_coord: xr.DataArray, bbox: pyproj.aoi.BBox, is_geographic: bool
+    lon_coord: xr.DataArray, bbox: BBox, is_geographic: bool
 ) -> tuple[slice, ...]:
     """
     Handle longitude coordinate selection with support for different conventions.
@@ -66,7 +64,7 @@ def _handle_longitude_selection(
     ----------
     lon_coord : xr.DataArray
         The longitude/X coordinate array
-    bbox : pyproj.aoi.BBox
+    bbox : BBox
         Bounding box for selection (may cross anti-meridian after coordinate transformation)
     is_geographic : bool
         Whether the CRS is geographic (True) or projected (False)
@@ -137,11 +135,11 @@ class GridSystem:
 
     indexes: tuple[xr.Index, ...]
 
-    def sel(self, da: xr.DataArray, *, bbox: pyproj.aoi.BBox) -> xr.DataArray:
+    def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("Subclasses must implement sel method")
 
-    def pad_bbox(self, bbox: pyproj.aoi.BBox, da: xr.DataArray) -> pyproj.aoi.BBox:
+    def pad_bbox(self, bbox: BBox, da: xr.DataArray) -> BBox:
         """Extend bbox slightly to account for discrete coordinate sampling."""
         raise NotImplementedError("Subclasses must implement pad_bbox method")
 
@@ -150,11 +148,11 @@ class GridSystem:
 class RasterAffine(GridSystem):
     """2D horizontal grid defined by an affine transform."""
 
-    crs: pyproj.CRS
-    bbox: pyproj.aoi.BBox
+    crs: CRS
+    bbox: BBox
     indexes: tuple[xr.Index, ...]
 
-    def pad_bbox(self, bbox: pyproj.aoi.BBox, da: xr.DataArray) -> pyproj.aoi.BBox:
+    def pad_bbox(self, bbox: BBox, da: xr.DataArray) -> BBox:
         """Extend bbox slightly to account for discrete coordinate sampling."""
         raise NotImplementedError("pad_bbox not implemented for RasterAffine grids")
 
@@ -163,13 +161,13 @@ class RasterAffine(GridSystem):
 class Rectilinear(GridSystem):
     """2D horizontal grid defined by two explicit 1D basis vectors."""
 
-    crs: pyproj.CRS
-    bbox: pyproj.aoi.BBox
+    crs: CRS
+    bbox: BBox
     X: str
     Y: str
     indexes: tuple[xr.Index, ...]
 
-    def sel(self, da: xr.DataArray, *, bbox: pyproj.aoi.BBox) -> xr.DataArray:
+    def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         """
         Select a subset of the data array using a bounding box.
 
@@ -221,7 +219,7 @@ class Rectilinear(GridSystem):
 
         return result
 
-    def pad_bbox(self, bbox: pyproj.aoi.BBox, da: xr.DataArray) -> pyproj.aoi.BBox:
+    def pad_bbox(self, bbox: BBox, da: xr.DataArray) -> BBox:
         """Extend bbox slightly to account for discrete coordinate sampling."""
         return pad_bbox(bbox, da, self.X, self.Y)
 
@@ -230,13 +228,13 @@ class Rectilinear(GridSystem):
 class Curvilinear(GridSystem):
     """2D horizontal grid defined by two 2D arrays."""
 
-    crs: pyproj.CRS
-    bbox: pyproj.aoi.BBox
+    crs: CRS
+    bbox: BBox
     X: str
     Y: str
     indexes: tuple[xr.Index, ...]
 
-    def sel(self, da: xr.DataArray, *, bbox: pyproj.aoi.BBox) -> xr.DataArray:
+    def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         """
         Select a subset of the data array using a bounding box.
 
@@ -264,11 +262,11 @@ class Curvilinear(GridSystem):
         result = da.isel(slicers)
         return result
 
-    def pad_bbox(self, bbox: pyproj.aoi.BBox, da: xr.DataArray) -> pyproj.aoi.BBox:
+    def pad_bbox(self, bbox: BBox, da: xr.DataArray) -> BBox:
         """Extend bbox slightly to account for discrete coordinate sampling."""
         return pad_bbox(bbox, da, self.X, self.Y)
 
-    # def sel_ndpoint(self, da: xr.DataArray, *, bbox: pyproj.aoi.BBox) -> xr.DataArray:
+    # def sel_ndpoint(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
     #     # https://github.com/pydata/xarray/issues/10572
     #     assert len(self.indexes) == 1
     #     (index,) = self.indexes
@@ -301,23 +299,23 @@ class DGGS(GridSystem):
     cells: str
     indexes: tuple[xr.Index, ...]
 
-    def sel(self, da: xr.DataArray, *, bbox: pyproj.aoi.BBox) -> xr.DataArray:
+    def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("sel not implemented for DGGS grids")
 
-    def pad_bbox(self, bbox: pyproj.aoi.BBox, da: xr.DataArray) -> pyproj.aoi.BBox:
+    def pad_bbox(self, bbox: BBox, da: xr.DataArray) -> BBox:
         """Extend bbox slightly to account for discrete coordinate sampling."""
         raise NotImplementedError("pad_bbox not implemented for DGGS grids")
 
 
 def _guess_grid_mapping_and_crs(
     ds: xr.Dataset,
-) -> tuple[xr.DataArray | None, pyproj.CRS | None]:
+) -> tuple[xr.DataArray | None, CRS | None]:
     """
     Returns
     ------
     grid_mapping variable
-    pyproj.CRS
+    CRS
     """
     grid_mapping_names = tuple(itertools.chain(*ds.cf.grid_mapping_names.values()))
     if not grid_mapping_names:
@@ -336,32 +334,45 @@ def _guess_grid_mapping_and_crs(
         raise ValueError(f"Multiple grid mappings found: {grid_mapping_names!r}!")
     (grid_mapping_var,) = grid_mapping_names
     grid_mapping = ds[grid_mapping_var]
-    return grid_mapping, pyproj.CRS.from_cf(grid_mapping.attrs)
+    return grid_mapping, CRS.from_cf(grid_mapping.attrs)
 
 
-# FIXME: cache here, we'll need some xpublish/booth specific attrs on ds
+def guess_coordinate_vars(ds: xr.Dataset, crs: CRS) -> tuple[str, str]:
+    if is_rotated_pole(crs):
+        stdnames = ds.cf.standard_names
+        Xname, Yname = (
+            stdnames.get("grid_longitude", ()),
+            stdnames.get("grid_latitude", None),
+        )
+    elif crs.is_geographic:
+        coords = ds.cf.coordinates
+        Xname, Yname = coords.get("longitude", None), coords.get("latitude", None)
+    else:
+        axes = ds.cf.axes
+        Xname, Yname = axes.get("X", None), axes.get("Y", None)
+    return Xname, Yname
+
+
 def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
+    """
+    Does some grid_mapping & CRS auto-guessing.
+
+    Raises RuntimeError to indicate that we might try again.
+    """
     grid_mapping, crs = _guess_grid_mapping_and_crs(ds)
     if crs is not None:
         # This means we are not DGGS for sure.
-        # FIXME: we aren't handling the triangular case very explicitly yet.
-        if is_rotated_pole(crs):
-            stdnames = ds.cf.standard_names
-            Xname, Yname = (
-                stdnames.get("grid_longitude", ()),
-                stdnames.get("grid_latitude", None),
-            )
-        elif crs.is_geographic:
-            coords = ds.cf.coordinates
-            Xname, Yname = coords.get("longitude", None), coords.get("latitude", None)
-        else:
-            axes = ds.cf.axes
-            Xname, Yname = axes.get("X", None), axes.get("Y", None)
+        # TODO: we aren't handling the triangular case very explicitly yet.
+        Xname, Yname = guess_coordinate_vars(ds, crs)
+        if Xname is None or Yname is None:
+            # FIXME: figure out how to do this only once, ever
+            # FIXME: let's be a little more targeted in what we are guessing
+            ds = ds.cf.guess_coord_axis()
+            Xname, Yname = guess_coordinate_vars(ds, crs)
 
         if Xname is None or Yname is None:
             if grid_mapping is None:
-                # FIXME: Add test
-                raise ValueError("Grid system could not be inferred.")
+                raise RuntimeError("Grid system could not be inferred.")
             else:
                 # we have spatial_ref with GeoTransform hopefully.
                 # infer bbox from GeoTransform
@@ -378,7 +389,9 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
         Y = ds[Yname]
 
         # intentionally reduce with Xarray to use numbagg
-        bbox = pyproj.aoi.BBox(
+        # FIXME: just use numbagg directly
+        # FIXME: compile ahead of time by reducing a 1D and 2D array
+        bbox = BBox(
             west=X.min().item(),
             east=X.max().item(),
             south=Y.min().item(),
@@ -390,7 +403,10 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
                 X=Xname,
                 Y=Yname,
                 bbox=bbox,
-                indexes=(ds.xindexes[Xname], ds.xindexes[Yname]),
+                indexes=(
+                    cast(xr.indexes.PandasIndex, ds.xindexes[Xname]),
+                    cast(xr.indexes.PandasIndex, ds.xindexes[Yname]),
+                ),
             )
         elif X.ndim == 2 and Y.ndim == 2:
             # See discussion in https://github.com/pydata/xarray/issues/10572
@@ -401,9 +417,10 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
                 f"Unknown grid system: X={Xname!r}, ndim={X.ndim}; Y={Yname!r}, ndim={Y.ndim}"
             )
     else:
-        raise NotImplementedError("CRS/grid system not detected")
+        raise RuntimeError("CRS/grid system not detected")
 
 
+# FIXME: cache here, we'll need some xpublish/booth specific attrs on ds
 def guess_grid_system(ds: xr.Dataset, name: str) -> GridSystem:
     try:
         return _guess_grid_for_dataset(ds.cf[[name]])

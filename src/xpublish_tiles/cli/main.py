@@ -8,7 +8,7 @@ import xpublish
 from fastapi.middleware.cors import CORSMiddleware
 
 import xarray as xr
-from xpublish_tiles.datasets import create_global_dataset
+from xpublish_tiles.datasets import EU3035, HRRR, create_global_dataset
 from xpublish_tiles.xpublish.tiles.plugin import TilesPlugin
 from xpublish_tiles.xpublish.wms.plugin import WMSPlugin
 
@@ -20,6 +20,10 @@ def get_dataset_for_name(
         return create_global_dataset()
     elif name == "air":
         return xr.tutorial.open_dataset("air_temperature")
+    elif name == "hrrr":
+        return HRRR.create().isel(time=0, step=0)
+    elif name == "eu3035":
+        return EU3035.create()
 
     try:
         from arraylake import Client
@@ -69,7 +73,7 @@ def main():
         "--dataset",
         type=str,
         default="global",
-        help="Dataset to serve (default: global). If an arraylake dataset is specified, the arraylake-org and arraylake-repo must be provided, along with an optional branch and group",
+        help="Dataset to serve (default: global). Options: global, air, hrrr, eu3035, or an arraylake dataset name. If an arraylake dataset is specified, the arraylake-org and arraylake-repo must be provided, along with an optional branch and group",
     )
     parser.add_argument(
         "--branch",

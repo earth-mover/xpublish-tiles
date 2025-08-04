@@ -8,7 +8,7 @@ from typing import Any, cast
 
 import numpy as np
 import pyproj
-import pyproj.aoi
+from pyproj.aoi import BBox
 
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, Rectilinear, guess_grid_system
@@ -130,9 +130,7 @@ def fix_coordinate_discontinuities(
     return coordinates
 
 
-def check_bbox_overlap(
-    input_bbox: pyproj.aoi.BBox, grid_bbox: pyproj.aoi.BBox, is_geographic: bool
-) -> bool:
+def check_bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool:
     """Check if bboxes overlap, handling longitude wrapping for geographic data."""
     # Standard intersection check
     if input_bbox.intersects(grid_bbox):
@@ -149,13 +147,13 @@ def check_bbox_overlap(
         # Handle the case where normalization creates an anti-meridian crossing
         if normalized_west > normalized_east:
             # Check both parts: [normalized_west, 180] and [-180, normalized_east]
-            bbox1 = pyproj.aoi.BBox(
+            bbox1 = BBox(
                 west=normalized_west,
                 south=input_bbox.south,
                 east=180.0,
                 north=input_bbox.north,
             )
-            bbox2 = pyproj.aoi.BBox(
+            bbox2 = BBox(
                 west=-180.0,
                 south=input_bbox.south,
                 east=normalized_east,
@@ -165,7 +163,7 @@ def check_bbox_overlap(
                 return True
         else:
             # Normal case - single normalized bbox
-            normalized_input = pyproj.aoi.BBox(
+            normalized_input = BBox(
                 west=normalized_west,
                 south=input_bbox.south,
                 east=normalized_east,
@@ -181,13 +179,13 @@ def check_bbox_overlap(
         # Handle case where wrapping creates crossing at 0°/360°
         if wrapped_west_360 > wrapped_east_360:
             # Check both parts: [wrapped_west_360, 360] and [0, wrapped_east_360]
-            bbox1 = pyproj.aoi.BBox(
+            bbox1 = BBox(
                 west=wrapped_west_360,
                 south=input_bbox.south,
                 east=360.0,
                 north=input_bbox.north,
             )
-            bbox2 = pyproj.aoi.BBox(
+            bbox2 = BBox(
                 west=0.0,
                 south=input_bbox.south,
                 east=wrapped_east_360,
@@ -197,7 +195,7 @@ def check_bbox_overlap(
                 return True
         else:
             # Normal case - single wrapped bbox
-            wrapped_input = pyproj.aoi.BBox(
+            wrapped_input = BBox(
                 west=wrapped_west_360,
                 south=input_bbox.south,
                 east=wrapped_east_360,
@@ -273,6 +271,8 @@ def subset_to_bbox(
     result = {}
     for var_name, array in validated.items():
         grid = array.grid
+        if (ndim := array.da.ndim) > 2:
+            raise ValueError(f"Attempting to visualize array with {ndim=!r} > 2.")
         # Check for insufficient data - either dimension has too few points
         if min(array.da.shape) < 2:
             raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
@@ -288,7 +288,7 @@ def subset_to_bbox(
         input_bbox_tuple = output_to_input.transform_bounds(
             left=bbox.west, right=bbox.east, top=bbox.north, bottom=bbox.south
         )
-        input_bbox = pyproj.aoi.BBox(
+        input_bbox = BBox(
             west=input_bbox_tuple[0],
             south=input_bbox_tuple[1],
             east=input_bbox_tuple[2],

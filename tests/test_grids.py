@@ -9,27 +9,8 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from tests.tiles import TILES
+from xpublish_tiles.datasets import HRRR_CRS_WKT
 from xpublish_tiles.grids import Curvilinear, GridSystem, Rectilinear, guess_grid_system
-
-HRRR_CRS_WKT = "".join(
-    [
-        'PROJCRS["unknown",BASEGEOGCRS["unknown",DATUM["unknown",ELLIPSOID["unk',
-        'nown",6371229,0,LENGTHUNIT["metre",1,ID["EPSG",9001]]]],PRIMEM["Greenw',
-        'ich",0,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8901]]],CONVER',
-        'SION["unknown",METHOD["Lambert Conic Conformal',
-        '(2SP)",ID["EPSG",9802]],PARAMETER["Latitude of false origin",38.5,ANGL',
-        'EUNIT["degree",0.0174532925199433],ID["EPSG",8821]],PARAMETER["Longitu',
-        'de of false origin",262.5,ANGLEUNIT["degree",0.0174532925199433],ID["E',
-        'PSG",8822]],PARAMETER["Latitude of 1st standard parallel",38.5,ANGLEUN',
-        'IT["degree",0.0174532925199433],ID["EPSG",8823]],PARAMETER["Latitude',
-        'of 2nd standard parallel",38.5,ANGLEUNIT["degree",0.0174532925199433],',
-        'ID["EPSG",8824]],PARAMETER["Easting at false',
-        'origin",0,LENGTHUNIT["metre",1],ID["EPSG",8826]],PARAMETER["Northing',
-        'at false origin",0,LENGTHUNIT["metre",1],ID["EPSG",8827]]],CS[Cartesia',
-        'n,2],AXIS["(E)",east,ORDER[1],LENGTHUNIT["metre",1,ID["EPSG",9001]]],A',
-        'XIS["(N)",north,ORDER[2],LENGTHUNIT["metre",1,ID["EPSG",9001]]]]',
-    ]
-)
 
 # FIXME: add tests for datasets with latitude, longitude but no attrs
 
@@ -45,7 +26,7 @@ HRRR_CRS_WKT = "".join(
                 bbox=BBox(south=0, north=5, east=4, west=0),
                 X="X",
                 Y="Y",
-                indexes=(),
+                indexes=(),  # type: ignore[arg-type]
             ),
         ),
         (
@@ -56,7 +37,7 @@ HRRR_CRS_WKT = "".join(
                 bbox=BBox(south=2.5, north=2.5, east=0.5, west=0.5),
                 X="ULONG",
                 Y="ULAT",
-                indexes=(),
+                indexes=(),  # type: ignore[arg-type]
             ),
         ),
         (
@@ -73,7 +54,7 @@ HRRR_CRS_WKT = "".join(
                 bbox=BBox(south=21.615, north=21.835, east=18.155, west=17.935),
                 X="rlon",
                 Y="rlat",
-                indexes=(),
+                indexes=(),  # type: ignore[arg-type]
             ),
         ),
         (
@@ -90,7 +71,7 @@ HRRR_CRS_WKT = "".join(
                 bbox=BBox(south=21.615, north=21.835, east=18.155, west=17.935),
                 X="rlon",
                 Y="rlat",
-                indexes=(),
+                indexes=(),  # type: ignore[arg-type]
             ),
         ),
         (
@@ -106,7 +87,7 @@ HRRR_CRS_WKT = "".join(
                 ),
                 X="x",
                 Y="y",
-                indexes=(),
+                indexes=(),  # type: ignore[arg-type]
             ),
         ),
     ),
