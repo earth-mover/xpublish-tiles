@@ -641,6 +641,10 @@ def test_tilejson_endpoint(xpublish_client):
     assert "{x}" in tile_url
     assert "WebMercatorQuad" in tile_url
 
+    # Check that URL includes protocol and host
+    assert tile_url.startswith("http://") or tile_url.startswith("https://")
+    assert "testserver" in tile_url  # TestClient uses testserver as default host
+
     # Check optional fields
     assert "name" in tilejson
     assert "WebMercatorQuad" in tilejson["name"]
