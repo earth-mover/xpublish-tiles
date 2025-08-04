@@ -64,10 +64,6 @@ def validate_style(v: str | list[str] | None) -> tuple[Style, str] | None:
                 "style must be in the format 'stylename/palettename'. A common default for this is 'raster/default'"
             )
 
-    if len(v) == 0:
-        # TODO: implement default style APIs
-        return (Style.RASTER, "viridis")
-
     values = v.split("/")
     if len(values) != 2:
         raise ValueError(
