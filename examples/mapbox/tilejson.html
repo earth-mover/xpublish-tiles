@@ -9,29 +9,10 @@
 <style>
 body { margin: 0; padding: 0; }
 #map { position: absolute; top: 0; bottom: 0; width: 100%; }
-#info {
-    position: absolute;
-    top: 10px;
-    left: 10px;
-    background: rgba(255,255,255,0.9);
-    padding: 10px;
-    border-radius: 5px;
-    font-family: Arial, sans-serif;
-    font-size: 12px;
-    max-width: 300px;
-    z-index: 1000;
-}
-#info h3 { margin: 0 0 5px 0; }
-#info p { margin: 2px 0; }
 </style>
 </head>
 <body>
 <div id="map"></div>
-<div id="info">
-    <h3>TileJSON Example</h3>
-    <p>Using TileJSON URL directly in source</p>
-    <p><strong>URL:</strong> <code style="font-size: 10px;">...tilejson.json?variables=2t&style=raster/viridis...</code></p>
-</div>
 <script>
 	// TO MAKE THE MAP APPEAR YOU MUST
 	// ADD YOUR ACCESS TOKEN FROM
@@ -61,7 +42,7 @@ body { margin: 0; padding: 0; }
         // Add source using TileJSON URL directly - Mapbox GL JS will fetch and parse it automatically
         map.addSource('tilejson-source', {
             'type': 'raster',
-            'url': 'http://localhost:8080/datasets/earthmover-public%2Faifs-outputs/tiles/WebMercatorQuad/tilejson.json?variables=2t&style=raster/viridis&colorscalerange=280,300&width=256&height=256&valid_time=2025-04-03T06:00:00',
+            'url': 'http://localhost:8080/tiles/WebMercatorQuad/tilejson.json?variables=2t&style=raster/viridis&colorscalerange=280,300&width=256&height=256&valid_time=2025-04-03T06:00:00',
             'tileSize': 256
         });
 

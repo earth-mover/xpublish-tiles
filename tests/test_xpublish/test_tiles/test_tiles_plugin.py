@@ -618,3 +618,181 @@ def test_helper_functions():
     assert limits[0].maxTileRow == 0  # 2^0 - 1 = 0
     assert limits[1].maxTileRow == 1  # 2^1 - 1 = 1
     assert limits[2].maxTileRow == 3  # 2^2 - 1 = 3
+
+
+def test_tilejson_endpoint(xpublish_client):
+    """Test the TileJSON endpoint"""
+    # Test basic TileJSON endpoint
+    response = xpublish_client.get("/datasets/air/tiles/WebMercatorQuad/tilejson.json")
+    assert response.status_code == 200
+
+    tilejson = response.json()
+
+    # Check required TileJSON fields
+    assert tilejson["tilejson"] == "3.0.0"
+    assert "tiles" in tilejson
+    assert isinstance(tilejson["tiles"], list)
+    assert len(tilejson["tiles"]) == 1
+
+    # Check tile URL template
+    tile_url = tilejson["tiles"][0]
+    assert "{z}" in tile_url
+    assert "{y}" in tile_url
+    assert "{x}" in tile_url
+    assert "WebMercatorQuad" in tile_url
+
+    # Check optional fields
+    assert "name" in tilejson
+    assert "WebMercatorQuad" in tilejson["name"]
+    assert "bounds" in tilejson
+    assert "center" in tilejson
+    assert "minzoom" in tilejson
+    assert "maxzoom" in tilejson
+    assert tilejson["scheme"] == "xyz"
+
+    # Validate bounds format
+    bounds = tilejson["bounds"]
+    assert isinstance(bounds, list)
+    assert len(bounds) == 4
+    assert all(isinstance(b, (int | float)) for b in bounds)
+
+    # Validate center format
+    center = tilejson["center"]
+    assert isinstance(center, list)
+    assert len(center) == 3
+    assert all(isinstance(c, (int | float)) for c in center)
+
+    # Validate zoom levels
+    assert isinstance(tilejson["minzoom"], int)
+    assert isinstance(tilejson["maxzoom"], int)
+    assert tilejson["minzoom"] <= tilejson["maxzoom"]
+
+
+def test_tilejson_endpoint_with_query_params(xpublish_client):
+    """Test TileJSON endpoint with query parameters"""
+    # Test with query parameters
+    response = xpublish_client.get(
+        "/datasets/air/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=air&style=raster/viridis&colorscalerange=200,300&f=image/png"
+    )
+    assert response.status_code == 200
+
+    tilejson = response.json()
+
+    # Check that query parameters are preserved in tile URLs
+    tile_url = tilejson["tiles"][0]
+    assert "variables=air" in tile_url
+    assert "style=raster" in tile_url or "style=raster%2F" in tile_url  # URL encoded
+    assert "colorscalerange=200" in tile_url or "colorscalerange=200%2C" in tile_url
+    assert "f=image" in tile_url or "f=image%2F" in tile_url
+
+
+def test_tilejson_endpoint_different_crs():
+    """Test TileJSON endpoint with different coordinate systems"""
+    # Create a simple dataset for testing
+    data = xr.Dataset(
+        {
+            "temperature": xr.DataArray(
+                np.random.randn(10, 20),
+                dims=["lat", "lon"],
+                coords={
+                    "lat": np.linspace(-45, 45, 10),
+                    "lon": np.linspace(-90, 90, 20),
+                },
+                attrs={"long_name": "Temperature", "units": "K"},
+            )
+        },
+        attrs={
+            "title": "Test Dataset",
+            "description": "A test dataset for TileJSON",
+            "attribution": "Test Attribution",
+        },
+    )
+
+    rest = xpublish.Rest({"test": data}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    # Test different coordinate systems
+    for crs in ["WebMercatorQuad", "WorldCRS84Quad"]:
+        response = client.get(f"/datasets/test/tiles/{crs}/tilejson.json")
+        assert response.status_code == 200
+
+        tilejson = response.json()
+        assert tilejson["tilejson"] == "3.0.0"
+        assert crs in tilejson["name"]
+        assert crs in tilejson["tiles"][0]
+
+        # Check that metadata is included
+        assert tilejson["description"] == "A test dataset for TileJSON"
+        assert tilejson["attribution"] == "Test Attribution"
+
+
+def test_tilejson_endpoint_with_metadata():
+    """Test TileJSON endpoint includes dataset metadata"""
+    import pandas as pd
+
+    # Create dataset with rich metadata
+    time_coords = pd.date_range("2023-01-01", periods=3, freq="D")
+
+    data = xr.Dataset(
+        {
+            "sst": xr.DataArray(
+                np.random.randn(3, 10, 20),
+                dims=["time", "lat", "lon"],
+                coords={
+                    "time": time_coords,
+                    "lat": np.linspace(-45, 45, 10),
+                    "lon": np.linspace(-90, 90, 20),
+                },
+                attrs={"long_name": "Sea Surface Temperature", "units": "degC"},
+            )
+        },
+        attrs={
+            "title": "Ocean Temperature Data",
+            "description": "Daily sea surface temperature measurements",
+            "attribution": "Ocean Data Center",
+            "version": "2.1.0",
+            "license": "MIT",
+        },
+    )
+
+    rest = xpublish.Rest({"ocean": data}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    response = client.get("/datasets/ocean/tiles/WebMercatorQuad/tilejson.json")
+    assert response.status_code == 200
+
+    tilejson = response.json()
+
+    # Check that dataset metadata is included
+    assert "Ocean Temperature Data" in tilejson["name"]
+    assert tilejson["description"] == "Daily sea surface temperature measurements"
+    assert tilejson["attribution"] == "Ocean Data Center"
+    assert tilejson["version"] == "2.1.0"
+
+
+def test_tilejson_endpoint_invalid_tms():
+    """Test TileJSON endpoint with invalid tile matrix set"""
+    # Create a simple dataset
+    data = xr.Dataset(
+        {
+            "temp": xr.DataArray(
+                np.random.randn(5, 10),
+                dims=["lat", "lon"],
+                coords={
+                    "lat": np.linspace(-10, 10, 5),
+                    "lon": np.linspace(-20, 20, 10),
+                },
+            )
+        }
+    )
+
+    rest = xpublish.Rest({"test": data}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    # Test with invalid tile matrix set
+    response = client.get("/datasets/test/tiles/InvalidTMS/tilejson.json")
+    assert response.status_code == 404
+
+    error = response.json()
+    assert "not found" in error["detail"].lower()
