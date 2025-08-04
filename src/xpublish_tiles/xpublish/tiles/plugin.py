@@ -92,7 +92,7 @@ class TilesPlugin(Plugin):
             prefix=self.dataset_router_prefix, tags=self.dataset_router_tags
         )
 
-        @router.get("/", response_model=TilesetsList)
+        @router.get("/", response_model=TilesetsList, response_model_exclude_none=True)
         async def get_dataset_tiles_list(dataset: Dataset = Depends(deps.dataset)):  # noqa: B008
             """List of available tilesets for this dataset"""
             # Get dataset variables that can be tiled
@@ -192,7 +192,11 @@ class TilesPlugin(Plugin):
 
             return TilesetsList(tilesets=tilesets)
 
-        @router.get("/{tileMatrixSetId}", response_model=TileSetMetadata)
+        @router.get(
+            "/{tileMatrixSetId}",
+            response_model=TileSetMetadata,
+            response_model_exclude_none=True,
+        )
         async def get_dataset_tileset_metadata(
             tileMatrixSetId: str,
             dataset: Dataset = Depends(deps.dataset),  # noqa: B008
