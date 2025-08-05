@@ -12,7 +12,7 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear, guess_grid_system
-from xpublish_tiles.lib import check_transparent_pixels
+from xpublish_tiles.lib import check_transparent_pixels, transform_blocked
 from xpublish_tiles.types import (
     DataType,
     NullRenderContext,
@@ -319,7 +319,12 @@ def subset_to_bbox(
             else False
         )
         bx, by = xr.broadcast(subset[grid.X], subset[grid.Y])
-        newX, newY = input_to_output.transform(bx.data, by.data)
+        if bx.size > 1000 * 1000:
+            newX, newY = transform_blocked(
+                bx.data, by.data, chunk_size=(500, 500), transformer=input_to_output
+            )
+        else:
+            newX, newY = input_to_output.transform(bx.data, by.data)
 
         # Fix coordinate discontinuities in transformed coordinates if detected
         # this is important because the transformation may introduce discontinuities
