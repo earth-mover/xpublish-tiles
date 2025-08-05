@@ -22,6 +22,35 @@ logger = logging.getLogger("xpublish-tiles")
 
 
 class DatashaderRasterRenderer(Renderer):
+    @staticmethod
+    def precompile() -> None:
+        cvs = dsh.Canvas(
+            plot_height=4,
+            plot_width=4,
+            x_range=(-2, 2),
+            y_range=(-2, 2),
+        )
+        for dtype in (np.int64, np.float32, np.float64):
+            array = np.array([[2, 2], [2, 2]], dtype=dtype)
+            data = xr.DataArray(
+                array,
+                dims=("x", "y"),
+                coords={
+                    "x": np.array([0, 1], dtype=dtype),
+                    "y": np.array([0, 1], dtype=dtype),
+                },
+                name="foo",
+            )
+            cvs.quadmesh(data, x="x", y="y")
+
+            data = data.assign_coords(
+                {
+                    "lon": (("x", "y"), np.array([[0, 1], [1, 2]], dtype=dtype)),
+                    "lat": (("x", "y"), np.array([[0, 1], [1, 2]], dtype=dtype)),
+                }
+            )
+            cvs.quadmesh(data, x="lon", y="lat")
+
     def validate(self, context: dict[str, "RenderContext"]):
         assert len(context) == 1
 

@@ -5,12 +5,27 @@ import operator
 from concurrent.futures import ThreadPoolExecutor
 from itertools import product
 
+import numbagg
 import numpy as np
 import pyproj
 import toolz as tlz
 from PIL import Image
 
+from xpublish_tiles.render.raster import DatashaderRasterRenderer
+
 EXECUTOR = ThreadPoolExecutor(max_workers=16)
+
+
+def pre_compile():
+    for dtype in (np.int32, np.int64, np.float32, np.float64):
+        for array in [
+            np.array([2, 2], dtype=dtype),
+            np.array([[2, 2], [2, 2]], dtype=dtype),
+        ]:
+            numbagg.nanmin(array)
+            numbagg.nanmax(array)
+
+    DatashaderRasterRenderer.precompile()
 
 
 def slices_from_chunks(chunks):
