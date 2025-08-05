@@ -12,6 +12,10 @@ import xarray as xr
 
 DEFAULT_CRS = CRS.from_epsg(4326)
 
+# Simple cache for grid systems
+# FIXME: use cachetools
+_GRID_CACHE = {}
+
 
 def _get_xy_pad(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
     # FIXME: use numbagg
@@ -463,7 +467,35 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
 
 # FIXME: cache here, we'll need some xpublish/booth specific attrs on ds
 def guess_grid_system(ds: xr.Dataset, name: str) -> GridSystem:
+    """
+    Guess the grid system for a dataset.
+
+    Uses caching with ds.attrs['_xpublish_id'] as cache key if present,
+    otherwise uses id(ds) as the cache key.
+    """
+    # Determine cache key - use _xpublish_id if present
+    if "_xpublish_id" in ds.attrs:
+        cache_key = (ds.attrs["_xpublish_id"], name)
+    else:
+        # For datasets without _xpublish_id, use id(ds)
+        # Note: In test environments with parametrized fixtures, the same dataset object
+        # may be reused with different coordinate values, causing cache collisions.
+        # In production, datasets should have _xpublish_id set to avoid this issue.
+        cache_key = (id(ds), name)
+
+    # Check cache
+    if cache_key in _GRID_CACHE:
+        print(f"grid cache hit for {cache_key=!r}")
+        return _GRID_CACHE[cache_key]
+
+    print(f"grid cache miss for {cache_key=!r}")
+    # Compute grid system
     try:
-        return _guess_grid_for_dataset(ds.cf[[name]])
+        grid = _guess_grid_for_dataset(ds.cf[[name]])
     except RuntimeError:
-        return _guess_grid_for_dataset(ds)
+        grid = _guess_grid_for_dataset(ds)
+
+    # Store in cache
+    _GRID_CACHE[cache_key] = grid
+
+    return grid

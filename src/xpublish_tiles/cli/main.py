@@ -17,46 +17,58 @@ def get_dataset_for_name(
     name: str, branch: str = "main", group: str = "", icechunk_cache: bool = False
 ) -> xr.Dataset:
     if name == "global":
-        return create_global_dataset()
+        ds = create_global_dataset()
+        ds.attrs["_xpublish_id"] = name
     elif name == "air":
-        return xr.tutorial.open_dataset("air_temperature")
+        ds = xr.tutorial.open_dataset("air_temperature")
+        ds.attrs["_xpublish_id"] = name
     elif name == "hrrr":
-        return HRRR.create().isel(time=0, step=0)
+        ds = HRRR.create().isel(time=0, step=0)
+        ds.attrs["_xpublish_id"] = name
     elif name == "eu3035":
-        return EU3035.create()
+        ds = EU3035.create()
+        ds.attrs["_xpublish_id"] = name
+    else:
+        # Arraylake path
+        try:
+            from arraylake import Client
 
-    try:
-        from arraylake import Client
+            import icechunk
 
-        import icechunk
-
-        config: icechunk.RepositoryConfig | None = None
-        if icechunk_cache:
-            config = icechunk.RepositoryConfig(
-                caching=icechunk.CachingConfig(
-                    num_bytes_chunks=1073741824,
-                    num_chunk_refs=1073741824,
-                    num_bytes_attributes=100_000_000,
+            config: icechunk.RepositoryConfig | None = None
+            if icechunk_cache:
+                config = icechunk.RepositoryConfig(
+                    caching=icechunk.CachingConfig(
+                        num_bytes_chunks=1073741824,
+                        num_chunk_refs=1073741824,
+                        num_bytes_attributes=100_000_000,
+                    )
                 )
-            )
 
-        client = Client()
-        repo = cast(icechunk.Repository, client.get_repo(name, config=config))
-        session = repo.readonly_session(branch=branch)
-        return xr.open_zarr(
-            session.store,
-            group=group if len(group) else None,
-            zarr_format=3,
-            consolidated=False,
-        )
-    except ImportError as ie:
-        raise ImportError(
-            f"Arraylake is not installed, no dataset available named {name}"
-        ) from ie
-    except Exception as e:
-        raise ValueError(
-            f"Error occurred while getting dataset from Arraylake: {e}"
-        ) from e
+            client = Client()
+            repo = cast(icechunk.Repository, client.get_repo(name, config=config))
+            session = repo.readonly_session(branch=branch)
+            ds = xr.open_zarr(
+                session.store,
+                group=group if len(group) else None,
+                zarr_format=3,
+                consolidated=False,
+            )
+            # Add _xpublish_id for caching - use name, branch, and group for arraylake
+            xpublish_id = f"{name}:{branch}"
+            if group:
+                xpublish_id += f":{group}"
+            ds.attrs["_xpublish_id"] = xpublish_id
+        except ImportError as ie:
+            raise ImportError(
+                f"Arraylake is not installed, no dataset available named {name}"
+            ) from ie
+        except Exception as e:
+            raise ValueError(
+                f"Error occurred while getting dataset from Arraylake: {e}"
+            ) from e
+
+    return ds
 
 
 def main():
@@ -97,6 +109,7 @@ def main():
 
     ds = get_dataset_for_name(args.dataset, args.branch, args.group, args.cache)
 
+    xr.set_options(keep_attrs=True)
     rest = xpublish.SingleDatasetRest(
         ds,
         plugins={"tiles": TilesPlugin(), "wms": WMSPlugin()},
