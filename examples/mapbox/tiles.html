@@ -64,6 +64,9 @@ body { margin: 0; padding: 0; }
             },
             // 'building' // Place layer under labels, roads and buildings.
         );
+
+        // Enable tile boundaries
+        map.showTileBoundaries = true;
     });
 
     map.on('style.load', function() {

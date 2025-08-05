@@ -134,8 +134,8 @@ def global_datasets(request):
 def _get_projected_dataset_tile_params():
     params = []
     for dataset_class, tiles in [
-        (HRRR, HRRR_TILES),
         (EU3035, ETRS89_TILES),
+        (HRRR, HRRR_TILES),
     ]:
         for tile_param in tiles:
             tile, tms = tile_param.values

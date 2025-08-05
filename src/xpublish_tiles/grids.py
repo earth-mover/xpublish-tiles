@@ -152,36 +152,38 @@ class RectilinearSelMixin:
         *,
         da: xr.DataArray,
         bbox: BBox,
-        xindex: xr.Index,
-        yindex: xr.Index,
         y_is_increasing: bool,
     ) -> xr.DataArray:
+        """
+        This method handles coordinate selection for rectilinear grids, automatically
+        converting between different longitude conventions (0→360 vs -180→180).
+        """
         if y_is_increasing:
             yslice = slice(bbox.south, bbox.north)
         else:
             yslice = slice(bbox.north, bbox.south)
+        slicers = {self.Y: yslice}
 
-        slicers = yindex.sel({self.Y: yslice}).dim_indexers
         if self.crs.is_geographic:
             lon_slices = _handle_longitude_selection(da[self.X], bbox)
             if len(lon_slices) == 1:
                 # Single slice - normal case
-                slicers |= xindex.sel({self.X: lon_slices[0]}).dim_indexers
-                result = da.isel(slicers)
+                slicers[self.X] = lon_slices[0]
+                result = da.sel(slicers)
             else:
                 # Multiple slices - bbox crosses 360°/0° boundary
                 results = []
                 for lon_slice in lon_slices:
                     subset_slicers = slicers.copy()
-                    subset_slicers.update(xindex.sel({self.X: lon_slice}).dim_indexers)
-                    results.append(da.isel(subset_slicers))
+                    subset_slicers[self.X] = lon_slice
+                    results.append(da.sel(subset_slicers))
                 # Concatenate along longitude dimension
                 result = xr.concat(results, dim=self.X)
 
         else:
             # Non-geographic coordinates
-            slicers |= xindex.sel({self.X: slice(bbox.west, bbox.east)}).dim_indexers
-            result = da.isel(slicers)
+            slicers[self.X] = slice(bbox.west, bbox.east)
+            result = da.sel(slicers)
         return result
 
 
@@ -204,11 +206,10 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         (index,) = self.indexes
         affine = index.transform()
+        da = da.assign_coords(xr.Coordinates.from_xindex(index))
         return super().sel(
             da=da,
             bbox=bbox,
-            xindex=index,
-            yindex=index,
             y_is_increasing=affine.e > 0,
         )
 
@@ -226,13 +227,6 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         """
         Select a subset of the data array using a bounding box.
-
-        This method handles coordinate selection for rectilinear grids, automatically
-        converting between different longitude conventions (0→360 vs -180→180) and
-        ensuring consistent output coordinates in -180→180 format.
-
-        Web Mercator tiles are guaranteed never to cross the anti-meridian, which
-        simplifies the longitude handling significantly compared to arbitrary bounding boxes.
         """
         assert self.X in da.xindexes and self.Y in da.xindexes
         assert isinstance(da.xindexes[self.Y], xr.indexes.PandasIndex)
@@ -240,8 +234,6 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
         return super().sel(
             da=da,
             bbox=bbox,
-            xindex=self.indexes[0],  # FIXME: dict instead?
-            yindex=self.indexes[1],  # FIXME: dict instead?
             y_is_increasing=y_index.index.is_monotonic_increasing,
         )
 
