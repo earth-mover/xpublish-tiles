@@ -42,7 +42,7 @@ class DatashaderRasterRenderer(Renderer):
         self.validate(contexts)
         (context,) = contexts.values()
         if isinstance(context, NullRenderContext):
-            raise NotImplementedError("no overlap with requested bbox.")
+            raise ValueError("no overlap with requested bbox.")
         if TYPE_CHECKING:
             assert isinstance(context, PopulatedRenderContext)
         bbox = context.bbox
