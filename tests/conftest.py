@@ -208,6 +208,7 @@ def png_snapshot(snapshot, pytestconfig, request):
         # Create difference map
         def create_difference_map(expected, actual):
             # Calculate absolute differences for RGB channels (ignore alpha)
+            # Now guaranteed to have RGBA format from conversion above
             diff_rgb = np.abs(
                 expected[:, :, :3].astype(np.float32)
                 - actual[:, :, :3].astype(np.float32)
@@ -375,9 +376,15 @@ Change: {actual_transparent - expected_transparent:+,} pixels
             This is more robust against compression differences and platform variations.
             Generates debug visualization when --debug-visual flag is used.
             """
-            # Convert both images to numpy arrays
+            # Convert both images to numpy arrays, ensuring RGBA format
             actual_img = Image.open(io.BytesIO(serialized_data))
             expected_img = Image.open(io.BytesIO(snapshot_data))
+
+            # Convert to RGBA if not already
+            if actual_img.mode != "RGBA":
+                actual_img = actual_img.convert("RGBA")
+            if expected_img.mode != "RGBA":
+                expected_img = expected_img.convert("RGBA")
 
             actual_array = np.array(actual_img)
             expected_array = np.array(expected_img)

@@ -64,7 +64,7 @@ class Renderer:
         height: int,
         cmap: str,
         colorscalerange: tuple[Number, Number] | None = None,
-    ):
+    ) -> None:
         raise NotImplementedError
 
     @staticmethod

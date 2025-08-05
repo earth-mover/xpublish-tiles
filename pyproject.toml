@@ -25,6 +25,9 @@ dependencies = [
     "rasterix>=0.1a4",
     "toolz>=1.0.0",
     "cachetools>=5.5.2",
+    "pyvista>=0.46.0",
+    "pyvista-xarray>=0.1.7",
+    "setuptools>=80.9.0",
 ]
 dynamic = ["version"]
 
