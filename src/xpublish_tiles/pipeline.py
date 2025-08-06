@@ -257,14 +257,20 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
 
     buffer = io.BytesIO()
     renderer = query.get_renderer()
-    renderer.render(
-        contexts=context_dict,
-        buffer=buffer,
-        width=query.width,
-        height=query.height,
-        cmap=query.cmap,
-        colorscalerange=query.colorscalerange,
-        format=query.format,
+
+    # Run render in executor to avoid blocking
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        EXECUTOR,
+        lambda: renderer.render(
+            contexts=context_dict,
+            buffer=buffer,
+            width=query.width,
+            height=query.height,
+            cmap=query.cmap,
+            colorscalerange=query.colorscalerange,
+            format=query.format,
+        ),
     )
     buffer.seek(0)
     if int(os.environ.get("XPUBLISH_TILES_DEBUG_CHECKS", "0")):
