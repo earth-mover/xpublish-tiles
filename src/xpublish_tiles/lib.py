@@ -44,8 +44,7 @@ def transform_blocked(
     x_grid: np.ndarray,
     y_grid: np.ndarray,
     transformer: pyproj.Transformer,
-    chunk_size: tuple[int, int] = (500, 500),
-    n_workers: int = 4,
+    chunk_size: tuple[int, int] = (250, 250),
 ) -> tuple[np.ndarray, np.ndarray]:
     """Blocked transformation using thread pool."""
     shape = x_grid.shape

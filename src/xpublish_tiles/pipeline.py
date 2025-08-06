@@ -28,6 +28,8 @@ logger = logging.getLogger("xpublish-tiles")
 # https://pyproj4.github.io/pyproj/stable/advanced_examples.html#caching-pyproj-objects
 transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=True))
 
+USE_CHUNKED_TRANSFORM_THRESHOLD_SIZE = 1000 * 1000
+
 
 def has_coordinate_discontinuity(coordinates: np.ndarray) -> bool:
     """
@@ -319,7 +321,7 @@ async def subset_to_bbox(
             else False
         )
         bx, by = xr.broadcast(subset[grid.X], subset[grid.Y])
-        if bx.size > 1000 * 1000:
+        if bx.size > USE_CHUNKED_TRANSFORM_THRESHOLD_SIZE:
             loop = asyncio.get_event_loop()
             newX, newY = await loop.run_in_executor(
                 EXECUTOR,
