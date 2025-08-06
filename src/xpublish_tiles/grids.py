@@ -473,22 +473,16 @@ def guess_grid_system(ds: xr.Dataset, name: str) -> GridSystem:
     If no _xpublish_id, skips caching to avoid cross-contamination.
     """
     # Only use cache if _xpublish_id is present
-    xpublish_id = ds.attrs.get("_xpublish_id")
-    if xpublish_id is not None:
-        cache_key = (xpublish_id, name)
-        # Check cache
-        if cache_key in _GRID_CACHE:
+    if (xpublish_id := ds.attrs.get("_xpublish_id")) is not None:
+        if (cache_key := (xpublish_id, name)) in _GRID_CACHE:
             return _GRID_CACHE[cache_key]
 
-    # Compute grid system
     try:
         grid = _guess_grid_for_dataset(ds.cf[[name]])
-    except (RuntimeError, AttributeError):
+    except RuntimeError:
         grid = _guess_grid_for_dataset(ds)
 
-    # Store in cache only if _xpublish_id is present
     if xpublish_id is not None:
-        cache_key = (xpublish_id, name)
         _GRID_CACHE[cache_key] = grid
 
     return grid
