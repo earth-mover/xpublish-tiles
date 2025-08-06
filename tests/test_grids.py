@@ -88,8 +88,8 @@ from xpublish_tiles.grids import (
                 crs=CRS.from_user_input(3035),
                 bbox=BBox(
                     west=2635780.0,
-                    south=1385920.0,
-                    east=6084700.0,
+                    south=1816000.0,
+                    east=6235780.0,
                     north=5416000.0,
                 ),
                 X="x",

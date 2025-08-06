@@ -8,7 +8,7 @@ import xpublish
 from fastapi.middleware.cors import CORSMiddleware
 
 import xarray as xr
-from xpublish_tiles.datasets import EU3035, HRRR, create_global_dataset
+from xpublish_tiles.datasets import EU3035_HIRES, HRRR, create_global_dataset
 from xpublish_tiles.xpublish.tiles.plugin import TilesPlugin
 from xpublish_tiles.xpublish.wms.plugin import WMSPlugin
 
@@ -23,7 +23,7 @@ def get_dataset_for_name(
     elif name == "hrrr":
         ds = HRRR.create().isel(time=0, step=0).assign_attrs(_xpublish_id=name)
     elif name == "eu3035":
-        ds = EU3035.create().assign_attrs(_xpublish_id=name)
+        ds = EU3035_HIRES.create().assign_attrs(_xpublish_id=name)
     else:
         # Arraylake path
         try:

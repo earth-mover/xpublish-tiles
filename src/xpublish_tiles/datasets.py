@@ -375,6 +375,23 @@ HRRR = Dataset(
 EU3035 = Dataset(
     name="eu3035",
     dims=(
+        Dim(name="x", size=3000, chunk_size=1000, data=None),
+        Dim(name="y", size=3000, chunk_size=1000, data=None),
+    ),
+    dtype=np.float32,
+    setup=partial(
+        raster_grid,
+        crs="epsg:3035",
+        geotransform="2635780.0 1200.0 0.0 5416000.0 0.0 -1200.0",
+        bbox=BBox(
+            west=-31.39, south=36.96, east=55.51, north=67.12
+        ),  # Geographic extent of projected grid
+    ),
+)
+
+EU3035_HIRES = Dataset(
+    name="eu3035_hires",
+    dims=(
         Dim(name="x", size=28741, chunk_size=2000, data=None),
         Dim(name="y", size=33584, chunk_size=2000, data=None),
     ),
