@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import cast
 
 import cachetools
+import numbagg
 import numpy as np
 import rasterix
 from pyproj import CRS
@@ -18,9 +19,8 @@ _GRID_CACHE = cachetools.TTLCache(maxsize=128, ttl=300)
 
 
 def _get_xy_pad(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
-    # FIXME: use numbagg
-    x_pad = np.abs(np.diff(x)).max()
-    y_pad = np.abs(np.diff(y)).max()
+    x_pad = numbagg.nanmax(np.abs(np.diff(x)))
+    y_pad = numbagg.nanmax(np.abs(np.diff(y)))
     return x_pad, y_pad
 
 
@@ -422,17 +422,14 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
         # FIXME: nice error here
         (Xname,) = Xname
         (Yname,) = Yname
-        X = ds[Xname]
-        Y = ds[Yname]
+        X = ds[Xname].data
+        Y = ds[Yname].data
 
-        # intentionally reduce with Xarray to use numbagg
-        # FIXME: just use numbagg directly
-        # FIXME: compile ahead of time by reducing a 1D and 2D array
         bbox = BBox(
-            west=X.min().item(),
-            east=X.max().item(),
-            south=Y.min().item(),
-            north=Y.max().item(),
+            west=numbagg.nanmin(X).item(),
+            east=numbagg.nanmax(X).item(),
+            south=numbagg.nanmin(Y).item(),
+            north=numbagg.nanmax(Y).item(),
         )
         if X.ndim == 1 and Y.ndim == 1:
             return Rectilinear(
@@ -457,7 +454,6 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
         raise RuntimeError("CRS/grid system not detected")
 
 
-# FIXME: cache here, we'll need some xpublish/booth specific attrs on ds
 def guess_grid_system(ds: xr.Dataset, name: str) -> GridSystem:
     """
     Guess the grid system for a dataset.
@@ -477,10 +473,8 @@ def guess_grid_system(ds: xr.Dataset, name: str) -> GridSystem:
 
     # Check cache
     if cache_key in _GRID_CACHE:
-        print(f"grid cache hit for {cache_key=!r}")
         return _GRID_CACHE[cache_key]
 
-    print(f"grid cache miss for {cache_key=!r}")
     # Compute grid system
     try:
         grid = _guess_grid_for_dataset(ds.cf[[name]])
