@@ -145,7 +145,8 @@ def raster_grid(
     ds = uniform_grid(dims=dims, dtype=dtype, attrs=attrs)
     crs = pyproj.CRS.from_user_input(crs)
     ds.coords["spatial_ref"] = ((), 0, crs.to_cf())
-    ds.spatial_ref.attrs["GeoTransform"] = geotransform
+    if geotransform:
+        ds.spatial_ref.attrs["GeoTransform"] = geotransform
 
     # Add bounding box to dataset attributes if provided
     if bbox is not None:

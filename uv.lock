@@ -2869,8 +2869,8 @@ wheels = [
 
 [[package]]
 name = "xarray"
-version = "2025.3.2.dev277+g67c77cc8"
-source = { git = "https://github.com/dcherian/xarray.git?rev=async.load#67c77cc8c8bbdef1d4b11077dc0f2ba73d2f642e" }
+version = "2025.7.2.dev134+gef6afdfd"
+source = { git = "https://github.com/TomNicholas/xarray.git?rev=async.load#ef6afdfd0400656cc0b9f2cc4e20fd02c0a5b3fc" }
 dependencies = [
     { name = "numpy" },
     { name = "packaging" },
@@ -2970,7 +2970,7 @@ requires-dist = [
     { name = "pyproj", specifier = ">=3.7.1" },
     { name = "rasterix", specifier = ">=0.1a4" },
     { name = "toolz", specifier = ">=1.0.0" },
-    { name = "xarray", git = "https://github.com/dcherian/xarray.git?rev=async.load" },
+    { name = "xarray", git = "https://github.com/TomNicholas/xarray.git?rev=async.load" },
     { name = "xpublish", specifier = ">=0.3.0" },
     { name = "zarr", git = "https://github.com/zarr-developers/zarr-python.git?rev=main" },
 ]

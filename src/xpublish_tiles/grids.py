@@ -469,22 +469,16 @@ def guess_grid_system(ds: xr.Dataset, name: str) -> GridSystem:
     """
     Guess the grid system for a dataset.
 
-    Uses caching with ds.attrs['_xpublish_id'] as cache key if present,
-    otherwise uses id(ds) as the cache key.
+    Uses caching with ds.attrs['_xpublish_id'] as cache key if present.
+    If no _xpublish_id, skips caching to avoid cross-contamination.
     """
-    # Determine cache key - use _xpublish_id if present
-    if "_xpublish_id" in ds.attrs:
-        cache_key = (ds.attrs["_xpublish_id"], name)
-    else:
-        # For datasets without _xpublish_id, use id(ds)
-        # Note: In test environments with parametrized fixtures, the same dataset object
-        # may be reused with different coordinate values, causing cache collisions.
-        # In production, datasets should have _xpublish_id set to avoid this issue.
-        cache_key = (id(ds), name)
-
-    # Check cache
-    if cache_key in _GRID_CACHE:
-        return _GRID_CACHE[cache_key]
+    # Only use cache if _xpublish_id is present
+    xpublish_id = ds.attrs.get("_xpublish_id")
+    if xpublish_id is not None:
+        cache_key = (xpublish_id, name)
+        # Check cache
+        if cache_key in _GRID_CACHE:
+            return _GRID_CACHE[cache_key]
 
     # Compute grid system
     try:
@@ -492,7 +486,9 @@ def guess_grid_system(ds: xr.Dataset, name: str) -> GridSystem:
     except (RuntimeError, AttributeError):
         grid = _guess_grid_for_dataset(ds)
 
-    # Store in cache
-    _GRID_CACHE[cache_key] = grid
+    # Store in cache only if _xpublish_id is present
+    if xpublish_id is not None:
+        cache_key = (xpublish_id, name)
+        _GRID_CACHE[cache_key] = grid
 
     return grid
