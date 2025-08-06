@@ -3,6 +3,7 @@ import warnings
 from dataclasses import dataclass
 from typing import cast
 
+import cachetools
 import numpy as np
 import rasterix
 from pyproj import CRS
@@ -12,9 +13,8 @@ import xarray as xr
 
 DEFAULT_CRS = CRS.from_epsg(4326)
 
-# Simple cache for grid systems
-# FIXME: use cachetools
-_GRID_CACHE = {}
+# TTL cache for grid systems (5 minute TTL, max 128 entries)
+_GRID_CACHE = cachetools.TTLCache(maxsize=128, ttl=300)
 
 
 def _get_xy_pad(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:

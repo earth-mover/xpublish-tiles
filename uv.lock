@@ -2905,6 +2905,7 @@ name = "xpublish-tiles"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "cachetools" },
     { name = "cf-xarray" },
     { name = "cftime" },
     { name = "datashader" },
@@ -2943,6 +2944,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cachetools", specifier = ">=5.5.2" },
     { name = "cf-xarray", specifier = ">=0.10.6" },
     { name = "cftime", specifier = ">=1.6.4.post1" },
     { name = "datashader", specifier = ">=0.18.1" },
