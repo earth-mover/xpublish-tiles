@@ -10,7 +10,14 @@ from pyproj.aoi import BBox
 import xarray as xr
 from tests.tiles import TILES
 from xpublish_tiles.datasets import HRRR_CRS_WKT
-from xpublish_tiles.grids import Curvilinear, GridSystem, Rectilinear, guess_grid_system
+from xpublish_tiles.grids import (
+    X_COORD_PATTERN,
+    Y_COORD_PATTERN,
+    Curvilinear,
+    GridSystem,
+    Rectilinear,
+    guess_grid_system,
+)
 
 # FIXME: add tests for datasets with latitude, longitude but no attrs
 
@@ -118,3 +125,59 @@ def test_subset(global_datasets, tile, tms):
     lat_min, lat_max = actual.latitude.min().item(), actual.latitude.max().item()
     assert lat_min >= bbox_geo.south, f"Latitude too low: {lat_min} < {bbox_geo.south}"
     assert lat_max <= bbox_geo.north, f"Latitude too high: {lat_max} > {bbox_geo.north}"
+
+
+def test_x_coordinate_regex_patterns():
+    """Test that X coordinate regex patterns match expected coordinate names."""
+    # Should match
+    x_valid_names = [
+        "x",
+        "i",
+        "nlon",
+        "rlon",
+        "ni",
+        "lon",
+        "longitude",
+        "nav_lon",
+        "glam",
+        "glamv",
+        "xlon",
+        "xlongitude",
+    ]
+
+    for name in x_valid_names:
+        assert X_COORD_PATTERN.match(name), f"X pattern should match '{name}'"
+
+    # Should not match
+    x_invalid_names = ["not_x", "X", "Y", "lat", "latitude", "foo", ""]
+
+    for name in x_invalid_names:
+        assert not X_COORD_PATTERN.match(name), f"X pattern should not match '{name}'"
+
+
+def test_y_coordinate_regex_patterns():
+    """Test that Y coordinate regex patterns match expected coordinate names."""
+    # Should match
+    y_valid_names = [
+        "y",
+        "j",
+        "nlat",
+        "rlat",
+        "nj",
+        "lat",
+        "latitude",
+        "nav_lat",
+        "gphi",
+        "gphiv",
+        "ylat",
+        "ylatitude",
+    ]
+
+    for name in y_valid_names:
+        assert Y_COORD_PATTERN.match(name), f"Y pattern should match '{name}'"
+
+    # Should not match
+    y_invalid_names = ["not_y", "Y", "X", "lon", "longitude", "foo", ""]
+
+    for name in y_invalid_names:
+        assert not Y_COORD_PATTERN.match(name), f"Y pattern should not match '{name}'"

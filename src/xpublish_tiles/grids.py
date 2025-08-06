@@ -1,4 +1,5 @@
 import itertools
+import re
 import warnings
 from dataclasses import dataclass
 from typing import cast
@@ -13,6 +14,10 @@ from pyproj.aoi import BBox
 import xarray as xr
 
 DEFAULT_CRS = CRS.from_epsg(4326)
+
+# Regex patterns for coordinate detection
+X_COORD_PATTERN = re.compile(r"^(x|i|nlon|rlon|ni|x?(nav_lon|lon|glam)[a-z0-9]*)$")
+Y_COORD_PATTERN = re.compile(r"^(y|j|nlat|rlat|nj|y?(nav_lat|lat|gphi)[a-z0-9]*)$")
 
 # TTL cache for grid systems (5 minute TTL, max 128 entries)
 _GRID_CACHE = cachetools.TTLCache(maxsize=128, ttl=300)
@@ -388,7 +393,6 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
         # TODO: we aren't handling the triangular case very explicitly yet.
         Xname, Yname = guess_coordinate_vars(ds, crs)
         if Xname is None or Yname is None:
-            # FIXME: figure out how to do this only once, ever
             # FIXME: let's be a little more targeted in what we are guessing
             ds = ds.cf.guess_coord_axis()
             Xname, Yname = guess_coordinate_vars(ds, crs)
@@ -398,23 +402,32 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
             if grid_mapping is None:
                 raise RuntimeError("Grid system could not be inferred.")
             else:
-                # FIXME: use cf-xarray regexes here?
-                for x, y in (("x", "y"), ("lon", "lat"), ("longitude", "latitude")):
-                    if x in ds.dims and y in ds.dims:
-                        ds = rasterix.assign_index(ds, x_dim=x, y_dim=y)
-                        index = ds.xindexes[x]
-                        return RasterAffine(
-                            crs=crs,
-                            X=x,
-                            Y=y,
-                            bbox=BBox(
-                                west=index.bbox.left,
-                                east=index.bbox.right,
-                                south=index.bbox.bottom,
-                                north=index.bbox.top,
-                            ),
-                            indexes=(index,),
-                        )
+                # Use regex patterns to find coordinate dimensions
+                x_dim = None
+                y_dim = None
+                for dim in ds.dims:
+                    if X_COORD_PATTERN.match(dim):
+                        x_dim = dim
+                        break
+                    if Y_COORD_PATTERN.match(dim):
+                        y_dim = dim
+                        break
+
+                if x_dim and y_dim:
+                    ds = rasterix.assign_index(ds, x_dim=x_dim, y_dim=y_dim)
+                    index = ds.xindexes[x_dim]
+                    return RasterAffine(
+                        crs=crs,
+                        X=x_dim,
+                        Y=y_dim,
+                        bbox=BBox(
+                            west=index.bbox.left,
+                            east=index.bbox.right,
+                            south=index.bbox.bottom,
+                            north=index.bbox.top,
+                        ),
+                        indexes=(index,),
+                    )
                 raise RuntimeError(
                     f"Creating raster affine grid system failed. Detected {grid_mapping=!r}."
                 )
