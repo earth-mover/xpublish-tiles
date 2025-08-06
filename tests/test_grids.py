@@ -71,10 +71,10 @@ from xpublish_tiles.grids import (
             Rectilinear(
                 crs=CRS.from_wkt(HRRR_CRS_WKT),
                 bbox=BBox(
-                    west=-2697520.1425219364,
-                    south=-1587306.1525566631,
-                    east=2696479.8574780636,
-                    north=1586693.8474433369,
+                    west=-2697520.142522,
+                    south=-1587306.152557,
+                    east=2696479.857478,
+                    north=1586693.847443,
                 ),
                 X="x",
                 Y="y",

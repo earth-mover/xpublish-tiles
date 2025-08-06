@@ -335,6 +335,8 @@ PARA = Dataset(
 
 transformer = pyproj.Transformer.from_crs(HRRR_CRS_WKT, 4326, always_xy=True)
 x0, y0 = transformer.transform(237.280472, 21.138123, direction="INVERSE")
+x0 = round(x0, 6)
+y0 = round(y0, 6)
 
 HRRR = Dataset(
     name="hrrr",
