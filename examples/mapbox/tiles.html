@@ -24,11 +24,6 @@ body { margin: 0; padding: 0; }
         style: 'mapbox://styles/mapbox/light-v11',
         zoom: 2,
         center: [-71.0367, 42.3739],
-    projection: {
-    name: 'mercator',
-    <!-- center: [262.5-360, 38.5], -->
-    <!-- parallels: [38.5, 38.5] -->
-    },
         //center: [-61.5, -4.5],
         // transformRequest: (url, resourceType) => {
         //     if (url.includes('localhost')) {
@@ -49,7 +44,7 @@ body { margin: 0; padding: 0; }
             // https://docs.mapbox.com/style-spec/reference/sources/
             'tiles': [
                 // CHANGE THIS URL TO DEMO URL and LAYERS/time/other dimensions
-                'http://localhost:8989/tiles/WebMercatorQuad/{z}/{y}/{x}?variables=foo&style=raster/viridis&colorscalerange=-1,1&width=256&height=256'
+                'http://localhost:8080/tiles/WebMercatorQuad/{z}/{y}/{x}?variables=2t&style=raster/viridis&colorscalerange=280,300&width=256&height=256&valid_time=2025-04-03T06:00:00'
             ],
             'tileSize': 256
         });
@@ -64,9 +59,6 @@ body { margin: 0; padding: 0; }
             },
             // 'building' // Place layer under labels, roads and buildings.
         );
-
-        // Enable tile boundaries
-        map.showTileBoundaries = true;
     });
 
     map.on('style.load', function() {
