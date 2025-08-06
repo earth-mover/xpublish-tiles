@@ -53,6 +53,7 @@ dev = [
     "hypothesis>=6.136.6",
     "dask",
     "ipython>=9.4.0",
+    "pytest-randomly>=3.16.0",
 ]
 
 [project.entry-points."xpublish.plugin"]
