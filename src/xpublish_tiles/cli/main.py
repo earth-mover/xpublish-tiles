@@ -17,17 +17,13 @@ def get_dataset_for_name(
     name: str, branch: str = "main", group: str = "", icechunk_cache: bool = False
 ) -> xr.Dataset:
     if name == "global":
-        ds = create_global_dataset()
-        ds.attrs["_xpublish_id"] = name
+        ds = create_global_dataset().assign_attrs(_xpublish_id=name)
     elif name == "air":
-        ds = xr.tutorial.open_dataset("air_temperature")
-        ds.attrs["_xpublish_id"] = name
+        ds = xr.tutorial.open_dataset("air_temperature").assign_attrs(_xpublish_id=name)
     elif name == "hrrr":
-        ds = HRRR.create().isel(time=0, step=0)
-        ds.attrs["_xpublish_id"] = name
+        ds = HRRR.create().isel(time=0, step=0).assign_attrs(_xpublish_id=name)
     elif name == "eu3035":
-        ds = EU3035.create()
-        ds.attrs["_xpublish_id"] = name
+        ds = EU3035.create().assign_attrs(_xpublish_id=name)
     else:
         # Arraylake path
         try:
