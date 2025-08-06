@@ -297,7 +297,6 @@ def _infer_datatype(array: xr.DataArray) -> DataType:
     )
 
 
-# FIXME: apply a decorator to time this
 def apply_query(
     ds: xr.Dataset, *, variables: list[str], selectors: dict[str, Any]
 ) -> dict[str, ValidatedArray]:
@@ -305,13 +304,16 @@ def apply_query(
     This method does all automagic detection necessary for the rest of the pipeline to work.
     """
     validated: dict[str, ValidatedArray] = {}
-    ds = ds.cf.sel(**selectors)
+    if selectors:
+        ds = ds.cf.sel(**selectors)
     for name in variables:
-        grid_system = guess_grid_system(ds, name)
-        array = ds.cf[name]
+        grid = guess_grid_system(ds, name)
+        array = ds[name]
+        if extra_dims := (set(array.dims) - grid.dims):
+            array = array.isel({dim: -1 for dim in extra_dims})
         validated[name] = ValidatedArray(
             da=array,
-            grid=grid_system,
+            grid=grid,
             datatype=_infer_datatype(array),
         )
     return validated

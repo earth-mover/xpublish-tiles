@@ -34,6 +34,7 @@ from xpublish_tiles.grids import (
                 bbox=BBox(south=0, north=5, east=4, west=0),
                 X="X",
                 Y="Y",
+                dims={"X", "Y"},
                 indexes=(),  # type: ignore[arg-type]
             ),
         ),
@@ -45,6 +46,7 @@ from xpublish_tiles.grids import (
                 bbox=BBox(south=2.5, north=2.5, east=0.5, west=0.5),
                 X="ULONG",
                 Y="ULAT",
+                dims={"nlon", "nlat"},
                 indexes=(),  # type: ignore[arg-type]
             ),
         ),
@@ -62,6 +64,7 @@ from xpublish_tiles.grids import (
                 bbox=BBox(south=21.615, north=21.835, east=18.155, west=17.935),
                 X="rlon",
                 Y="rlat",
+                dims={"rlon", "rlat"},
                 indexes=(),  # type: ignore[arg-type]
             ),
         ),
@@ -78,6 +81,7 @@ from xpublish_tiles.grids import (
                 ),
                 X="x",
                 Y="y",
+                dims={"x", "y"},
                 indexes=(),  # type: ignore[arg-type]
             ),
         ),
@@ -94,6 +98,7 @@ from xpublish_tiles.grids import (
                 ),
                 X="x",
                 Y="y",
+                dims={"x", "y"},
                 indexes=(),  # type: ignore[arg-type]
             ),
         ),

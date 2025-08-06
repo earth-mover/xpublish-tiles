@@ -156,9 +156,6 @@ def _get_projected_dataset_tile_params():
 def projected_dataset_and_tile(request):
     dataset_class, tile, tms = request.param
     ds = dataset_class.create()
-    if ds.attrs["name"] == "hrrr":
-        # FIXME: make this kind of thing more explicit
-        ds = ds.isel(time=0, step=0)
 
     # Validate that tile overlaps with dataset bounding box
     dataset_bbox = ds.attrs["bbox"]

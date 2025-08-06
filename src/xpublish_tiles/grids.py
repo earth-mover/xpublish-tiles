@@ -135,6 +135,7 @@ class GridSystem:
     bounds, and reference frame for that specific grid system.
     """
 
+    dims: set[str]
     # FIXME: do we really need these Index objects on the class?
     #   - reconsider when we do curvilinear and triangular grids
     #   - The ugliness is that booth would have to set the right indexes on the dataset.
@@ -202,6 +203,7 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
     bbox: BBox
     X: str
     Y: str
+    dims: set[str]
     indexes: tuple[rasterix.RasterIndex]
 
     def pad_bbox(self, bbox: BBox, da: xr.DataArray) -> BBox:
@@ -229,6 +231,7 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
     bbox: BBox
     X: str
     Y: str
+    dims: set[str]
     indexes: tuple[xr.indexes.PandasIndex, xr.indexes.PandasIndex]
 
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
@@ -261,6 +264,7 @@ class Curvilinear(GridSystem):
     bbox: BBox
     X: str
     Y: str
+    dims: set[str]
     indexes: tuple[xr.Index, ...]
 
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
@@ -327,6 +331,7 @@ class Curvilinear(GridSystem):
 @dataclass(kw_only=True)
 class DGGS(GridSystem):
     cells: str
+    dims: set[str]
     indexes: tuple[xr.Index, ...]
 
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
@@ -420,6 +425,7 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
                         crs=crs,
                         X=x_dim,
                         Y=y_dim,
+                        dims={x_dim, y_dim},
                         bbox=BBox(
                             west=index.bbox.left,
                             east=index.bbox.right,
@@ -435,20 +441,22 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
         # FIXME: nice error here
         (Xname,) = Xname
         (Yname,) = Yname
-        X = ds[Xname].data
-        Y = ds[Yname].data
+        X = ds[Xname]
+        Y = ds[Yname]
 
         bbox = BBox(
-            west=numbagg.nanmin(X).item(),
-            east=numbagg.nanmax(X).item(),
-            south=numbagg.nanmin(Y).item(),
-            north=numbagg.nanmax(Y).item(),
+            west=numbagg.nanmin(X.data).item(),
+            east=numbagg.nanmax(X.data).item(),
+            south=numbagg.nanmin(Y.data).item(),
+            north=numbagg.nanmax(Y.data).item(),
         )
+        dims = set(X.dims) | set(Y.dims)
         if X.ndim == 1 and Y.ndim == 1:
             return Rectilinear(
                 crs=crs,
                 X=Xname,
                 Y=Yname,
+                dims=dims,
                 bbox=bbox,
                 indexes=(
                     cast(xr.indexes.PandasIndex, ds.xindexes[Xname]),
@@ -457,7 +465,9 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
             )
         elif X.ndim == 2 and Y.ndim == 2:
             # See discussion in https://github.com/pydata/xarray/issues/10572
-            return Curvilinear(crs=crs, X=Xname, Y=Yname, bbox=bbox, indexes=tuple())
+            return Curvilinear(
+                crs=crs, X=Xname, Y=Yname, dims=dims, bbox=bbox, indexes=tuple()
+            )
 
         else:
             raise RuntimeError(

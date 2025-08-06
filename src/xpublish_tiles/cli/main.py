@@ -21,9 +21,9 @@ def get_dataset_for_name(
     elif name == "air":
         ds = xr.tutorial.open_dataset("air_temperature").assign_attrs(_xpublish_id=name)
     elif name == "hrrr":
-        ds = HRRR.create().isel(time=0, step=0).assign_attrs(_xpublish_id=name)
+        ds = HRRR.create().assign_attrs(_xpublish_id=name)
     elif name == "para":
-        ds = PARA.create().isel(time=0).assign_attrs(_xpublish_id=name)
+        ds = PARA.create().assign_attrs(_xpublish_id=name)
     elif name == "eu3035":
         ds = EU3035_HIRES.create().assign_attrs(_xpublish_id=name)
     else:
