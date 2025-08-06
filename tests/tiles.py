@@ -132,4 +132,35 @@ WGS84_TILES = [
     ),
 ]
 
+# HRRR tiles for testing Lambert Conformal Conic projection data
+# Actual HRRR domain: Lat(21.14, 47.84), Lon(-134.10, -60.92)
+HRRR_TILES = [
+    # Low zoom - full domain coverage
+    pytest.param(Tile(x=0, y=1, z=2), WEBMERC_TMS, id="hrrr_west_z2(2/0/1)"),
+    pytest.param(Tile(x=1, y=1, z=2), WEBMERC_TMS, id="hrrr_east_z2(2/1/1)"),
+    # Medium zoom - domain corners and edges
+    pytest.param(Tile(x=1, y=2, z=3), WEBMERC_TMS, id="hrrr_sw_corner_z3(3/1/2)"),
+    pytest.param(Tile(x=2, y=2, z=3), WEBMERC_TMS, id="hrrr_se_corner_z3(3/2/2)"),
+    pytest.param(Tile(x=1, y=2, z=3), WEBMERC_TMS, id="hrrr_nw_corner_z3(3/1/2)"),
+    pytest.param(Tile(x=2, y=2, z=3), WEBMERC_TMS, id="hrrr_ne_corner_z3(3/2/2)"),
+    pytest.param(Tile(x=1, y=3, z=3), WEBMERC_TMS, id="hrrr_south_z3(3/1/3)"),
+    # Higher zoom - precise domain coverage
+    pytest.param(Tile(x=4, y=11, z=5), WEBMERC_TMS, id="hrrr_west_edge_z5(5/4/11)"),
+    pytest.param(Tile(x=10, y=11, z=5), WEBMERC_TMS, id="hrrr_east_edge_z5(5/10/11)"),
+    pytest.param(Tile(x=4, y=13, z=5), WEBMERC_TMS, id="hrrr_south_edge_z5(5/4/13)"),
+    pytest.param(Tile(x=7, y=11, z=5), WEBMERC_TMS, id="hrrr_center_z5(5/7/11)"),
+    # Very high zoom - edge cases
+    pytest.param(Tile(x=16, y=44, z=7), WEBMERC_TMS, id="hrrr_sw_precise_z7(7/16/44)"),
+    pytest.param(Tile(x=42, y=44, z=7), WEBMERC_TMS, id="hrrr_se_precise_z7(7/42/44)"),
+    pytest.param(Tile(x=29, y=50, z=7), WEBMERC_TMS, id="hrrr_center_z7(7/29/50)"),
+    # Ultra high zoom - precise boundaries
+    pytest.param(
+        Tile(x=130, y=356, z=10), WEBMERC_TMS, id="hrrr_sw_extreme_z10(10/130/356)"
+    ),
+    pytest.param(
+        Tile(x=338, y=356, z=10), WEBMERC_TMS, id="hrrr_se_extreme_z10(10/338/356)"
+    ),
+    pytest.param(Tile(x=234, y=403, z=10), WEBMERC_TMS, id="hrrr_center_z10(10/234/403)"),
+]
+
 TILES = WEBMERC_TILES + WGS84_TILES + ETRS89_TILES

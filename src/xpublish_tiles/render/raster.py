@@ -8,7 +8,7 @@ import matplotlib as mpl  # type: ignore
 import numpy as np
 
 import xarray as xr
-from xpublish_tiles.grids import Curvilinear, Rectilinear
+from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear
 from xpublish_tiles.render import Renderer
 from xpublish_tiles.types import (
     DataType,
@@ -42,7 +42,7 @@ class DatashaderRasterRenderer(Renderer):
         self.validate(contexts)
         (context,) = contexts.values()
         if isinstance(context, NullRenderContext):
-            raise NotImplementedError("no overlap with requested bbox.")
+            raise ValueError("no overlap with requested bbox.")
         if TYPE_CHECKING:
             assert isinstance(context, PopulatedRenderContext)
         bbox = context.bbox
@@ -54,9 +54,16 @@ class DatashaderRasterRenderer(Renderer):
             y_range=(bbox.south, bbox.north),
         )
 
-        if isinstance(context.grid, Rectilinear | Curvilinear):
+        if (
+            colorscalerange is None
+            and "valid_min" in data.attrs
+            and "valid_max" in data.attrs
+        ):
+            colorscalerange = (data.attrs.get("valid_min"), data.attrs.get("valid_max"))
+
+        if isinstance(context.grid, RasterAffine | Rectilinear | Curvilinear):
             # Use the actual coordinate names from the grid system
-            grid = cast(Rectilinear | Curvilinear, context.grid)
+            grid = cast(RasterAffine | Rectilinear | Curvilinear, context.grid)
             mesh = cvs.quadmesh(data, x=grid.X, y=grid.Y)
         else:
             raise NotImplementedError(

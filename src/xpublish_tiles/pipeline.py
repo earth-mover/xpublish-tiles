@@ -8,11 +8,11 @@ from typing import Any, cast
 
 import numpy as np
 import pyproj
-import pyproj.aoi
+from pyproj.aoi import BBox
 
 import xarray as xr
-from xpublish_tiles.grids import Curvilinear, Rectilinear, guess_grid_system
-from xpublish_tiles.lib import check_transparent_pixels
+from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear, guess_grid_system
+from xpublish_tiles.lib import check_transparent_pixels, transform_blocked
 from xpublish_tiles.types import (
     DataType,
     NullRenderContext,
@@ -130,9 +130,7 @@ def fix_coordinate_discontinuities(
     return coordinates
 
 
-def check_bbox_overlap(
-    input_bbox: pyproj.aoi.BBox, grid_bbox: pyproj.aoi.BBox, is_geographic: bool
-) -> bool:
+def check_bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool:
     """Check if bboxes overlap, handling longitude wrapping for geographic data."""
     # Standard intersection check
     if input_bbox.intersects(grid_bbox):
@@ -140,7 +138,9 @@ def check_bbox_overlap(
 
     # For geographic data, check longitude wrapping
     if is_geographic:
-        # Try converting input bbox to both 0-360 and -180-180 conventions to see if either overlaps
+        # If the bbox spans more than 360 degrees, it covers the entire globe
+        if (input_bbox.east - input_bbox.west) >= 360:
+            return True
 
         # Convert input bbox to -180 to 180 range
         normalized_west = ((input_bbox.west + 180) % 360) - 180
@@ -149,13 +149,13 @@ def check_bbox_overlap(
         # Handle the case where normalization creates an anti-meridian crossing
         if normalized_west > normalized_east:
             # Check both parts: [normalized_west, 180] and [-180, normalized_east]
-            bbox1 = pyproj.aoi.BBox(
+            bbox1 = BBox(
                 west=normalized_west,
                 south=input_bbox.south,
                 east=180.0,
                 north=input_bbox.north,
             )
-            bbox2 = pyproj.aoi.BBox(
+            bbox2 = BBox(
                 west=-180.0,
                 south=input_bbox.south,
                 east=normalized_east,
@@ -165,7 +165,7 @@ def check_bbox_overlap(
                 return True
         else:
             # Normal case - single normalized bbox
-            normalized_input = pyproj.aoi.BBox(
+            normalized_input = BBox(
                 west=normalized_west,
                 south=input_bbox.south,
                 east=normalized_east,
@@ -181,13 +181,13 @@ def check_bbox_overlap(
         # Handle case where wrapping creates crossing at 0°/360°
         if wrapped_west_360 > wrapped_east_360:
             # Check both parts: [wrapped_west_360, 360] and [0, wrapped_east_360]
-            bbox1 = pyproj.aoi.BBox(
+            bbox1 = BBox(
                 west=wrapped_west_360,
                 south=input_bbox.south,
                 east=360.0,
                 north=input_bbox.north,
             )
-            bbox2 = pyproj.aoi.BBox(
+            bbox2 = BBox(
                 west=0.0,
                 south=input_bbox.south,
                 east=wrapped_east_360,
@@ -197,7 +197,7 @@ def check_bbox_overlap(
                 return True
         else:
             # Normal case - single wrapped bbox
-            wrapped_input = pyproj.aoi.BBox(
+            wrapped_input = BBox(
                 west=wrapped_west_360,
                 south=input_bbox.south,
                 east=wrapped_east_360,
@@ -273,14 +273,16 @@ def subset_to_bbox(
     result = {}
     for var_name, array in validated.items():
         grid = array.grid
+        if (ndim := array.da.ndim) > 2:
+            raise ValueError(f"Attempting to visualize array with {ndim=!r} > 2.")
         # Check for insufficient data - either dimension has too few points
         if min(array.da.shape) < 2:
             raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
 
-        if not isinstance(grid, Rectilinear | Curvilinear):
+        if not isinstance(grid, RasterAffine | Rectilinear | Curvilinear):
             raise NotImplementedError(f"{grid=!r} not supported yet.")
         # Cast to help type checker understand narrowed type
-        grid = cast(Rectilinear | Curvilinear, grid)
+        grid = cast(RasterAffine | Rectilinear | Curvilinear, grid)
         input_to_output = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
         output_to_input = transformer_from_crs(crs_from=crs, crs_to=grid.crs)
 
@@ -288,7 +290,7 @@ def subset_to_bbox(
         input_bbox_tuple = output_to_input.transform_bounds(
             left=bbox.west, right=bbox.east, top=bbox.north, bottom=bbox.south
         )
-        input_bbox = pyproj.aoi.BBox(
+        input_bbox = BBox(
             west=input_bbox_tuple[0],
             south=input_bbox_tuple[1],
             east=input_bbox_tuple[2],
@@ -317,7 +319,12 @@ def subset_to_bbox(
             else False
         )
         bx, by = xr.broadcast(subset[grid.X], subset[grid.Y])
-        newX, newY = input_to_output.transform(bx.data, by.data)
+        if bx.size > 1000 * 1000:
+            newX, newY = transform_blocked(
+                bx.data, by.data, chunk_size=(500, 500), transformer=input_to_output
+            )
+        else:
+            newX, newY = input_to_output.transform(bx.data, by.data)
 
         # Fix coordinate discontinuities in transformed coordinates if detected
         # this is important because the transformation may introduce discontinuities

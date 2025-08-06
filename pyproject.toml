@@ -21,8 +21,11 @@ dependencies = [
     "pyproj>=3.7.1",
     "xpublish>=0.3.0",
     "fastapi",
-    "xarray @ git+https://github.com/dcherian/xarray.git@async.load",
+    "xarray @ git+https://github.com/TomNicholas/xarray.git@async.load",
     "zarr @ git+https://github.com/zarr-developers/zarr-python.git@main",
+    "rasterix>=0.1a4",
+    "toolz>=1.0.0",
+    "cachetools>=5.5.2",
 ]
 
 [build-system]
@@ -49,6 +52,8 @@ dev = [
     "pooch>=1.8.2",
     "hypothesis>=6.136.6",
     "dask",
+    "ipython>=9.4.0",
+    "pytest-randomly>=3.16.0",
 ]
 
 [project.entry-points."xpublish.plugin"]
