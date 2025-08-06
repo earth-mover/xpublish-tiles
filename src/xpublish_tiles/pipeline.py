@@ -2,6 +2,7 @@ import asyncio
 import copy
 import io
 import logging
+import math
 import os
 from functools import lru_cache, partial
 from typing import Any, cast
@@ -28,7 +29,37 @@ logger = logging.getLogger("xpublish-tiles")
 # https://pyproj4.github.io/pyproj/stable/advanced_examples.html#caching-pyproj-objects
 transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=True))
 
-USE_CHUNKED_TRANSFORM_THRESHOLD_SIZE = 1000 * 1000
+# benchmarked with
+# import numpy as np
+# import pyproj
+# from src.xpublish_tiles.lib import transform_blocked
+
+# x = np.linspace(2635840.0, 3874240.0, 500)
+# y = np.linspace(5415940.0, 2042740, 500)
+
+# transformer = pyproj.Transformer.from_crs(3035, 4326, always_xy=True)
+# grid = np.meshgrid(x, y)
+
+# %timeit transform_blocked(*grid, chunk_size=(20, 20), transformer=transformer)
+# %timeit transform_blocked(*grid, chunk_size=(100, 100), transformer=transformer)
+# %timeit transform_blocked(*grid, chunk_size=(250, 250), transformer=transformer)
+# %timeit transform_blocked(*grid, chunk_size=(500, 500), transformer=transformer)
+# %timeit transformer.transform(*grid)
+#
+# 500 x 500 grid:
+# 19.1 ms ± 1.64 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+# 10.9 ms ± 113 μs per loop (mean ± std. dev. of 7 runs, 100 loops each)
+# 13.8 ms ± 222 μs per loop (mean ± std. dev. of 7 runs, 100 loops each)
+# 48.6 ms ± 318 μs per loop (mean ± std. dev. of 7 runs, 10 loops each)
+# 49.6 ms ± 3.38 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
+#
+# 2000 x 2000 grid:
+# 302 ms ± 21.9 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+# 156 ms ± 1.36 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
+# 155 ms ± 2.75 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
+# 156 ms ± 5.07 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
+# 772 ms ± 27 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+CHUNKED_TRANSFORM_CHUNK_SIZE = (250, 250)
 
 
 def has_coordinate_discontinuity(coordinates: np.ndarray) -> bool:
@@ -321,7 +352,7 @@ async def subset_to_bbox(
             else False
         )
         bx, by = xr.broadcast(subset[grid.X], subset[grid.Y])
-        if bx.size > USE_CHUNKED_TRANSFORM_THRESHOLD_SIZE:
+        if bx.size > math.prod(CHUNKED_TRANSFORM_CHUNK_SIZE):
             loop = asyncio.get_event_loop()
             newX, newY = await loop.run_in_executor(
                 EXECUTOR,
@@ -329,7 +360,7 @@ async def subset_to_bbox(
                 bx.data,
                 by.data,
                 input_to_output,
-                (500, 500),
+                CHUNKED_TRANSFORM_CHUNK_SIZE,
             )
         else:
             newX, newY = input_to_output.transform(bx.data, by.data)
