@@ -12,7 +12,7 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear, guess_grid_system
-from xpublish_tiles.lib import check_transparent_pixels, transform_blocked
+from xpublish_tiles.lib import EXECUTOR, check_transparent_pixels, transform_blocked
 from xpublish_tiles.types import (
     DataType,
     NullRenderContext,
@@ -211,7 +211,7 @@ def check_bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -
 
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = apply_query(ds, variables=query.variables, selectors=query.selectors)
-    subsets = subset_to_bbox(validated, bbox=query.bbox, crs=query.crs)
+    subsets = await subset_to_bbox(validated, bbox=query.bbox, crs=query.crs)
     if int(os.environ.get("XPUBLISH_TILES_ASYNC_LOAD", "1")):
         logger.debug("Using async_load for data loading")
         loaded_contexts = await asyncio.gather(
@@ -265,7 +265,7 @@ def apply_query(
     return validated
 
 
-def subset_to_bbox(
+async def subset_to_bbox(
     validated: dict[str, ValidatedArray], *, bbox: OutputBBox, crs: OutputCRS
 ) -> dict[str, PopulatedRenderContext]:
     # transform desired bbox to input data?
@@ -320,8 +320,14 @@ def subset_to_bbox(
         )
         bx, by = xr.broadcast(subset[grid.X], subset[grid.Y])
         if bx.size > 1000 * 1000:
-            newX, newY = transform_blocked(
-                bx.data, by.data, chunk_size=(500, 500), transformer=input_to_output
+            loop = asyncio.get_event_loop()
+            newX, newY = await loop.run_in_executor(
+                EXECUTOR,
+                transform_blocked,
+                bx.data,
+                by.data,
+                input_to_output,
+                (500, 500),
             )
         else:
             newX, newY = input_to_output.transform(bx.data, by.data)
