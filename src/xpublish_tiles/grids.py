@@ -406,12 +406,10 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
                 x_dim = None
                 y_dim = None
                 for dim in ds.dims:
-                    if X_COORD_PATTERN.match(dim):
+                    if x_dim is None and X_COORD_PATTERN.match(dim):
                         x_dim = dim
-                        break
-                    if Y_COORD_PATTERN.match(dim):
+                    if y_dim is None and Y_COORD_PATTERN.match(dim):
                         y_dim = dim
-                        break
 
                 if x_dim and y_dim:
                     ds = rasterix.assign_index(ds, x_dim=x_dim, y_dim=y_dim)
@@ -491,7 +489,7 @@ def guess_grid_system(ds: xr.Dataset, name: str) -> GridSystem:
     # Compute grid system
     try:
         grid = _guess_grid_for_dataset(ds.cf[[name]])
-    except RuntimeError:
+    except (RuntimeError, AttributeError):
         grid = _guess_grid_for_dataset(ds)
 
     # Store in cache

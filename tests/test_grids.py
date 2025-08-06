@@ -9,12 +9,13 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from tests.tiles import TILES
-from xpublish_tiles.datasets import HRRR_CRS_WKT
+from xpublish_tiles.datasets import EU3035, HRRR, HRRR_CRS_WKT
 from xpublish_tiles.grids import (
     X_COORD_PATTERN,
     Y_COORD_PATTERN,
     Curvilinear,
     GridSystem,
+    RasterAffine,
     Rectilinear,
     guess_grid_system,
 )
@@ -65,32 +66,31 @@ from xpublish_tiles.grids import (
             ),
         ),
         (
-            cfxr.datasets.rotds,
-            "temp",
+            HRRR.create(),
+            "foo",
             Rectilinear(
-                crs=CRS.from_cf(
-                    {
-                        "grid_mapping_name": "rotated_latitude_longitude",
-                        "grid_north_pole_latitude": 39.25,
-                        "grid_north_pole_longitude": -162.0,
-                    }
+                crs=CRS.from_wkt(HRRR_CRS_WKT),
+                bbox=BBox(
+                    west=-2697520.1425219364,
+                    south=-1587306.1525566631,
+                    east=2696479.8574780636,
+                    north=1586693.8474433369,
                 ),
-                bbox=BBox(south=21.615, north=21.835, east=18.155, west=17.935),
-                X="rlon",
-                Y="rlat",
+                X="x",
+                Y="y",
                 indexes=(),  # type: ignore[arg-type]
             ),
         ),
         (
-            xr.tutorial.open_dataset("hrrr-cube"),
-            "dswrf",
-            Rectilinear(
-                crs=CRS.from_wkt(HRRR_CRS_WKT),
+            EU3035.create(),
+            "foo",
+            RasterAffine(
+                crs=CRS.from_user_input(3035),
                 bbox=BBox(
-                    west=-897520.1425219309,
-                    south=-27306.15255666431,
-                    east=-660520.1425219309,
-                    north=89693.84744333569,
+                    west=2635780.0,
+                    south=1385920.0,
+                    east=6084700.0,
+                    north=5416000.0,
                 ),
                 X="x",
                 Y="y",
