@@ -329,7 +329,7 @@ PARA = Dataset(
     setup=partial(
         raster_grid,
         crs="wgs84",
-        geotransform="-58.98825 0.00024999999999999995 0.0 2.72175 0.0 -0.00025000000000000017",
+        geotransform="-58.98825 0.00025 0.0 2.72175 0.0 -0.00025",
     ),
 )
 
