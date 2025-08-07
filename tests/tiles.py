@@ -163,4 +163,24 @@ HRRR_TILES = [
     pytest.param(Tile(x=234, y=403, z=10), WEBMERC_TMS, id="hrrr_center_z10(10/234/403)"),
 ]
 
+# Para (Brazilian state) tiles for testing South American region
+# Para is approximately between 2.72°N to 9.93°S and 45.97°W to 58.99°W
+PARA_TILES = [
+    # Zoom level 4 - broader coverage
+    pytest.param(Tile(x=5, y=7, z=4), WEBMERC_TMS, id="para_north_z4(4/5/7)"),
+    pytest.param(Tile(x=5, y=8, z=4), WEBMERC_TMS, id="para_south_z4(4/5/8)"),
+    # Zoom level 5 - more detailed coverage
+    pytest.param(Tile(x=10, y=15, z=5), WEBMERC_TMS, id="para_northwest_z5(5/10/15)"),
+    pytest.param(Tile(x=11, y=15, z=5), WEBMERC_TMS, id="para_northeast_z5(5/11/15)"),
+    pytest.param(Tile(x=10, y=16, z=5), WEBMERC_TMS, id="para_southwest_z5(5/10/16)"),
+    pytest.param(Tile(x=11, y=16, z=5), WEBMERC_TMS, id="para_southeast_z5(5/11/16)"),
+    # Zoom level 6 - covering Belém (capital) area at ~1.5°S, 48.5°W
+    pytest.param(Tile(x=22, y=31, z=6), WEBMERC_TMS, id="para_belem_z6(6/22/31)"),
+    # Zoom level 7 - detailed view
+    pytest.param(Tile(x=44, y=63, z=7), WEBMERC_TMS, id="para_north_z7(7/44/63)"),
+    pytest.param(Tile(x=45, y=64, z=7), WEBMERC_TMS, id="para_central_z7(7/45/64)"),
+    # Zoom level 8 - high detail for southern Para
+    pytest.param(Tile(x=88, y=128, z=8), WEBMERC_TMS, id="para_south_z8(8/88/128)"),
+]
+
 TILES = WEBMERC_TILES + WGS84_TILES + ETRS89_TILES

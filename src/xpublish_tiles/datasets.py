@@ -97,16 +97,42 @@ def generate_tanh_wave_data(dims: tuple[Dim, ...], dtype: npt.DTypeLike):
 def generate_flag_values_data(
     dims: tuple[Dim, ...], dtype: npt.DTypeLike, flag_values: list
 ):
-    """Generate random integers from flag_values for categorical data."""
+    """Generate discretized tanh wave data with noise using flag_values for categorical data."""
+    # Generate tanh wave data (returns values in [-1, 1] range)
+    tanh_data = generate_tanh_wave_data(dims, np.float32)
+
+    # Add random noise that preserves the sign
+    # Generate noise proportional to the absolute value to avoid sign changes
     shape = tuple(d.size for d in dims)
     chunks = tuple(d.chunk_size for d in dims)
 
-    # Create random choice from flag_values
-    flag_array = np.array(flag_values, dtype=dtype)
-    random_indices = np.random.choice(len(flag_values), size=shape)
-    data = flag_array[random_indices]
+    # Create random noise array with same chunking
+    noise_array = np.random.uniform(-0.8, 0.8, size=shape)
+    noise = dask.array.from_array(noise_array, chunks=chunks)
 
-    return dask.array.from_array(data, chunks=chunks)
+    # Scale noise by absolute value to preserve sign and prevent crossing zero
+    abs_tanh = dask.array.abs(tanh_data)
+    scaled_noise = noise * abs_tanh * 1.2  # Scale factor to control noise intensity
+
+    # Apply noise while ensuring we stay within [-1, 1] bounds
+    noisy_tanh = tanh_data + scaled_noise
+    noisy_tanh = dask.array.clip(noisy_tanh, -1, 1)
+
+    # Discretize to 10 levels by mapping [-1, 1] to [0, 9] indices
+    # First normalize to [0, 1], then scale to [0, 9], then round to integers
+    normalized = (noisy_tanh + 1) / 2  # Map [-1, 1] to [0, 1]
+    scaled = normalized * 9  # Map [0, 1] to [0, 9]
+    indices = dask.array.round(scaled).astype(int)  # Round and convert to int
+
+    # Clip to ensure indices are in valid range [0, 9]
+    indices = dask.array.clip(indices, 0, 9)
+
+    # Map indices to actual flag values
+    # Only use the first 10 flag values if more are provided
+    flag_array = np.array(flag_values[:10], dtype=dtype)
+
+    # Use advanced indexing to map indices to flag values
+    return flag_array[indices]
 
 
 def uniform_grid(*, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]):
@@ -117,8 +143,9 @@ def uniform_grid(*, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str
         # Generate tanh wave data for continuous data
         data_array = generate_tanh_wave_data(dims, dtype)
 
-    attrs["valid_max"] = 1
-    attrs["valid_min"] = -1
+    if "flag_values" not in attrs:
+        attrs["valid_max"] = 1
+        attrs["valid_min"] = -1
     ds = xr.Dataset(
         {
             "foo": (tuple(d.name for d in dims), data_array, attrs),
@@ -301,6 +328,45 @@ PARA = Dataset(
     dims=(
         Dim(
             name="x",
+            size=2000,
+            chunk_size=1000,
+            data=np.linspace(-58.988125, -45.972125, 2000),
+        ),
+        Dim(
+            name="y",
+            size=3000,
+            chunk_size=1000,
+            data=np.linspace(2.721625, -9.931125, 3000),
+        ),
+        Dim(
+            name="time",
+            size=1,
+            chunk_size=1,
+            data=np.array(["2018-01-01"], dtype="datetime64[h]"),
+        ),
+    ),
+    dtype=np.int16,
+    attrs={
+        "flag_meanings": (
+            "water ocean forest grassland agriculture urban barren shrubland "
+            "wetland cropland tundra ice"
+        ),
+        "flag_values": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        "flag_colors": "#1f77b4 #17becf #2ca02c #8c564b #ff7f0e #d62728 #bcbd22 #9467bd #e377c2 #7f7f7f #c5b0d5 #ffffff",
+    },
+    setup=partial(
+        raster_grid,
+        crs="wgs84",
+        geotransform="-58.988125 0.006508 0.0 2.721625 0.0 -0.004217583333333333",
+        bbox=BBox(west=-58.988125, south=-9.931125, east=-45.972125, north=2.721625),
+    ),
+)
+
+PARA_HIRES = Dataset(
+    name="para_hires",
+    dims=(
+        Dim(
+            name="x",
             size=52065,
             chunk_size=2000,
             data=np.linspace(-58.988125, -45.972125, 52065),
@@ -325,11 +391,13 @@ PARA = Dataset(
             "wetland cropland tundra ice"
         ),
         "flag_values": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        "flag_colors": "#1f77b4 #17becf #2ca02c #8c564b #ff7f0e #d62728 #bcbd22 #9467bd #e377c2 #7f7f7f #c5b0d5 #ffffff",
     },
     setup=partial(
         raster_grid,
         crs="wgs84",
-        geotransform="-58.98825 0.00025 0.0 2.72175 0.0 -0.00025",
+        geotransform="-58.988125 0.00025 0.0 2.721625 0.0 -0.00025",
+        bbox=BBox(west=-58.988125, south=-9.931125, east=-45.972125, north=2.721625),
     ),
 )
 

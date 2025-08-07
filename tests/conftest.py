@@ -43,6 +43,11 @@ def pytest_addoption(parser):
         action="store_true",
         help="Save visual difference plots to PNG files and auto-open them (automatically disables parallelization)",
     )
+    parser.addoption(
+        "--visualize",
+        action="store_true",
+        help="Show matplotlib visualization windows during tests",
+    )
 
 
 def pytest_configure(config):
@@ -63,7 +68,10 @@ def pytest_configure(config):
 
 @pytest.fixture(scope="session")
 def air_dataset():
-    return xr.tutorial.load_dataset("air_temperature")
+    ds = xr.tutorial.load_dataset("air_temperature")
+    ds.air.attrs["valid_min"] = 271
+    ds.air.attrs["valid_max"] = 317.4
+    return ds
 
 
 @pytest.fixture(scope="session")

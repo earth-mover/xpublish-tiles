@@ -37,6 +37,8 @@ def pad_bbox(bbox: BBox, da: xr.DataArray, *, x_pad: float, y_pad: float) -> BBo
     The function ensures that the padded bbox does not cross the anti-meridian
     by checking if padding would cause west > east.
     """
+    x_pad = abs(x_pad)
+    y_pad = abs(y_pad)
     padded_west = float(bbox.west - x_pad)
     padded_east = float(bbox.east + x_pad)
 
@@ -206,7 +208,7 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
         """Extend bbox slightly to account for discrete coordinate sampling."""
         (index,) = self.indexes
         affine = index.transform()
-        return pad_bbox(bbox, da, x_pad=affine.a, y_pad=affine.e)
+        return pad_bbox(bbox, da, x_pad=abs(affine.a), y_pad=abs(affine.e))
 
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         (index,) = self.indexes

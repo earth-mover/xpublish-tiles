@@ -15,7 +15,9 @@ import xarray as xr
 from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear, guess_grid_system
 from xpublish_tiles.lib import EXECUTOR, check_transparent_pixels, transform_blocked
 from xpublish_tiles.types import (
+    ContinuousData,
     DataType,
+    DiscreteData,
     NullRenderContext,
     OutputBBox,
     OutputCRS,
@@ -279,9 +281,20 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
 
 
 def _infer_datatype(array: xr.DataArray) -> DataType:
-    # return DataType.DISCRETE if array.cf.is_flag_variable else DataType.CONTINUOUS
-    # FIXME: enable DISCRETE detection soon, for CTrees.
-    return DataType.CONTINUOUS
+    if (flag_values := array.attrs.get("flag_values")) and (
+        flag_meanings := array.attrs.get("flag_meanings")
+    ):
+        flag_colors = array.attrs.get("flag_colors")
+
+        return DiscreteData(
+            values=flag_values,
+            meanings=flag_meanings.split(" "),
+            colors=flag_colors.split(" ") if isinstance(flag_colors, str) else None,
+        )
+    return ContinuousData(
+        valid_min=array.attrs.get("valid_min"),
+        valid_max=array.attrs.get("valid_max"),
+    )
 
 
 # FIXME: apply a decorator to time this
