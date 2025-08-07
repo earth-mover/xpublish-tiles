@@ -9,7 +9,7 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from tests.tiles import TILES
-from xpublish_tiles.datasets import EU3035, HRRR, HRRR_CRS_WKT
+from xpublish_tiles.datasets import EU3035, FORECAST, HRRR, HRRR_CRS_WKT
 from xpublish_tiles.grids import (
     X_COORD_PATTERN,
     Y_COORD_PATTERN,
@@ -27,7 +27,7 @@ from xpublish_tiles.grids import (
     "ds, array_name, expected",
     (
         (
-            cfxr.datasets.forecast,
+            FORECAST,
             "sst",
             Rectilinear(
                 crs=CRS.from_user_input(4326),

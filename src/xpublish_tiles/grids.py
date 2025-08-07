@@ -2,7 +2,7 @@ import itertools
 import re
 import warnings
 from dataclasses import dataclass, field
-from typing import cast
+from typing import Self, cast
 
 import cachetools
 import numbagg
@@ -143,6 +143,19 @@ class GridSystem:
     #     plugin and the "orchestrator"
     indexes: tuple[xr.Index, ...]
 
+    def equals(self, other: Self) -> bool:
+        if not isinstance(self, type(other)):
+            return False
+        if self.dims != self.dims:
+            return False
+        if len(self.indexes) != len(other.indexes):
+            return False
+        if any(
+            not a.equals(b) for a, b in zip(self.indexes, other.indexes, strict=False)
+        ):
+            return False
+        return True
+
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("Subclasses must implement sel method")
@@ -225,6 +238,14 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
             y_is_increasing=affine.e > 0,
         )
 
+    def equals(self, other: Self) -> bool:
+        if (self.crs == other.crs and self.bbox == other.bbox) or (
+            self.X == other.X and self.Y == other.Y
+        ):
+            return super().equals(other)
+        else:
+            return False
+
 
 @dataclass(kw_only=True)
 class Rectilinear(RectilinearSelMixin, GridSystem):
@@ -260,6 +281,14 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
         """
         x_pad, y_pad = _get_xy_pad(da[self.X].data, da[self.Y].data)
         return pad_bbox(bbox, da, x_pad=x_pad, y_pad=y_pad)
+
+    def equals(self, other: Self) -> bool:
+        if (self.crs == other.crs and self.bbox == other.bbox) or (
+            self.X == other.X and self.Y == other.Y
+        ):
+            return super().equals(other)
+        else:
+            return False
 
 
 @dataclass(kw_only=True)
@@ -347,6 +376,12 @@ class DGGS(GridSystem):
     def pad_bbox(self, bbox: BBox, da: xr.DataArray) -> BBox:
         """Extend bbox slightly to account for discrete coordinate sampling."""
         raise NotImplementedError("pad_bbox not implemented for DGGS grids")
+
+    def equals(self, other: Self) -> bool:
+        if self.cells == other.cells:
+            return super().equals(other)
+        else:
+            return False
 
 
 def _guess_grid_mapping_and_crs(

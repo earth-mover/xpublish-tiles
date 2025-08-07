@@ -11,9 +11,11 @@ from pyproj import CRS
 from pyproj.aoi import BBox
 
 from tests.tiles import PARA_TILES, TILES, WEBMERC_TMS
-from xpublish_tiles.datasets import PARA, create_global_dataset
+from xarray.testing import assert_equal
+from xpublish_tiles.datasets import FORECAST, PARA, create_global_dataset
 from xpublish_tiles.lib import check_transparent_pixels
 from xpublish_tiles.pipeline import (
+    apply_query,
     check_bbox_overlap,
     pipeline,
 )
@@ -304,3 +306,25 @@ async def test_categorical_data(tile, tms, png_snapshot, pytestconfig):
     # assert_render_matches_snapshot(
     #     result, png_snapshot, tile=tile, tms=tms, dataset_bbox=ds.attrs["bbox"]
     # )
+
+
+def test_apply_query_selectors():
+    ds = FORECAST.copy(deep=True)
+    ds["foo2"] = ds["sst"] * 2
+
+    result = apply_query(ds, variables=["sst"], selectors={})
+    assert result["sst"].da.dims == ("Y", "X")
+    assert len(result) == 1
+
+    result = apply_query(ds, variables=["sst", "foo2"], selectors={})
+    assert len(result) == 2
+    assert result["sst"].grid.equals(result["foo2"].grid)
+
+    result = apply_query(
+        ds,
+        variables=["sst"],
+        selectors={"L": 0, "forecast_reference_time": "1960-02-01 00:00:00"},
+    )
+    assert_equal(
+        result["sst"].da, FORECAST.sst.sel(L=0, S="1960-02-01 00:00:00").isel(M=-1, S=-1)
+    )

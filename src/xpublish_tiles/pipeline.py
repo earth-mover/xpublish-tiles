@@ -310,6 +310,8 @@ def apply_query(
         grid = guess_grid_system(ds, name)
         array = ds[name]
         if extra_dims := (set(array.dims) - grid.dims):
+            # Note: this will handle squeezing of label-based selection
+            # along datetime coordinates
             array = array.isel({dim: -1 for dim in extra_dims})
         validated[name] = ValidatedArray(
             da=array,
