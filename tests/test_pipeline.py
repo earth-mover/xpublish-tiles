@@ -289,20 +289,19 @@ async def test_projected_coordinate_data(projected_dataset_and_tile, png_snapsho
 
 
 @pytest.mark.parametrize("tile,tms", PARA_TILES)
-async def test_categorical_data(tile, tms, pytestconfig):
+async def test_categorical_data(tile, tms, png_snapshot, pytestconfig):
     ds = PARA.create().squeeze("time")
     query_params = create_query_params(tile, tms)
     result = await pipeline(ds, query_params)
-
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile, tms)
     # Validate basic properties
     assert is_png(result)
     result.seek(0)
     content = result.read()
     assert len(content) > 0
-
-    if pytestconfig.getoption("--visualize"):
-        visualize_tile(result, tile, tms)
-
-    # TODO: we can't validate transparency here, because datashader appears to render transparent pixels!
-    # TODO: we can't validate snapshot here because the output is non-deterministic
-    # validate_transparency(content, tile=tile, tms=tms, dataset_bbox=ds.attrs["bbox"])
+    validate_transparency(content, tile=tile, tms=tms, dataset_bbox=ds.attrs["bbox"])
+    # TODO: the output appears to be non-deterministic
+    # assert_render_matches_snapshot(
+    #     result, png_snapshot, tile=tile, tms=tms, dataset_bbox=ds.attrs["bbox"]
+    # )

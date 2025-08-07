@@ -58,12 +58,12 @@ class DatashaderRasterRenderer(Renderer):
         if isinstance(context.grid, RasterAffine | Rectilinear | Curvilinear):
             # Use the actual coordinate names from the grid system
             grid = cast(RasterAffine | Rectilinear | Curvilinear, context.grid)
-            agg = (
-                dsh.reductions.mode()
-                if context.datatype is DiscreteData
-                else dsh.reductions.mean()
-            )
-            mesh = cvs.quadmesh(data, x=grid.X, y=grid.Y, agg=agg)
+            if isinstance(context.datatype, DiscreteData):
+                mesh = cvs.quadmesh(
+                    data, x=grid.X, y=grid.Y, agg=dsh.reductions.max(data.name)
+                )
+            else:
+                mesh = cvs.quadmesh(data, x=grid.X, y=grid.Y)
         else:
             raise NotImplementedError(
                 f"Grid type {type(context.grid)} not supported by DatashaderRasterRenderer"
