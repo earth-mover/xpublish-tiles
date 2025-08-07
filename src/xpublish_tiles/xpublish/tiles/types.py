@@ -1299,11 +1299,12 @@ class TileQuery(BaseModel):
         ),
     ]
     colorscalerange: Annotated[
-        tuple[float, float],
+        tuple[float, float] | None,
         Field(
+            None,
             json_schema_extra={
-                "description": "Range of values to scale colors to, in the format of `{min},{max}`",
-            }
+                "description": "Range of values to scale colors to, in the format of `{min},{max}`. If not provided, the range will be automatically determined from the `valid_min` and `valid_max` or `valid_range` attributes of the variable. If no valid range is found, the range will be automatically determined from the data, which may cause discontinuities across tiles.",
+            },
         ),
     ]
     style: Annotated[
