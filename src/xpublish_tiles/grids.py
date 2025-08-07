@@ -450,7 +450,8 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
     """
     grid_mapping, crs = _guess_grid_mapping_and_crs(ds)
 
-    Z = set(ds.cf.coordinates.get("vertical", {})) | set(ds.cf.axes.get("Z", {}))
+    Z_set = set(ds.cf.coordinates.get("vertical", {})) | set(ds.cf.axes.get("Z", {}))
+    Z = tuple(sorted(Z_set)) if Z_set else None
     if crs is not None:
         # This means we are not DGGS for sure.
         # TODO: we aren't handling the triangular case very explicitly yet.
