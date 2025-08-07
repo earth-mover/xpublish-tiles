@@ -1,7 +1,7 @@
 import itertools
 import re
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import cast
 
 import cachetools
@@ -203,8 +203,11 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
     bbox: BBox
     X: str
     Y: str
-    dims: set[str]
+    dims: set[str] = field(init=False)
     indexes: tuple[rasterix.RasterIndex]
+
+    def __post_init__(self) -> None:
+        self.dims = {self.X, self.Y}
 
     def pad_bbox(self, bbox: BBox, da: xr.DataArray) -> BBox:
         """Extend bbox slightly to account for discrete coordinate sampling."""
@@ -231,8 +234,11 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
     bbox: BBox
     X: str
     Y: str
-    dims: set[str]
+    dims: set[str] = field(init=False)
     indexes: tuple[xr.indexes.PandasIndex, xr.indexes.PandasIndex]
+
+    def __post_init__(self) -> None:
+        self.dims = {self.X, self.Y}
 
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         """
@@ -425,7 +431,6 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
                         crs=crs,
                         X=x_dim,
                         Y=y_dim,
-                        dims={x_dim, y_dim},
                         bbox=BBox(
                             west=index.bbox.left,
                             east=index.bbox.right,
@@ -450,13 +455,11 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
             south=numbagg.nanmin(Y.data).item(),
             north=numbagg.nanmax(Y.data).item(),
         )
-        dims = set(X.dims) | set(Y.dims)
         if X.ndim == 1 and Y.ndim == 1:
             return Rectilinear(
                 crs=crs,
                 X=Xname,
                 Y=Yname,
-                dims=dims,
                 bbox=bbox,
                 indexes=(
                     cast(xr.indexes.PandasIndex, ds.xindexes[Xname]),
@@ -464,6 +467,7 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
                 ),
             )
         elif X.ndim == 2 and Y.ndim == 2:
+            dims = set(X.dims) | set(Y.dims)
             # See discussion in https://github.com/pydata/xarray/issues/10572
             return Curvilinear(
                 crs=crs, X=Xname, Y=Yname, dims=dims, bbox=bbox, indexes=tuple()
