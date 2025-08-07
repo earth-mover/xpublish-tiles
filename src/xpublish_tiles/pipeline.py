@@ -281,9 +281,9 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
 
 
 def _infer_datatype(array: xr.DataArray) -> DataType:
-    if "flag_values" in array.attrs and "flag_meanings" in array.attrs:
-        flag_values = array.attrs["flag_values"]
-        flag_meanings = array.attrs["flag_meanings"]
+    if (flag_values := array.attrs.get("flag_values")) and (
+        flag_meanings := array.attrs.get("flag_meanings")
+    ):
         flag_colors = array.attrs.get("flag_colors")
 
         return DiscreteData(
