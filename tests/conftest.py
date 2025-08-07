@@ -43,6 +43,11 @@ def pytest_addoption(parser):
         action="store_true",
         help="Save visual difference plots to PNG files and auto-open them (automatically disables parallelization)",
     )
+    parser.addoption(
+        "--visualize",
+        action="store_true",
+        help="Show matplotlib visualization windows during tests",
+    )
 
 
 def pytest_configure(config):

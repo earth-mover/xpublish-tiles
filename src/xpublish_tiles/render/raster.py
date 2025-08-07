@@ -11,7 +11,8 @@ import xarray as xr
 from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear
 from xpublish_tiles.render import Renderer
 from xpublish_tiles.types import (
-    DataType,
+    ContinuousData,
+    DiscreteData,
     ImageFormat,
     NullRenderContext,
     PopulatedRenderContext,
@@ -54,31 +55,44 @@ class DatashaderRasterRenderer(Renderer):
             y_range=(bbox.south, bbox.north),
         )
 
-        if (
-            colorscalerange is None
-            and "valid_min" in data.attrs
-            and "valid_max" in data.attrs
-        ):
-            colorscalerange = (data.attrs.get("valid_min"), data.attrs.get("valid_max"))
-
         if isinstance(context.grid, RasterAffine | Rectilinear | Curvilinear):
             # Use the actual coordinate names from the grid system
             grid = cast(RasterAffine | Rectilinear | Curvilinear, context.grid)
-            mesh = cvs.quadmesh(data, x=grid.X, y=grid.Y)
+            agg = (
+                dsh.reductions.mode()
+                if context.datatype is DiscreteData
+                else dsh.reductions.mean()
+            )
+            mesh = cvs.quadmesh(data, x=grid.X, y=grid.Y, agg=agg)
         else:
             raise NotImplementedError(
                 f"Grid type {type(context.grid)} not supported by DatashaderRasterRenderer"
             )
 
-        if context.datatype is DataType.CONTINUOUS:
+        if isinstance(context.datatype, ContinuousData):
+            if colorscalerange is None:
+                colorscalerange = (context.datatype.valid_min, context.datatype.valid_max)
             shaded = tf.shade(
                 mesh,
                 cmap=mpl.colormaps.get_cmap(cmap),
                 how="linear",
                 span=colorscalerange,
             )
+        elif isinstance(context.datatype, DiscreteData):
+            kwargs = {}
+            if context.datatype.colors is not None:
+                kwargs["color_key"] = dict(
+                    zip(context.datatype.values, context.datatype.colors, strict=True)
+                )
+            else:
+                kwargs["cmap"] = mpl.colormaps.get_cmap(cmap)
+                kwargs["span"] = (
+                    min(context.datatype.values),
+                    max(context.datatype.values),
+                )
+            shaded = tf.shade(mesh, how="linear", **kwargs)
         else:
-            raise NotImplementedError("Categorical data not supported yet")
+            raise NotImplementedError(f"Unsupported datatype: {type(context.datatype)}")
 
         im = shaded.to_pil()
         im.save(buffer, format=str(format))

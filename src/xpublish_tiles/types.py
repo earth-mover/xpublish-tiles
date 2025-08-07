@@ -1,4 +1,5 @@
 import enum
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, NewType, Self
 
@@ -19,9 +20,43 @@ class ImageFormat(enum.StrEnum):
     JPEG = enum.auto()
 
 
-class DataType(enum.Enum):
-    DISCRETE = enum.auto()
-    CONTINUOUS = enum.auto()
+@dataclass
+class DataType:
+    pass
+
+
+@dataclass
+class DiscreteData(DataType):
+    values: Sequence[Any]
+    meanings: Sequence[str]
+    colors: Sequence[str] | None
+
+    def __post_init__(self) -> None:
+        assert len(self.values) == len(self.meanings)
+        if self.colors is not None:
+            assert len(self.colors) == len(self.values), (
+                len(self.colors),
+                len(self.values),
+            )
+
+
+@dataclass
+class ContinuousData(DataType):
+    valid_min: Any | None
+    valid_max: Any | None
+
+    def __post_init__(self) -> None:
+        valid_min, valid_max = self.valid_min, self.valid_max
+        if valid_min is not None and valid_max is not None:
+            if valid_max < valid_min:
+                raise ValueError(f"{valid_max=!r} < {valid_min=!r} specified in attrs.")
+        elif valid_min is None and valid_max is None:
+            pass
+        else:
+            raise ValueError(
+                f"Either both `valid_max` and `valid_min` must be set or unset. "
+                f"Received {valid_max=!r}, {valid_min=!r}."
+            )
 
 
 class Style(enum.StrEnum):
