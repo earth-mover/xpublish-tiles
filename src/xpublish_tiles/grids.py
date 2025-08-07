@@ -302,6 +302,14 @@ class Curvilinear(GridSystem):
     dims: set[str]
     indexes: tuple[xr.Index, ...]
 
+    def equals(self, other: Self) -> bool:
+        if (self.crs == other.crs and self.bbox == other.bbox) or (
+            self.X == other.X and self.Y == other.Y
+        ):
+            return super().equals(other)
+        else:
+            return False
+
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         """
         Select a subset of the data array using a bounding box.
