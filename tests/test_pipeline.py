@@ -29,13 +29,12 @@ def is_png(buffer: io.BytesIO) -> bool:
     return header == b"\x89PNG\r\n\x1a\n"
 
 
-def visualize_tile(result: io.BytesIO, tile, tms=None):
+def visualize_tile(result: io.BytesIO, tile: morecantile.Tile) -> None:
     """Visualize a rendered tile with matplotlib showing RGB and alpha channels.
 
     Args:
         result: BytesIO buffer containing PNG image data
         tile: Tile object with z, x, y coordinates
-        tms: Optional TileMatrixSet for additional context
     """
     import matplotlib.pyplot as plt
     import numpy as np
@@ -294,7 +293,7 @@ async def test_categorical_data(tile, tms, png_snapshot, pytestconfig):
     query_params = create_query_params(tile, tms)
     result = await pipeline(ds, query_params)
     if pytestconfig.getoption("--visualize"):
-        visualize_tile(result, tile, tms)
+        visualize_tile(result, tile)
     # Validate basic properties
     assert is_png(result)
     result.seek(0)

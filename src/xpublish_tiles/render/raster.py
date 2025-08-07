@@ -3,6 +3,7 @@ import logging
 from typing import TYPE_CHECKING, cast
 
 import datashader as dsh  # type: ignore
+import datashader.reductions  # type: ignore
 import datashader.transfer_functions as tf  # type: ignore
 import matplotlib as mpl  # type: ignore
 import numpy as np
@@ -71,7 +72,14 @@ class DatashaderRasterRenderer(Renderer):
 
         if isinstance(context.datatype, ContinuousData):
             if colorscalerange is None:
-                colorscalerange = (context.datatype.valid_min, context.datatype.valid_max)
+                valid_min = context.datatype.valid_min
+                valid_max = context.datatype.valid_max
+                if valid_min is not None and valid_max is not None:
+                    colorscalerange = (valid_min, valid_max)
+                else:
+                    raise ValueError(
+                        "`colorscalerange` must be specified when array does not have valid_min and valid_max attributes specified."
+                    )
             shaded = tf.shade(
                 mesh,
                 cmap=mpl.colormaps.get_cmap(cmap),
