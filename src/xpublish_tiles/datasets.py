@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 
+import cf_xarray.datasets
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
@@ -547,3 +548,9 @@ FORECAST = xr.decode_cf(
         }
     )
 )
+
+
+# TODO: make this curvilinear
+ROMSDS = cf_xarray.datasets.romsds.expand_dims(lat_rho=[0, 1, 2], lon_rho=[0, 1, 2])
+ROMSDS.lat_rho.attrs["standard_name"] = "latitude"
+ROMSDS.lon_rho.attrs["standard_name"] = "longitude"

@@ -309,6 +309,8 @@ def apply_query(
     for name in variables:
         grid = guess_grid_system(ds, name)
         array = ds[name]
+        if grid.Z in array.dims:
+            array = array.sel(Z=0, method="nearest")
         if extra_dims := (set(array.dims) - grid.dims):
             # Note: this will handle squeezing of label-based selection
             # along datetime coordinates

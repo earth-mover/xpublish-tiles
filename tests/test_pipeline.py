@@ -12,7 +12,7 @@ from pyproj.aoi import BBox
 
 from tests.tiles import PARA_TILES, TILES, WEBMERC_TMS
 from xarray.testing import assert_equal
-from xpublish_tiles.datasets import FORECAST, PARA, create_global_dataset
+from xpublish_tiles.datasets import FORECAST, PARA, ROMSDS, create_global_dataset
 from xpublish_tiles.lib import check_transparent_pixels
 from xpublish_tiles.pipeline import (
     apply_query,
@@ -327,4 +327,9 @@ def test_apply_query_selectors():
     )
     assert_equal(
         result["sst"].da, FORECAST.sst.sel(L=0, S="1960-02-01 00:00:00").isel(M=-1, S=-1)
+    )
+
+    result = apply_query(ROMSDS, variables=["temp"], selectors={})
+    assert_equal(
+        result["temp"].da, ROMSDS.temp.sel(s_rho=0, method="nearest").isel(ocean_time=-1)
     )

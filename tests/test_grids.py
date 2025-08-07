@@ -9,7 +9,7 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from tests.tiles import TILES
-from xpublish_tiles.datasets import EU3035, FORECAST, HRRR, HRRR_CRS_WKT
+from xpublish_tiles.datasets import EU3035, FORECAST, HRRR, HRRR_CRS_WKT, ROMSDS
 from xpublish_tiles.grids import (
     X_COORD_PATTERN,
     Y_COORD_PATTERN,
@@ -34,6 +34,19 @@ from xpublish_tiles.grids import (
                 bbox=BBox(south=0, north=5, east=4, west=0),
                 X="X",
                 Y="Y",
+                Z=None,
+                indexes=(),  # type: ignore[arg-type]
+            ),
+        ),
+        (
+            ROMSDS,
+            "temp",
+            Rectilinear(
+                crs=CRS.from_user_input(4326),
+                bbox=BBox(south=0, north=2, east=2, west=0),
+                X="lon_rho",
+                Y="lat_rho",
+                Z=("s_rho",),
                 indexes=(),  # type: ignore[arg-type]
             ),
         ),
@@ -45,6 +58,7 @@ from xpublish_tiles.grids import (
                 bbox=BBox(south=2.5, north=2.5, east=0.5, west=0.5),
                 X="ULONG",
                 Y="ULAT",
+                Z=None,
                 dims={"nlon", "nlat"},
                 indexes=(),  # type: ignore[arg-type]
             ),
@@ -63,6 +77,7 @@ from xpublish_tiles.grids import (
                 bbox=BBox(south=21.615, north=21.835, east=18.155, west=17.935),
                 X="rlon",
                 Y="rlat",
+                Z=None,
                 indexes=(),  # type: ignore[arg-type]
             ),
         ),
@@ -79,6 +94,7 @@ from xpublish_tiles.grids import (
                 ),
                 X="x",
                 Y="y",
+                Z=None,
                 indexes=(),  # type: ignore[arg-type]
             ),
         ),
@@ -95,6 +111,7 @@ from xpublish_tiles.grids import (
                 ),
                 X="x",
                 Y="y",
+                Z=None,
                 indexes=(),  # type: ignore[arg-type]
             ),
         ),
