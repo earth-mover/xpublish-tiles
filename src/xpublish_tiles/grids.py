@@ -127,6 +127,7 @@ def _handle_longitude_selection(lon_coord: xr.DataArray, bbox: BBox) -> tuple[sl
         return (slice(bbox_west, bbox_east),)
 
 
+@dataclass
 class GridSystem:
     """
     Marker class for Grid Systems.
@@ -142,7 +143,7 @@ class GridSystem:
     #   - So this is do-able, but there's some strong coupling between the
     #     plugin and the "orchestrator"
     indexes: tuple[xr.Index, ...]
-    Z: tuple[str, ...] | None
+    Z: str | None = None
 
     def equals(self, other: Self) -> bool:
         if not isinstance(self, type(other)):
@@ -217,9 +218,9 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
     bbox: BBox
     X: str
     Y: str
-    Z: tuple[str, ...] | None
     dims: set[str] = field(init=False)
     indexes: tuple[rasterix.RasterIndex]
+    Z: str | None = None
 
     def __post_init__(self) -> None:
         self.dims = {self.X, self.Y}
@@ -257,9 +258,9 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
     bbox: BBox
     X: str
     Y: str
-    Z: tuple[str, ...] | None
     dims: set[str] = field(init=False)
     indexes: tuple[xr.indexes.PandasIndex, xr.indexes.PandasIndex]
+    Z: str | None = None
 
     def __post_init__(self) -> None:
         self.dims = {self.X, self.Y}
@@ -302,9 +303,9 @@ class Curvilinear(GridSystem):
     bbox: BBox
     X: str
     Y: str
-    Z: tuple[str, ...] | None
     dims: set[str]
     indexes: tuple[xr.Index, ...]
+    Z: str | None = None
 
     def equals(self, other: Self) -> bool:
         if (self.crs == other.crs and self.bbox == other.bbox) or (
@@ -378,9 +379,9 @@ class Curvilinear(GridSystem):
 @dataclass(kw_only=True)
 class DGGS(GridSystem):
     cells: str
-    Z: tuple[str, ...] | None
     dims: set[str]
     indexes: tuple[xr.Index, ...]
+    Z: str | None = None
 
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         """Select a subset of the data array using a bounding box."""
@@ -449,9 +450,6 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
     Raises RuntimeError to indicate that we might try again.
     """
     grid_mapping, crs = _guess_grid_mapping_and_crs(ds)
-
-    Z_set = set(ds.cf.coordinates.get("vertical", {})) | set(ds.cf.axes.get("Z", {}))
-    Z = tuple(sorted(Z_set)) if Z_set else None
     if crs is not None:
         # This means we are not DGGS for sure.
         # TODO: we aren't handling the triangular case very explicitly yet.
@@ -482,7 +480,6 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
                         crs=crs,
                         X=x_dim,
                         Y=y_dim,
-                        Z=Z,
                         bbox=BBox(
                             west=index.bbox.left,
                             east=index.bbox.right,
@@ -512,7 +509,6 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
                 crs=crs,
                 X=Xname,
                 Y=Yname,
-                Z=Z,
                 bbox=bbox,
                 indexes=(
                     cast(xr.indexes.PandasIndex, ds.xindexes[Xname]),
@@ -523,7 +519,7 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
             dims = set(X.dims) | set(Y.dims)
             # See discussion in https://github.com/pydata/xarray/issues/10572
             return Curvilinear(
-                crs=crs, X=Xname, Y=Yname, Z=Z, dims=dims, bbox=bbox, indexes=tuple()
+                crs=crs, X=Xname, Y=Yname, dims=dims, bbox=bbox, indexes=tuple()
             )
 
         else:
@@ -532,6 +528,17 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
             )
     else:
         raise RuntimeError("CRS/grid system not detected")
+
+
+def _guess_z_dimension(da: xr.DataArray) -> str | None:
+    # make sure Z is a dimension we can select on
+    # We have to do this here to deal with the try-except above.
+    # In the except clause, we might detect multiple Z.
+    possible = set(da.cf.coordinates.get("vertical", {})) | set(da.cf.axes.get("Z", {}))
+    for z in sorted(possible):
+        if z in da.dims:
+            return z
+    return None
 
 
 def guess_grid_system(ds: xr.Dataset, name: str) -> GridSystem:
@@ -551,13 +558,7 @@ def guess_grid_system(ds: xr.Dataset, name: str) -> GridSystem:
     except RuntimeError:
         grid = _guess_grid_for_dataset(ds)
 
-    # make sure Z is a dimension we can select on
-    if grid.Z is not None:
-        newZ = None
-        for z in grid.Z:
-            if z in ds[name].dims:
-                newZ = z
-        grid.Z = (newZ,) if newZ is not None else None
+    grid.Z = _guess_z_dimension(ds.cf[name])
 
     if xpublish_id is not None:
         _GRID_CACHE[cache_key] = grid
