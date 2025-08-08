@@ -41,12 +41,13 @@ from xpublish_tiles.grids import (
         (
             ROMSDS,
             "temp",
-            Rectilinear(
+            Curvilinear(
                 crs=CRS.from_user_input(4326),
-                bbox=BBox(south=0, north=2, east=2, west=0),
+                bbox=BBox(south=0, north=12, east=12, west=0),
                 X="lon_rho",
                 Y="lat_rho",
                 Z="s_rho",
+                dims={"eta_rho", "xi_rho"},
                 indexes=(),  # type: ignore[arg-type]
             ),
         ),

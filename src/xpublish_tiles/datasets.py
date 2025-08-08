@@ -551,6 +551,18 @@ FORECAST = xr.decode_cf(
 
 
 # TODO: make this curvilinear
-ROMSDS = cf_xarray.datasets.romsds.expand_dims(lat_rho=[0, 1, 2], lon_rho=[0, 1, 2])
+ROMSDS = cf_xarray.datasets.romsds.expand_dims(xi_rho=3, eta_rho=4).assign_coords(
+    lon_rho=(
+        ("eta_rho", "xi_rho"),
+        np.arange(12).reshape(4, 3),
+        {"standard_name": "longitude"},
+    ),
+    lat_rho=(
+        ("eta_rho", "xi_rho"),
+        np.arange(12).reshape(4, 3),
+        {"standard_name": "longitude"},
+    ),
+)
+
 ROMSDS.lat_rho.attrs["standard_name"] = "latitude"
 ROMSDS.lon_rho.attrs["standard_name"] = "longitude"
