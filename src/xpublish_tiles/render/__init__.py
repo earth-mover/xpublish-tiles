@@ -10,6 +10,22 @@ class RenderRegistry:
     """Registry for renderer classes."""
 
     _renderers: dict[str, type["Renderer"]] = {}
+    _loaded: bool = False
+
+    @classmethod
+    def _load_entry_points(cls) -> None:
+        """Load renderers from entry points."""
+        if cls._loaded:
+            return
+
+        from importlib.metadata import entry_points
+
+        eps = entry_points(group="xpublish_tiles.renderers")
+        for ep in eps:
+            renderer_cls = ep.load()
+            cls.register(renderer_cls)
+
+        cls._loaded = True
 
     @classmethod
     def register(cls, renderer_cls: type["Renderer"]) -> None:
@@ -20,6 +36,7 @@ class RenderRegistry:
     @classmethod
     def get(cls, style_id: str) -> type["Renderer"]:
         """Get a renderer class by style ID."""
+        cls._load_entry_points()
         if style_id not in cls._renderers:
             raise ValueError(f"Unknown style: {style_id}")
         return cls._renderers[style_id]
@@ -27,6 +44,7 @@ class RenderRegistry:
     @classmethod
     def all(cls) -> dict[str, type["Renderer"]]:
         """Get all registered renderers."""
+        cls._load_entry_points()
         return cls._renderers.copy()
 
 

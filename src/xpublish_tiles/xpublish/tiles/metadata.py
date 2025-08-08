@@ -31,7 +31,7 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
     dataset_bounds = extract_dataset_bounds(dataset)
 
     # Get available styles from registered renderers
-    from xpublish_tiles.render import RenderRegistry, quiver, raster  # noqa: F401
+    from xpublish_tiles.render import RenderRegistry
 
     styles = []
     for renderer_cls in RenderRegistry.all().values():

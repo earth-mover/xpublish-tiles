@@ -168,7 +168,7 @@ def extract_dimensions(dataset: xr.Dataset) -> list[WMSDimensionResponse]:
 
 def get_available_wms_styles() -> list[WMSStyleResponse]:
     """Get all available styles from registered renderers."""
-    from xpublish_tiles.render import RenderRegistry, quiver, raster  # noqa: F401
+    from xpublish_tiles.render import RenderRegistry
 
     styles = []
 

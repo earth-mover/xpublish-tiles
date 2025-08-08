@@ -111,7 +111,7 @@ class TilesPlugin(Plugin):
                 keywords = []
 
             # Get available styles from registered renderers
-            from xpublish_tiles.render import RenderRegistry, quiver, raster  # noqa: F401
+            from xpublish_tiles.render import RenderRegistry
 
             styles = []
             for renderer_cls in RenderRegistry.all().values():

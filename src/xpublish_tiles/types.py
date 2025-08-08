@@ -84,8 +84,7 @@ class QueryParams:
     colorscalerange: tuple[float, float] | None = None
 
     def get_renderer(self):
-        # Import renderers to ensure they're registered
-        from xpublish_tiles.render import RenderRegistry, quiver, raster  # noqa: F401
+        from xpublish_tiles.render import RenderRegistry
 
         renderer_cls = RenderRegistry.get(self.style.value.lower())
         return renderer_cls()
