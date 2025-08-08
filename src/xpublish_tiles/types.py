@@ -59,13 +59,6 @@ class ContinuousData(DataType):
             )
 
 
-class Style(enum.StrEnum):
-    RASTER = enum.auto()
-    QUIVER = enum.auto()
-    NUMPY = enum.auto()
-    VECTOR = enum.auto()
-
-
 @dataclass
 class QueryParams:
     variables: list[str]
@@ -76,7 +69,7 @@ class QueryParams:
     #    notice that we are effectively interpolating along X, Y
     #    so there is some "interpretation" here
     selectors: dict[str, Any]
-    style: Style
+    style: str
     width: int
     height: int
     cmap: str
@@ -84,12 +77,10 @@ class QueryParams:
     colorscalerange: tuple[float, float] | None = None
 
     def get_renderer(self):
-        from xpublish_tiles.render.raster import DatashaderRasterRenderer
+        from xpublish_tiles.render import RenderRegistry
 
-        if self.style is Style.RASTER:
-            return DatashaderRasterRenderer()
-        else:
-            raise NotImplementedError("Unknown style type: %r" % self.style)  # noqa: UP031
+        renderer_cls = RenderRegistry.get(self.style)
+        return renderer_cls()
 
 
 @dataclass(kw_only=True)

@@ -19,7 +19,7 @@ from xpublish_tiles.pipeline import (
     check_bbox_overlap,
     pipeline,
 )
-from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams, Style
+from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
 
 
 def is_png(buffer: io.BytesIO) -> bool:
@@ -134,7 +134,7 @@ def create_query_params(tile, tms, *, colorscalerange=None):
         crs=OutputCRS(target_crs),
         bbox=OutputBBox(bbox),
         selectors={},
-        style=Style.RASTER,
+        style="raster",
         width=256,
         height=256,
         cmap="viridis",
@@ -259,7 +259,7 @@ async def test_pipeline_bad_bbox(global_datasets, png_snapshot):
             )
         ),
         selectors={},
-        style=Style.RASTER,
+        style="raster",
         width=256,
         height=256,
         cmap="viridis",

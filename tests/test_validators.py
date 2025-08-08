@@ -1,7 +1,7 @@
 import pytest
 from pyproj import CRS
 
-from xpublish_tiles.types import ImageFormat, Style
+from xpublish_tiles.types import ImageFormat
 from xpublish_tiles.validators import (
     validate_colorscalerange,
     validate_crs,
@@ -112,27 +112,27 @@ class TestValidateImageFormat:
 class TestValidateStyle:
     def test_valid_raster_style(self):
         result = validate_style("raster/default")
-        assert result == (Style.RASTER, "default")
+        assert result == ("raster", "default")
+
+    def test_valid_raster_style_with_colormap(self):
+        result = validate_style("raster/viridis")
+        assert result == ("raster", "viridis")
 
     def test_valid_quiver_style(self):
         result = validate_style("quiver/arrows")
-        assert result == (Style.QUIVER, "arrows")
+        assert result == ("quiver", "arrows")
 
-    def test_valid_numpy_style(self):
-        result = validate_style("numpy/colormap")
-        assert result == (Style.NUMPY, "colormap")
-
-    def test_valid_vector_style(self):
-        result = validate_style("vector/lines")
-        assert result == (Style.VECTOR, "lines")
+    def test_valid_quiver_style_default(self):
+        result = validate_style("quiver/default")
+        assert result == ("quiver", "default")
 
     def test_valid_style_lowercase(self):
         result = validate_style("raster/default")
-        assert result == (Style.RASTER, "default")
+        assert result == ("raster", "default")
 
     def test_valid_style_mixed_case(self):
         result = validate_style("RaStEr/default")
-        assert result == (Style.RASTER, "default")
+        assert result == ("raster", "default")
 
     def test_none_input(self):
         result = validate_style(None)
@@ -162,9 +162,23 @@ class TestValidateStyle:
     def test_invalid_style_name(self):
         with pytest.raises(
             ValueError,
-            match="style invalid is not valid. Options are: RASTER, QUIVER, NUMPY, VECTOR",
+            match="style 'invalid' is not valid. Available styles are:",
         ):
             validate_style("invalid/default")
+
+    def test_invalid_variant_for_raster(self):
+        with pytest.raises(
+            ValueError,
+            match="variant 'invalid_variant' is not supported for style 'raster'",
+        ):
+            validate_style("raster/invalid_variant")
+
+    def test_invalid_variant_for_quiver(self):
+        with pytest.raises(
+            ValueError,
+            match="variant 'invalid_variant' is not supported for style 'quiver'",
+        ):
+            validate_style("quiver/invalid_variant")
 
 
 class TestValidateCrs:

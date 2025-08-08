@@ -1,6 +1,6 @@
 import pytest
 
-from xpublish_tiles.types import ImageFormat, Style
+from xpublish_tiles.types import ImageFormat
 from xpublish_tiles.xpublish.wms.types import (
     WMSGetCapabilitiesQuery,
     WMSGetFeatureInfoQuery,
@@ -34,7 +34,7 @@ def test_wms_query_discriminator():
     )
     assert isinstance(getmap_query.root, WMSGetMapQuery)
     assert getmap_query.root.colorscalerange == (0, 100)
-    assert getmap_query.root.styles == (Style.RASTER, "magma")
+    assert getmap_query.root.styles == ("raster", "magma")
     assert getmap_query.root.crs.to_epsg() == 3857
     assert getmap_query.root.format == ImageFormat.PNG
 

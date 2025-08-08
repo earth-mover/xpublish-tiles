@@ -1,7 +1,6 @@
 from typing import Any, Union
 
 from xarray import Dataset
-from xpublish_tiles.utils import get_available_raster_styles
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     extract_dataset_bounds,
@@ -31,16 +30,38 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
     # Extract dataset bounds
     dataset_bounds = extract_dataset_bounds(dataset)
 
-    # Get available styles
-    style_dicts = get_available_raster_styles()
-    styles = [
-        Style(
-            id=style["id"],
-            title=style["title"],
-            description=style["description"],
+    # Get available styles from registered renderers
+    from xpublish_tiles.render import RenderRegistry
+
+    styles = []
+    for renderer_cls in RenderRegistry.all().values():
+        # Add default variant alias
+        default_variant = renderer_cls.default_variant()
+        default_style_info = renderer_cls.describe_style("default")
+        default_style_info["title"] = (
+            f"{renderer_cls.style_id().title()} - Default ({default_variant.title()})"
         )
-        for style in style_dicts
-    ]
+        default_style_info["description"] = (
+            f"Default {renderer_cls.style_id()} rendering (alias for {default_variant})"
+        )
+        styles.append(
+            Style(
+                id=default_style_info["id"],
+                title=default_style_info["title"],
+                description=default_style_info["description"],
+            )
+        )
+
+        # Add all actual variants
+        for variant in renderer_cls.supported_variants():
+            style_info = renderer_cls.describe_style(variant)
+            styles.append(
+                Style(
+                    id=style_info["id"],
+                    title=style_info["title"],
+                    description=style_info["description"],
+                )
+            )
 
     # Create main tileset metadata
     return TileSetMetadata(

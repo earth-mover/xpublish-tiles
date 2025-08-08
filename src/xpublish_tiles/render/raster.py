@@ -10,7 +10,7 @@ import numpy as np
 
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear
-from xpublish_tiles.render import Renderer
+from xpublish_tiles.render import Renderer, register_renderer
 from xpublish_tiles.types import (
     ContinuousData,
     DiscreteData,
@@ -23,6 +23,7 @@ from xpublish_tiles.types import (
 logger = logging.getLogger("xpublish-tiles")
 
 
+@register_renderer
 class DatashaderRasterRenderer(Renderer):
     def validate(self, context: dict[str, "RenderContext"]):
         assert len(context) == 1
@@ -41,6 +42,10 @@ class DatashaderRasterRenderer(Renderer):
         colorscalerange: tuple[float, float] | None = None,
         format: ImageFormat = ImageFormat.PNG,
     ):
+        # Handle "default" alias
+        if cmap == "default":
+            cmap = self.default_variant()
+
         self.validate(contexts)
         (context,) = contexts.values()
         if isinstance(context, NullRenderContext):
@@ -104,3 +109,24 @@ class DatashaderRasterRenderer(Renderer):
 
         im = shaded.to_pil()
         im.save(buffer, format=str(format))
+
+    @staticmethod
+    def style_id() -> str:
+        return "raster"
+
+    @staticmethod
+    def supported_variants() -> list[str]:
+        colormaps = list(mpl.colormaps)
+        return [name for name in sorted(colormaps) if not name.endswith("_r")]
+
+    @staticmethod
+    def default_variant() -> str:
+        return "viridis"
+
+    @classmethod
+    def describe_style(cls, variant: str) -> dict[str, str]:
+        return {
+            "id": f"{cls.style_id()}/{variant}",
+            "title": f"Raster - {variant.title()}",
+            "description": f"Raster rendering using {variant} colormap",
+        }

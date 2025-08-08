@@ -3,7 +3,6 @@
 import numpy as np
 
 import xarray as xr
-from xpublish_tiles.utils import get_available_raster_styles
 from xpublish_tiles.xpublish.wms.types import (
     WMSBoundingBoxResponse,
     WMSCapabilitiesResponse,
@@ -168,17 +167,41 @@ def extract_dimensions(dataset: xr.Dataset) -> list[WMSDimensionResponse]:
 
 
 def get_available_wms_styles() -> list[WMSStyleResponse]:
-    """Get all available raster styles based on matplotlib colormaps."""
-    style_dicts = get_available_raster_styles()
+    """Get all available styles from registered renderers."""
+    from xpublish_tiles.render import RenderRegistry
 
-    return [
-        WMSStyleResponse(
-            name=style["id"],
-            title=style["title"],
-            abstract=style["description"],
+    styles = []
+
+    for renderer_cls in RenderRegistry.all().values():
+        # Add default variant alias
+        default_variant = renderer_cls.default_variant()
+        default_style_info = renderer_cls.describe_style("default")
+        default_style_info["title"] = (
+            f"{renderer_cls.style_id().title()} - Default ({default_variant.title()})"
         )
-        for style in style_dicts
-    ]
+        default_style_info["description"] = (
+            f"Default {renderer_cls.style_id()} rendering (alias for {default_variant})"
+        )
+        styles.append(
+            WMSStyleResponse(
+                name=default_style_info["id"],
+                title=default_style_info["title"],
+                abstract=default_style_info["description"],
+            )
+        )
+
+        # Add all actual variants
+        for variant in renderer_cls.supported_variants():
+            style_info = renderer_cls.describe_style(variant)
+            styles.append(
+                WMSStyleResponse(
+                    name=style_info["id"],
+                    title=style_info["title"],
+                    abstract=style_info["description"],
+                )
+            )
+
+    return styles
 
 
 def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]:
