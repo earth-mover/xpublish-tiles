@@ -1,8 +1,8 @@
 import itertools
 import re
 import warnings
-from dataclasses import dataclass
-from typing import cast
+from dataclasses import dataclass, field
+from typing import Self, cast
 
 import cachetools
 import numbagg
@@ -127,6 +127,7 @@ def _handle_longitude_selection(lon_coord: xr.DataArray, bbox: BBox) -> tuple[sl
         return (slice(bbox_west, bbox_east),)
 
 
+@dataclass
 class GridSystem:
     """
     Marker class for Grid Systems.
@@ -135,12 +136,29 @@ class GridSystem:
     bounds, and reference frame for that specific grid system.
     """
 
+    dims: set[str]
     # FIXME: do we really need these Index objects on the class?
     #   - reconsider when we do curvilinear and triangular grids
     #   - The ugliness is that booth would have to set the right indexes on the dataset.
     #   - So this is do-able, but there's some strong coupling between the
     #     plugin and the "orchestrator"
     indexes: tuple[xr.Index, ...]
+    Z: str | None = None
+
+    def equals(self, other: Self) -> bool:
+        if not isinstance(self, type(other)):
+            return False
+        if self.dims != other.dims:
+            return False
+        if len(self.indexes) != len(other.indexes):
+            return False
+        if self.Z != other.Z:
+            return False
+        if any(
+            not a.equals(b) for a, b in zip(self.indexes, other.indexes, strict=False)
+        ):
+            return False
+        return True
 
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         """Select a subset of the data array using a bounding box."""
@@ -202,7 +220,12 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
     bbox: BBox
     X: str
     Y: str
+    dims: set[str] = field(init=False)
     indexes: tuple[rasterix.RasterIndex]
+    Z: str | None = None
+
+    def __post_init__(self) -> None:
+        self.dims = {self.X, self.Y}
 
     def pad_bbox(self, bbox: BBox, da: xr.DataArray) -> BBox:
         """Extend bbox slightly to account for discrete coordinate sampling."""
@@ -220,6 +243,14 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
             y_is_increasing=affine.e > 0,
         )
 
+    def equals(self, other: Self) -> bool:
+        if (self.crs == other.crs and self.bbox == other.bbox) or (
+            self.X == other.X and self.Y == other.Y
+        ):
+            return super().equals(other)
+        else:
+            return False
+
 
 @dataclass(kw_only=True)
 class Rectilinear(RectilinearSelMixin, GridSystem):
@@ -229,7 +260,12 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
     bbox: BBox
     X: str
     Y: str
+    dims: set[str] = field(init=False)
     indexes: tuple[xr.indexes.PandasIndex, xr.indexes.PandasIndex]
+    Z: str | None = None
+
+    def __post_init__(self) -> None:
+        self.dims = {self.X, self.Y}
 
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         """
@@ -252,6 +288,14 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
         x_pad, y_pad = _get_xy_pad(da[self.X].data, da[self.Y].data)
         return pad_bbox(bbox, da, x_pad=x_pad, y_pad=y_pad)
 
+    def equals(self, other: Self) -> bool:
+        if (self.crs == other.crs and self.bbox == other.bbox) or (
+            self.X == other.X and self.Y == other.Y
+        ):
+            return super().equals(other)
+        else:
+            return False
+
 
 @dataclass(kw_only=True)
 class Curvilinear(GridSystem):
@@ -261,7 +305,17 @@ class Curvilinear(GridSystem):
     bbox: BBox
     X: str
     Y: str
+    dims: set[str]
     indexes: tuple[xr.Index, ...]
+    Z: str | None = None
+
+    def equals(self, other: Self) -> bool:
+        if (self.crs == other.crs and self.bbox == other.bbox) or (
+            self.X == other.X and self.Y == other.Y
+        ):
+            return super().equals(other)
+        else:
+            return False
 
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         """
@@ -327,7 +381,9 @@ class Curvilinear(GridSystem):
 @dataclass(kw_only=True)
 class DGGS(GridSystem):
     cells: str
+    dims: set[str]
     indexes: tuple[xr.Index, ...]
+    Z: str | None = None
 
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         """Select a subset of the data array using a bounding box."""
@@ -336,6 +392,12 @@ class DGGS(GridSystem):
     def pad_bbox(self, bbox: BBox, da: xr.DataArray) -> BBox:
         """Extend bbox slightly to account for discrete coordinate sampling."""
         raise NotImplementedError("pad_bbox not implemented for DGGS grids")
+
+    def equals(self, other: Self) -> bool:
+        if self.cells == other.cells:
+            return super().equals(other)
+        else:
+            return False
 
 
 def _guess_grid_mapping_and_crs(
@@ -435,14 +497,14 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
         # FIXME: nice error here
         (Xname,) = Xname
         (Yname,) = Yname
-        X = ds[Xname].data
-        Y = ds[Yname].data
+        X = ds[Xname]
+        Y = ds[Yname]
 
         bbox = BBox(
-            west=numbagg.nanmin(X).item(),
-            east=numbagg.nanmax(X).item(),
-            south=numbagg.nanmin(Y).item(),
-            north=numbagg.nanmax(Y).item(),
+            west=numbagg.nanmin(X.data).item(),
+            east=numbagg.nanmax(X.data).item(),
+            south=numbagg.nanmin(Y.data).item(),
+            north=numbagg.nanmax(Y.data).item(),
         )
         if X.ndim == 1 and Y.ndim == 1:
             return Rectilinear(
@@ -456,8 +518,11 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
                 ),
             )
         elif X.ndim == 2 and Y.ndim == 2:
+            dims = set(X.dims) | set(Y.dims)
             # See discussion in https://github.com/pydata/xarray/issues/10572
-            return Curvilinear(crs=crs, X=Xname, Y=Yname, bbox=bbox, indexes=tuple())
+            return Curvilinear(
+                crs=crs, X=Xname, Y=Yname, dims=dims, bbox=bbox, indexes=tuple()
+            )
 
         else:
             raise RuntimeError(
@@ -465,6 +530,17 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
             )
     else:
         raise RuntimeError("CRS/grid system not detected")
+
+
+def _guess_z_dimension(da: xr.DataArray) -> str | None:
+    # make sure Z is a dimension we can select on
+    # We have to do this here to deal with the try-except above.
+    # In the except clause, we might detect multiple Z.
+    possible = set(da.cf.coordinates.get("vertical", {})) | set(da.cf.axes.get("Z", {}))
+    for z in sorted(possible):
+        if z in da.dims:
+            return z
+    return None
 
 
 def guess_grid_system(ds: xr.Dataset, name: str) -> GridSystem:
@@ -483,6 +559,8 @@ def guess_grid_system(ds: xr.Dataset, name: str) -> GridSystem:
         grid = _guess_grid_for_dataset(ds.cf[[name]])
     except RuntimeError:
         grid = _guess_grid_for_dataset(ds)
+
+    grid.Z = _guess_z_dimension(ds.cf[name])
 
     if xpublish_id is not None:
         _GRID_CACHE[cache_key] = grid
