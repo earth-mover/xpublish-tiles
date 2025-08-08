@@ -55,25 +55,20 @@ class Renderer:
         raise NotImplementedError
 
     @staticmethod
-    def supported_variants() -> list[str] | None:
-        """Return supported palette variants, or None if using colormaps."""
+    def supported_variants() -> list[str]:
+        """Return supported variants for this renderer."""
         raise NotImplementedError
 
     @staticmethod
-    def supported_colormaps() -> list[str]:
-        """Return supported colormap names."""
-        raise NotImplementedError
-
-    @staticmethod
-    def default_palette() -> str:
-        """Return the default palette name."""
+    def default_variant() -> str:
+        """Return the default variant name."""
         raise NotImplementedError
 
     @classmethod
-    def describe_style(cls, palette: str) -> dict[str, str]:
-        """Return metadata for a style/palette combination."""
+    def describe_style(cls, variant: str) -> dict[str, str]:
+        """Return metadata for a style/variant combination."""
         return {
-            "id": f"{cls.style_id()}/{palette}",
-            "title": f"{cls.style_id().title()} - {palette.title()}",
-            "description": f"{cls.style_id().title()} rendering using {palette}",
+            "id": f"{cls.style_id()}/{variant}",
+            "title": f"{cls.style_id().title()} - {variant.title()}",
+            "description": f"{cls.style_id().title()} rendering using {variant}",
         }

@@ -111,22 +111,18 @@ class DatashaderRasterRenderer(Renderer):
         return "raster"
 
     @staticmethod
-    def supported_variants() -> list[str] | None:
-        return None
-
-    @staticmethod
-    def supported_colormaps() -> list[str]:
+    def supported_variants() -> list[str]:
         colormaps = list(mpl.colormaps)
         return [name for name in sorted(colormaps) if not name.endswith("_r")]
 
     @staticmethod
-    def default_palette() -> str:
+    def default_variant() -> str:
         return "viridis"
 
     @classmethod
-    def describe_style(cls, palette: str) -> dict[str, str]:
+    def describe_style(cls, variant: str) -> dict[str, str]:
         return {
-            "id": f"{cls.style_id()}/{palette}",
-            "title": f"Raster - {palette.title()}",
-            "description": f"Raster rendering using {palette} colormap",
+            "id": f"{cls.style_id()}/{variant}",
+            "title": f"Raster - {variant.title()}",
+            "description": f"Raster rendering using {variant} colormap",
         }

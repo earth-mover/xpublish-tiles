@@ -35,32 +35,8 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
 
     styles = []
     for renderer_cls in RenderRegistry.all().values():
-        if renderer_cls.supported_colormaps():
-            # Renderer uses colormaps
-            for cmap in renderer_cls.supported_colormaps():
-                style_info = renderer_cls.describe_style(cmap)
-                styles.append(
-                    Style(
-                        id=style_info["id"],
-                        title=style_info["title"],
-                        description=style_info["description"],
-                    )
-                )
-        elif renderer_cls.supported_variants():
-            # Renderer uses variants
-            for variant in renderer_cls.supported_variants():
-                style_info = renderer_cls.describe_style(variant)
-                styles.append(
-                    Style(
-                        id=style_info["id"],
-                        title=style_info["title"],
-                        description=style_info["description"],
-                    )
-                )
-        else:
-            # Renderer has only default palette
-            default_palette = renderer_cls.default_palette()
-            style_info = renderer_cls.describe_style(default_palette)
+        for variant in renderer_cls.supported_variants():
+            style_info = renderer_cls.describe_style(variant)
             styles.append(
                 Style(
                     id=style_info["id"],

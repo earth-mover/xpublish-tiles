@@ -21,21 +21,17 @@ class QuiverRenderer(Renderer):
         return "quiver"
 
     @staticmethod
-    def supported_variants() -> list[str] | None:
+    def supported_variants() -> list[str]:
         return ["arrows"]
 
     @staticmethod
-    def supported_colormaps() -> list[str]:
-        return []
-
-    @staticmethod
-    def default_palette() -> str:
+    def default_variant() -> str:
         return "arrows"
 
     @classmethod
-    def describe_style(cls, palette: str) -> dict[str, str]:
+    def describe_style(cls, variant: str) -> dict[str, str]:
         return {
-            "id": f"{cls.style_id()}/{palette}",
-            "title": f"Quiver - {palette.title()}",
-            "description": f"Vector field rendering using {palette} style",
+            "id": f"{cls.style_id()}/{variant}",
+            "title": f"Quiver - {variant.title()}",
+            "description": f"Vector field rendering using {variant} style",
         }
