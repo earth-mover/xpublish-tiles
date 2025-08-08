@@ -1,6 +1,7 @@
 import itertools
 import re
 import warnings
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Self, cast
 
@@ -8,7 +9,7 @@ import cachetools
 import numbagg
 import numpy as np
 import rasterix
-from pyproj import CRS
+from pyproj import CRS, Transformer
 from pyproj.aoi import BBox
 
 import xarray as xr
@@ -566,3 +567,146 @@ def guess_grid_system(ds: xr.Dataset, name: str) -> GridSystem:
         _GRID_CACHE[cache_key] = grid
 
     return grid
+
+
+# --- Centralized spatial metadata helpers (no extra caching) ---
+
+
+def get_var_grid(ds: xr.Dataset, var_name: str) -> GridSystem:
+    """Return the GridSystem for a given variable using the pipeline logic."""
+    return guess_grid_system(ds, var_name)
+
+
+def _union_bboxes(bboxes: Iterable[BBox]) -> BBox:
+    """Compute the union of multiple BBoxes in the same CRS."""
+    west = min(b.west for b in bboxes)
+    south = min(b.south for b in bboxes)
+    east = max(b.east for b in bboxes)
+    north = max(b.north for b in bboxes)
+    return BBox(west=west, south=south, east=east, north=north)
+
+
+def compute_bbox_union_native(
+    ds: xr.Dataset, variables: list[str] | None = None
+) -> tuple[CRS, BBox]:
+    """Compute a dataset bbox union in its native CRS using grid inference.
+
+    If multiple variables are given with different CRSs, transform their bboxes
+    to the CRS of the first successful variable and then union.
+    """
+    grids: list[GridSystem] = []
+
+    if variables is None:
+        # Try all data variables; skip non-spatial failures
+        for name in (str(n) for n in ds.data_vars):
+            try:
+                grids.append(get_var_grid(ds, name))
+            except Exception:
+                continue
+    else:
+        for name in variables:
+            try:
+                grids.append(get_var_grid(ds, name))
+            except Exception:
+                continue
+
+    if not grids:
+        # Fallback: try to infer a grid from the whole dataset (may raise)
+        try:
+            g_any = _guess_grid_for_dataset(ds)
+            g = cast(RasterAffine | Rectilinear | Curvilinear, g_any)
+            return g.crs, g.bbox
+        except Exception:
+            # Try simple lat/lon coordinates heuristic
+            try:
+                lon = None
+                lat = None
+                if "lon" in ds.coords and "lat" in ds.coords:
+                    lon = ds["lon"]
+                    lat = ds["lat"]
+                elif "longitude" in ds.coords and "latitude" in ds.coords:
+                    lon = ds["longitude"]
+                    lat = ds["latitude"]
+                if lon is not None and lat is not None:
+                    return (
+                        DEFAULT_CRS,
+                        BBox(
+                            west=float(np.nanmin(lon.data).item()),
+                            east=float(np.nanmax(lon.data).item()),
+                            south=float(np.nanmin(lat.data).item()),
+                            north=float(np.nanmax(lat.data).item()),
+                        ),
+                    )
+            except Exception:
+                pass
+            # Final fallback to geographic world
+            return DEFAULT_CRS, BBox(west=-180.0, south=-90.0, east=180.0, north=90.0)
+
+    # Use the CRS of the first grid
+    target_crs = grids[0].crs
+    target_bboxes: list[BBox] = []
+
+    for g in grids:
+        if g.crs == target_crs:
+            target_bboxes.append(g.bbox)
+        else:
+            # Transform bbox to target_crs then append
+            transformer = Transformer.from_crs(g.crs, target_crs, always_xy=True)
+            left, bottom, right, top = transformer.transform_bounds(
+                g.bbox.west, g.bbox.south, g.bbox.east, g.bbox.north
+            )
+            target_bboxes.append(BBox(west=left, south=bottom, east=right, north=top))
+
+    return target_crs, _union_bboxes(target_bboxes)
+
+
+def bbox_in_crs(native_crs: CRS, bbox: BBox, out_crs: CRS) -> BBox:
+    """Transform a bbox from native_crs to out_crs using always_xy axis order."""
+    if native_crs == out_crs:
+        return bbox
+    transformer = Transformer.from_crs(native_crs, out_crs, always_xy=True)
+    left, bottom, right, top = transformer.transform_bounds(
+        bbox.west, bbox.south, bbox.east, bbox.north
+    )
+    return BBox(west=left, south=bottom, east=right, north=top)
+
+
+def _normalize_longitudes(west: float, east: float) -> tuple[float, float, bool]:
+    """Normalize longitudes to [-180, 180] preserving 180 as 180.
+
+    Returns (west, east, crosses) where crosses indicates anti-meridian crossing.
+    """
+    eps = 1e-9
+
+    def norm_w(lon: float) -> float:
+        # Keep exact -180 as -180
+        if abs(lon + 180.0) < eps:
+            return -180.0
+        return ((lon + 180.0) % 360.0) - 180.0
+
+    def norm_e(lon: float) -> float:
+        # Keep exact +180 as +180
+        if abs(lon - 180.0) < eps:
+            return 180.0
+        return ((lon + 180.0) % 360.0) - 180.0
+
+    nw, ne = norm_w(west), norm_e(east)
+    crosses = nw > ne
+    return nw, ne, crosses
+
+
+def canonical_geographic_bbox(native_crs: CRS, bbox: BBox) -> BBox:
+    """Return a geographic (EPSG:4326) bbox normalized to [-180, 180] and [-90, 90]."""
+    geo = bbox_in_crs(native_crs, bbox, DEFAULT_CRS)
+
+    # Clamp latitude
+    south = float(max(-90.0, min(90.0, geo.south)))
+    north = float(max(-90.0, min(90.0, geo.north)))
+
+    west, east, crosses = _normalize_longitudes(geo.west, geo.east)
+
+    if crosses:
+        # Single bbox cannot represent anti-meridian crossing well; use world bbox
+        return BBox(west=-180.0, south=south, east=180.0, north=north)
+
+    return BBox(west=float(west), south=south, east=float(east), north=north)

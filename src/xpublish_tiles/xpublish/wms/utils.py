@@ -1,8 +1,15 @@
 """Utilities for WMS dataset introspection and metadata extraction"""
 
 import numpy as np
+from pyproj import CRS
 
 import xarray as xr
+from xpublish_tiles.grids import (
+    bbox_in_crs,
+    canonical_geographic_bbox,
+    compute_bbox_union_native,
+)
+from xpublish_tiles.xpublish.tiles.metadata import extract_dataset_extents
 from xpublish_tiles.xpublish.wms.types import (
     WMSBoundingBoxResponse,
     WMSCapabilitiesResponse,
@@ -23,42 +30,19 @@ from xpublish_tiles.xpublish.wms.types import (
 
 
 def extract_geographic_bounds(dataset: xr.Dataset) -> tuple[float, float, float, float]:
-    """Extract geographic bounding box from dataset coordinates.
+    """Extract a canonical geographic bbox using pipeline grid inference.
 
-    Returns:
-        Tuple of (west, east, south, north) in geographic coordinates
+    Returns a tuple (west, east, south, north) in EPSG:4326 with longitudes
+    normalized to [-180, 180] and latitudes clamped to [-90, 90].
     """
-    # Try to find longitude/latitude coordinates
-    lon_coord = None
-    lat_coord = None
-
-    for coord_name, coord in dataset.coords.items():
-        if hasattr(coord, "standard_name"):
-            if coord.standard_name in ["longitude", "lon"]:
-                lon_coord = coord
-            elif coord.standard_name in ["latitude", "lat"]:
-                lat_coord = coord
-        elif str(coord_name).lower() in ["lon", "longitude", "x"]:
-            lon_coord = coord
-        elif str(coord_name).lower() in ["lat", "latitude", "y"]:
-            lat_coord = coord
-
-    if lon_coord is None or lat_coord is None:
-        # Fallback to first two coordinates if no standard names found
-        coords = list(dataset.coords.values())
-        if len(coords) >= 2:
-            lon_coord = coords[0]
-            lat_coord = coords[1]
-        else:
-            # Default bounds if no coordinates found
-            return -180.0, 180.0, -90.0, 90.0
-
-    west = float(lon_coord.min().values)
-    east = float(lon_coord.max().values)
-    south = float(lat_coord.min().values)
-    north = float(lat_coord.max().values)
-
-    return west, east, south, north
+    native_crs, native_bbox = compute_bbox_union_native(dataset)
+    geo_bbox = canonical_geographic_bbox(native_crs, native_bbox)
+    return (
+        float(geo_bbox.west),
+        float(geo_bbox.east),
+        float(geo_bbox.south),
+        float(geo_bbox.north),
+    )
 
 
 def extract_dimensions(dataset: xr.Dataset) -> list[WMSDimensionResponse]:
@@ -216,16 +200,20 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
     """
     layers = []
 
-    # Get geographic bounds
-    west, east, south, north = extract_geographic_bounds(dataset)
+    # Derive accurate bounds using grid inference
+    native_crs, native_bbox = compute_bbox_union_native(dataset)
 
-    # Create geographic bounding box
+    # Geographic (EPSG:4326)
+    west, east, south, north = extract_geographic_bounds(dataset)
     geo_bbox = WMSGeographicBoundingBoxResponse(
         west_bound_longitude=west,
         east_bound_longitude=east,
         south_bound_latitude=south,
         north_bound_latitude=north,
     )
+
+    # Accurate projected bbox in Web Mercator
+    bbox_3857 = bbox_in_crs(native_crs, native_bbox, CRS.from_epsg(3857))
 
     # Create bounding boxes for different CRS
     bounding_boxes = [
@@ -234,15 +222,50 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
         ),
         WMSBoundingBoxResponse(
             crs="EPSG:3857",
-            minx=west * 111319.49,  # Rough conversion to Web Mercator
-            miny=south * 111319.49,
-            maxx=east * 111319.49,
-            maxy=north * 111319.49,
+            minx=float(bbox_3857.west),
+            miny=float(bbox_3857.south),
+            maxx=float(bbox_3857.east),
+            maxy=float(bbox_3857.north),
         ),
     ]
 
-    # Extract dimensions
-    dimensions = extract_dimensions(dataset)
+    # Extract dimensions using unified extents calculator
+    extents = extract_dataset_extents(dataset, None)
+
+    def _to_wms_dimensions(
+        ext: dict[str, dict[str, object]],
+    ) -> list[WMSDimensionResponse]:
+        dims: list[WMSDimensionResponse] = []
+        for name, meta in ext.items():
+            units = str(meta.get("units")) if meta.get("units") is not None else ""
+            default = meta.get("default")
+            default_str = str(default) if default is not None else None
+            values_list = meta.get("values")
+            interval = meta.get("interval")
+            if isinstance(values_list, list) and values_list:
+                values = ",".join(str(v) for v in values_list)
+            elif isinstance(interval, list) and interval:
+                values = ",".join(str(v) for v in interval)
+            else:
+                values = ""
+            if name.lower() in ("time", "t"):
+                dim_name = "time"
+                units = units or "ISO8601"
+            else:
+                dim_name = name
+            dims.append(
+                WMSDimensionResponse(
+                    name=dim_name,
+                    units=units,
+                    default=default_str,
+                    values=values,
+                    multiple_values=True,
+                    nearest_value=True,
+                )
+            )
+        return dims
+
+    dimensions = _to_wms_dimensions(extents)
 
     for var_name, var in dataset.data_vars.items():
         # Extract variable metadata

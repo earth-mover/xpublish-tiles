@@ -157,39 +157,27 @@ def extract_tile_bbox_and_crs(
 
 
 def extract_dataset_bounds(dataset: Dataset) -> Optional[BoundingBox]:
-    """Extract geographic bounds from a dataset.
+    """Extract geographic bounds from a dataset using pipeline grid inference.
 
-    TODO: This functionality may be handled by the tile rendering pipeline in the future.
-
-    Args:
-        dataset: xarray Dataset to extract bounds from
-
-    Returns:
-        BoundingBox object if bounds can be extracted, None otherwise
+    Returns a 2D geographic (EPSG:4326) bounding box normalized to [-180, 180] longitudes
+    with orderedAxes ["X", "Y"]. Returns None if no spatial grid can be inferred.
     """
     try:
-        # Try to get bounds from dataset bounds attribute
-        if hasattr(dataset, "bounds"):
-            bounds = dataset.bounds
-            return BoundingBox(
-                lowerLeft=[float(bounds[0]), float(bounds[1])],
-                upperRight=[float(bounds[2]), float(bounds[3])],
-                crs="http://www.opengis.net/def/crs/EPSG/0/4326",
-            )
-        # Try to extract from lat/lon coordinates
-        elif "lat" in dataset.coords and "lon" in dataset.coords:
-            lat_min, lat_max = float(dataset.lat.min()), float(dataset.lat.max())
-            lon_min, lon_max = float(dataset.lon.min()), float(dataset.lon.max())
-            return BoundingBox(
-                lowerLeft=[lon_min, lat_min],
-                upperRight=[lon_max, lat_max],
-                crs="http://www.opengis.net/def/crs/EPSG/0/4326",
-                orderedAxes=["X", "Y"],
-            )
+        from xpublish_tiles.grids import (
+            canonical_geographic_bbox,
+            compute_bbox_union_native,
+        )
+
+        native_crs, native_bbox = compute_bbox_union_native(dataset)
+        geo_bbox = canonical_geographic_bbox(native_crs, native_bbox)
+        return BoundingBox(
+            lowerLeft=[float(geo_bbox.west), float(geo_bbox.south)],
+            upperRight=[float(geo_bbox.east), float(geo_bbox.north)],
+            crs="http://www.opengis.net/def/crs/EPSG/0/4326",
+            orderedAxes=["X", "Y"],
+        )
     except Exception:
-        # If we can't extract bounds, return None
-        pass
-    return None
+        return None
 
 
 def get_tile_matrix_limits(
