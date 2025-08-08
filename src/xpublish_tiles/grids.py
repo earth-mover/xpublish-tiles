@@ -148,9 +148,11 @@ class GridSystem:
     def equals(self, other: Self) -> bool:
         if not isinstance(self, type(other)):
             return False
-        if self.dims != self.dims:
+        if self.dims != other.dims:
             return False
         if len(self.indexes) != len(other.indexes):
+            return False
+        if self.Z != other.Z:
             return False
         if any(
             not a.equals(b) for a, b in zip(self.indexes, other.indexes, strict=False)

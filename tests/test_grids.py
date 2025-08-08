@@ -46,7 +46,7 @@ from xpublish_tiles.grids import (
                 bbox=BBox(south=0, north=2, east=2, west=0),
                 X="lon_rho",
                 Y="lat_rho",
-                Z=("s_rho",),
+                Z="s_rho",
                 indexes=(),  # type: ignore[arg-type]
             ),
         ),
