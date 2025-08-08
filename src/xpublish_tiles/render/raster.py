@@ -42,6 +42,10 @@ class DatashaderRasterRenderer(Renderer):
         colorscalerange: tuple[float, float] | None = None,
         format: ImageFormat = ImageFormat.PNG,
     ):
+        # Handle "default" alias
+        if cmap == "default":
+            cmap = self.default_variant()
+
         self.validate(contexts)
         (context,) = contexts.values()
         if isinstance(context, NullRenderContext):

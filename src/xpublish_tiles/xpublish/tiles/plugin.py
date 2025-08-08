@@ -115,6 +115,24 @@ class TilesPlugin(Plugin):
 
             styles = []
             for renderer_cls in RenderRegistry.all().values():
+                # Add default variant alias
+                default_variant = renderer_cls.default_variant()
+                default_style_info = renderer_cls.describe_style("default")
+                default_style_info["title"] = (
+                    f"{renderer_cls.style_id().title()} - Default ({default_variant.title()})"
+                )
+                default_style_info["description"] = (
+                    f"Default {renderer_cls.style_id()} rendering (alias for {default_variant})"
+                )
+                styles.append(
+                    Style(
+                        id=default_style_info["id"],
+                        title=default_style_info["title"],
+                        description=default_style_info["description"],
+                    )
+                )
+
+                # Add all actual variants
                 for variant in renderer_cls.supported_variants():
                     style_info = renderer_cls.describe_style(variant)
                     styles.append(

@@ -12,7 +12,21 @@ class QuiverRenderer(Renderer):
         assert len(contexts) in [2, 3]
         # assert we can find u,v
 
-    def render(self, *, data: dict[str, "RenderContext"]) -> None:
+    def render(
+        self,
+        *,
+        contexts: dict[str, "RenderContext"],
+        buffer,
+        width: int,
+        height: int,
+        cmap: str,
+        colorscalerange=None,
+        format=None,
+    ) -> None:
+        # Handle "default" alias
+        if cmap == "default":
+            cmap = self.default_variant()
+
         # look at CF metadata to find u, v
         pass
 
