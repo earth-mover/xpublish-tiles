@@ -13,7 +13,7 @@ from pydantic_xml import BaseXmlModel, attr, element
 from pyproj import CRS
 from pyproj.aoi import BBox
 
-from xpublish_tiles.types import ImageFormat, Style
+from xpublish_tiles.types import ImageFormat
 from xpublish_tiles.validators import (
     validate_bbox,
     validate_colorscalerange,
@@ -48,8 +48,8 @@ class WMSGetMapQuery(WMSBaseQuery):
     layers: str = Field(
         validation_alias=AliasChoices("layername", "layers", "query_layers"),
     )
-    styles: tuple[Style, str] = Field(
-        (Style.RASTER, "viridis"),
+    styles: tuple[str, str] = Field(
+        ("raster", "viridis"),
         description="Style to use for the query. Defaults to raster/default. Default may be replaced by the name of any colormap available to matplotlibs",
     )
     crs: CRS = Field(
@@ -97,7 +97,7 @@ class WMSGetMapQuery(WMSBaseQuery):
 
     @field_validator("styles", mode="before")
     @classmethod
-    def validate_style(cls, v: str | None) -> tuple[Style, str] | None:
+    def validate_style(cls, v: str | None) -> tuple[str, str] | None:
         return validate_style(v)
 
     @field_validator("crs", mode="before")
@@ -197,7 +197,7 @@ class WMSGetLegendGraphicQuery(WMSBaseQuery):
 
     @field_validator("styles", mode="before")
     @classmethod
-    def validate_style(cls, v: str | None) -> tuple[Style, str] | None:
+    def validate_style(cls, v: str | None) -> tuple[str, str] | None:
         return validate_style(v)
 
     @field_validator("format", mode="before")

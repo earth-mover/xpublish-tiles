@@ -59,13 +59,6 @@ class ContinuousData(DataType):
             )
 
 
-class Style(enum.StrEnum):
-    RASTER = enum.auto()
-    QUIVER = enum.auto()
-    NUMPY = enum.auto()
-    VECTOR = enum.auto()
-
-
 @dataclass
 class QueryParams:
     variables: list[str]
@@ -76,7 +69,7 @@ class QueryParams:
     #    notice that we are effectively interpolating along X, Y
     #    so there is some "interpretation" here
     selectors: dict[str, Any]
-    style: Style
+    style: str
     width: int
     height: int
     cmap: str
@@ -86,7 +79,7 @@ class QueryParams:
     def get_renderer(self):
         from xpublish_tiles.render import RenderRegistry
 
-        renderer_cls = RenderRegistry.get(self.style.value.lower())
+        renderer_cls = RenderRegistry.get(self.style)
         return renderer_cls()
 
 

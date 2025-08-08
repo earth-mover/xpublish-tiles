@@ -4,7 +4,7 @@ from pyproj import CRS
 from pyproj.aoi import BBox
 from pyproj.exceptions import CRSError
 
-from xpublish_tiles.types import ImageFormat, Style
+from xpublish_tiles.types import ImageFormat
 
 
 def validate_colorscalerange(v: str | list[str] | None) -> tuple[float, float] | None:
@@ -53,7 +53,7 @@ def validate_bbox(v: str | None) -> BBox | None:
     return BBox(*bbox)
 
 
-def validate_style(v: str | list[str] | None) -> tuple[Style, str] | None:
+def validate_style(v: str | list[str] | None) -> tuple[str, str] | None:
     if v is None:
         return None
     elif not isinstance(v, str):
@@ -70,14 +70,30 @@ def validate_style(v: str | list[str] | None) -> tuple[Style, str] | None:
             "style must be in the format 'stylename/palettename'. A common default for this is 'raster/default'",
         )
 
+    style_name = values[0].lower()
+    variant = values[1]
+
+    # Validate that the style is registered
+    from xpublish_tiles.render import RenderRegistry
+
     try:
-        style = Style(values[0].lower())
+        renderer_cls = RenderRegistry.get(style_name)
     except ValueError as e:
+        available_styles = list(RenderRegistry.all().keys())
         raise ValueError(
-            f"style {values[0]} is not valid. Options are: {', '.join(Style.__members__.keys())}",
+            f"style '{style_name}' is not valid. Available styles are: {', '.join(available_styles)}",
         ) from e
 
-    return style, values[1]
+    # Validate that the variant is supported (or is "default")
+    if variant != "default":
+        supported_variants = renderer_cls.supported_variants()
+        if variant not in supported_variants:
+            raise ValueError(
+                f"variant '{variant}' is not supported for style '{style_name}'. "
+                f"Supported variants are: {', '.join(['default'] + supported_variants)}",
+            )
+
+    return style_name, variant
 
 
 def validate_image_format(v: str | None) -> ImageFormat | None:

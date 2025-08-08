@@ -8,7 +8,6 @@ import pyproj
 from pydantic import BaseModel, Field, field_validator
 
 from xpublish_tiles.types import ImageFormat
-from xpublish_tiles.types import Style as CoreStyle
 from xpublish_tiles.validators import (
     validate_colorscalerange,
     validate_image_format,
@@ -1308,7 +1307,7 @@ class TileQuery(BaseModel):
         ),
     ]
     style: Annotated[
-        tuple[CoreStyle, str],
+        tuple[str, str],
         Field(
             default="raster/viridis",
             json_schema_extra={
@@ -1348,7 +1347,7 @@ class TileQuery(BaseModel):
 
     @field_validator("style", mode="before")
     @classmethod
-    def validate_style(cls, v: str | None) -> tuple[CoreStyle, str] | None:
+    def validate_style(cls, v: str | None) -> tuple[str, str] | None:
         return validate_style(v)
 
     @field_validator("colorscalerange", mode="before")
