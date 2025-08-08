@@ -10,7 +10,7 @@ import numpy as np
 
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear
-from xpublish_tiles.render import Renderer
+from xpublish_tiles.render import Renderer, register_renderer
 from xpublish_tiles.types import (
     ContinuousData,
     DiscreteData,
@@ -23,6 +23,7 @@ from xpublish_tiles.types import (
 logger = logging.getLogger("xpublish-tiles")
 
 
+@register_renderer
 class DatashaderRasterRenderer(Renderer):
     def validate(self, context: dict[str, "RenderContext"]):
         assert len(context) == 1
@@ -104,3 +105,28 @@ class DatashaderRasterRenderer(Renderer):
 
         im = shaded.to_pil()
         im.save(buffer, format=str(format))
+
+    @staticmethod
+    def style_id() -> str:
+        return "raster"
+
+    @staticmethod
+    def supported_variants() -> list[str] | None:
+        return None
+
+    @staticmethod
+    def supported_colormaps() -> list[str]:
+        colormaps = list(mpl.colormaps)
+        return [name for name in sorted(colormaps) if not name.endswith("_r")]
+
+    @staticmethod
+    def default_palette() -> str:
+        return "viridis"
+
+    @classmethod
+    def describe_style(cls, palette: str) -> dict[str, str]:
+        return {
+            "id": f"{cls.style_id()}/{palette}",
+            "title": f"Raster - {palette.title()}",
+            "description": f"Raster rendering using {palette} colormap",
+        }

@@ -1,7 +1,6 @@
 from typing import Any, Union
 
 from xarray import Dataset
-from xpublish_tiles.utils import get_available_raster_styles
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     extract_dataset_bounds,
@@ -31,16 +30,44 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
     # Extract dataset bounds
     dataset_bounds = extract_dataset_bounds(dataset)
 
-    # Get available styles
-    style_dicts = get_available_raster_styles()
-    styles = [
-        Style(
-            id=style["id"],
-            title=style["title"],
-            description=style["description"],
-        )
-        for style in style_dicts
-    ]
+    # Get available styles from registered renderers
+    from xpublish_tiles.render import RenderRegistry, quiver, raster  # noqa: F401
+
+    styles = []
+    for renderer_cls in RenderRegistry.all().values():
+        if renderer_cls.supported_colormaps():
+            # Renderer uses colormaps
+            for cmap in renderer_cls.supported_colormaps():
+                style_info = renderer_cls.describe_style(cmap)
+                styles.append(
+                    Style(
+                        id=style_info["id"],
+                        title=style_info["title"],
+                        description=style_info["description"],
+                    )
+                )
+        elif renderer_cls.supported_variants():
+            # Renderer uses variants
+            for variant in renderer_cls.supported_variants():
+                style_info = renderer_cls.describe_style(variant)
+                styles.append(
+                    Style(
+                        id=style_info["id"],
+                        title=style_info["title"],
+                        description=style_info["description"],
+                    )
+                )
+        else:
+            # Renderer has only default palette
+            default_palette = renderer_cls.default_palette()
+            style_info = renderer_cls.describe_style(default_palette)
+            styles.append(
+                Style(
+                    id=style_info["id"],
+                    title=style_info["title"],
+                    description=style_info["description"],
+                )
+            )
 
     # Create main tileset metadata
     return TileSetMetadata(

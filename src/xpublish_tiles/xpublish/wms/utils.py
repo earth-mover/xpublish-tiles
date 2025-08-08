@@ -3,7 +3,6 @@
 import numpy as np
 
 import xarray as xr
-from xpublish_tiles.utils import get_available_raster_styles
 from xpublish_tiles.xpublish.wms.types import (
     WMSBoundingBoxResponse,
     WMSCapabilitiesResponse,
@@ -168,17 +167,47 @@ def extract_dimensions(dataset: xr.Dataset) -> list[WMSDimensionResponse]:
 
 
 def get_available_wms_styles() -> list[WMSStyleResponse]:
-    """Get all available raster styles based on matplotlib colormaps."""
-    style_dicts = get_available_raster_styles()
+    """Get all available styles from registered renderers."""
+    from xpublish_tiles.render import RenderRegistry, quiver, raster  # noqa: F401
 
-    return [
-        WMSStyleResponse(
-            name=style["id"],
-            title=style["title"],
-            abstract=style["description"],
-        )
-        for style in style_dicts
-    ]
+    styles = []
+
+    for renderer_cls in RenderRegistry.all().values():
+        if renderer_cls.supported_colormaps():
+            # Renderer uses colormaps
+            for cmap in renderer_cls.supported_colormaps():
+                style_info = renderer_cls.describe_style(cmap)
+                styles.append(
+                    WMSStyleResponse(
+                        name=style_info["id"],
+                        title=style_info["title"],
+                        abstract=style_info["description"],
+                    )
+                )
+        elif renderer_cls.supported_variants():
+            # Renderer uses variants
+            for variant in renderer_cls.supported_variants():
+                style_info = renderer_cls.describe_style(variant)
+                styles.append(
+                    WMSStyleResponse(
+                        name=style_info["id"],
+                        title=style_info["title"],
+                        abstract=style_info["description"],
+                    )
+                )
+        else:
+            # Renderer has only default palette
+            default_palette = renderer_cls.default_palette()
+            style_info = renderer_cls.describe_style(default_palette)
+            styles.append(
+                WMSStyleResponse(
+                    name=style_info["id"],
+                    title=style_info["title"],
+                    abstract=style_info["description"],
+                )
+            )
+
+    return styles
 
 
 def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]:

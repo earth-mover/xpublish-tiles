@@ -10,7 +10,6 @@ from xpublish import Dependencies, Plugin, hookimpl
 from xarray import Dataset
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.types import QueryParams
-from xpublish_tiles.utils import get_available_raster_styles
 from xpublish_tiles.xpublish.tiles.metadata import (
     create_tileset_metadata,
     extract_dataset_extents,
@@ -111,16 +110,44 @@ class TilesPlugin(Plugin):
             elif not isinstance(keywords, list):
                 keywords = []
 
-            # Get available styles
-            style_dicts = get_available_raster_styles()
-            styles = [
-                Style(
-                    id=style["id"],
-                    title=style["title"],
-                    description=style["description"],
-                )
-                for style in style_dicts
-            ]
+            # Get available styles from registered renderers
+            from xpublish_tiles.render import RenderRegistry, quiver, raster  # noqa: F401
+
+            styles = []
+            for renderer_cls in RenderRegistry.all().values():
+                if renderer_cls.supported_colormaps():
+                    # Renderer uses colormaps
+                    for cmap in renderer_cls.supported_colormaps():
+                        style_info = renderer_cls.describe_style(cmap)
+                        styles.append(
+                            Style(
+                                id=style_info["id"],
+                                title=style_info["title"],
+                                description=style_info["description"],
+                            )
+                        )
+                elif renderer_cls.supported_variants():
+                    # Renderer uses variants
+                    for variant in renderer_cls.supported_variants():
+                        style_info = renderer_cls.describe_style(variant)
+                        styles.append(
+                            Style(
+                                id=style_info["id"],
+                                title=style_info["title"],
+                                description=style_info["description"],
+                            )
+                        )
+                else:
+                    # Renderer has only default palette
+                    default_palette = renderer_cls.default_palette()
+                    style_info = renderer_cls.describe_style(default_palette)
+                    styles.append(
+                        Style(
+                            id=style_info["id"],
+                            title=style_info["title"],
+                            description=style_info["description"],
+                        )
+                    )
 
             # Create one tileset entry per supported tile matrix set
             supported_tms = get_all_tile_matrix_set_ids()

@@ -84,12 +84,11 @@ class QueryParams:
     colorscalerange: tuple[float, float] | None = None
 
     def get_renderer(self):
-        from xpublish_tiles.render.raster import DatashaderRasterRenderer
+        # Import renderers to ensure they're registered
+        from xpublish_tiles.render import RenderRegistry, quiver, raster  # noqa: F401
 
-        if self.style is Style.RASTER:
-            return DatashaderRasterRenderer()
-        else:
-            raise NotImplementedError("Unknown style type: %r" % self.style)  # noqa: UP031
+        renderer_cls = RenderRegistry.get(self.style.value.lower())
+        return renderer_cls()
 
 
 @dataclass(kw_only=True)
