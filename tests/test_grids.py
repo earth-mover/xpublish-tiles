@@ -43,7 +43,7 @@ from xpublish_tiles.grids import (
             "temp",
             Curvilinear(
                 crs=CRS.from_user_input(4326),
-                bbox=BBox(south=0, north=12, east=12, west=0),
+                bbox=BBox(south=0, north=11, east=11, west=0),
                 X="lon_rho",
                 Y="lat_rho",
                 Z="s_rho",
