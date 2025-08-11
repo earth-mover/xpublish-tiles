@@ -23,7 +23,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install hatch
-        run: uv pip install hatch
+        run: uv pip install hatch --system
 
       - name: Build tarball and wheels
         run: |
