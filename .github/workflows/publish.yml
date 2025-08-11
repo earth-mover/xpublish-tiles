@@ -1,0 +1,41 @@
+name: Build and Upload client to PyPI
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        type: string
+        description: "Tag to release"
+        required: true
+
+jobs:
+  run-tests:
+    name: python
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install hatch
+        run: uv pip install hatch
+
+      - name: Build tarball and wheels
+        run: |
+          # clean working directory
+          git clean -xdf
+          git restore -SW .
+
+          # build and publish
+          hatch build
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: ./dist
+          print-hash: true
