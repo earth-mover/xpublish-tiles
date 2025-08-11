@@ -40,7 +40,7 @@ build.hooks.vcs.version-file = "src/xpublish_tiles/_version.py"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["xpublish_tiles"]
+packages = ["src/xpublish_tiles"]
 
 [dependency-groups]
 dev = [

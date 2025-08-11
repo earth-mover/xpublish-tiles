@@ -207,3 +207,6 @@ marimo/_lsp/
 __marimo__/
 
 *.DS_Store
+
+# Version file
+src/xpublish_tiles/_version.py
