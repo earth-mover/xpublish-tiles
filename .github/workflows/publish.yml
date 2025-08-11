@@ -43,8 +43,7 @@ jobs:
           python -m pip install --upgrade pip &&
           pip install hatch
 
-      - name: Build tarball and wheels - client
-        working-directory: ./client
+      - name: Build tarball and wheels
         run: |
           # clean working directory
           git clean -xdf
@@ -56,5 +55,5 @@ jobs:
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: ./client/dist
+          packages-dir: ./dist
           print-hash: true
