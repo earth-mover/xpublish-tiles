@@ -20,13 +20,17 @@ dependencies = [
     "pyproj>=3.7.1",
     "xpublish>=0.3.0",
     "fastapi",
-    "xarray @ git+https://github.com/TomNicholas/xarray.git@async.load",
-    "zarr @ git+https://github.com/zarr-developers/zarr-python.git@main",
+    "xarray",
+    "zarr",
     "rasterix>=0.1a4",
     "toolz>=1.0.0",
     "cachetools>=5.5.2",
 ]
 dynamic = ["version"]
+
+[too.uv.sources]
+xarray = { git = "https://github.com/TomNicholas/xarray.git", rev = "async.load" }
+zarr = { git = "https://github.com/zarr-developers/zarr-python.git", rev = "main" }
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]

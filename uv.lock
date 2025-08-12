@@ -2869,12 +2869,16 @@ wheels = [
 
 [[package]]
 name = "xarray"
-version = "2025.7.2.dev134+gef6afdfd"
-source = { git = "https://github.com/TomNicholas/xarray.git?rev=async.load#ef6afdfd0400656cc0b9f2cc4e20fd02c0a5b3fc" }
+version = "2025.7.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "packaging" },
     { name = "pandas" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e8/c5/a31ba8605005ef080c3d35efc696ddd851aee0a7a22420f9afebec386281/xarray-2025.7.1.tar.gz", hash = "sha256:2884bf5672b540fcc6ff8c20a3196bda0d78fbfb4d67398d60526e97c2faceef", size = 3013717, upload_time = "2025-07-10T04:53:07.01Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b2/ea/9554e5fb78eda4dbc9e9ccaf23034166fe3e9ea9af82ea6204b9578434bc/xarray-2025.7.1-py3-none-any.whl", hash = "sha256:e8647b659e53bd350d7c5a91c34dd4122ad6a3ca0bc41399d424a7c0273c7635", size = 1324464, upload_time = "2025-07-10T04:53:05.104Z" },
 ]
 
 [[package]]
@@ -2969,9 +2973,9 @@ requires-dist = [
     { name = "pyproj", specifier = ">=3.7.1" },
     { name = "rasterix", specifier = ">=0.1a4" },
     { name = "toolz", specifier = ">=1.0.0" },
-    { name = "xarray", git = "https://github.com/TomNicholas/xarray.git?rev=async.load" },
+    { name = "xarray" },
     { name = "xpublish", specifier = ">=0.3.0" },
-    { name = "zarr", git = "https://github.com/zarr-developers/zarr-python.git?rev=main" },
+    { name = "zarr" },
 ]
 
 [package.metadata.requires-dev]
@@ -3078,14 +3082,18 @@ wheels = [
 
 [[package]]
 name = "zarr"
-version = "3.1.1.dev28+g4eda04eb3"
-source = { git = "https://github.com/zarr-developers/zarr-python.git?rev=main#4eda04eb39bef4bfd309fc85a5c3b10a472cdf16" }
+version = "3.1.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "donfig" },
     { name = "numcodecs", extra = ["crc32c"] },
     { name = "numpy" },
     { name = "packaging" },
     { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/15/a9/29fe1800380092ae03ac6207d757f3e5affaf1fcd2e5ef074cf4fc68f0fa/zarr-3.1.1.tar.gz", hash = "sha256:17db72f37f2489452d2137ac891c4133b8f976f9189d8efd3e75f3b3add84e8c", size = 314075, upload_time = "2025-07-30T11:51:36.81Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c8/48/bde2f58cfbc9fd6ab844e2f2fd79d5e54195c12a17aa9b47c0b0e701a421/zarr-3.1.1-py3-none-any.whl", hash = "sha256:9a0b7e7c27bf62965b8eef6b8b8fdb9b47381f0738be35e40f37be6479b546be", size = 255373, upload_time = "2025-07-30T11:51:34.623Z" },
 ]
 
 [[package]]
