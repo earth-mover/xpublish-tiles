@@ -1,5 +1,7 @@
 # xpublish-tiles
 
+![PyPI - Version](https://img.shields.io/pypi/v/xpublish-tiles)
+
 Web mapping plugins for Xpublish
 
 ## Project Overview
