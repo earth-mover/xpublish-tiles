@@ -28,7 +28,7 @@ dependencies = [
 ]
 dynamic = ["version"]
 
-[too.uv.sources]
+[tool.uv.sources]
 xarray = { git = "https://github.com/TomNicholas/xarray.git", rev = "async.load" }
 zarr = { git = "https://github.com/zarr-developers/zarr-python.git", rev = "main" }
 
