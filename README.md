@@ -31,6 +31,30 @@ Run the tests
 uv run pytest tests --where=local
 ```
 
+### Test Dataset Creation
+
+The project includes utilities for creating test datasets in various storage backends:
+
+```sh
+# Create test datasets locally (checks for existing datasets first)
+uv run pytest tests/test_arraylake.py --where=local --setup
+
+# Force recreate datasets (overwrites existing)
+uv run pytest tests/test_arraylake.py --where=local --setup=force
+
+# Create datasets in Arraylake dev environment
+uv run pytest tests/test_arraylake.py --where=arraylake-dev --setup
+```
+
+See [tests/README.md](tests/README.md) for detailed documentation on test dataset creation and available options.
+
+### Automated Dataset Updates
+
+A GitHub Actions workflow automatically maintains test datasets:
+- **Nightly runs** at 2 AM UTC to ensure datasets are current
+- **Manual triggers** available with force-create option
+- Targets Arraylake dev environment for integration testing
+
 ## CLI Usage
 
 The package includes a command-line interface for quickly serving datasets with tiles and WMS endpoints:

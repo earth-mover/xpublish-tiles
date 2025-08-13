@@ -1,0 +1,65 @@
+name: Dataset Creation
+
+on:
+  # Manual trigger with option to force-create datasets
+  workflow_dispatch:
+    inputs:
+      force_create:
+        description: 'Force create datasets (overwrites existing)'
+        required: false
+        default: false
+        type: boolean
+
+  # Nightly scheduled run
+  schedule:
+    # Run at 2 AM UTC every day
+    - cron: '0 2 * * *'
+
+jobs:
+  create-datasets:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+
+    - name: Sync dependencies
+      run: uv sync
+
+    - name: Determine setup option
+      id: setup_option
+      run: |
+        if [ "${{ github.event.inputs.force_create }}" = "true" ]; then
+          echo "setup_arg=--setup=force" >> $GITHUB_OUTPUT
+        else
+          echo "setup_arg=--setup" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create datasets in Arraylake
+      env:
+        ARRAYLAKE_TOKEN: ${{ secrets.ARRAYLAKE_TOKEN }}
+        ARRAYLAKE_URI: https://dev.api.earthmover.io
+      run: |
+        uv run pytest tests/test_arraylake.py::test_create \
+          --where=arraylake-dev \
+          ${{ steps.setup_option.outputs.setup_arg }} \
+          --dist=loadgroup \
+          -v
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: dataset-creation-results
+        path: |
+          pytest.log
+        retention-days: 30

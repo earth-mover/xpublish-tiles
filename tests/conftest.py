@@ -32,7 +32,14 @@ def pytest_addoption(parser):
         action="store",
         help="Prefix for the repository/storage path (defaults: local=/tmp/tiles-icechunk/, arraylake=earthmover-integration/tiles-icechunk/, arraylake-dev=earthmover-integration/tiles-icechunk/)",
     )
-    parser.addoption("--setup", action="store_true", help="Run setup tests (test_create)")
+    parser.addoption(
+        "--setup",
+        action="store",
+        nargs="?",
+        const="",
+        default=None,
+        help="Run setup tests (test_create). Use --setup=force to always recreate datasets.",
+    )
     parser.addoption(
         "--debug-visual",
         action="store_true",
@@ -129,9 +136,36 @@ def generate_repo(where: str, prefix: str):
         raise ValueError(f"Unsupported storage backend: {where}")
 
 
-@pytest.fixture
-def repo(where, prefix):
+@pytest.fixture(scope="session")
+def setup_option(request):
+    """Get the --setup option value for the session."""
+    return request.config.getoption("--setup")
+
+
+@pytest.fixture(scope="session")
+def session_repo(where, prefix, setup_option):
+    """Create repository once per session for force-create scenarios."""
+    if setup_option == "force":
+        # For force create, ensure we have a clean repo
+        if where == "local":
+            import os
+            import shutil
+
+            # Clean up existing repo for force-create
+            try:
+                if os.path.exists(prefix):
+                    shutil.rmtree(prefix, ignore_errors=True)
+            except Exception:
+                # If cleanup fails, continue anyway
+                pass
+
     return generate_repo(where, prefix)
+
+
+@pytest.fixture
+def repo(session_repo):
+    """Return the session repo for individual tests."""
+    return session_repo
 
 
 @pytest.fixture(

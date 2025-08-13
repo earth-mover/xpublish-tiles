@@ -31,9 +31,27 @@ def dataset(request):
     return request.param
 
 
-def test_create(dataset: Dataset, repo, where: str, prefix: str, request) -> None:
-    if not request.config.getoption("--setup"):
+@pytest.mark.xdist_group(name="repo_creation")
+def test_create(dataset: Dataset, repo, where: str, prefix: str, setup_option) -> None:
+    if setup_option is None:
         pytest.skip("test_create only runs when --setup flag is provided")
+
+    force_create = setup_option == "force"
+
+    # Check if dataset already exists (unless force_create)
+    if not force_create and "arraylake" in where:
+        try:
+            # Check if the dataset group already exists in the current repo
+            snapshot = repo.readonly_session()
+            group_exists = dataset.name in snapshot.store
+            if group_exists:
+                print(
+                    f"Dataset {dataset.name} already exists in {prefix}, skipping creation"
+                )
+                return
+        except Exception:
+            # If we can't check the group, proceed with creation
+            pass
 
     if "arraylake" in where:
         import coiled
