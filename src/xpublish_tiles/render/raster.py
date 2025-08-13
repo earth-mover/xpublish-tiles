@@ -1,3 +1,5 @@
+import contextlib
+import importlib.util
 import io
 import logging
 import threading
@@ -23,7 +25,9 @@ from xpublish_tiles.types import (
     RenderContext,
 )
 
-LOCK = threading.Lock()
+# Only use lock if tbb is not available
+HAS_TBB = importlib.util.find_spec("tbb") is not None
+LOCK = contextlib.nullcontext() if HAS_TBB else threading.Lock()
 logger = logging.getLogger("xpublish-tiles")
 
 # without controlling the seed, output for categorical data is non-deterministic
@@ -103,7 +107,7 @@ class DatashaderRasterRenderer(Renderer):
                 # the mode aggregation.
                 # https://github.com/holoviz/datashader/issues/1435
                 data = nearest_on_uniform_grid(context.da, grid.X, grid.Y)
-                # FIXME: this lock is only needed when `tbb` cannot be installed, so macos
+                # Lock is only used when tbb is not available (e.g., on macOS)
                 with LOCK:
                     mesh = cvs.raster(
                         data,
