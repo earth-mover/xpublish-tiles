@@ -75,8 +75,7 @@ class PyVistaRasterRenderer(Renderer):
                 render=True,
             )
             plotter.camera_position = "xy"
-            print(plotter.actors)
-            plotter.camera.zoom(1.5)
+            plotter.camera.zoom(1.5)  # WTF
             # plotter.camera.zoom("tight")
             # plotter.camera.tight(adjust_render_window=False)
             plotter.screenshot(buffer, transparent_background=True, return_img=True)

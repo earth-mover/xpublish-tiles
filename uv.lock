@@ -3021,8 +3021,6 @@ dependencies = [
     { name = "numbagg" },
     { name = "pydantic-xml" },
     { name = "pyproj" },
-    { name = "pyvista" },
-    { name = "pyvista-xarray" },
     { name = "rasterix" },
     { name = "setuptools" },
     { name = "tbb", marker = "sys_platform == 'linux'" },
@@ -3051,6 +3049,10 @@ dev = [
     { name = "syrupy" },
     { name = "ty" },
 ]
+pyvista = [
+    { name = "pyvista" },
+    { name = "pyvista-xarray" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -3065,8 +3067,6 @@ requires-dist = [
     { name = "numbagg", specifier = ">=0.9.0" },
     { name = "pydantic-xml", specifier = ">=2.17.3" },
     { name = "pyproj", specifier = ">=3.7.1" },
-    { name = "pyvista", specifier = ">=0.46.0" },
-    { name = "pyvista-xarray", specifier = ">=0.1.7" },
     { name = "rasterix", specifier = ">=0.1a4" },
     { name = "setuptools", specifier = ">=80.9.0" },
     { name = "tbb", marker = "sys_platform == 'linux'", specifier = ">=2022.2.0" },
@@ -3094,6 +3094,10 @@ dev = [
     { name = "ruff", specifier = ">=0.12.4" },
     { name = "syrupy", specifier = ">=4.9.1" },
     { name = "ty", specifier = ">=0.0.1a15" },
+]
+pyvista = [
+    { name = "pyvista", specifier = ">=0.46.0" },
+    { name = "pyvista-xarray", specifier = ">=0.1.7" },
 ]
 
 [[package]]

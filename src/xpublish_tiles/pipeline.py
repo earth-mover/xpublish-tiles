@@ -1,9 +1,11 @@
 import asyncio
 import copy
+import importlib.util
 import io
 import logging
 import math
 import os
+import platform
 from functools import lru_cache, partial
 from typing import Any, cast
 
@@ -27,6 +29,17 @@ from xpublish_tiles.types import (
 )
 
 logger = logging.getLogger("xpublish-tiles")
+
+
+def _is_pyvista_renderer(renderer) -> bool:
+    """Check if renderer is a PyVista renderer."""
+    if importlib.util.find_spec("xpublish_tiles.render.pyvista") is None:
+        return False
+
+    from xpublish_tiles.render.pyvista import PyVistaRasterRenderer
+
+    return isinstance(renderer, PyVistaRasterRenderer)
+
 
 # https://pyproj4.github.io/pyproj/stable/advanced_examples.html#caching-pyproj-objects
 transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=True))
@@ -260,11 +273,13 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     buffer = io.BytesIO()
     renderer = query.get_renderer()
 
-    # Run render in executor to avoid blocking
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(
-        EXECUTOR,
-        lambda: renderer.render(
+    # On macOS, PyVista renderer must run on main thread to avoid NSWindow issues
+    is_macos = platform.system() == "Darwin"
+    is_pyvista_renderer = _is_pyvista_renderer(renderer)
+
+    if is_macos and is_pyvista_renderer:
+        # Run PyVista renderer synchronously on main thread on macOS
+        renderer.render(
             contexts=context_dict,
             buffer=buffer,
             width=query.width,
@@ -272,8 +287,22 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
             cmap=query.cmap,
             colorscalerange=query.colorscalerange,
             format=query.format,
-        ),
-    )
+        )
+    else:
+        # Run render in executor to avoid blocking
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            EXECUTOR,
+            lambda: renderer.render(
+                contexts=context_dict,
+                buffer=buffer,
+                width=query.width,
+                height=query.height,
+                cmap=query.cmap,
+                colorscalerange=query.colorscalerange,
+                format=query.format,
+            ),
+        )
     buffer.seek(0)
     if int(os.environ.get("XPUBLISH_TILES_DEBUG_CHECKS", "0")):
         assert check_transparent_pixels(copy.deepcopy(buffer).read()) == 0, query

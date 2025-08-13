@@ -25,8 +25,6 @@ dependencies = [
     "rasterix>=0.1a4",
     "toolz>=1.0.0",
     "cachetools>=5.5.2",
-    "pyvista>=0.46.0",
-    "pyvista-xarray>=0.1.7",
     "setuptools>=80.9.0",
     "tbb>=2022.2.0 ; sys_platform == 'linux'",
 ]
@@ -70,6 +68,10 @@ dev = [
     "ipython>=9.4.0",
     "pytest-randomly>=3.16.0",
 ]
+pyvista = [
+    "pyvista>=0.46.0",
+    "pyvista-xarray>=0.1.7",
+]
 
 [project.entry-points."xpublish.plugin"]
 tiles = "xpublish_tiles.xpublish.tiles:TilesPlugin"
@@ -77,6 +79,7 @@ wms = "xpublish_tiles.xpublish.wms:WMSPlugin"
 
 [project.entry-points."xpublish_tiles.renderers"]
 raster = "xpublish_tiles.render.raster:DatashaderRasterRenderer"
+pyvista_raster = "xpublish_tiles.render.pyvista:PyVistaRasterRenderer"
 
 [project.scripts]
 xpublish-tiles = "xpublish_tiles.cli.main:main"

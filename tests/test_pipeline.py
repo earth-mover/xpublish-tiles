@@ -114,7 +114,7 @@ def test_bbox_overlap_detection(bbox, grid_config):
     )
 
 
-def create_query_params(tile, tms, *, colorscalerange=None):
+def create_query_params(tile, tms, *, colorscalerange=None, pyvista=False):
     """Create QueryParams instance using test tiles and TMS."""
 
     # Convert TMS CRS to pyproj CRS
@@ -134,7 +134,7 @@ def create_query_params(tile, tms, *, colorscalerange=None):
         crs=OutputCRS(target_crs),
         bbox=OutputBBox(bbox),
         selectors={},
-        style="raster",
+        style="pyvista_raster" if pyvista else "raster",
         width=256,
         height=256,
         cmap="viridis",
@@ -333,3 +333,16 @@ def test_apply_query_selectors():
     assert_equal(
         result["temp"].da, ROMSDS.temp.sel(s_rho=0, method="nearest").isel(ocean_time=-1)
     )
+
+
+@pytest.mark.asyncio
+async def test_pipeline_pyvista_smoke(global_datasets, png_snapshot, pytestconfig):
+    """Smoke test for PyVista renderer - tests basic functionality."""
+    ds = global_datasets
+    tile = morecantile.Tile(x=2, y=1, z=2)  # Simple European tile
+    tms = WEBMERC_TMS
+    query_params = create_query_params(tile, tms, pyvista=True)
+    result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(result, png_snapshot)
