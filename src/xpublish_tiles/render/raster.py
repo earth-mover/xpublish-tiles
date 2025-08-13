@@ -26,6 +26,9 @@ from xpublish_tiles.types import (
 LOCK = threading.Lock()
 logger = logging.getLogger("xpublish-tiles")
 
+# without controlling the seed, output for categorical data is non-deterministic
+np.random.seed(1234)
+
 
 def nearest_on_uniform_grid(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.DataArray:
     X, Y = da[Xdim], da[Ydim]
