@@ -108,33 +108,38 @@ def generate_flag_values_data(
     chunks = tuple(d.chunk_size for d in dims)
 
     # Create random noise array with same chunking
-    rng = np.random.default_rng(seed=1234)
-    noise_array = rng.uniform(-0.8, 0.8, size=shape)
-    noise = dask.array.from_array(noise_array, chunks=chunks)
+    rng = dask.array.random.default_rng(seed=1234)
+    noise = rng.uniform(-0.8, 0.8, size=shape, chunks=chunks)
 
     # Scale noise by absolute value to preserve sign and prevent crossing zero
-    abs_tanh = dask.array.abs(tanh_data)
+    abs_tanh = np.abs(tanh_data)
     scaled_noise = noise * abs_tanh * 1.2  # Scale factor to control noise intensity
 
     # Apply noise while ensuring we stay within [-1, 1] bounds
     noisy_tanh = tanh_data + scaled_noise
-    noisy_tanh = dask.array.clip(noisy_tanh, -1, 1)
+    noisy_tanh = np.clip(noisy_tanh, -1, 1)
 
     # Discretize to 10 levels by mapping [-1, 1] to [0, 9] indices
     # First normalize to [0, 1], then scale to [0, 9], then round to integers
     normalized = (noisy_tanh + 1) / 2  # Map [-1, 1] to [0, 1]
     scaled = normalized * 9  # Map [0, 1] to [0, 9]
-    indices = dask.array.round(scaled).astype(int)  # Round and convert to int
+    indices = np.round(scaled).astype(int)  # Round and convert to int
 
     # Clip to ensure indices are in valid range [0, 9]
-    indices = dask.array.clip(indices, 0, 9)
+    indices = np.clip(indices, 0, 9)
 
     # Map indices to actual flag values
     # Only use the first 10 flag values if more are provided
     flag_array = np.array(flag_values[:10], dtype=dtype)
+    array = dask.array.map_blocks(
+        lambda chunk, flags: flags[chunk],
+        indices,
+        flag_array,
+        meta=indices,
+    )
 
     # Use advanced indexing to map indices to flag values
-    return flag_array[indices]
+    return array
 
 
 def uniform_grid(*, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]):
