@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 import matplotlib as mpl
 
+from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear
 from xpublish_tiles.render import Renderer, register_renderer
 from xpublish_tiles.types import (
     ContinuousData,
@@ -40,6 +41,9 @@ class PyVistaRasterRenderer(Renderer):
             assert isinstance(context, PopulatedRenderContext)
 
         bbox, grid = context.bbox, context.grid
+        if TYPE_CHECKING:
+            assert isinstance(grid, RasterAffine | Rectilinear | Curvilinear)
+            assert hasattr(grid, "X") and hasattr(grid, "Y")
         mesh = context.da.pyvista.mesh(x=grid.X, y=grid.Y).point_data_to_cell_data()
         image_grid = pv.ImageData(
             dimensions=(width, height, 1),
