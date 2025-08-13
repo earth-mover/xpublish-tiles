@@ -25,6 +25,7 @@ dependencies = [
     "rasterix>=0.1a4",
     "toolz>=1.0.0",
     "cachetools>=5.5.2",
+    "tbb>=2022.2.0 ; sys_platform == 'linux'",
 ]
 dynamic = ["version"]
 

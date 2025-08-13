@@ -81,3 +81,9 @@ Where `4/4/14` represents the tile coordinates in {z}/{y}/{x}
 ## Integration Examples
 
 - [Mapbox Usage](./examples/mapbox/)
+
+
+## Deployment notes
+
+1. Make sure to limit `NUMBA_NUM_THREADS`; this is used for rendering categorical data with datashader.
+2. The first invocation of a render will block while datashader functions are JIT-compiled. Our attempts to add a precompilation step to remove this have been unsuccessful.

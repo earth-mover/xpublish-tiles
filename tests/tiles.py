@@ -181,6 +181,16 @@ PARA_TILES = [
     pytest.param(Tile(x=45, y=64, z=7), WEBMERC_TMS, id="para_central_z7(7/45/64)"),
     # Zoom level 8 - high detail for southern Para
     pytest.param(Tile(x=88, y=128, z=8), WEBMERC_TMS, id="para_south_z8(8/88/128)"),
+    # test upsampling
+    pytest.param(
+        Tile(x=1480, y=2064, z=12), WEBMERC_TMS, id="para_south_z8(12/1480/2064)"
+    ),
+    pytest.param(
+        Tile(x=2964, y=4129, z=13), WEBMERC_TMS, id="para_south_z8(13/2964/4129)"
+    ),
+    pytest.param(
+        Tile(x=5971, y=8252, z=14), WEBMERC_TMS, id="para_south_z8(14/5971/8252)"
+    ),
 ]
 
 TILES = WEBMERC_TILES + WGS84_TILES + ETRS89_TILES
