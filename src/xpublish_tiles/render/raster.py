@@ -3,6 +3,7 @@ import importlib.util
 import io
 import logging
 import threading
+import time
 from typing import TYPE_CHECKING, cast
 
 import datashader as dsh  # type: ignore
@@ -34,16 +35,21 @@ logger = logging.getLogger("xpublish-tiles")
 np.random.seed(1234)
 
 
-def nearest_on_uniform_grid(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.DataArray:
+def nearest_on_uniform_grid_scipy(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.DataArray:
+    """This is quite slow. 10s for a 2000x3000 array"""
     X, Y = da[Xdim], da[Ydim]
     dx = abs(X.diff(Xdim).median().data)
     dy = abs(Y.diff(Ydim).median().data)
     newX = np.arange(numbagg.nanmin(X.data), numbagg.nanmax(X.data) + dx, dx)
     newY = np.arange(numbagg.nanmin(Y.data), numbagg.nanmax(Y.data) + dy, dy)
+    tic = time.time()
     interpolator = NearestNDInterpolator(
         np.stack([X.data.ravel(), Y.data.ravel()], axis=-1),
         da.data.ravel(),
     )
+    print(f"constructing interpolator: {time.time() - tic} seconds")
+    print(f"interpolating from {da.shape} to {newY.size}x{newX.size}")
+    tic = time.time()
     new = xr.DataArray(
         interpolator(*np.meshgrid(newX, newY)),
         dims=(Ydim, Xdim),
@@ -54,7 +60,34 @@ def nearest_on_uniform_grid(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.DataAr
         # coords=dict(x=("x", newX - dx/2), y=("y", newY - dy/2)),
         coords=dict(x=("x", newX), y=("y", newY)),
     )
+    print(f"interpolating: {time.time() - tic} seconds")
     return new
+
+
+def nearest_on_uniform_grid_quadmesh(
+    da: xr.DataArray, Xdim: str, Ydim: str
+) -> xr.DataArray:
+    """
+    This is a trick; for upsampling, datashader will do nearest neighbor resampling.
+    """
+    X, Y = da[Xdim], da[Ydim]
+    dx = abs(X.diff(Xdim).median().data)
+    dy = abs(Y.diff(Ydim).median().data)
+    xmin, xmax = numbagg.nanmin(X.data), numbagg.nanmax(X.data)
+    ymin, ymax = numbagg.nanmin(Y.data), numbagg.nanmax(Y.data)
+    newshape = (
+        round(abs((xmax - xmin) / dx)) + 1,
+        round(abs((ymax - ymin) / dy)) + 1,
+    )
+    # tic = time.time()
+    cvs = dsh.Canvas(
+        *newshape,
+        x_range=(xmin - dx / 2, xmax + dx / 2),
+        y_range=(ymin - dy / 2, ymax + dy / 2),
+    )
+    res = cvs.quadmesh(da, x="x", y="y", agg=dsh.reductions.first(cast(str, da.name)))
+    # print(f"interpolating from {da.shape} to {newshape}: {time.time() - tic} seconds")
+    return res
 
 
 @register_renderer
@@ -106,9 +139,9 @@ class DatashaderRasterRenderer(Renderer):
                 # we nearest-neighbour resample to a rectilinear grid, and the use
                 # the mode aggregation.
                 # https://github.com/holoviz/datashader/issues/1435
-                data = nearest_on_uniform_grid(context.da, grid.X, grid.Y)
                 # Lock is only used when tbb is not available (e.g., on macOS)
                 with LOCK:
+                    data = nearest_on_uniform_grid_quadmesh(context.da, grid.X, grid.Y)
                     mesh = cvs.raster(
                         data,
                         interpolate="nearest",

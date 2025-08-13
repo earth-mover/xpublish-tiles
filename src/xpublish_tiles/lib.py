@@ -10,7 +10,9 @@ import pyproj
 import toolz as tlz
 from PIL import Image
 
-EXECUTOR = ThreadPoolExecutor(max_workers=16)
+EXECUTOR = ThreadPoolExecutor(
+    max_workers=16, thread_name_prefix="xpublish-tiles-threadpool"
+)
 
 
 def slices_from_chunks(chunks):
