@@ -1,4 +1,4 @@
-name: Dataset Creation
+name: Arraylake Integration Tests
 
 on:
   # Manual trigger with option to force-create datasets
@@ -46,7 +46,7 @@ jobs:
 
     - name: Create datasets in Arraylake
       env:
-        ARRAYLAKE_TOKEN: ${{ secrets.ARRAYLAKE_TOKEN }}
+        ARRAYLAKE_TOKEN: ${{ secrets.DEV_ARRAYLAKE_TOKEN }}
         ARRAYLAKE_URI: https://dev.api.earthmover.io
       run: |
         uv run pytest tests/test_arraylake.py::test_create \
