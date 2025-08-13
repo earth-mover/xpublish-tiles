@@ -9,6 +9,7 @@ from xpublish_tiles.datasets import (
     HRRR,
     IFS,
     PARA,
+    PARA_HIRES,
     SENTINEL2_NOCOORDS,
     Dataset,
 )
@@ -20,6 +21,7 @@ from xpublish_tiles.datasets import (
         pytest.param(SENTINEL2_NOCOORDS, id="sentinel2-nocoords"),
         pytest.param(GLOBAL_6KM, id="global_6km"),
         pytest.param(PARA, id="para"),
+        pytest.param(PARA_HIRES, id="para_hires"),
         pytest.param(HRRR, id="hrrr"),
         pytest.param(EU3035, id="eu3035"),
         pytest.param(EU3035_HIRES, id="eu3035_hires"),
