@@ -28,6 +28,7 @@ dependencies = [
     "pyvista>=0.46.0",
     "pyvista-xarray>=0.1.7",
     "setuptools>=80.9.0",
+    "tbb>=2022.2.0 ; sys_platform == 'linux'",
 ]
 dynamic = ["version"]
 

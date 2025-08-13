@@ -4,6 +4,7 @@ import io
 
 import cf_xarray  # noqa: F401 - Enable cf accessor
 import morecantile
+import numpy as np
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
@@ -39,7 +40,6 @@ def visualize_tile(result: io.BytesIO, tile: morecantile.Tile) -> None:
         tile: Tile object with z, x, y coordinates
     """
     import matplotlib.pyplot as plt
-    import numpy as np
     from PIL import Image
 
     result.seek(0)
@@ -303,10 +303,9 @@ async def test_categorical_data(tile, tms, png_snapshot, pytestconfig):
     content = result.read()
     assert len(content) > 0
     validate_transparency(content, tile=tile, tms=tms, dataset_bbox=ds.attrs["bbox"])
-    # TODO: the output appears to be non-deterministic
-    # assert_render_matches_snapshot(
-    #     result, png_snapshot, tile=tile, tms=tms, dataset_bbox=ds.attrs["bbox"]
-    # )
+    assert_render_matches_snapshot(
+        result, png_snapshot, tile=tile, tms=tms, dataset_bbox=ds.attrs["bbox"]
+    )
 
 
 def test_apply_query_selectors():

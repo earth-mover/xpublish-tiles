@@ -1,12 +1,17 @@
+import contextlib
+import importlib.util
 import io
 import logging
+import threading
 from typing import TYPE_CHECKING, cast
 
 import datashader as dsh  # type: ignore
 import datashader.reductions  # type: ignore
 import datashader.transfer_functions as tf  # type: ignore
 import matplotlib as mpl  # type: ignore
+import numbagg
 import numpy as np
+from scipy.interpolate import NearestNDInterpolator
 
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear
@@ -20,7 +25,36 @@ from xpublish_tiles.types import (
     RenderContext,
 )
 
+# Only use lock if tbb is not available
+HAS_TBB = importlib.util.find_spec("tbb") is not None
+LOCK = contextlib.nullcontext() if HAS_TBB else threading.Lock()
 logger = logging.getLogger("xpublish-tiles")
+
+# without controlling the seed, output for categorical data is non-deterministic
+np.random.seed(1234)
+
+
+def nearest_on_uniform_grid(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.DataArray:
+    X, Y = da[Xdim], da[Ydim]
+    dx = abs(X.diff(Xdim).median().data)
+    dy = abs(Y.diff(Ydim).median().data)
+    newX = np.arange(numbagg.nanmin(X.data), numbagg.nanmax(X.data) + dx, dx)
+    newY = np.arange(numbagg.nanmin(Y.data), numbagg.nanmax(Y.data) + dy, dy)
+    interpolator = NearestNDInterpolator(
+        np.stack([X.data.ravel(), Y.data.ravel()], axis=-1),
+        da.data.ravel(),
+    )
+    new = xr.DataArray(
+        interpolator(*np.meshgrid(newX, newY)),
+        dims=(Ydim, Xdim),
+        name=da.name,
+        # this dx, dy offset is weird but it gets raster to almost look like quadmesh
+        # FIXME: I should need to offset this with `-dx` and `-dy`
+        # but that leads to transparent pixels at high res
+        # coords=dict(x=("x", newX - dx/2), y=("y", newY - dy/2)),
+        coords=dict(x=("x", newX), y=("y", newY)),
+    )
+    return new
 
 
 @register_renderer
@@ -53,7 +87,6 @@ class DatashaderRasterRenderer(Renderer):
         if TYPE_CHECKING:
             assert isinstance(context, PopulatedRenderContext)
         bbox = context.bbox
-        data = self.maybe_cast_data(context.da)
         cvs = dsh.Canvas(
             plot_height=height,
             plot_width=width,
@@ -65,10 +98,24 @@ class DatashaderRasterRenderer(Renderer):
             # Use the actual coordinate names from the grid system
             grid = cast(RasterAffine | Rectilinear | Curvilinear, context.grid)
             if isinstance(context.datatype, DiscreteData):
-                mesh = cvs.quadmesh(
-                    data, x=grid.X, y=grid.Y, agg=dsh.reductions.max(data.name)
-                )
+                if isinstance(grid, Curvilinear):
+                    # FIXME: we'll need to track Xdim, Ydim explicitly no dims: tuple[str]
+                    raise NotImplementedError
+                # datashader only supports rectilinear input for the mode aggregation;
+                # Our input coordinates are most commonly "curvilinear", so
+                # we nearest-neighbour resample to a rectilinear grid, and the use
+                # the mode aggregation.
+                # https://github.com/holoviz/datashader/issues/1435
+                data = nearest_on_uniform_grid(context.da, grid.X, grid.Y)
+                # Lock is only used when tbb is not available (e.g., on macOS)
+                with LOCK:
+                    mesh = cvs.raster(
+                        data,
+                        interpolate="nearest",
+                        agg=dsh.reductions.mode(cast(str, data.name)),
+                    )
             else:
+                data = self.maybe_cast_data(context.da)
                 mesh = cvs.quadmesh(data, x=grid.X, y=grid.Y)
         else:
             raise NotImplementedError(

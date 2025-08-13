@@ -108,7 +108,8 @@ def generate_flag_values_data(
     chunks = tuple(d.chunk_size for d in dims)
 
     # Create random noise array with same chunking
-    noise_array = np.random.uniform(-0.8, 0.8, size=shape)
+    rng = np.random.default_rng(seed=1234)
+    noise_array = rng.uniform(-0.8, 0.8, size=shape)
     noise = dask.array.from_array(noise_array, chunks=chunks)
 
     # Scale noise by absolute value to preserve sign and prevent crossing zero
