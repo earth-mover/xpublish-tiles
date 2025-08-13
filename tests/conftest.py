@@ -1,4 +1,5 @@
 import io
+import os
 import re
 from itertools import product
 
@@ -15,7 +16,6 @@ import xarray as xr
 from tests.tiles import ETRS89_TILES, HRRR_TILES
 from xpublish_tiles.datasets import EU3035, HRRR, create_global_dataset
 
-ARRAYLAKE_REPO = "earthmover-integration/tiles-datasets-develop"
 IS_SNAPSHOT_UPDATE = False
 
 
@@ -23,14 +23,14 @@ def pytest_addoption(parser):
     parser.addoption(
         "--where",
         action="store",
-        choices=["local", "arraylake"],
+        choices=["local", "arraylake", "arraylake-dev"],
         default="local",
-        help="Storage backend: 'local' for local filesystem or 'arraylake' for Arraylake (default: local)",
+        help="Storage backend: 'local' for local filesystem, 'arraylake' for Arraylake prod deployment, or 'arraylake-dev' for Arraylake dev deployment (default: local)",
     )
     parser.addoption(
         "--prefix",
         action="store",
-        help="Prefix for the repository/storage path (defaults: local=/tmp/tiles-icechunk/, arraylake=earthmover-integration/tiles-icechunk/)",
+        help="Prefix for the repository/storage path (defaults: local=/tmp/tiles-icechunk/, arraylake=earthmover-integration/tiles-icechunk/, arraylake-dev=earthmover-integration/tiles-icechunk/)",
     )
     parser.addoption("--setup", action="store_true", help="Run setup tests (test_create)")
     parser.addoption(
@@ -89,7 +89,9 @@ def prefix(request, where):
     if where == "local":
         return "/tmp/tiles-icechunk/"
     elif where == "arraylake":
-        return "earthmover-integration/tiles-icechunk/"
+        return "earthmover-integration/tiles-icechunk"
+    elif where == "arraylake-dev":
+        return "earthmover-integration/tiles-icechunk"
     else:
         raise ValueError(f"No default prefix available for storage backend: {where}")
 
@@ -98,7 +100,7 @@ def generate_repo(where: str, prefix: str):
     """Generate an icechunk Repository based on storage backend choice.
 
     Args:
-        where: Storage backend - 'local' or 'arraylake'
+        where: Storage backend - 'local', 'arraylake', or 'arraylake-dev'
         prefix: Prefix for the repository/storage path
 
     Returns:
@@ -114,7 +116,14 @@ def generate_repo(where: str, prefix: str):
             return icechunk.Repository.create(storage)
     elif where == "arraylake":
         client = al.Client()
-        repo = client.get_or_create_repo(ARRAYLAKE_REPO)
+        repo = client.get_or_create_repo(prefix)
+        return repo
+    elif where == "arraylake-dev":
+        client = al.Client(
+            service_uri="https://dev.api.earthmover.io",
+            token=os.environ.get("ARRAYLAKE_TOKEN"),
+        )
+        repo = client.get_or_create_repo(prefix, bucket_config_nickname="earthmover")
         return repo
     else:
         raise ValueError(f"Unsupported storage backend: {where}")

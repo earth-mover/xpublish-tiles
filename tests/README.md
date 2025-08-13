@@ -8,7 +8,7 @@ Configurable test for creating sample datasets in different storage backends.
 
 ```bash
 # Required arguments
---where {local,arraylake}    # Storage backend
+--where {local,arraylake,arraylake-dev}    # Storage backend
 --setup                      # Enable dataset creation tests
 
 # Optional arguments
@@ -20,7 +20,8 @@ Configurable test for creating sample datasets in different storage backends.
 | Backend | Default Prefix | Description |
 |---------|----------------|-------------|
 | `local` | `/tmp/tiles-icechunk/` | Local filesystem using icechunk |
-| `arraylake` | `earthmover-integration/tiles-icechunk/` | Arraylake cloud storage |
+| `arraylake` | `earthmover-integration/tiles-icechunk/` | Arraylake prod deployment |
+| `arraylake-dev` | `earthmover-integration/tiles-icechunk/` | Arraylake dev deployment |
 
 ### Examples
 
@@ -28,8 +29,11 @@ Configurable test for creating sample datasets in different storage backends.
 # Create datasets locally (default prefix)
 uv run pytest tests/test_arraylake.py --where=local --setup
 
-# Create datasets in Arraylake (default prefix)
+# Create datasets in Arraylake prod deployment (default prefix)
 uv run pytest tests/test_arraylake.py --where=arraylake --setup
+
+# Create datasets in Arraylake dev deployment (default prefix)
+uv run pytest tests/test_arraylake.py --where=arraylake-dev --setup
 
 # Use custom prefix
 uv run pytest tests/test_arraylake.py --where=local --prefix=/tmp/my-data --setup

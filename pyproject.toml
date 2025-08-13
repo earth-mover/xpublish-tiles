@@ -66,6 +66,8 @@ dev = [
     "dask",
     "ipython>=9.4.0",
     "pytest-randomly>=3.16.0",
+    "coiled>=1.118.1",
+    "bokeh>=3.7.3",
 ]
 
 [project.entry-points."xpublish.plugin"]
