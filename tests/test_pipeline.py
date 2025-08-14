@@ -11,6 +11,8 @@ from hypothesis import strategies as st
 from pyproj import CRS
 from pyproj.aoi import BBox
 
+import xarray as xr
+from src.xpublish_tiles.render.raster import nearest_on_uniform_grid_quadmesh
 from tests.tiles import PARA_TILES, TILES, WEBMERC_TMS
 from xarray.testing import assert_equal
 from xpublish_tiles.datasets import FORECAST, PARA, ROMSDS, create_global_dataset
@@ -190,7 +192,7 @@ def validate_transparency(
             if dataset_bbox.contains(tile_bbox):
                 assert (
                     transparent_percent == 0
-                ), f"Found {transparent_percent:.1f}% transparent pixels in fully contained tile (expected ≤5%)."
+                ), f"Found {transparent_percent:.1f}% transparent pixels in fully contained tile."
             elif dataset_bbox.intersects(tile_bbox):
                 assert transparent_percent > 0
             else:
@@ -332,3 +334,12 @@ def test_apply_query_selectors():
     assert_equal(
         result["temp"].da, ROMSDS.temp.sel(s_rho=0, method="nearest").isel(ocean_time=-1)
     )
+
+
+def test_datashader_nearest_regridding():
+    ds = xr.Dataset(
+        {"foo": (("x", "y"), np.arange(120).reshape(30, 4))},
+        coords={"x": np.arange(30), "y": np.arange(4)},
+    ).drop_indexes(("x", "y"))
+    res = nearest_on_uniform_grid_quadmesh(ds.foo, "x", "y")
+    assert_equal(ds.foo, res.astype(ds.foo.dtype).transpose(*ds.foo.dims))
