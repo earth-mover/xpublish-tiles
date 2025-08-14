@@ -298,7 +298,7 @@ def test_multi_dimensional_dataset():
     from xpublish_tiles.xpublish.tiles.metadata import extract_dataset_extents
 
     # Create a dataset with multiple dimensions
-    time_coords = pd.date_range("2023-01-01", periods=3, freq="H")
+    time_coords = pd.date_range("2023-01-01", periods=3, freq="h")
     elevation_coords = [0, 100, 500]
     scenario_coords = ["A", "B"]
 

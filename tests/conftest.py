@@ -19,6 +19,22 @@ ARRAYLAKE_REPO = "earthmover-integration/tiles-datasets-develop"
 IS_SNAPSHOT_UPDATE = False
 
 
+def compare_image_buffers(buffer1: io.BytesIO, buffer2: io.BytesIO) -> bool:
+    """Compare two image BytesIO buffers by converting them to numpy arrays."""
+    buffer1.seek(0)
+    buffer2.seek(0)
+
+    # Convert both images to numpy arrays
+    img1 = Image.open(buffer1)
+    img2 = Image.open(buffer2)
+
+    array1 = np.array(img1)
+    array2 = np.array(img2)
+
+    # Compare arrays using numpy array equality
+    return np.array_equal(array1, array2)
+
+
 def pytest_addoption(parser):
     parser.addoption(
         "--where",
@@ -375,55 +391,56 @@ Change: {actual_transparent - expected_transparent:+,} pixels
             This is more robust against compression differences and platform variations.
             Generates debug visualization when --debug-visual flag is used.
             """
-            # Convert both images to numpy arrays
-            actual_img = Image.open(io.BytesIO(serialized_data))
-            expected_img = Image.open(io.BytesIO(snapshot_data))
+            # Use the helper function to compare images
+            actual_buffer = io.BytesIO(serialized_data)
+            expected_buffer = io.BytesIO(snapshot_data)
+            arrays_equal = compare_image_buffers(expected_buffer, actual_buffer)
 
+            if IS_SNAPSHOT_UPDATE:
+                return arrays_equal
+
+            # Convert both images to numpy arrays for debug visualization
+            actual_img = Image.open(actual_buffer)
+            expected_img = Image.open(expected_buffer)
             actual_array = np.array(actual_img)
             expected_array = np.array(expected_img)
 
-            # Check if arrays are equal
-            arrays_equal = np.array_equal(actual_array, expected_array)
+            # Generate debug visualization if arrays don't match and debug flag is set
+            if not arrays_equal and (DEBUG_VISUAL or DEBUG_VISUAL_SAVE):
+                test_name = request.node.name
 
-            # Check if we're in snapshot update mode
-            if IS_SNAPSHOT_UPDATE:
-                return arrays_equal
-            else:
-                # Generate debug visualization if arrays don't match and debug flag is set
-                if not arrays_equal and (DEBUG_VISUAL or DEBUG_VISUAL_SAVE):
-                    test_name = request.node.name
+                # Try to get tile and tms from test parameters
+                tile_info = None
+                try:
+                    # Look for tile and tms in the request's fixturenames and cached values
+                    if hasattr(request, "_pyfuncitem"):
+                        callspec = getattr(request._pyfuncitem, "callspec", None)
+                        if callspec and hasattr(callspec, "params"):
+                            params = callspec.params
+                            # Check for individual tile/tms params (test_pipeline_tiles)
+                            if "tile" in params and "tms" in params:
+                                tile_info = (params["tile"], params["tms"])
+                            # Check for projected_dataset_and_tile fixture (test_projected_coordinate_data)
+                            elif "projected_dataset_and_tile" in params:
+                                _, tile, tms = params["projected_dataset_and_tile"]
+                                tile_info = (tile, tms)
+                except Exception:
+                    # Parameter extraction failed
+                    pass
 
-                    # Try to get tile and tms from test parameters
-                    tile_info = None
-                    try:
-                        # Look for tile and tms in the request's fixturenames and cached values
-                        if hasattr(request, "_pyfuncitem"):
-                            callspec = getattr(request._pyfuncitem, "callspec", None)
-                            if callspec and hasattr(callspec, "params"):
-                                params = callspec.params
-                                # Check for individual tile/tms params (test_pipeline_tiles)
-                                if "tile" in params and "tms" in params:
-                                    tile_info = (params["tile"], params["tms"])
-                                # Check for projected_dataset_and_tile fixture (test_projected_coordinate_data)
-                                elif "projected_dataset_and_tile" in params:
-                                    ds, tile, tms = params["projected_dataset_and_tile"]
-                                    tile_info = (tile, tms)
-                    except Exception:
-                        # Parameter extraction failed
-                        pass
-
-                    # Only create debug visualization if we have tile info
-                    if tile_info:
-                        create_debug_visualization(
-                            actual_array, expected_array, test_name, tile_info
-                        )
-                    else:
-                        print(
-                            f"Warning: Could not extract tile info for debug visualization: {test_name}"
-                        )
+                # Only create debug visualization if we have tile info
+                if tile_info:
+                    create_debug_visualization(
+                        actual_array, expected_array, test_name, tile_info
+                    )
+                else:
+                    print(
+                        f"Warning: Could not extract tile info for debug visualization: {test_name}"
+                    )
 
                 # Normal test run - better error messages
                 np.testing.assert_array_equal(actual_array, expected_array)
-                return True
+
+            return arrays_equal
 
     return snapshot.use_extension(RobustPNGSnapshotExtension)
