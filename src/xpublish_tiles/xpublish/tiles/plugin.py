@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import Dataset
+from xpublish_tiles.lib import NoCoverageError
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.types import QueryParams
 from xpublish_tiles.xpublish.tiles.metadata import (
@@ -269,13 +270,11 @@ class TilesPlugin(Plugin):
             )
             try:
                 buffer = await pipeline(dataset, render_params)
-            except ValueError as e:
-                if "no overlap with requested bbox" in str(e):
-                    raise HTTPException(  # noqa: B904
-                        status_code=400,
-                        detail=f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} has no overlap with dataset bounds",
-                    )
-                raise e
+            except NoCoverageError:
+                raise HTTPException(  # noqa: B904
+                    status_code=400,
+                    detail=f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} has no overlap with dataset bounds",
+                )
 
             return StreamingResponse(
                 buffer,

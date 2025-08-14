@@ -16,6 +16,7 @@ from scipy.interpolate import NearestNDInterpolator
 
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear
+from xpublish_tiles.lib import NoCoverageError
 from xpublish_tiles.render import Renderer, register_renderer
 from xpublish_tiles.types import (
     ContinuousData,
@@ -115,7 +116,7 @@ class DatashaderRasterRenderer(Renderer):
         self.validate(contexts)
         (context,) = contexts.values()
         if isinstance(context, NullRenderContext):
-            raise ValueError("no overlap with requested bbox.")
+            raise NoCoverageError("no overlap with requested bbox.")
         if TYPE_CHECKING:
             assert isinstance(context, PopulatedRenderContext)
         bbox = context.bbox
