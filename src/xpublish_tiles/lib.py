@@ -17,6 +17,12 @@ class NoCoverageError(Exception):
     pass
 
 
+class TileTooBigError(Exception):
+    """Raised when a tile request would result in too much data to render."""
+
+    pass
+
+
 EXECUTOR = ThreadPoolExecutor(
     max_workers=16, thread_name_prefix="xpublish-tiles-threadpool"
 )

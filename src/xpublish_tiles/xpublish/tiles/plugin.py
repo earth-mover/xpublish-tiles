@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import Dataset
-from xpublish_tiles.lib import NoCoverageError
+from xpublish_tiles.lib import NoCoverageError, TileTooBigError
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.types import QueryParams
 from xpublish_tiles.xpublish.tiles.metadata import (
@@ -274,6 +274,11 @@ class TilesPlugin(Plugin):
                 raise HTTPException(  # noqa: B904
                     status_code=400,
                     detail=f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} has no overlap with dataset bounds",
+                )
+            except TileTooBigError:
+                raise HTTPException(  # noqa: B904
+                    status_code=400,
+                    detail=f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} request too big. Please choose a higher zoom level.",
                 )
 
             return StreamingResponse(
