@@ -4,6 +4,7 @@ import xpublish
 from fastapi.testclient import TestClient
 
 import xarray as xr
+from xpublish_tiles.datasets import EU3035
 from xpublish_tiles.xpublish.tiles import TilesPlugin
 
 
@@ -618,3 +619,23 @@ def test_helper_functions():
     assert limits[0].maxTileRow == 0  # 2^0 - 1 = 0
     assert limits[1].maxTileRow == 1  # 2^1 - 1 = 1
     assert limits[2].maxTileRow == 3  # 2^2 - 1 = 3
+
+
+def test_bbox_overlap_error():
+    """Test that requesting a tile with no overlap with dataset bounds returns proper error"""
+    # EU3035 covers Europe, so we'll request a tile that's far away (e.g., in Pacific Ocean)
+    rest = xpublish.Rest({"europe": EU3035.create()}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    # Request a tile that's completely outside the dataset bounds
+    # This tile at zoom 9 should be in the Pacific Ocean, far from Europe
+    response = client.get(
+        "/datasets/europe/tiles/WebMercatorQuad/9/10/200"
+        "?variables=foo&style=raster/viridis&width=256&height=256"
+    )
+
+    # Should return 400 Bad Request with appropriate error message
+    assert response.status_code == 400
+    error_detail = response.json()["detail"]
+    assert "no overlap with dataset bounds" in error_detail
+    assert "WebMercatorQuad/9/10/200" in error_detail

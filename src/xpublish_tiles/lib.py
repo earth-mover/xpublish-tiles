@@ -10,6 +10,13 @@ import pyproj
 import toolz as tlz
 from PIL import Image
 
+
+class NoCoverageError(Exception):
+    """Raised when a tile has no overlap with the dataset bounds."""
+
+    pass
+
+
 EXECUTOR = ThreadPoolExecutor(
     max_workers=16, thread_name_prefix="xpublish-tiles-threadpool"
 )
