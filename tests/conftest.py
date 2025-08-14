@@ -1,6 +1,5 @@
 from itertools import product
 
-import arraylake as al
 import pytest
 from pyproj.aoi import BBox
 
@@ -10,24 +9,13 @@ from xpublish_tiles.testing.datasets import EU3035, HRRR, create_global_dataset
 from xpublish_tiles.testing.lib import compare_image_buffers, png_snapshot  # noqa: F401
 from xpublish_tiles.testing.tiles import ETRS89_TILES, HRRR_TILES
 
-ARRAYLAKE_REPO = "earthmover-integration/tiles-datasets-develop"
 IS_SNAPSHOT_UPDATE = False
 
 
 def pytest_addoption(parser):
     parser.addoption(
-        "--where",
-        action="store",
-        choices=["local", "arraylake"],
-        default="local",
-        help="Storage backend: 'local' for local filesystem or 'arraylake' for Arraylake (default: local)",
+        "--setup", action="store_true", help="Run setup tests (test_create_local_dataset)"
     )
-    parser.addoption(
-        "--prefix",
-        action="store",
-        help="Prefix for the repository/storage path (defaults: local=/tmp/tiles-icechunk/, arraylake=earthmover-integration/tiles-icechunk/)",
-    )
-    parser.addoption("--setup", action="store_true", help="Run setup tests (test_create)")
     parser.addoption(
         "--debug-visual",
         action="store_true",
@@ -61,6 +49,19 @@ def pytest_configure(config):
             config.option.dist = "no"
 
 
+def pytest_collection_modifyitems(config, items):
+    """Modify test collection based on command line options."""
+    if config.getoption("--setup"):
+        # Filter to only include test_create_local_dataset function from test_create_datasets.py when --setup is specified
+        setup_items = [
+            item
+            for item in items
+            if item.name.startswith("test_create_local_dataset")
+            and "test_create_datasets.py" in str(item.fspath)
+        ]
+        items[:] = setup_items
+
+
 @pytest.fixture(scope="session")
 def air_dataset():
     ds = xr.tutorial.load_dataset("air_temperature")
@@ -69,55 +70,17 @@ def air_dataset():
     return ds
 
 
-@pytest.fixture(scope="session")
-def where(request):
-    return request.config.getoption("--where")
-
-
-@pytest.fixture(scope="session")
-def prefix(request, where):
-    provided_prefix = request.config.getoption("--prefix")
-    if provided_prefix:
-        return provided_prefix
-
-    # Use defaults based on storage backend
-    if where == "local":
-        return "/tmp/tiles-icechunk/"
-    elif where == "arraylake":
-        return "earthmover-integration/tiles-icechunk/"
-    else:
-        raise ValueError(f"No default prefix available for storage backend: {where}")
-
-
-def generate_repo(where: str, prefix: str):
-    """Generate an icechunk Repository based on storage backend choice.
-
-    Args:
-        where: Storage backend - 'local' or 'arraylake'
-        prefix: Prefix for the repository/storage path
-
-    Returns:
-        icechunk.Repository: Repository object for the specified backend
-    """
-    if where == "local":
-        storage = icechunk.local_filesystem_storage(prefix)
-        try:
-            # Try to open existing repository
-            return icechunk.Repository.open(storage)
-        except Exception:
-            # Create new repository if it doesn't exist
-            return icechunk.Repository.create(storage)
-    elif where == "arraylake":
-        client = al.Client()
-        repo = client.get_or_create_repo(ARRAYLAKE_REPO)
-        return repo
-    else:
-        raise ValueError(f"Unsupported storage backend: {where}")
-
-
 @pytest.fixture
-def repo(where, prefix):
-    return generate_repo(where, prefix)
+def repo():
+    """Generate an icechunk Repository for local filesystem storage."""
+    prefix = "/tmp/tiles-icechunk/"
+    storage = icechunk.local_filesystem_storage(prefix)
+    try:
+        # Try to open existing repository
+        return icechunk.Repository.open(storage)
+    except Exception:
+        # Create new repository if it doesn't exist
+        return icechunk.Repository.create(storage)
 
 
 @pytest.fixture(

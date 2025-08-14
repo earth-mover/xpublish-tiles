@@ -31,6 +31,50 @@ def get_dataset_for_name(
         ds = PARA.create().assign_attrs(_xpublish_id=name)
     elif name == "eu3035":
         ds = EU3035_HIRES.create().assign_attrs(_xpublish_id=name)
+    elif name.startswith("local://"):
+        # Local icechunk dataset path
+        import icechunk
+
+        # Parse the local path - format: local://dataset_name or local:///path/to/repo::dataset_name
+        local_path = name[8:]  # Remove "local://" prefix
+
+        # Check if a custom path is specified (separated by ::)
+        if "::" in local_path:
+            repo_path, dataset_name = local_path.rsplit("::", 1)
+        else:
+            # Use default path
+            repo_path = "/tmp/tiles-icechunk/"
+            dataset_name = local_path
+
+        try:
+            storage = icechunk.local_filesystem_storage(repo_path)
+            repo = icechunk.Repository.open(storage)
+
+            config: icechunk.RepositoryConfig | None = None
+            if icechunk_cache:
+                config = icechunk.RepositoryConfig(
+                    caching=icechunk.CachingConfig(
+                        num_bytes_chunks=1073741824,
+                        num_chunk_refs=1073741824,
+                        num_bytes_attributes=100_000_000,
+                    )
+                )
+
+            session = repo.readonly_session(branch=branch)
+            ds = xr.open_zarr(
+                session.store,
+                group=dataset_name,
+                zarr_format=3,
+                consolidated=False,
+                chunks=None,
+            )
+            # Add _xpublish_id for caching
+            xpublish_id = f"local:{dataset_name}:{branch}"
+            ds.attrs["_xpublish_id"] = xpublish_id
+        except Exception as e:
+            raise ValueError(
+                f"Error loading local dataset '{dataset_name}' from {repo_path}: {e}"
+            ) from e
     else:
         # Arraylake path
         try:
@@ -56,6 +100,7 @@ def get_dataset_for_name(
                 group=group if len(group) else None,
                 zarr_format=3,
                 consolidated=False,
+                chunks=None,
             )
             # Add _xpublish_id for caching - use name, branch, and group for arraylake
             xpublish_id = f"{name}:{branch}"
@@ -88,7 +133,7 @@ def main():
         "--dataset",
         type=str,
         default="global",
-        help="Dataset to serve (default: global). Options: global, air, hrrr, eu3035, or an arraylake dataset name. If an arraylake dataset is specified, the arraylake-org and arraylake-repo must be provided, along with an optional branch and group",
+        help="Dataset to serve (default: global). Options: global, air, hrrr, para, eu3035, local://<group_name> (loads group from /tmp/tiles-icechunk/), local:///custom/path::<group_name> (loads group from custom icechunk repo), or an arraylake dataset name",
     )
     parser.add_argument(
         "--branch",
