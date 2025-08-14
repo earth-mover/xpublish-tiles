@@ -13,7 +13,12 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear, guess_grid_system
-from xpublish_tiles.lib import EXECUTOR, check_transparent_pixels, transform_blocked
+from xpublish_tiles.lib import (
+    EXECUTOR,
+    TileTooBigError,
+    check_transparent_pixels,
+    transform_blocked,
+)
 from xpublish_tiles.types import (
     ContinuousData,
     DataType,
@@ -25,6 +30,9 @@ from xpublish_tiles.types import (
     QueryParams,
     ValidatedArray,
 )
+
+# This takes the pipeline ~ 1s
+MAX_RENDERABLE_SIZE = 10_000 * 10_000
 
 logger = logging.getLogger("xpublish-tiles")
 
@@ -370,6 +378,11 @@ async def subset_to_bbox(
         # Check for insufficient data - either dimension has too few points
         if min(subset.shape) < 2:
             raise ValueError("Tile request resulted in insufficient data for rendering.")
+
+        if subset.size > MAX_RENDERABLE_SIZE:
+            raise TileTooBigError(
+                "Tile request too big. Please choose a higher zoom level."
+            )
 
         has_discontinuity = (
             has_coordinate_discontinuity(subset[grid.X].data)

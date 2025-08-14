@@ -4,7 +4,7 @@ import xpublish
 from fastapi.testclient import TestClient
 
 import xarray as xr
-from xpublish_tiles.datasets import EU3035
+from xpublish_tiles.datasets import EU3035, PARA_HIRES
 from xpublish_tiles.xpublish.tiles import TilesPlugin
 
 
@@ -639,3 +639,19 @@ def test_bbox_overlap_error():
     error_detail = response.json()["detail"]
     assert "no overlap with dataset bounds" in error_detail
     assert "WebMercatorQuad/9/10/200" in error_detail
+
+
+def test_para_hires_zoom_level_2_size_limit():
+    """Test that requesting zoom level 2 for PARA_HIRES dataset triggers size limit error"""
+    rest = xpublish.Rest({"para": PARA_HIRES.create()}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    response = client.get(
+        "/datasets/para/tiles/WebMercatorQuad/2/1/1"
+        "?variables=foo&style=raster/viridis&width=256&height=256"
+    )
+    assert response.status_code == 413
+    error_detail = response.json()["detail"]
+    assert "WebMercatorQuad/2/1/1" in error_detail
+    assert "request too big" in error_detail
+    assert "Please choose a higher zoom level" in error_detail
