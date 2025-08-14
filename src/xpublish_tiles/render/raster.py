@@ -96,7 +96,13 @@ class DatashaderRasterRenderer(Renderer):
         assert len(context) == 1
 
     def maybe_cast_data(self, data) -> xr.DataArray:  # type: ignore[name-defined]
-        return data.astype(np.float64, copy=False)
+        dtype = data.dtype
+        totype = str(dtype.str)
+        # numba only supports float32 and float64. upcast everything else
+        # https://numba.readthedocs.io/en/stable/reference/types.html#numbers
+        if dtype.kind == "f" and dtype.itemsize < 4:
+            totype = totype[:-1] + "4"
+        return data.astype(totype, copy=False)
 
     def render(
         self,
@@ -141,7 +147,8 @@ class DatashaderRasterRenderer(Renderer):
                 # https://github.com/holoviz/datashader/issues/1435
                 # Lock is only used when tbb is not available (e.g., on macOS)
                 with LOCK:
-                    data = nearest_on_uniform_grid_quadmesh(context.da, grid.X, grid.Y)
+                    data = self.maybe_cast_data(context.da)
+                    data = nearest_on_uniform_grid_quadmesh(data, grid.X, grid.Y)
                     mesh = cvs.raster(
                         data,
                         interpolate="nearest",

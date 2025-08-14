@@ -3,16 +3,19 @@
 import io
 
 import cf_xarray  # noqa: F401 - Enable cf accessor
+import matplotlib.pyplot as plt
 import morecantile
 import numpy as np
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
+from PIL import Image
 from pyproj import CRS
 from pyproj.aoi import BBox
 
 import xarray as xr
 from src.xpublish_tiles.render.raster import nearest_on_uniform_grid_quadmesh
+from tests.conftest import compare_image_buffers
 from tests.tiles import PARA_TILES, TILES, WEBMERC_TMS
 from xarray.testing import assert_equal
 from xpublish_tiles.datasets import FORECAST, PARA, ROMSDS, create_global_dataset
@@ -25,15 +28,6 @@ from xpublish_tiles.pipeline import (
 from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
 
 
-def is_png(buffer: io.BytesIO) -> bool:
-    """Check if a BytesIO buffer contains valid PNG data."""
-    buffer.seek(0)
-    header = buffer.read(8)
-    buffer.seek(0)
-    # PNG signature: 89 50 4E 47 0D 0A 1A 0A
-    return header == b"\x89PNG\r\n\x1a\n"
-
-
 def visualize_tile(result: io.BytesIO, tile: morecantile.Tile) -> None:
     """Visualize a rendered tile with matplotlib showing RGB and alpha channels.
 
@@ -41,9 +35,6 @@ def visualize_tile(result: io.BytesIO, tile: morecantile.Tile) -> None:
         result: BytesIO buffer containing PNG image data
         tile: Tile object with z, x, y coordinates
     """
-    import matplotlib.pyplot as plt
-    from PIL import Image
-
     result.seek(0)
     pil_img = Image.open(result)
     img_array = np.array(pil_img)
@@ -339,3 +330,52 @@ def test_datashader_nearest_regridding():
     ).drop_indexes(("x", "y"))
     res = nearest_on_uniform_grid_quadmesh(ds.foo, "x", "y")
     assert_equal(ds.foo, res.astype(ds.foo.dtype).transpose(*ds.foo.dims))
+
+
+@pytest.mark.parametrize("data_type", ["discrete", "continuous"])
+@pytest.mark.parametrize("size", [1, 2, 4, 8])
+@pytest.mark.parametrize("kind", ["u", "i", "f"])
+async def test_datashader_casting(data_type, size, kind, pytestconfig):
+    """
+    For all dtypes, we render a bbox that will contain NaNs.
+    Ensure that output is identical to that of rendering a float64 input.
+    """
+    if kind == "f" and size == 1:
+        pytest.skip()
+    if data_type == "discrete":
+        attrs = {
+            "flag_values": [0, 1, 2, 3],
+            "flag_meanings": "a b c d",
+        }
+    else:
+        attrs = {"valid_min": 0, "valid_max": 3}
+    ds = xr.Dataset(
+        {
+            "foo": (
+                ("x", "y"),
+                np.array([[1, 2, 3], [0, 1, 2]], dtype=f"{kind}{size}"),
+                attrs,
+            )
+        },
+        coords={
+            "x": ("x", [1, 2], {"standard_name": "longitude"}),
+            "y": ("y", [1, 2, 3], {"standard_name": "latitude"}),
+        },
+    )
+    query = QueryParams(
+        variables=["foo"],
+        crs=OutputCRS(CRS.from_user_input(4326)),
+        bbox=OutputBBox(BBox(west=-5, east=5, south=-5, north=5)),
+        selectors={},
+        style="raster",
+        width=256,
+        height=256,
+        cmap="viridis",
+        colorscalerange=None,
+        format=ImageFormat.PNG,
+    )
+    actual = await pipeline(ds, query)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(actual, morecantile.Tile(0, 0, 0))
+    expected = await pipeline(ds.astype(np.float64), query)
+    assert compare_image_buffers(expected, actual)
