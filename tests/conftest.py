@@ -1,36 +1,17 @@
-import io
 from itertools import product
 
 import arraylake as al
-import numpy as np
 import pytest
-from PIL import Image
 from pyproj.aoi import BBox
 
 import icechunk
 import xarray as xr
 from xpublish_tiles.testing.datasets import EU3035, HRRR, create_global_dataset
-from xpublish_tiles.testing.fixtures import png_snapshot  # noqa: F401
+from xpublish_tiles.testing.lib import compare_image_buffers, png_snapshot  # noqa: F401
 from xpublish_tiles.testing.tiles import ETRS89_TILES, HRRR_TILES
 
 ARRAYLAKE_REPO = "earthmover-integration/tiles-datasets-develop"
 IS_SNAPSHOT_UPDATE = False
-
-
-def compare_image_buffers(buffer1: io.BytesIO, buffer2: io.BytesIO) -> bool:
-    """Compare two image BytesIO buffers by converting them to numpy arrays."""
-    buffer1.seek(0)
-    buffer2.seek(0)
-
-    # Convert both images to numpy arrays
-    img1 = Image.open(buffer1)
-    img2 = Image.open(buffer2)
-
-    array1 = np.array(img1)
-    array2 = np.array(img2)
-
-    # Compare arrays using numpy array equality
-    return np.array_equal(array1, array2)
 
 
 def pytest_addoption(parser):
