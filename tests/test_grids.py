@@ -8,8 +8,6 @@ from pyproj import CRS
 from pyproj.aoi import BBox
 
 import xarray as xr
-from tests.tiles import TILES
-from xpublish_tiles.datasets import EU3035, FORECAST, HRRR, HRRR_CRS_WKT, ROMSDS
 from xpublish_tiles.grids import (
     X_COORD_PATTERN,
     Y_COORD_PATTERN,
@@ -19,6 +17,8 @@ from xpublish_tiles.grids import (
     Rectilinear,
     guess_grid_system,
 )
+from xpublish_tiles.testing.datasets import EU3035, FORECAST, HRRR, HRRR_CRS_WKT, ROMSDS
+from xpublish_tiles.testing.tiles import TILES
 
 # FIXME: add tests for datasets with latitude, longitude but no attrs
 

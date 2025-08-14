@@ -8,7 +8,12 @@ import xpublish
 from fastapi.middleware.cors import CORSMiddleware
 
 import xarray as xr
-from xpublish_tiles.datasets import EU3035_HIRES, HRRR, PARA, create_global_dataset
+from xpublish_tiles.testing.datasets import (
+    EU3035_HIRES,
+    HRRR,
+    PARA,
+    create_global_dataset,
+)
 from xpublish_tiles.xpublish.tiles.plugin import TilesPlugin
 from xpublish_tiles.xpublish.wms.plugin import WMSPlugin
 
