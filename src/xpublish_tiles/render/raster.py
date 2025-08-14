@@ -165,12 +165,13 @@ class DatashaderRasterRenderer(Renderer):
                     raise ValueError(
                         "`colorscalerange` must be specified when array does not have valid_min and valid_max attributes specified."
                     )
-            shaded = tf.shade(
-                mesh,
-                cmap=mpl.colormaps.get_cmap(cmap),
-                how="linear",
-                span=colorscalerange,
-            )
+            with np.errstate(invalid="ignore"):
+                shaded = tf.shade(
+                    mesh,
+                    cmap=mpl.colormaps.get_cmap(cmap),
+                    how="linear",
+                    span=colorscalerange,
+                )
         elif isinstance(context.datatype, DiscreteData):
             kwargs = {}
             if context.datatype.colors is not None:
@@ -183,7 +184,8 @@ class DatashaderRasterRenderer(Renderer):
                     min(context.datatype.values),
                     max(context.datatype.values),
                 )
-            shaded = tf.shade(mesh, how="linear", **kwargs)
+            with np.errstate(invalid="ignore"):
+                shaded = tf.shade(mesh, how="linear", **kwargs)
         else:
             raise NotImplementedError(f"Unsupported datatype: {type(context.datatype)}")
 
