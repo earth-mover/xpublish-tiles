@@ -12,7 +12,6 @@ dependencies = [
     "cf-xarray>=0.10.6",
     "cftime>=1.6.4.post1",
     "datashader>=0.18.2",
-    "matplotlib>=3.10.3",
     "morecantile>=5.4.2",
     "numbagg>=0.9.0",
     "numba>=0.60.0",
@@ -48,10 +47,6 @@ packages = ["src/xpublish_tiles"]
 
 [dependency-groups]
 dev = [
-    "pytest>=8.4.1",
-    "pytest-asyncio>=1.1.0",
-    "pytest-cov>=6.2.1",
-    "pytest-xdist>=3.6.1",
     "ruff>=0.12.4",
     "ty>=0.0.1a15",
     "pdbpp>=0.11.7",
@@ -59,12 +54,19 @@ dev = [
     "pooch>=1.8.2",
     "arraylake",
     "icechunk",
-    "syrupy>=4.9.1",
-    "pooch>=1.8.2",
-    "hypothesis>=6.136.6",
     "dask",
     "ipython>=9.4.0",
+    {include-group = "testing"},
+]
+testing = [
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.1.0",
+    "pytest-cov>=6.2.1",
+    "pytest-xdist>=3.6.1",
+    "syrupy>=4.9.1",
+    "hypothesis>=6.136.6",
     "pytest-randomly>=3.16.0",
+    "matplotlib>=3.10.3",
 ]
 
 [project.entry-points."xpublish.plugin"]
