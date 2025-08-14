@@ -267,7 +267,15 @@ class TilesPlugin(Plugin):
                 format=query.f,
                 selectors=selectors,
             )
-            buffer = await pipeline(dataset, render_params)
+            try:
+                buffer = await pipeline(dataset, render_params)
+            except ValueError as e:
+                if "no overlap with requested bbox" in str(e):
+                    raise HTTPException(  # noqa: B904
+                        status_code=400,
+                        detail=f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} has no overlap with dataset bounds",
+                    )
+                raise e
 
             return StreamingResponse(
                 buffer,
