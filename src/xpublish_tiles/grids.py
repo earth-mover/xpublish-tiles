@@ -558,7 +558,11 @@ def guess_grid_system(ds: xr.Dataset, name: str) -> GridSystem:
     try:
         grid = _guess_grid_for_dataset(ds.cf[[name]])
     except RuntimeError:
-        grid = _guess_grid_for_dataset(ds)
+        try:
+            grid = _guess_grid_for_dataset(ds)
+        except RuntimeError:
+            ds = ds.cf.guess_coord_axis()
+            grid = _guess_grid_for_dataset(ds)
 
     grid.Z = _guess_z_dimension(ds.cf[name])
 

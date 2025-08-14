@@ -17,7 +17,14 @@ from xpublish_tiles.grids import (
     Rectilinear,
     guess_grid_system,
 )
-from xpublish_tiles.testing.datasets import EU3035, FORECAST, HRRR, HRRR_CRS_WKT, ROMSDS
+from xpublish_tiles.testing.datasets import (
+    EU3035,
+    FORECAST,
+    HRRR,
+    HRRR_CRS_WKT,
+    IFS,
+    ROMSDS,
+)
 from xpublish_tiles.testing.tiles import TILES
 
 # FIXME: add tests for datasets with latitude, longitude but no attrs
@@ -26,6 +33,23 @@ from xpublish_tiles.testing.tiles import TILES
 @pytest.mark.parametrize(
     "ds, array_name, expected",
     (
+        (
+            IFS.create(),
+            "foo",
+            Rectilinear(
+                crs=CRS.from_epsg(4326),
+                bbox=BBox(
+                    west=-180,
+                    south=-90,
+                    east=180,
+                    north=90,
+                ),
+                X="longitude",
+                Y="latitude",
+                Z=None,
+                indexes=(),  # type: ignore[arg-type]
+            ),
+        ),
         (
             FORECAST,
             "sst",

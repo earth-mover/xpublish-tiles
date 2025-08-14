@@ -25,4 +25,4 @@ jobs:
         run: uv run ty check src/ tests/
 
       - name: Run tests
-        run: uv run pytest tests --where=local --durations=10
+        run: uv run pytest tests --durations=10

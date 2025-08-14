@@ -13,8 +13,6 @@ from xpublish_tiles.testing.datasets import (
     Dataset,
 )
 
-ARRAYLAKE_REPO = "earthmover-integration/tiles-datasets-develop"
-
 
 @pytest.fixture(
     params=[
@@ -32,12 +30,14 @@ def dataset(request):
     return request.param
 
 
-def test_create(dataset: Dataset, repo, where: str, prefix: str, request) -> None:
+# This test runs first when --setup is passed. The xdist_group ensures it completes
+# before other tests run in parallel.
+@pytest.mark.xdist_group(name="repo_creation")
+def test_create_local_dataset(dataset: Dataset, repo, request) -> None:
     if not request.config.getoption("--setup"):
-        pytest.skip("test_create only runs when --setup flag is provided")
+        pytest.skip("test_create_local_dataset only runs when --setup flag is provided")
 
     ds = dataset.create()
     session = repo.writable_session("main")
-
     to_icechunk(ds, session, group=dataset.name, mode="w")
     session.commit(f"wrote {dataset.name!r}")

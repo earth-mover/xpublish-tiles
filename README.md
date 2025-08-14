@@ -28,7 +28,13 @@ uv run ty check
 Run the tests
 
 ```sh
-uv run pytest tests --where=local
+uv run pytest tests
+```
+
+Run setup tests (create local datasets, these can be deployed using the CLI)
+
+```sh
+uv run pytest --setup
 ```
 
 ## CLI Usage
@@ -64,6 +70,9 @@ xpublish-tiles --port 9000 --dataset air
 
 # Serve Arraylake dataset with specific branch and group
 xpublish-tiles --dataset earthmover-public/aifs-outputs --branch main --group 2025-04-01/12z --cache
+
+# Serve locally stored data created using `uv run pytest --setup`
+uv run xpublish-tiles --dataset=local://ifs
 ```
 
 Once running, the server provides:
