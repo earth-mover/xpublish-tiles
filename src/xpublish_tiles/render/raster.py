@@ -31,9 +31,6 @@ HAS_TBB = importlib.util.find_spec("tbb") is not None
 LOCK = contextlib.nullcontext() if HAS_TBB else threading.Lock()
 logger = logging.getLogger("xpublish-tiles")
 
-# without controlling the seed, output for categorical data is non-deterministic
-np.random.seed(1234)
-
 
 def nearest_on_uniform_grid_scipy(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.DataArray:
     """This is quite slow. 10s for a 2000x3000 array"""
@@ -47,8 +44,8 @@ def nearest_on_uniform_grid_scipy(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.
         np.stack([X.data.ravel(), Y.data.ravel()], axis=-1),
         da.data.ravel(),
     )
-    print(f"constructing interpolator: {time.time() - tic} seconds")
-    print(f"interpolating from {da.shape} to {newY.size}x{newX.size}")
+    logger.debug(f"constructing interpolator: {time.time() - tic} seconds")
+    logger.debug(f"interpolating from {da.shape} to {newY.size}x{newX.size}")
     tic = time.time()
     new = xr.DataArray(
         interpolator(*np.meshgrid(newX, newY)),
@@ -60,7 +57,7 @@ def nearest_on_uniform_grid_scipy(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.
         # coords=dict(x=("x", newX - dx/2), y=("y", newY - dy/2)),
         coords=dict(x=("x", newX), y=("y", newY)),
     )
-    print(f"interpolating: {time.time() - tic} seconds")
+    logger.debug(f"interpolating: {time.time() - tic} seconds")
     return new
 
 
