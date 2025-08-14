@@ -379,3 +379,28 @@ async def test_datashader_casting(data_type, size, kind, pytestconfig):
         visualize_tile(actual, morecantile.Tile(0, 0, 0))
     expected = await pipeline(ds.astype(np.float64), query)
     assert compare_image_buffers(expected, actual)
+
+
+async def test_bad_latitude_coordinates(png_snapshot, pytestconfig):
+    """
+    Regression test for https://github.com/holoviz/datashader/issues/1431
+    IMPORTANT: This only fails on linux with datshader < 0.18.2
+    """
+    lon = -179.875 + 0.25 * np.arange(1440)
+    lat = 89.875 - 0.25 * np.arange(720)
+    ds = xr.DataArray(
+        np.ones(shape=(720, 1440), dtype="f4"),
+        dims=("lat", "lon"),
+        coords={
+            "lon": ("lon", lon, {"standard_name": "longitude"}),
+            "lat": ("lat", lat, {"standard_name": "latitude"}),
+        },
+        attrs={"valid_min": 0, "valid_max": 2},
+        name="foo",
+    ).to_dataset()
+    tile = morecantile.Tile(x=8, y=8, z=4)
+    query = create_query_params(tms=WEBMERC_TMS, tile=tile)
+    render = await pipeline(ds, query)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(render, tile)
+    assert_render_matches_snapshot(render, png_snapshot)
