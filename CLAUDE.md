@@ -14,10 +14,14 @@ The WMS and Tiles specifications are available in in the `docs` directory for re
 ## Development Workflow
 
 ### Key Commands
-- **Environment sync**: `uv sync`
+- **Environment sync**: `uv sync --dev`
 - **Type check**: `uv run ty check src/ tests/` (only checks src/ and tests/ directories)
 - **Run unit tests**: `uv run pytest tests` (defaults to --where=local)
 - **Run pre-commit checks**: `pre-commit run --all-files`
+
+### Dependency Groups
+- **dev**: All development dependencies (includes testing, linting, type checking, debugging)
+- **testing**: Testing-only dependencies (pytest, syrupy, hypothesis, matplotlib, etc.)
 
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.

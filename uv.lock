@@ -2944,7 +2944,6 @@ dependencies = [
     { name = "cftime" },
     { name = "datashader" },
     { name = "fastapi" },
-    { name = "matplotlib" },
     { name = "morecantile" },
     { name = "numba" },
     { name = "numbagg" },
@@ -2965,6 +2964,7 @@ dev = [
     { name = "hypothesis" },
     { name = "icechunk" },
     { name = "ipython" },
+    { name = "matplotlib" },
     { name = "netcdf4" },
     { name = "pdbpp" },
     { name = "pooch" },
@@ -2977,6 +2977,16 @@ dev = [
     { name = "syrupy" },
     { name = "ty" },
 ]
+testing = [
+    { name = "hypothesis" },
+    { name = "matplotlib" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "pytest-randomly" },
+    { name = "pytest-xdist" },
+    { name = "syrupy" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -2985,7 +2995,6 @@ requires-dist = [
     { name = "cftime", specifier = ">=1.6.4.post1" },
     { name = "datashader", specifier = ">=0.18.2" },
     { name = "fastapi" },
-    { name = "matplotlib", specifier = ">=3.10.3" },
     { name = "morecantile", specifier = ">=5.4.2" },
     { name = "numba", specifier = ">=0.60.0" },
     { name = "numbagg", specifier = ">=0.9.0" },
@@ -3006,6 +3015,7 @@ dev = [
     { name = "hypothesis", specifier = ">=6.136.6" },
     { name = "icechunk" },
     { name = "ipython", specifier = ">=9.4.0" },
+    { name = "matplotlib", specifier = ">=3.10.3" },
     { name = "netcdf4", specifier = ">=1.7.2" },
     { name = "pdbpp", specifier = ">=0.11.7" },
     { name = "pooch", specifier = ">=1.8.2" },
@@ -3017,6 +3027,16 @@ dev = [
     { name = "ruff", specifier = ">=0.12.4" },
     { name = "syrupy", specifier = ">=4.9.1" },
     { name = "ty", specifier = ">=0.0.1a15" },
+]
+testing = [
+    { name = "hypothesis", specifier = ">=6.136.6" },
+    { name = "matplotlib", specifier = ">=3.10.3" },
+    { name = "pytest", specifier = ">=8.4.1" },
+    { name = "pytest-asyncio", specifier = ">=1.1.0" },
+    { name = "pytest-cov", specifier = ">=6.2.1" },
+    { name = "pytest-randomly", specifier = ">=3.16.0" },
+    { name = "pytest-xdist", specifier = ">=3.6.1" },
+    { name = "syrupy", specifier = ">=4.9.1" },
 ]
 
 [[package]]
