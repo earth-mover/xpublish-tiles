@@ -225,12 +225,8 @@ def assert_render_matches_snapshot(
     assert isinstance(result, io.BytesIO)
     result.seek(0)
     content = result.read()
-
     assert len(content) > 0
-
-    # Validate transparency based on tile/dataset overlap
     validate_transparency(content, tile=tile, tms=tms, dataset_bbox=dataset_bbox)
-
     assert content == png_snapshot
 
 
@@ -273,19 +269,25 @@ async def test_pipeline_bad_bbox(global_datasets, png_snapshot):
 
 
 @pytest.mark.asyncio
-async def test_high_zoom_tile_global_dataset(png_snapshot):
+async def test_high_zoom_tile_global_dataset(png_snapshot, pytestconfig):
     ds = create_global_dataset()
     tms = WEBMERC_TMS
     tile = morecantile.Tile(x=524288 + 2916, y=262144, z=20)
     query_params = create_query_params(tile, tms, colorscalerange=(-1, 1))
     result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
     assert_render_matches_snapshot(result, png_snapshot)
 
 
-async def test_projected_coordinate_data(projected_dataset_and_tile, png_snapshot):
+async def test_projected_coordinate_data(
+    projected_dataset_and_tile, png_snapshot, pytestconfig
+):
     ds, tile, tms = projected_dataset_and_tile
     query_params = create_query_params(tile, tms)
     result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
     assert_render_matches_snapshot(
         result, png_snapshot, tile=tile, tms=tms, dataset_bbox=ds.attrs["bbox"]
     )
@@ -298,12 +300,6 @@ async def test_categorical_data(tile, tms, png_snapshot, pytestconfig):
     result = await pipeline(ds, query_params)
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
-    # Validate basic properties
-    assert is_png(result)
-    result.seek(0)
-    content = result.read()
-    assert len(content) > 0
-    validate_transparency(content, tile=tile, tms=tms, dataset_bbox=ds.attrs["bbox"])
     assert_render_matches_snapshot(
         result, png_snapshot, tile=tile, tms=tms, dataset_bbox=ds.attrs["bbox"]
     )
