@@ -55,6 +55,7 @@ uv run xpublish-tiles [OPTIONS]
 - `--branch BRANCH`: Branch to use for Arraylake datasets (default: main)
 - `--group GROUP`: Group to use for Arraylake datasets (default: '')
 - `--cache`: Enable icechunk cache for Arraylake datasets
+- `--spy`: Run benchmark requests with the specified dataset for performance testing
 
 > [!TIP]
 > You can control if the tile servers data loading is async or not with the `XPUBLISH_TILES_ASYNC_LOAD` environment variable (`1` for async mode, `0` for sync mode, async is enabled by default). You can also control the zarr concurrency with the `ZARR_ASYNC__CONCURRENCY` environment variable (default: 10).
@@ -73,7 +74,26 @@ xpublish-tiles --dataset earthmover-public/aifs-outputs --branch main --group 20
 
 # Serve locally stored data created using `uv run pytest --setup`
 uv run xpublish-tiles --dataset=local://ifs
+
+# Run benchmark with a specific dataset
+xpublish-tiles --dataset=local://para_hires --spy
 ```
+
+## Benchmarking
+
+The CLI includes a benchmarking feature that can be used to test tile server performance:
+
+```sh
+# Run benchmark with a specific dataset
+xpublish-tiles --dataset=local://para_hires --spy
+```
+
+The `--spy` flag starts the tile server and automatically runs benchmark requests against it. The benchmarking:
+- Warms up the server with initial tile requests
+- Makes concurrent tile requests (limited to 12 at a time) to test performance
+- Automatically exits after completing the benchmark run
+
+For datasets containing "para" in the name, it uses zoom level 9 tiles. For other datasets, it uses lower zoom levels (0-1).
 
 Once running, the server provides:
 - Tiles API at `http://localhost:8080/tiles/`
