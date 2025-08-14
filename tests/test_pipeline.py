@@ -16,15 +16,15 @@ from pyproj.aoi import BBox
 import xarray as xr
 from src.xpublish_tiles.render.raster import nearest_on_uniform_grid_quadmesh
 from tests.conftest import compare_image_buffers
-from tests.tiles import PARA_TILES, TILES, WEBMERC_TMS
 from xarray.testing import assert_equal
-from xpublish_tiles.datasets import FORECAST, PARA, ROMSDS, create_global_dataset
 from xpublish_tiles.lib import check_transparent_pixels
 from xpublish_tiles.pipeline import (
     apply_query,
     check_bbox_overlap,
     pipeline,
 )
+from xpublish_tiles.testing.datasets import FORECAST, PARA, ROMSDS, create_global_dataset
+from xpublish_tiles.testing.tiles import PARA_TILES, TILES, WEBMERC_TMS
 from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
 
 

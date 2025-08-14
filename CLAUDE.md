@@ -15,7 +15,7 @@ The WMS and Tiles specifications are available in in the `docs` directory for re
 
 ### Key Commands
 - **Environment sync**: `uv sync`
-- **Type check**: `uv run ty check`
+- **Type check**: `uv run ty check src/ tests/` (only checks src/ and tests/ directories)
 - **Run unit tests**: `uv run pytest tests` (defaults to --where=local)
 - **Run pre-commit checks**: `pre-commit run --all-files`
 

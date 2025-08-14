@@ -4,7 +4,7 @@ import xpublish
 from fastapi.testclient import TestClient
 
 import xarray as xr
-from xpublish_tiles.datasets import EU3035, PARA_HIRES
+from xpublish_tiles.testing.datasets import EU3035, PARA_HIRES
 from xpublish_tiles.xpublish.tiles import TilesPlugin
 
 

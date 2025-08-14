@@ -1,7 +1,7 @@
 import pytest
 
 from icechunk.xarray import to_icechunk
-from xpublish_tiles.datasets import (
+from xpublish_tiles.testing.datasets import (
     EU3035,
     EU3035_HIRES,
     GLOBAL_6KM,

@@ -12,6 +12,18 @@ from pyproj.aoi import BBox
 
 import dask.array
 import xarray as xr
+from xpublish_tiles.testing.tiles import (
+    ETRS89_TILES,
+    ETRS89_TILES_EDGE_CASES,
+    HRRR_TILES,
+    HRRR_TILES_EDGE_CASES,
+    PARA_TILES,
+    PARA_TILES_EDGE_CASES,
+    WEBMERC_TILES,
+    WEBMERC_TILES_EDGE_CASES,
+    WGS84_TILES,
+    WGS84_TILES_EDGE_CASES,
+)
 
 
 @dataclass(kw_only=True)
@@ -30,6 +42,8 @@ class Dataset:
     dtype: np.typing.DTypeLike
     attrs: dict[str, Any] = field(default_factory=dict)
     setup: Callable
+    edge_case_tiles: list = field(default_factory=list)
+    tiles: list = field(default_factory=list)
 
     def create(self):
         ds = self.setup(dims=self.dims, dtype=self.dtype, attrs=self.attrs)
@@ -279,6 +293,8 @@ IFS = Dataset(
     ),
     dtype=np.float32,
     setup=uniform_grid,
+    edge_case_tiles=WGS84_TILES_EDGE_CASES + WEBMERC_TILES_EDGE_CASES,
+    tiles=WGS84_TILES + WEBMERC_TILES,
 )
 
 SENTINEL2_NOCOORDS = Dataset(
@@ -301,6 +317,8 @@ SENTINEL2_NOCOORDS = Dataset(
         crs="wgs84",
         geotransform="-82.0 0.0002777777777777778 0.0 13.0 0.0 -0.0002777777777777778",
     ),
+    edge_case_tiles=WGS84_TILES_EDGE_CASES + WEBMERC_TILES_EDGE_CASES,
+    tiles=WGS84_TILES + WEBMERC_TILES,
 )
 
 GLOBAL_6KM = Dataset(
@@ -328,6 +346,8 @@ GLOBAL_6KM = Dataset(
     ),
     dtype=np.float32,
     setup=uniform_grid,
+    edge_case_tiles=WGS84_TILES_EDGE_CASES + WEBMERC_TILES_EDGE_CASES,
+    tiles=WGS84_TILES + WEBMERC_TILES,
 )
 
 PARA = Dataset(
@@ -367,6 +387,8 @@ PARA = Dataset(
         geotransform="-58.988125 0.006508 0.0 2.721625 0.0 -0.004217583333333333",
         bbox=BBox(west=-58.988125, south=-9.931125, east=-45.972125, north=2.721625),
     ),
+    edge_case_tiles=PARA_TILES_EDGE_CASES,
+    tiles=PARA_TILES,
 )
 
 PARA_HIRES = Dataset(
@@ -406,6 +428,8 @@ PARA_HIRES = Dataset(
         geotransform="-58.988125 0.00025 0.0 2.721625 0.0 -0.00025",
         bbox=BBox(west=-58.988125, south=-9.931125, east=-45.972125, north=2.721625),
     ),
+    edge_case_tiles=PARA_TILES_EDGE_CASES,
+    tiles=PARA_TILES,
 )
 
 transformer = pyproj.Transformer.from_crs(HRRR_CRS_WKT, 4326, always_xy=True)
@@ -448,6 +472,8 @@ HRRR = Dataset(
         geotransform=None,
         bbox=BBox(west=-134.095480, south=21.138123, east=-60.917193, north=52.6156533),
     ),
+    edge_case_tiles=HRRR_TILES_EDGE_CASES,
+    tiles=HRRR_TILES,
 )
 
 EU3035 = Dataset(
@@ -465,6 +491,8 @@ EU3035 = Dataset(
             west=-31.39, south=36.96, east=55.51, north=67.12
         ),  # Geographic extent of projected grid
     ),
+    edge_case_tiles=ETRS89_TILES_EDGE_CASES,
+    tiles=ETRS89_TILES,
 )
 
 EU3035_HIRES = Dataset(
@@ -482,6 +510,8 @@ EU3035_HIRES = Dataset(
             west=-16.0, south=32.0, east=40.0, north=84.0
         ),  # Approximate EU coverage
     ),
+    edge_case_tiles=ETRS89_TILES_EDGE_CASES,
+    tiles=ETRS89_TILES,
 )
 
 

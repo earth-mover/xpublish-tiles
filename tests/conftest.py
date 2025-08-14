@@ -12,8 +12,8 @@ from syrupy.extensions.image import PNGImageSnapshotExtension
 
 import icechunk
 import xarray as xr
-from tests.tiles import ETRS89_TILES, HRRR_TILES
-from xpublish_tiles.datasets import EU3035, HRRR, create_global_dataset
+from xpublish_tiles.testing.datasets import EU3035, HRRR, create_global_dataset
+from xpublish_tiles.testing.tiles import ETRS89_TILES, HRRR_TILES
 
 ARRAYLAKE_REPO = "earthmover-integration/tiles-datasets-develop"
 IS_SNAPSHOT_UPDATE = False
