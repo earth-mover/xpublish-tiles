@@ -15,15 +15,17 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from src.xpublish_tiles.render.raster import nearest_on_uniform_grid_quadmesh
-from tests.conftest import compare_image_buffers
 from xarray.testing import assert_equal
-from xpublish_tiles.lib import check_transparent_pixels
 from xpublish_tiles.pipeline import (
     apply_query,
     check_bbox_overlap,
     pipeline,
 )
 from xpublish_tiles.testing.datasets import FORECAST, PARA, ROMSDS, create_global_dataset
+from xpublish_tiles.testing.lib import (
+    assert_render_matches_snapshot,
+    compare_image_buffers,
+)
 from xpublish_tiles.testing.tiles import PARA_TILES, TILES, WEBMERC_TMS
 from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
 
@@ -134,91 +136,6 @@ def create_query_params(tile, tms, *, colorscalerange=None):
         colorscalerange=colorscalerange,
         format=ImageFormat.PNG,
     )
-
-
-def validate_transparency(
-    content: bytes,
-    *,
-    tile=None,
-    tms=None,
-    dataset_bbox: BBox | None = None,
-):
-    """Validate transparency of rendered content based on tile/dataset overlap.
-
-    Args:
-        content: The rendered PNG content
-        tile: The tile being rendered (optional)
-        tms: The tile matrix set (optional)
-        dataset_bbox: Bounding box of the dataset (optional)
-    """
-    # Calculate tile bbox if tile and tms provided
-    tile_bbox = None
-    if tile is not None and tms is not None:
-        tile_bounds = tms.bounds(tile)
-        tile_bbox = BBox(
-            west=tile_bounds.left,
-            south=tile_bounds.bottom,
-            east=tile_bounds.right,
-            north=tile_bounds.top,
-        )
-
-    # Check if this is the specific failing test case that should skip transparency checks
-    # This is a boundary tile, and the bounds checking is inaccurate.
-    # TODO: Consider figuring out a better way to do this, but I suspect it's just too hard.
-    # TODO: We could instead just keep separate lists of fully contained and partially intersecting tiles;
-    #       and add an explicit check.
-    skip_transparency_check = (
-        tile is not None
-        and tms is not None
-        and tile.x == 0
-        and tile.y == 1
-        and tile.z == 2
-        and tms.id == "EuropeanETRS89_LAEAQuad"
-    )
-
-    # Check transparency based on whether dataset contains the tile
-    transparent_percent = check_transparent_pixels(content)
-    if not skip_transparency_check:
-        if tile_bbox is not None and dataset_bbox is not None:
-            if dataset_bbox.contains(tile_bbox):
-                assert (
-                    transparent_percent == 0
-                ), f"Found {transparent_percent:.1f}% transparent pixels in fully contained tile."
-            elif dataset_bbox.intersects(tile_bbox):
-                assert transparent_percent > 0
-            else:
-                assert (
-                    transparent_percent == 100
-                ), f"Found {transparent_percent:.1f}% transparent pixels in fully disjoint tile (expected 100%)."
-        else:
-            assert (
-                transparent_percent == 0
-            ), f"Found {transparent_percent:.1f}% transparent pixels."
-
-
-def assert_render_matches_snapshot(
-    result: io.BytesIO,
-    png_snapshot,
-    *,
-    tile=None,
-    tms=None,
-    dataset_bbox: BBox | None = None,
-):
-    """Helper function to validate PNG content against snapshot.
-
-    Args:
-        result: The rendered image buffer
-        png_snapshot: The expected snapshot
-        tile: The tile being rendered (optional)
-        tms: The tile matrix set (optional)
-        dataset_bbox: Bounding box of the dataset (optional)
-    """
-    assert isinstance(result, io.BytesIO)
-    result.seek(0)
-    content = result.read()
-    assert len(content) > 0
-    validate_transparency(content, tile=tile, tms=tms, dataset_bbox=dataset_bbox)
-    assert content == png_snapshot
 
 
 @pytest.mark.asyncio
