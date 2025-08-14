@@ -650,7 +650,7 @@ def test_para_hires_zoom_level_2_size_limit():
         "/datasets/para/tiles/WebMercatorQuad/2/1/1"
         "?variables=foo&style=raster/viridis&width=256&height=256"
     )
-    assert response.status_code == 400
+    assert response.status_code == 413
     error_detail = response.json()["detail"]
     assert "WebMercatorQuad/2/1/1" in error_detail
     assert "request too big" in error_detail

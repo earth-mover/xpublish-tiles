@@ -277,7 +277,7 @@ class TilesPlugin(Plugin):
                 )
             except TileTooBigError:
                 raise HTTPException(  # noqa: B904
-                    status_code=400,
+                    status_code=413,
                     detail=f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} request too big. Please choose a higher zoom level.",
                 )
 
