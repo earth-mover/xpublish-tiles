@@ -113,7 +113,6 @@ def epsg4326to3857(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.nda
     x = np.deg2rad(lon)
     y = np.deg2rad(lat)
     np.arctan2(np.sin(x), np.cos(x), out=x)
-    np.arctan2(np.sin(y), np.cos(y), out=y)
     x *= a
     np.log(np.tan(np.pi / 4 + y / 2, out=y), out=y)
     y *= a
