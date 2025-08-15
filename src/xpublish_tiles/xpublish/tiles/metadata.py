@@ -213,7 +213,6 @@ def extract_variable_bounding_box(
             return None
 
         # After isinstance check, grid is guaranteed to have crs and bbox attributes
-        grid_with_bounds: Rectilinear | Curvilinear = grid
 
         # Convert target CRS to string format for transformer
         if isinstance(target_crs, CRSType):
@@ -224,14 +223,12 @@ def extract_variable_bounding_box(
             target_crs_str = target_crs
 
         # Transform bounds to target CRS
-        transformer = transformer_from_crs(
-            crs_from=grid_with_bounds.crs, crs_to=target_crs_str
-        )
+        transformer = transformer_from_crs(crs_from=grid.crs, crs_to=target_crs_str)
         transformed_bounds = transformer.transform_bounds(
-            grid_with_bounds.bbox.west,
-            grid_with_bounds.bbox.south,
-            grid_with_bounds.bbox.east,
-            grid_with_bounds.bbox.north,
+            grid.bbox.west,
+            grid.bbox.south,
+            grid.bbox.east,
+            grid.bbox.north,
         )
 
         return BoundingBox(
