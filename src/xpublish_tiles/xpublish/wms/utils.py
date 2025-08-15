@@ -190,7 +190,7 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
         grid = guess_grid_system(dataset, var_name)
         supported_crs = ["EPSG:4326", "EPSG:3857"]
         supported_bounds = []
-        if isinstance(grid, Rectilinear) or isinstance(grid, Curvilinear):
+        if isinstance(grid, Rectilinear | Curvilinear | RasterAffine):
             for crs in supported_crs:
                 transformer = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
                 bounds = transformer.transform_bounds(
