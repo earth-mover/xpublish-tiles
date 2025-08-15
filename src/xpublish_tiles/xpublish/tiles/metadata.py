@@ -209,7 +209,7 @@ def extract_variable_bounding_box(
         # Get the grid system for this variable
         grid = guess_grid_system(dataset, variable_name)
 
-        if not isinstance(grid, Rectilinear | Curvilinear):
+        if not isinstance(grid, RasterAffine | Rectilinear | Curvilinear):
             return None
 
         # After isinstance check, grid is guaranteed to have crs and bbox attributes
