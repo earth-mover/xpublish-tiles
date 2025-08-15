@@ -214,7 +214,7 @@ async def transform_coordinates(
     grid_y_name: str,
     transformer: pyproj.Transformer,
     chunk_size: tuple[int, int] | None = None,
-) -> tuple[np.ndarray, np.ndarray, xr.DataArray, xr.DataArray]:
+) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Transform coordinates from input CRS to output CRS.
 
@@ -238,8 +238,8 @@ async def transform_coordinates(
 
     Returns
     -------
-    tuple[np.ndarray, np.ndarray, xr.DataArray, xr.DataArray]
-        Transformed X and Y coordinates, and the broadcasted coordinate arrays
+    tuple[xr.DataArray, xr.DataArray]
+        Transformed X and Y coordinate arrays
     """
     if chunk_size is None:
         chunk_size = CHUNKED_TRANSFORM_CHUNK_SIZE
