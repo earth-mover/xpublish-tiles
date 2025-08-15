@@ -1,7 +1,7 @@
 from typing import Any, Optional, Union
 
 from xarray import Dataset
-from xpublish_tiles.grids import Curvilinear, Rectilinear, RasterAffine, guess_grid_system
+from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear, guess_grid_system
 from xpublish_tiles.pipeline import transformer_from_crs
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
