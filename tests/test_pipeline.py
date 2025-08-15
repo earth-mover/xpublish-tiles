@@ -140,12 +140,13 @@ def create_query_params(tile, tms, *, colorscalerange=None):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tile,tms", TILES)
-async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot):
+async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot, pytestconfig):
     """Test pipeline with various tiles using their native TMS CRS."""
     ds = global_datasets
     query_params = create_query_params(tile, tms)
     result = await pipeline(ds, query_params)
-
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
     assert_render_matches_snapshot(result, png_snapshot)
 
 
