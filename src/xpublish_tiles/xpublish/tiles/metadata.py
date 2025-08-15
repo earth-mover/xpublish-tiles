@@ -209,7 +209,7 @@ def extract_variable_bounding_box(
         # Get the grid system for this variable
         grid = guess_grid_system(dataset, variable_name)
 
-        if not isinstance(grid, (Rectilinear, Curvilinear)):
+        if not isinstance(grid, Rectilinear | Curvilinear):
             return None
 
         # Convert target CRS to string format for transformer
