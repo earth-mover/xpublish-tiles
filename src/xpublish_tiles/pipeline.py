@@ -3,7 +3,6 @@ import copy
 import io
 import logging
 import os
-from functools import lru_cache, partial
 from typing import Any, cast
 
 import numpy as np
@@ -17,6 +16,7 @@ from xpublish_tiles.lib import (
     TileTooBigError,
     check_transparent_pixels,
     transform_coordinates,
+    transformer_from_crs,
 )
 from xpublish_tiles.types import (
     ContinuousData,
@@ -34,9 +34,6 @@ from xpublish_tiles.types import (
 MAX_RENDERABLE_SIZE = 10_000 * 10_000
 
 logger = logging.getLogger("xpublish-tiles")
-
-# https://pyproj4.github.io/pyproj/stable/advanced_examples.html#caching-pyproj-objects
-transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=True))
 
 
 def has_coordinate_discontinuity(coordinates: np.ndarray) -> bool:
@@ -356,19 +353,17 @@ async def subset_to_bbox(
             if grid.crs.is_geographic
             else False
         )
-        newX, newY, bx, by = await transform_coordinates(
-            subset, grid.X, grid.Y, input_to_output
-        )
+        newX, newY = await transform_coordinates(subset, grid.X, grid.Y, input_to_output)
 
         # Fix coordinate discontinuities in transformed coordinates if detected
         # this is important because the transformation may introduce discontinuities
         # at the anti-meridian
         if has_discontinuity:
-            newX = fix_coordinate_discontinuities(newX, input_to_output)
+            newX = newX.copy(
+                data=fix_coordinate_discontinuities(newX.data, input_to_output)
+            )
 
-        newda = subset.assign_coords(
-            {bx.name: bx.copy(data=newX), by.name: by.copy(data=newY)}
-        )
+        newda = subset.assign_coords({grid.X: newX, grid.Y: newY})
         result[var_name] = PopulatedRenderContext(
             da=newda,
             grid=grid,

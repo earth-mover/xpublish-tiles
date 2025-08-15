@@ -7,12 +7,14 @@ import math
 import operator
 import time
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache, partial, wraps
 from itertools import product
 
 import numpy as np
 import pyproj
 import toolz as tlz
 from PIL import Image
+from pyproj import CRS
 
 import xarray as xr
 
@@ -34,6 +36,22 @@ logger = logging.getLogger(__name__)
 EXECUTOR = ThreadPoolExecutor(
     max_workers=16, thread_name_prefix="xpublish-tiles-threadpool"
 )
+
+OTHER_4326 = CRS.from_user_input("""
+GEOGCRS["WGS 84 (with axis order normalized for visualization)",
+ENSEMBLE["World Geodetic System 1984 ensemble",MEMBER["World Geodetic System 1984 (Transit)",ID["EPSG",1166]],
+MEMBER["World Geodetic System 1984 (G730)",ID["EPSG",1152]],MEMBER["World Geodetic System 1984 (G873)",ID["EPSG",1153]],
+MEMBER["World Geodetic System 1984 (G1150)",ID["EPSG",1154]],MEMBER["World Geodetic System 1984 (G1674)",ID["EPSG",1155]],
+MEMBER["World Geodetic System 1984 (G1762)",ID["EPSG",1156]],MEMBER["World Geodetic System 1984 (G2139)",ID["EPSG",1309]],
+MEMBER["World Geodetic System 1984 (G2296)",ID["EPSG",1383]],ELLIPSOID["WGS 84",6378137,298.257223563,LENGTHUNIT["metre",1],
+ID["EPSG",7030]],ENSEMBLEACCURACY[2.0],ID["EPSG",6326]],PRIMEM["Greenwich",0,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8901]],CS[ellipsoidal,2],
+AXIS["geodetic longitude (Lon)",east,ORDER[1],ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]]
+,AXIS["geodetic latitude (Lat)",north,ORDER[2],ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]],
+USAGE[SCOPE["Horizontal component of 3D system."],AREA["World."],BBOX[-90,-180,90,180]],REMARK["Axis order reversed compared to EPSG:4326"]]""")
+
+# https://pyproj4.github.io/pyproj/stable/advanced_examples.html#caching-pyproj-objects
+transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=True))
+
 
 # benchmarked with
 # import numpy as np
@@ -66,6 +84,42 @@ EXECUTOR = ThreadPoolExecutor(
 # 156 ms ± 5.07 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
 # 772 ms ± 27 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
 CHUNKED_TRANSFORM_CHUNK_SIZE = (250, 250)
+
+
+def timing_debug(func):
+    """Decorator to add debug timing to async functions."""
+
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        start_time = time.perf_counter()
+        result = await func(*args, **kwargs)
+        total_time = time.perf_counter() - start_time
+        print("%s completed in %.4f seconds", func.__name__, total_time)
+        return result
+
+    return wrapper
+
+
+def epsg4326to3857(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    # lat0 = 0
+    # lon0 = 0
+    # FE = 0
+    # FN = 0
+    a = 6378137.0
+
+    # lon -= lon0
+    # lat -= lat0
+
+    x = np.deg2rad(lon)
+    y = np.deg2rad(lat)
+    np.arctan2(np.sin(x), np.cos(x), out=x)
+    np.arctan2(np.sin(y), np.cos(y), out=y)
+    x *= a
+    np.log(np.tan(np.pi / 4 + y / 2, out=y), out=y)
+    y *= a
+    # x += FE
+    # y += FN
+    return x, y
 
 
 def slices_from_chunks(chunks):
@@ -102,9 +156,6 @@ def transform_blocked(
     chunk_size: tuple[int, int] = (250, 250),
 ) -> tuple[np.ndarray, np.ndarray]:
     """Blocked transformation using thread pool."""
-
-    if transformer.source_crs == transformer.target_crs:
-        return x_grid, y_grid
 
     start_time = time.perf_counter()
 
@@ -156,6 +207,7 @@ def check_transparent_pixels(image_bytes):
     return (transparent_count / total_pixels) * 100
 
 
+@timing_debug
 async def transform_coordinates(
     subset: xr.DataArray,
     grid_x_name: str,
@@ -168,6 +220,8 @@ async def transform_coordinates(
 
     This function broadcasts the X and Y coordinates and then transforms them
     using either chunked or direct transformation based on the data size.
+
+    It attempts to preserve rectilinear-ness when possible: 4326 -> 3857
 
     Parameters
     ----------
@@ -190,8 +244,21 @@ async def transform_coordinates(
     if chunk_size is None:
         chunk_size = CHUNKED_TRANSFORM_CHUNK_SIZE
 
+    inx, iny = subset[grid_x_name], subset[grid_y_name]
+
+    if transformer.source_crs == transformer.target_crs:
+        return inx, iny
+
+    # preserve rectilinear-ness by reimplementing this (easy) transform
+    if (inx.ndim == 1 and iny.ndim == 1) and (
+        transformer == transformer_from_crs(4326, 3857)
+        or transformer == transformer_from_crs(OTHER_4326, 3857)
+    ):
+        newx, newy = epsg4326to3857(inx.data, iny.data)
+        return inx.copy(data=newx), iny.copy(data=newy)
+
     # Broadcast coordinates
-    bx, by = xr.broadcast(subset[grid_x_name], subset[grid_y_name])
+    bx, by = xr.broadcast(inx, iny)
 
     # Choose transformation method based on data size
     if bx.size > math.prod(chunk_size):
@@ -207,4 +274,4 @@ async def transform_coordinates(
     else:
         newX, newY = transformer.transform(bx.data, by.data)
 
-    return newX, newY, bx, by
+    return bx.copy(data=newX), by.copy(data=newY)
