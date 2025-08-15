@@ -1,6 +1,7 @@
 """Test fixtures for xpublish-tiles with optional pytest dependencies."""
 
 import io
+import logging
 import re
 import subprocess
 import sys
@@ -13,6 +14,8 @@ from PIL import Image
 from pyproj.aoi import BBox
 
 from xpublish_tiles.lib import check_transparent_pixels
+
+logger = logging.getLogger(__name__)
 
 
 def compare_image_buffers(buffer1: io.BytesIO, buffer2: io.BytesIO) -> bool:
@@ -253,6 +256,9 @@ def _create_png_snapshot_fixture():
                 expected_buffer = io.BytesIO(snapshot_data)
                 arrays_equal = compare_image_buffers(expected_buffer, actual_buffer)
 
+                actual_array = np.array(Image.open(actual_buffer))
+                expected_array = np.array(Image.open(expected_buffer))
+
                 if IS_SNAPSHOT_UPDATE:
                     return arrays_equal
 
@@ -278,8 +284,6 @@ def _create_png_snapshot_fixture():
                     except Exception:
                         pass
 
-                    actual_array = np.array(Image.open(actual_buffer))
-                    expected_array = np.array(Image.open(expected_buffer))
                     if tile_info:
                         create_debug_visualization(
                             actual_array,
@@ -293,7 +297,11 @@ def _create_png_snapshot_fixture():
                             f"Warning: Could not extract tile info for debug visualization: {test_name}"
                         )
                 if not arrays_equal:
-                    np.testing.assert_array_equal(actual_array, expected_array)
+                    try:
+                        np.testing.assert_array_equal(actual_array, expected_array)
+                    except AssertionError as e:
+                        # syrupy seems to swallow the error?
+                        logger.error(e)
 
                 return arrays_equal
 
