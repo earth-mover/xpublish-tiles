@@ -2,11 +2,17 @@
 
 import io
 import re
+import subprocess
+import sys
 from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
+from morecantile import Tile
 from PIL import Image
+from pyproj.aoi import BBox
+
+from xpublish_tiles.lib import check_transparent_pixels
 
 
 def compare_image_buffers(buffer1: io.BytesIO, buffer2: io.BytesIO) -> bool:
@@ -17,11 +23,8 @@ def compare_image_buffers(buffer1: io.BytesIO, buffer2: io.BytesIO) -> bool:
     # Convert both images to numpy arrays
     img1 = Image.open(buffer1)
     img2 = Image.open(buffer2)
-
     array1 = np.array(img1)
     array2 = np.array(img2)
-
-    # Compare arrays using numpy array equality
     return np.array_equal(array1, array2)
 
 
@@ -46,7 +49,6 @@ def create_debug_visualization(
                 "tms": None,
             }
 
-        # Use tile and tms info directly from test parameters
         tile, tms = tile_info
         # Extract coordinate system info from test name
         coord_pattern = r"\[([-\d>]+,[-\d>]+)-"
@@ -94,8 +96,6 @@ def create_debug_visualization(
         # Use TMS directly from the extracted tile info
         tms = extracted_tile_info["tms"]
         if tms is not None:
-            from morecantile import Tile
-
             tile = Tile(
                 x=extracted_tile_info["x"],
                 y=extracted_tile_info["y"],
@@ -199,9 +199,6 @@ Change: {actual_transparent - expected_transparent:+,} pixels
         )
 
         # Try to open the image automatically using the system's default viewer
-        import subprocess
-        import sys
-
         try:
             if sys.platform == "darwin":  # macOS
                 subprocess.run(["open", debug_path], check=False)
@@ -259,12 +256,6 @@ def _create_png_snapshot_fixture():
                 if IS_SNAPSHOT_UPDATE:
                     return arrays_equal
 
-                # Convert both images to numpy arrays for debug visualization
-                actual_img = Image.open(actual_buffer)
-                expected_img = Image.open(expected_buffer)
-                actual_array = np.array(actual_img)
-                expected_array = np.array(expected_img)
-
                 # Generate debug visualization if arrays don't match and debug flag is set
                 if not arrays_equal and (DEBUG_VISUAL or DEBUG_VISUAL_SAVE):
                     test_name = request.node.name
@@ -285,10 +276,10 @@ def _create_png_snapshot_fixture():
                                     _, tile, tms = params["projected_dataset_and_tile"]
                                     tile_info = (tile, tms)
                     except Exception:
-                        # Parameter extraction failed
                         pass
 
-                    # Only create debug visualization if we have tile info
+                    actual_array = np.array(Image.open(actual_buffer))
+                    expected_array = np.array(Image.open(expected_buffer))
                     if tile_info:
                         create_debug_visualization(
                             actual_array,
@@ -301,8 +292,7 @@ def _create_png_snapshot_fixture():
                         print(
                             f"Warning: Could not extract tile info for debug visualization: {test_name}"
                         )
-
-                    # Normal test run - better error messages
+                if not arrays_equal:
                     np.testing.assert_array_equal(actual_array, expected_array)
 
                 return arrays_equal
@@ -339,10 +329,6 @@ def validate_transparency(
         tms: The tile matrix set (optional)
         dataset_bbox: Bounding box of the dataset (optional)
     """
-    from pyproj.aoi import BBox
-
-    from xpublish_tiles.lib import check_transparent_pixels
-
     # Calculate tile bbox if tile and tms provided
     tile_bbox = None
     if tile is not None and tms is not None:
