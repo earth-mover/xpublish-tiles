@@ -253,7 +253,10 @@ async def transform_coordinates(
         or transformer == transformer_from_crs(OTHER_4326, 3857)
     ):
         newx, newy = epsg4326to3857(inx.data, iny.data)
-        return xr.broadcast(inx.copy(data=newx), iny.copy(data=newy))
+        logger.info(newx)
+        logger.info(newy)
+        logger.warn("fastest path")
+        return inx.copy(data=newx), iny.copy(data=newy)
 
     # Broadcast coordinates
     bx, by = xr.broadcast(inx, iny)
@@ -272,4 +275,5 @@ async def transform_coordinates(
     else:
         newX, newY = transformer.transform(bx.data, by.data)
 
+    logger.warn("not so fast path")
     return bx.copy(data=newX), by.copy(data=newY)
