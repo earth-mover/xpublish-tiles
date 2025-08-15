@@ -393,6 +393,13 @@ class WMSStyleResponse(BaseXmlModel, tag="Style"):
     legend_url: WMSOnlineResourceResponse | None = element(tag="LegendURL", default=None)
 
 
+class WMSAttributeResponse(BaseXmlModel, tag="Attribute"):
+    """Custom attribute element for WMS layer metadata"""
+
+    name: str = attr(name="name")
+    value: str = attr(name="value")
+
+
 class WMSLayerResponse(BaseXmlModel, tag="Layer"):
     queryable: bool = attr(name="queryable", default=True)
     cascaded: int | None = attr(name="cascaded", default=None)
@@ -429,6 +436,7 @@ class WMSLayerResponse(BaseXmlModel, tag="Layer"):
     styles: list[WMSStyleResponse] = element(tag="Style", default=[])
     min_scale_denominator: float | None = element(tag="MinScaleDenominator", default=None)
     max_scale_denominator: float | None = element(tag="MaxScaleDenominator", default=None)
+    attributes: list[WMSAttributeResponse] = element(tag="Attribute", default=[])
     layers: list["WMSLayerResponse"] = element(tag="Layer", default=[])
 
 

@@ -414,6 +414,29 @@ class DataType(str, Enum):
     COVERAGE = "coverage"
 
 
+class AttributesMetadata(BaseModel):
+    """Metadata extracted from xarray attributes"""
+
+    dataset_attrs: Annotated[
+        dict[str, Any],
+        Field(
+            default_factory=dict,
+            json_schema_extra={
+                "description": "Dataset-level attributes from xarray.Dataset.attrs"
+            },
+        ),
+    ]
+    variable_attrs: Annotated[
+        dict[str, dict[str, Any]],
+        Field(
+            default_factory=dict,
+            json_schema_extra={
+                "description": "Variable-level attributes from xarray.DataArray.attrs, keyed by variable name"
+            },
+        ),
+    ]
+
+
 class TileSetMetadata(BaseModel):
     """Metadata for a tileset applied to a specific dataset"""
 
@@ -470,6 +493,14 @@ class TileSetMetadata(BaseModel):
         Field(
             json_schema_extra={
                 "description": "Available styles for this tileset",
+            }
+        ),
+    ] = None
+    attributes: Annotated[
+        Optional[AttributesMetadata],
+        Field(
+            json_schema_extra={
+                "description": "Attributes from the underlying xarray Dataset and DataArrays",
             }
         ),
     ] = None
