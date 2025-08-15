@@ -405,10 +405,11 @@ class WMSLayerResponse(BaseXmlModel, tag="Layer"):
     title: str = element(tag="Title")
     abstract: str | None = element(tag="Abstract", default=None)
     keyword_list: list[str] | None = element(tag="KeywordList", default=None)
-    crs: list[str] | None = element(tag="CRS")
-    # ex_geographic_bounding_box: WMSGeographicBoundingBoxResponse = element(
-    #     tag="EX_GeographicBoundingBox"
-    # )
+    crs: list[str] | None = element(tag="CRS", default=None)
+    ex_geographic_bounding_box: WMSGeographicBoundingBoxResponse | None = element(
+        tag="EX_GeographicBoundingBox",
+        default=None,
+    )
     bounding_box: list[WMSBoundingBoxResponse] | None = element(
         tag="BoundingBox", default=[]
     )
