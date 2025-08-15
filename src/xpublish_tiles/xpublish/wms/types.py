@@ -405,11 +405,13 @@ class WMSLayerResponse(BaseXmlModel, tag="Layer"):
     title: str = element(tag="Title")
     abstract: str | None = element(tag="Abstract", default=None)
     keyword_list: list[str] | None = element(tag="KeywordList", default=None)
-    crs: list[str] = element(tag="CRS")
-    ex_geographic_bounding_box: WMSGeographicBoundingBoxResponse = element(
-        tag="EX_GeographicBoundingBox"
+    crs: list[str] | None = element(tag="CRS")
+    # ex_geographic_bounding_box: WMSGeographicBoundingBoxResponse = element(
+    #     tag="EX_GeographicBoundingBox"
+    # )
+    bounding_box: list[WMSBoundingBoxResponse] | None = element(
+        tag="BoundingBox", default=[]
     )
-    bounding_box: list[WMSBoundingBoxResponse] = element(tag="BoundingBox", default=[])
     dimensions: list[WMSDimensionResponse] = element(tag="Dimension", default=[])
     attribution: str | None = element(tag="Attribution", default=None)
     authority_url: WMSOnlineResourceResponse | None = element(
