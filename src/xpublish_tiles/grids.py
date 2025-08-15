@@ -521,7 +521,12 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
             dims = set(X.dims) | set(Y.dims)
             # See discussion in https://github.com/pydata/xarray/issues/10572
             return Curvilinear(
-                crs=crs, X=Xname, Y=Yname, dims=dims, bbox=bbox, indexes=tuple()
+                crs=crs,
+                X=Xname,
+                Y=Yname,
+                dims=cast(set[str], dims),
+                bbox=bbox,
+                indexes=tuple(),
             )
 
         else:

@@ -1,5 +1,7 @@
 """Utilities for WMS dataset introspection and metadata extraction"""
 
+from typing import cast
+
 import numpy as np
 
 import xarray as xr
@@ -187,10 +189,11 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
         abstract = getattr(var, "description", getattr(var, "comment", None))
 
         # Extract geographic bounds
-        grid = guess_grid_system(dataset, var_name)
+        guessed_grid = guess_grid_system(dataset, var_name)
         supported_crs = ["EPSG:4326", "EPSG:3857"]
         supported_bounds = []
-        if isinstance(grid, Rectilinear | Curvilinear | RasterAffine):
+        if isinstance(guessed_grid, Rectilinear | Curvilinear | RasterAffine):
+            grid = cast(Rectilinear | Curvilinear | RasterAffine, guessed_grid)
             for crs in supported_crs:
                 transformer = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
                 bounds = transformer.transform_bounds(

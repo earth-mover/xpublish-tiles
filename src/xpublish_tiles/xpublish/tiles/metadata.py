@@ -1,4 +1,4 @@
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, cast
 
 from xarray import Dataset
 from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear, guess_grid_system
@@ -207,10 +207,12 @@ def extract_variable_bounding_box(
     """
     try:
         # Get the grid system for this variable
-        grid = guess_grid_system(dataset, variable_name)
+        guessed_grid = guess_grid_system(dataset, variable_name)
 
-        if not isinstance(grid, RasterAffine | Rectilinear | Curvilinear):
+        if not isinstance(guessed_grid, RasterAffine | Rectilinear | Curvilinear):
             return None
+
+        grid = cast(RasterAffine | Rectilinear | Curvilinear, guessed_grid)
 
         # After isinstance check, grid is guaranteed to have crs and bbox attributes
 
