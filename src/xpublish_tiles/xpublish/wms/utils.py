@@ -1,8 +1,12 @@
 """Utilities for WMS dataset introspection and metadata extraction"""
 
+from typing import cast
+
 import numpy as np
 
 import xarray as xr
+from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear, guess_grid_system
+from xpublish_tiles.pipeline import transformer_from_crs
 from xpublish_tiles.xpublish.wms.types import (
     WMSBoundingBoxResponse,
     WMSCapabilitiesResponse,
@@ -10,7 +14,6 @@ from xpublish_tiles.xpublish.wms.types import (
     WMSDCPTypeResponse,
     WMSDimensionResponse,
     WMSFormatResponse,
-    WMSGeographicBoundingBoxResponse,
     WMSGetCapabilitiesOperationResponse,
     WMSGetMapOperationResponse,
     WMSHTTPResponse,
@@ -20,45 +23,6 @@ from xpublish_tiles.xpublish.wms.types import (
     WMSServiceResponse,
     WMSStyleResponse,
 )
-
-
-def extract_geographic_bounds(dataset: xr.Dataset) -> tuple[float, float, float, float]:
-    """Extract geographic bounding box from dataset coordinates.
-
-    Returns:
-        Tuple of (west, east, south, north) in geographic coordinates
-    """
-    # Try to find longitude/latitude coordinates
-    lon_coord = None
-    lat_coord = None
-
-    for coord_name, coord in dataset.coords.items():
-        if hasattr(coord, "standard_name"):
-            if coord.standard_name in ["longitude", "lon"]:
-                lon_coord = coord
-            elif coord.standard_name in ["latitude", "lat"]:
-                lat_coord = coord
-        elif str(coord_name).lower() in ["lon", "longitude", "x"]:
-            lon_coord = coord
-        elif str(coord_name).lower() in ["lat", "latitude", "y"]:
-            lat_coord = coord
-
-    if lon_coord is None or lat_coord is None:
-        # Fallback to first two coordinates if no standard names found
-        coords = list(dataset.coords.values())
-        if len(coords) >= 2:
-            lon_coord = coords[0]
-            lat_coord = coords[1]
-        else:
-            # Default bounds if no coordinates found
-            return -180.0, 180.0, -90.0, 90.0
-
-    west = float(lon_coord.min().values)
-    east = float(lon_coord.max().values)
-    south = float(lat_coord.min().values)
-    north = float(lat_coord.max().values)
-
-    return west, east, south, north
 
 
 def extract_dimensions(dataset: xr.Dataset) -> list[WMSDimensionResponse]:
@@ -216,31 +180,6 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
     """
     layers = []
 
-    # Get geographic bounds
-    west, east, south, north = extract_geographic_bounds(dataset)
-
-    # Create geographic bounding box
-    geo_bbox = WMSGeographicBoundingBoxResponse(
-        west_bound_longitude=west,
-        east_bound_longitude=east,
-        south_bound_latitude=south,
-        north_bound_latitude=north,
-    )
-
-    # Create bounding boxes for different CRS
-    bounding_boxes = [
-        WMSBoundingBoxResponse(
-            crs="EPSG:4326", minx=west, miny=south, maxx=east, maxy=north
-        ),
-        WMSBoundingBoxResponse(
-            crs="EPSG:3857",
-            minx=west * 111319.49,  # Rough conversion to Web Mercator
-            miny=south * 111319.49,
-            maxx=east * 111319.49,
-            maxy=north * 111319.49,
-        ),
-    ]
-
     # Extract dimensions
     dimensions = extract_dimensions(dataset)
 
@@ -249,12 +188,35 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
         title = getattr(var, "long_name", var_name)
         abstract = getattr(var, "description", getattr(var, "comment", None))
 
+        # Extract geographic bounds
+        guessed_grid = guess_grid_system(dataset, var_name)
+        supported_crs = ["EPSG:4326", "EPSG:3857"]
+        supported_bounds = []
+        if isinstance(guessed_grid, Rectilinear | Curvilinear | RasterAffine):
+            grid = cast(Rectilinear | Curvilinear | RasterAffine, guessed_grid)
+            for crs in supported_crs:
+                transformer = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
+                bounds = transformer.transform_bounds(
+                    grid.bbox.west, grid.bbox.south, grid.bbox.east, grid.bbox.north
+                )
+                supported_bounds.append(bounds)
+
+            supported_crs.append(grid.crs.to_string())
+            bounding_boxes = [
+                WMSBoundingBoxResponse(
+                    crs=grid.crs.to_string(),
+                    minx=grid.bbox.west,
+                    miny=grid.bbox.south,
+                    maxx=grid.bbox.east,
+                    maxy=grid.bbox.north,
+                )
+            ]
+
         layer = WMSLayerResponse(
             name=var_name,
             title=title,
             abstract=abstract,
-            crs=["EPSG:4326", "EPSG:3857"],
-            ex_geographic_bounding_box=geo_bbox,
+            crs=supported_crs,
             bounding_box=bounding_boxes,
             dimensions=dimensions,
             styles=[],  # Styles inherited from root layer
@@ -324,19 +286,11 @@ def create_capabilities_response(
     layers = extract_layers(dataset, base_url)
 
     # Create root layer containing all data layers and styles
-    west, east, south, north = extract_geographic_bounds(dataset)
     available_styles = get_available_wms_styles()
 
     root_layer = WMSLayerResponse(
         title="Dataset Layers",
         abstract="All available data layers with raster visualization styles",
-        crs=["EPSG:4326", "EPSG:3857"],
-        ex_geographic_bounding_box=WMSGeographicBoundingBoxResponse(
-            west_bound_longitude=west,
-            east_bound_longitude=east,
-            south_bound_latitude=south,
-            north_bound_latitude=north,
-        ),
         layers=layers,
         styles=available_styles,  # All styles defined at root level
         queryable=False,

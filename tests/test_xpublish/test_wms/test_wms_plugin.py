@@ -129,7 +129,6 @@ def test_get_capabilities_layers(xpublish_client):
     assert "crs" in air_layer
     assert "EPSG:4326" in air_layer["crs"]
     assert "EPSG:3857" in air_layer["crs"]
-    assert "ex_geographic_bounding_box" in air_layer
 
 
 def test_get_capabilities_dimensions(xpublish_client):
