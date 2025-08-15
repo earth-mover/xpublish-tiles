@@ -253,7 +253,7 @@ async def transform_coordinates(
         or transformer == transformer_from_crs(OTHER_4326, 3857)
     ):
         newx, newy = epsg4326to3857(inx.data, iny.data)
-        return inx.copy(data=newx), iny.copy(data=newy)
+        return xr.broadcast(inx.copy(data=newx), iny.copy(data=newy))
 
     # Broadcast coordinates
     bx, by = xr.broadcast(inx, iny)
