@@ -207,7 +207,6 @@ def check_transparent_pixels(image_bytes):
     return (transparent_count / total_pixels) * 100
 
 
-@timing_debug
 async def transform_coordinates(
     subset: xr.DataArray,
     grid_x_name: str,
