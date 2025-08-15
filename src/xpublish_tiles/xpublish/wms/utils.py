@@ -3,7 +3,7 @@
 import numpy as np
 
 import xarray as xr
-from xpublish_tiles.grids import Curvilinear, Rectilinear, guess_grid_system
+from xpublish_tiles.grids import RasterAffine, Curvilinear, Rectilinear, guess_grid_system
 from xpublish_tiles.pipeline import transformer_from_crs
 from xpublish_tiles.xpublish.wms.types import (
     WMSBoundingBoxResponse,
