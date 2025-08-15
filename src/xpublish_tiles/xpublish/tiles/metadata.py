@@ -9,6 +9,7 @@ from xpublish_tiles.xpublish.tiles.tile_matrix import (
     extract_dimension_extents,
 )
 from xpublish_tiles.xpublish.tiles.types import (
+    AttributesMetadata,
     BoundingBox,
     CRSType,
     DataType,
@@ -17,6 +18,32 @@ from xpublish_tiles.xpublish.tiles.types import (
     Style,
     TileSetMetadata,
 )
+
+
+def extract_attributes_metadata(
+    dataset: Dataset, variable_name: str | None = None
+) -> AttributesMetadata:
+    """Extract and filter attributes from dataset and variables
+
+    Args:
+        dataset: xarray Dataset
+        variable_name: Optional variable name to extract attributes for specific variable only
+
+    Returns:
+        AttributesMetadata object with filtered dataset and variable attributes
+    """
+    # Extract variable attributes
+    variable_attrs = {}
+    if variable_name:
+        # Extract attributes for specific variable only
+        if variable_name in dataset.data_vars:
+            variable_attrs[variable_name] = dataset[variable_name].attrs
+    else:
+        # Extract attributes for all data variables
+        for var_name, var_data in dataset.data_vars.items():
+            variable_attrs[var_name] = var_data.attrs
+
+    return AttributesMetadata(dataset_attrs=dataset.attrs, variable_attrs=variable_attrs)
 
 
 def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSetMetadata:
@@ -67,6 +94,9 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
                 )
             )
 
+    # Extract attributes metadata
+    attributes = extract_attributes_metadata(dataset)
+
     # Create main tileset metadata
     return TileSetMetadata(
         title=f"{title} - {tile_matrix_set_id}",
@@ -90,6 +120,7 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
         ],
         boundingBox=dataset_bounds,
         styles=styles,
+        attributes=attributes,
     )
 
 

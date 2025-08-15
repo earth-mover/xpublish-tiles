@@ -1,6 +1,6 @@
 """Utilities for WMS dataset introspection and metadata extraction"""
 
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 
@@ -8,6 +8,7 @@ import xarray as xr
 from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear, guess_grid_system
 from xpublish_tiles.pipeline import transformer_from_crs
 from xpublish_tiles.xpublish.wms.types import (
+    WMSAttributeResponse,
     WMSBoundingBoxResponse,
     WMSCapabilitiesResponse,
     WMSCapabilityResponse,
@@ -23,6 +24,34 @@ from xpublish_tiles.xpublish.wms.types import (
     WMSServiceResponse,
     WMSStyleResponse,
 )
+
+
+def convert_attributes_to_wms(attrs: dict[str, Any]) -> list[WMSAttributeResponse]:
+    """Convert xarray attributes to WMS attribute elements
+
+    Args:
+        attrs: Dictionary of attributes to convert
+
+    Returns:
+        List of WMSAttributeResponse objects
+    """
+    wms_attrs = []
+    for name, value in attrs.items():
+        # Convert value to string representation
+        if isinstance(value, str):
+            str_value = value
+        elif isinstance(value, bool):
+            str_value = str(value).lower()
+        elif isinstance(value, int | float):
+            str_value = str(value)
+        elif isinstance(value, list | tuple):
+            str_value = ", ".join(str(v) for v in value)
+        else:
+            str_value = str(value)
+
+        wms_attrs.append(WMSAttributeResponse(name=name, value=str_value))
+
+    return wms_attrs
 
 
 def extract_dimensions(dataset: xr.Dataset) -> list[WMSDimensionResponse]:
@@ -188,10 +217,15 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
         title = getattr(var, "long_name", var_name)
         abstract = getattr(var, "description", getattr(var, "comment", None))
 
+        # Extract variable attributes
+        wms_attributes = convert_attributes_to_wms(var.attrs)
+
         # Extract geographic bounds
         guessed_grid = guess_grid_system(dataset, var_name)
         supported_crs = ["EPSG:4326", "EPSG:3857"]
         supported_bounds = []
+        bounding_boxes = []
+
         if isinstance(guessed_grid, Rectilinear | Curvilinear | RasterAffine):
             grid = cast(Rectilinear | Curvilinear | RasterAffine, guessed_grid)
             for crs in supported_crs:
@@ -219,6 +253,7 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
             crs=supported_crs,
             bounding_box=bounding_boxes,
             dimensions=dimensions,
+            attributes=wms_attributes,
             styles=[],  # Styles inherited from root layer
             queryable=True,
             opaque=False,
@@ -288,10 +323,14 @@ def create_capabilities_response(
     # Create root layer containing all data layers and styles
     available_styles = get_available_wms_styles()
 
+    # Extract dataset attributes for root layer
+    dataset_wms_attributes = convert_attributes_to_wms(dataset.attrs)
+
     root_layer = WMSLayerResponse(
         title="Dataset Layers",
         abstract="All available data layers with raster visualization styles",
         layers=layers,
+        attributes=dataset_wms_attributes,
         styles=available_styles,  # All styles defined at root level
         queryable=False,
     )

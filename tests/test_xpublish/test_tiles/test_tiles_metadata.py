@@ -642,3 +642,161 @@ def test_layers_use_variable_specific_bounding_boxes():
         pytest.skip(
             "Could not extract bounding boxes - this might indicate an issue with grid detection"
         )
+
+
+def test_extract_attributes_metadata():
+    """Test extraction of attributes metadata from dataset"""
+    from xpublish_tiles.xpublish.tiles.metadata import extract_attributes_metadata
+
+    # Create dataset with attributes
+    dataset = xr.Dataset(
+        {
+            "temperature": xr.DataArray(
+                np.random.randn(5, 10),
+                dims=["lat", "lon"],
+                coords={
+                    "lat": (["lat"], np.linspace(-2, 2, 5)),
+                    "lon": (["lon"], np.linspace(-5, 5, 10)),
+                },
+                attrs={
+                    "long_name": "Temperature",
+                    "units": "celsius",
+                    "valid_min": -50.0,
+                    "valid_max": 50.0,
+                    "description": "Air temperature measurement",
+                },
+            ),
+            "humidity": xr.DataArray(
+                np.random.randn(5, 10),
+                dims=["lat", "lon"],
+                coords={
+                    "lat": (["lat"], np.linspace(-2, 2, 5)),
+                    "lon": (["lon"], np.linspace(-5, 5, 10)),
+                },
+                attrs={
+                    "long_name": "Relative Humidity",
+                    "units": "percent",
+                    "valid_range": [0, 100],
+                },
+            ),
+        },
+        attrs={
+            "title": "Weather Data",
+            "institution": "Test University",
+            "source": "Model simulation",
+            "history": "Created on 2024-01-01",
+        },
+    )
+
+    # Test extraction for all variables
+    attrs_meta = extract_attributes_metadata(dataset)
+
+    # Check dataset attributes
+    assert "title" in attrs_meta.dataset_attrs
+    assert "institution" in attrs_meta.dataset_attrs
+    assert "source" in attrs_meta.dataset_attrs
+    assert "history" in attrs_meta.dataset_attrs
+    assert attrs_meta.dataset_attrs["title"] == "Weather Data"
+
+    # Check variable attributes
+    assert "temperature" in attrs_meta.variable_attrs
+    assert "humidity" in attrs_meta.variable_attrs
+
+    temp_attrs = attrs_meta.variable_attrs["temperature"]
+    assert temp_attrs["long_name"] == "Temperature"
+    assert temp_attrs["units"] == "celsius"
+    assert temp_attrs["valid_min"] == -50.0
+    assert temp_attrs["valid_max"] == 50.0
+
+    humidity_attrs = attrs_meta.variable_attrs["humidity"]
+    assert humidity_attrs["long_name"] == "Relative Humidity"
+    assert humidity_attrs["units"] == "percent"
+    assert humidity_attrs["valid_range"] == [0, 100]
+
+
+def test_extract_attributes_metadata_single_variable():
+    """Test extraction of attributes metadata for single variable"""
+    from xpublish_tiles.xpublish.tiles.metadata import extract_attributes_metadata
+
+    # Create dataset with multiple variables
+    dataset = xr.Dataset(
+        {
+            "temperature": xr.DataArray(
+                np.random.randn(5, 10),
+                dims=["lat", "lon"],
+                attrs={"long_name": "Temperature", "units": "celsius"},
+            ),
+            "pressure": xr.DataArray(
+                np.random.randn(5, 10),
+                dims=["lat", "lon"],
+                attrs={"long_name": "Pressure", "units": "hPa"},
+            ),
+        },
+        attrs={"title": "Test Dataset"},
+    )
+
+    # Test extraction for single variable
+    attrs_meta = extract_attributes_metadata(dataset, "temperature")
+
+    # Should have dataset attributes
+    assert attrs_meta.dataset_attrs["title"] == "Test Dataset"
+
+    # Should only have temperature variable attributes
+    assert "temperature" in attrs_meta.variable_attrs
+    assert "pressure" not in attrs_meta.variable_attrs
+    assert attrs_meta.variable_attrs["temperature"]["long_name"] == "Temperature"
+
+
+def test_create_tileset_metadata_with_attributes():
+    """Test that tileset metadata includes attributes"""
+    from xpublish_tiles.xpublish.tiles.metadata import create_tileset_metadata
+
+    # Create dataset with attributes
+    dataset = xr.Dataset(
+        {
+            "temperature": xr.DataArray(
+                np.random.randn(5, 10),
+                dims=["lat", "lon"],
+                coords={
+                    "lat": (
+                        ["lat"],
+                        np.linspace(-2, 2, 5),
+                        {"axis": "Y", "standard_name": "latitude"},
+                    ),
+                    "lon": (
+                        ["lon"],
+                        np.linspace(-5, 5, 10),
+                        {"axis": "X", "standard_name": "longitude"},
+                    ),
+                },
+                attrs={
+                    "long_name": "Air Temperature",
+                    "units": "K",
+                    "standard_name": "air_temperature",
+                },
+            )
+        },
+        attrs={
+            "title": "Test Weather Dataset",
+            "institution": "Test Lab",
+            "Conventions": "CF-1.8",
+        },
+    )
+
+    metadata = create_tileset_metadata(dataset, "WebMercatorQuad")
+
+    # Check that attributes are present
+    assert metadata.attributes is not None
+
+    # Check dataset attributes
+    assert "title" in metadata.attributes.dataset_attrs
+    assert "institution" in metadata.attributes.dataset_attrs
+    assert "Conventions" in metadata.attributes.dataset_attrs
+    assert metadata.attributes.dataset_attrs["title"] == "Test Weather Dataset"
+
+    # Check variable attributes
+    assert "temperature" in metadata.attributes.variable_attrs
+    temp_attrs = metadata.attributes.variable_attrs["temperature"]
+    assert temp_attrs["long_name"] == "Air Temperature"
+    assert temp_attrs["units"] == "K"
+    assert temp_attrs["standard_name"] == "air_temperature"
