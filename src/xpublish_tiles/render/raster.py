@@ -156,6 +156,18 @@ class DatashaderRasterRenderer(Renderer):
                     )
             else:
                 data = self.maybe_cast_data(context.da)
+                # FIXME: without this broadcasting
+                # tests/test_pipeline.py::test_projected_coordinate_data[eu3035_etrs89_center_europe(2/1/1)]
+                # is a fully transparent tile; even though it should be fully populated.
+                data = data.assign_coords(
+                    dict(
+                        zip(
+                            (grid.X, grid.Y),
+                            xr.broadcast(data[grid.X], data[grid.Y]),
+                            strict=False,
+                        )
+                    )
+                )
                 mesh = cvs.quadmesh(data, x=grid.X, y=grid.Y)
         else:
             raise NotImplementedError(

@@ -7,14 +7,18 @@ import math
 import operator
 import time
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache, partial, wraps
 from itertools import product
 
 import numpy as np
 import pyproj
 import toolz as tlz
 from PIL import Image
+from pyproj import CRS
 
 import xarray as xr
+
+WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)
 
 
 class NoCoverageError(Exception):
@@ -34,6 +38,22 @@ logger = logging.getLogger(__name__)
 EXECUTOR = ThreadPoolExecutor(
     max_workers=16, thread_name_prefix="xpublish-tiles-threadpool"
 )
+
+OTHER_4326 = CRS.from_user_input("""
+GEOGCRS["WGS 84 (with axis order normalized for visualization)",
+ENSEMBLE["World Geodetic System 1984 ensemble",MEMBER["World Geodetic System 1984 (Transit)",ID["EPSG",1166]],
+MEMBER["World Geodetic System 1984 (G730)",ID["EPSG",1152]],MEMBER["World Geodetic System 1984 (G873)",ID["EPSG",1153]],
+MEMBER["World Geodetic System 1984 (G1150)",ID["EPSG",1154]],MEMBER["World Geodetic System 1984 (G1674)",ID["EPSG",1155]],
+MEMBER["World Geodetic System 1984 (G1762)",ID["EPSG",1156]],MEMBER["World Geodetic System 1984 (G2139)",ID["EPSG",1309]],
+MEMBER["World Geodetic System 1984 (G2296)",ID["EPSG",1383]],ELLIPSOID["WGS 84",6378137,298.257223563,LENGTHUNIT["metre",1],
+ID["EPSG",7030]],ENSEMBLEACCURACY[2.0],ID["EPSG",6326]],PRIMEM["Greenwich",0,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8901]],CS[ellipsoidal,2],
+AXIS["geodetic longitude (Lon)",east,ORDER[1],ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]]
+,AXIS["geodetic latitude (Lat)",north,ORDER[2],ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]],
+USAGE[SCOPE["Horizontal component of 3D system."],AREA["World."],BBOX[-90,-180,90,180]],REMARK["Axis order reversed compared to EPSG:4326"]]""")
+
+# https://pyproj4.github.io/pyproj/stable/advanced_examples.html#caching-pyproj-objects
+transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=True))
+
 
 # benchmarked with
 # import numpy as np
@@ -66,6 +86,53 @@ EXECUTOR = ThreadPoolExecutor(
 # 156 ms ± 5.07 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
 # 772 ms ± 27 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
 CHUNKED_TRANSFORM_CHUNK_SIZE = (250, 250)
+
+
+def timing_debug(func):
+    """Decorator to add debug timing to async functions."""
+
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        start_time = time.perf_counter()
+        result = await func(*args, **kwargs)
+        total_time = time.perf_counter() - start_time
+        print("%s completed in %.4f seconds", func.__name__, total_time)
+        return result
+
+    return wrapper
+
+
+def epsg4326to3857(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    a = WGS84_SEMI_MAJOR_AXIS
+
+    x = np.asarray(lon, dtype=np.float64, copy=True)
+    y = np.asarray(lat, dtype=np.float64, copy=True)
+
+    # Only normalize longitude values that are outside the [-180, 180] range
+    # This preserves precision for values already in the valid range
+    # pyproj accepts both -180 and 180 as valid values without wrapping
+    needs_normalization = (x > 180) | (x < -180)
+    if np.any(needs_normalization):
+        # Only normalize the values that need it to preserve precision
+        x[needs_normalization] = ((x[needs_normalization] + 180) % 360) - 180
+
+    # Clamp latitude to avoid infinity at poles in-place
+    # Web Mercator is only valid between ~85.05 degrees
+    # MAX_LAT = 85.051128779806604  # atan(sinh(pi)) * 180 / pi
+    # np.clip(y, -MAX_LAT, MAX_LAT, out=y)
+
+    np.deg2rad(x, out=x)
+
+    # Y coordinate: use more stable formula for large latitudes
+    # Using: y = a * atanh(sin(φ)) for better numerical stability
+    np.deg2rad(y, out=y)
+    np.sin(y, out=y)
+    np.arctanh(y, out=y)
+
+    x *= a
+    y *= a
+
+    return x, y
 
 
 def slices_from_chunks(chunks):
@@ -102,9 +169,6 @@ def transform_blocked(
     chunk_size: tuple[int, int] = (250, 250),
 ) -> tuple[np.ndarray, np.ndarray]:
     """Blocked transformation using thread pool."""
-
-    if transformer.source_crs == transformer.target_crs:
-        return x_grid, y_grid
 
     start_time = time.perf_counter()
 
@@ -162,12 +226,14 @@ async def transform_coordinates(
     grid_y_name: str,
     transformer: pyproj.Transformer,
     chunk_size: tuple[int, int] | None = None,
-) -> tuple[np.ndarray, np.ndarray, xr.DataArray, xr.DataArray]:
+) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Transform coordinates from input CRS to output CRS.
 
     This function broadcasts the X and Y coordinates and then transforms them
     using either chunked or direct transformation based on the data size.
+
+    It attempts to preserve rectilinear-ness when possible: 4326 -> 3857
 
     Parameters
     ----------
@@ -184,14 +250,27 @@ async def transform_coordinates(
 
     Returns
     -------
-    tuple[np.ndarray, np.ndarray, xr.DataArray, xr.DataArray]
-        Transformed X and Y coordinates, and the broadcasted coordinate arrays
+    tuple[xr.DataArray, xr.DataArray]
+        Transformed X and Y coordinate arrays
     """
     if chunk_size is None:
         chunk_size = CHUNKED_TRANSFORM_CHUNK_SIZE
 
+    inx, iny = subset[grid_x_name], subset[grid_y_name]
+
+    if transformer.source_crs == transformer.target_crs:
+        return inx, iny
+
+    # preserve rectilinear-ness by reimplementing this (easy) transform
+    if (inx.ndim == 1 and iny.ndim == 1) and (
+        transformer == transformer_from_crs(4326, 3857)
+        or transformer == transformer_from_crs(OTHER_4326, 3857)
+    ):
+        newx, newy = epsg4326to3857(inx.data, iny.data)
+        return inx.copy(data=newx), iny.copy(data=newy)
+
     # Broadcast coordinates
-    bx, by = xr.broadcast(subset[grid_x_name], subset[grid_y_name])
+    bx, by = xr.broadcast(inx, iny)
 
     # Choose transformation method based on data size
     if bx.size > math.prod(chunk_size):
@@ -207,4 +286,4 @@ async def transform_coordinates(
     else:
         newX, newY = transformer.transform(bx.data, by.data)
 
-    return newX, newY, bx, by
+    return bx.copy(data=newX), by.copy(data=newY)
