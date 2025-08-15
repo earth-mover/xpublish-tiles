@@ -25,4 +25,4 @@ jobs:
         run: uv run ty check src/ tests/
 
       - name: Run tests
-        run: uv run pytest tests --durations=10 "tests/test_pipeline.py::test_pipeline_tiles[-90->90,0->360-webmerc_equator_z5_south(5/16/16)]" -n0 -s --tb=long
+        run: uv run pytest tests --durations=10
