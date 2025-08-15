@@ -3,7 +3,7 @@
 import numpy as np
 
 import xarray as xr
-from xpublish_tiles.grids import Curvilinear, Rectilinear, guess_grid_system
+from xpublish_tiles.grids import RasterAffine, Curvilinear, Rectilinear, guess_grid_system
 from xpublish_tiles.pipeline import transformer_from_crs
 from xpublish_tiles.xpublish.wms.types import (
     WMSBoundingBoxResponse,
@@ -190,7 +190,7 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
         grid = guess_grid_system(dataset, var_name)
         supported_crs = ["EPSG:4326", "EPSG:3857"]
         supported_bounds = []
-        if isinstance(grid, Rectilinear) or isinstance(grid, Curvilinear):
+        if isinstance(grid, Rectilinear | Curvilinear | RasterAffine):
             for crs in supported_crs:
                 transformer = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
                 bounds = transformer.transform_bounds(

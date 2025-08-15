@@ -1,7 +1,7 @@
 from typing import Any, Optional, Union
 
 from xarray import Dataset
-from xpublish_tiles.grids import Curvilinear, Rectilinear, guess_grid_system
+from xpublish_tiles.grids import Curvilinear, Rectilinear, RasterAffine, guess_grid_system
 from xpublish_tiles.pipeline import transformer_from_crs
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
@@ -209,7 +209,7 @@ def extract_variable_bounding_box(
         # Get the grid system for this variable
         grid = guess_grid_system(dataset, variable_name)
 
-        if not isinstance(grid, Rectilinear | Curvilinear):
+        if not isinstance(grid, RasterAffine | Rectilinear | Curvilinear):
             return None
 
         # After isinstance check, grid is guaranteed to have crs and bbox attributes
