@@ -1,6 +1,7 @@
 """Simple CLI for playing with xpublish-tiles, with a generated sample dataset"""
 
 import argparse
+import threading
 from typing import cast
 
 import cf_xarray  # noqa: F401
@@ -8,10 +9,14 @@ import xpublish
 from fastapi.middleware.cors import CORSMiddleware
 
 import xarray as xr
+from xpublish_tiles.cli.bench import run_benchmark
 from xpublish_tiles.testing.datasets import (
+    EU3035,
     EU3035_HIRES,
     HRRR,
+    IFS,
     PARA,
+    PARA_HIRES,
     create_global_dataset,
 )
 from xpublish_tiles.xpublish.tiles.plugin import TilesPlugin
@@ -30,7 +35,11 @@ def get_dataset_for_name(
     elif name == "para":
         ds = PARA.create().assign_attrs(_xpublish_id=name)
     elif name == "eu3035":
+        ds = EU3035.create().assign_attrs(_xpublish_id=name)
+    elif name == "eu3035_hires":
         ds = EU3035_HIRES.create().assign_attrs(_xpublish_id=name)
+    elif name == "ifs":
+        ds = IFS.create().assign_attrs(_xpublish_id=name)
     elif name.startswith("local://"):
         # Local icechunk dataset path
         import icechunk
@@ -119,6 +128,52 @@ def get_dataset_for_name(
     return ds
 
 
+def get_dataset_object_for_name(name: str):
+    """Get the Dataset object for benchmark tiles."""
+    # Handle local:// paths by extracting the dataset name
+    if name.startswith("local://"):
+        # Extract dataset name from local path
+        local_path = name[8:]  # Remove "local://" prefix
+        if "::" in local_path:
+            # Custom path format: local:///path/to/repo::dataset_name
+            _, dataset_name = local_path.rsplit("::", 1)
+        else:
+            # Default format: local://dataset_name
+            dataset_name = local_path
+
+        # Map dataset name to Dataset object
+        if dataset_name == "hrrr":
+            return HRRR
+        elif dataset_name == "para":
+            return PARA
+        elif dataset_name == "para_hires":
+            return PARA_HIRES
+        elif dataset_name == "eu3035":
+            return EU3035
+        elif dataset_name == "eu3035_hires":
+            return EU3035_HIRES
+        elif dataset_name == "ifs":
+            return IFS
+        else:
+            return None
+
+    # Handle non-local dataset names
+    if name == "hrrr":
+        return HRRR
+    elif name == "para":
+        return PARA
+    elif name == "para_hires":
+        return PARA_HIRES
+    elif name == "eu3035":
+        return EU3035
+    elif name == "eu3035_hires":
+        return EU3035_HIRES
+    elif name == "ifs":
+        return IFS
+    else:
+        return None
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Simple CLI for playing with xpublish-tiles"
@@ -133,7 +188,7 @@ def main():
         "--dataset",
         type=str,
         default="global",
-        help="Dataset to serve (default: global). Options: global, air, hrrr, para, eu3035, local://<group_name> (loads group from /tmp/tiles-icechunk/), local:///custom/path::<group_name> (loads group from custom icechunk repo), or an arraylake dataset name",
+        help="Dataset to serve (default: global). Options: global, air, hrrr, para, eu3035, ifs, local://<group_name> (loads group from /tmp/tiles-icechunk/), local:///custom/path::<group_name> (loads group from custom icechunk repo), or an arraylake dataset name",
     )
     parser.add_argument(
         "--branch",
@@ -153,9 +208,24 @@ def main():
         default=False,
         help="Enable the icechunk cache for Arraylake datasets (default: False)",
     )
+    parser.add_argument(
+        "--spy",
+        action="store_true",
+        help="Run benchmark requests with the specified dataset",
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=12,
+        help="Number of concurrent requests for benchmarking (default: 12)",
+    )
     args = parser.parse_args()
 
-    ds = get_dataset_for_name(args.dataset, args.branch, args.group, args.cache)
+    # Determine dataset to use and benchmarking mode
+    dataset_name = args.dataset
+    benchmarking = args.spy
+
+    ds = get_dataset_for_name(dataset_name, args.branch, args.group, args.cache)
 
     xr.set_options(keep_attrs=True)
     rest = xpublish.SingleDatasetRest(
@@ -163,4 +233,24 @@ def main():
         plugins={"tiles": TilesPlugin(), "wms": WMSPlugin()},
     )
     rest.app.add_middleware(CORSMiddleware, allow_origins=["*"])
+
+    # If benchmarking, start the benchmark thread after a delay
+    if benchmarking:
+        # Get dataset object for potential benchmark tiles
+        dataset_obj = get_dataset_object_for_name(dataset_name)
+        if not dataset_obj:
+            raise ValueError(f"No dataset object found for dataset '{dataset_name}'")
+        bench_thread = threading.Thread(
+            target=run_benchmark,
+            args=(
+                args.port,
+                "requests",
+                dataset_name,
+                dataset_obj.benchmark_tiles,
+                args.concurrency,
+            ),
+            daemon=True,
+        )
+        bench_thread.start()
+
     rest.serve(host="0.0.0.0", port=args.port)
