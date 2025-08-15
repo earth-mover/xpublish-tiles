@@ -1,12 +1,16 @@
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 from xarray import Dataset
+from xpublish_tiles.grids import Curvilinear, Rectilinear, guess_grid_system
+from xpublish_tiles.pipeline import transformer_from_crs
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     extract_dataset_bounds,
     extract_dimension_extents,
 )
 from xpublish_tiles.xpublish.tiles.types import (
+    BoundingBox,
+    CRSType,
     DataType,
     DimensionType,
     Link,
@@ -186,3 +190,47 @@ def _calculate_temporal_resolution(values: list[Union[str, float, int]]) -> str:
 
     except Exception:
         return "PT1H"  # Default fallback
+
+
+def extract_variable_bounding_box(
+    dataset: Dataset, variable_name: str, target_crs: str | CRSType
+) -> Optional[BoundingBox]:
+    """Extract variable-specific bounding box and transform to target CRS
+
+    Args:
+        dataset: xarray Dataset
+        variable_name: Name of the variable to extract bounds for
+        target_crs: Target coordinate reference system
+
+    Returns:
+        BoundingBox object if bounds can be extracted, None otherwise
+    """
+    try:
+        # Get the grid system for this variable
+        grid = guess_grid_system(dataset, variable_name)
+
+        if not isinstance(grid, (Rectilinear, Curvilinear)):
+            return None
+
+        # Convert target CRS to string format for transformer
+        if isinstance(target_crs, CRSType):
+            target_crs_str = target_crs.to_epsg_string() or str(
+                target_crs.uri or target_crs.wkt or ""
+            )
+        else:
+            target_crs_str = target_crs
+
+        # Transform bounds to target CRS
+        transformer = transformer_from_crs(crs_from=grid.crs, crs_to=target_crs_str)
+        transformed_bounds = transformer.transform_bounds(
+            grid.bbox.west, grid.bbox.south, grid.bbox.east, grid.bbox.north
+        )
+
+        return BoundingBox(
+            lowerLeft=[transformed_bounds[0], transformed_bounds[1]],
+            upperRight=[transformed_bounds[2], transformed_bounds[3]],
+            crs=target_crs,
+        )
+
+    except Exception:
+        return None

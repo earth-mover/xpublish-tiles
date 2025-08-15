@@ -14,6 +14,7 @@ from xpublish_tiles.types import QueryParams
 from xpublish_tiles.xpublish.tiles.metadata import (
     create_tileset_metadata,
     extract_dataset_extents,
+    extract_variable_bounding_box,
 )
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
@@ -155,12 +156,21 @@ class TilesPlugin(Plugin):
                     layers = []
                     for var_name, var_data in dataset.data_vars.items():
                         extents = extract_dataset_extents(dataset, var_name)
+
+                        # Extract variable-specific bounding box, fallback to dataset bounds
+                        var_bounding_box = extract_variable_bounding_box(
+                            dataset, var_name, tms_summary.crs
+                        )
+                        bounding_box = (
+                            var_bounding_box if var_bounding_box else dataset_bounds
+                        )
+
                         layer = Layer(
                             id=var_name,
                             title=var_data.attrs.get("long_name", var_name),
                             description=var_data.attrs.get("description", ""),
                             dataType=DataType.COVERAGE,
-                            boundingBox=dataset_bounds,
+                            boundingBox=bounding_box,
                             crs=tms_summary.crs,
                             links=[
                                 Link(
