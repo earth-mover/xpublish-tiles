@@ -18,6 +18,8 @@ from pyproj import CRS
 
 import xarray as xr
 
+WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)
+
 
 class NoCoverageError(Exception):
     """Raised when a tile has no overlap with the dataset bounds."""
@@ -101,23 +103,35 @@ def timing_debug(func):
 
 
 def epsg4326to3857(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    # lat0 = 0
-    # lon0 = 0
-    # FE = 0
-    # FN = 0
-    a = 6378137.0
+    a = WGS84_SEMI_MAJOR_AXIS
 
-    # lon -= lon0
-    # lat -= lat0
+    x = np.asarray(lon, dtype=np.float64, copy=True)
+    y = np.asarray(lat, dtype=np.float64, copy=True)
 
-    x = np.deg2rad(lon)
-    y = np.deg2rad(lat)
-    np.arctan2(np.sin(x), np.cos(x), out=x)
+    # Only normalize longitude values that are outside the [-180, 180] range
+    # This preserves precision for values already in the valid range
+    # pyproj accepts both -180 and 180 as valid values without wrapping
+    needs_normalization = (x > 180) | (x < -180)
+    if np.any(needs_normalization):
+        # Only normalize the values that need it to preserve precision
+        x[needs_normalization] = ((x[needs_normalization] + 180) % 360) - 180
+
+    # Clamp latitude to avoid infinity at poles in-place
+    # Web Mercator is only valid between ~85.05 degrees
+    # MAX_LAT = 85.051128779806604  # atan(sinh(pi)) * 180 / pi
+    # np.clip(y, -MAX_LAT, MAX_LAT, out=y)
+
+    np.deg2rad(x, out=x)
+
+    # Y coordinate: use more stable formula for large latitudes
+    # Using: y = a * atanh(sin(φ)) for better numerical stability
+    np.deg2rad(y, out=y)
+    np.sin(y, out=y)
+    np.arctanh(y, out=y)
+
     x *= a
-    np.log(np.tan(np.pi / 4 + y / 2, out=y), out=y)
     y *= a
-    # x += FE
-    # y += FN
+
     return x, y
 
 
@@ -253,9 +267,6 @@ async def transform_coordinates(
         or transformer == transformer_from_crs(OTHER_4326, 3857)
     ):
         newx, newy = epsg4326to3857(inx.data, iny.data)
-        logger.info(newx)
-        logger.info(newy)
-        logger.warn("fastest path")
         return inx.copy(data=newx), iny.copy(data=newy)
 
     # Broadcast coordinates
@@ -275,5 +286,4 @@ async def transform_coordinates(
     else:
         newX, newY = transformer.transform(bx.data, by.data)
 
-    logger.warn("not so fast path")
     return bx.copy(data=newX), by.copy(data=newY)
