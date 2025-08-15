@@ -26,23 +26,6 @@ from xpublish_tiles.xpublish.wms.types import (
 )
 
 
-def filter_sensitive_attributes(attrs: dict[str, Any]) -> dict[str, Any]:
-    """Filter out potentially sensitive attributes
-
-    Args:
-        attrs: Dictionary of attributes to filter
-
-    Returns:
-        Filtered dictionary with sensitive attributes removed
-    """
-    sensitive_keys = {"password", "token", "key", "secret", "_private"}
-    return {
-        k: v
-        for k, v in attrs.items()
-        if not any(sensitive in k.lower() for sensitive in sensitive_keys)
-    }
-
-
 def convert_attributes_to_wms(attrs: dict[str, Any]) -> list[WMSAttributeResponse]:
     """Convert xarray attributes to WMS attribute elements
 
@@ -235,8 +218,7 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
         abstract = getattr(var, "description", getattr(var, "comment", None))
 
         # Extract variable attributes
-        var_attrs = filter_sensitive_attributes(var.attrs)
-        wms_attributes = convert_attributes_to_wms(var_attrs)
+        wms_attributes = convert_attributes_to_wms(var.attrs)
 
         # Extract geographic bounds
         guessed_grid = guess_grid_system(dataset, var_name)
@@ -342,8 +324,7 @@ def create_capabilities_response(
     available_styles = get_available_wms_styles()
 
     # Extract dataset attributes for root layer
-    dataset_attrs = filter_sensitive_attributes(dataset.attrs)
-    dataset_wms_attributes = convert_attributes_to_wms(dataset_attrs)
+    dataset_wms_attributes = convert_attributes_to_wms(dataset.attrs)
 
     root_layer = WMSLayerResponse(
         title="Dataset Layers",

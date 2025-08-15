@@ -20,23 +20,6 @@ from xpublish_tiles.xpublish.tiles.types import (
 )
 
 
-def filter_sensitive_attributes(attrs: dict[str, Any]) -> dict[str, Any]:
-    """Filter out potentially sensitive attributes
-
-    Args:
-        attrs: Dictionary of attributes to filter
-
-    Returns:
-        Filtered dictionary with sensitive attributes removed
-    """
-    sensitive_keys = {"password", "token", "key", "secret", "_private"}
-    return {
-        k: v
-        for k, v in attrs.items()
-        if not any(sensitive in k.lower() for sensitive in sensitive_keys)
-    }
-
-
 def extract_attributes_metadata(
     dataset: Dataset, variable_name: str | None = None
 ) -> AttributesMetadata:
@@ -49,23 +32,18 @@ def extract_attributes_metadata(
     Returns:
         AttributesMetadata object with filtered dataset and variable attributes
     """
-    # Extract dataset attributes
-    dataset_attrs = filter_sensitive_attributes(dataset.attrs)
-
     # Extract variable attributes
     variable_attrs = {}
     if variable_name:
         # Extract attributes for specific variable only
         if variable_name in dataset.data_vars:
-            variable_attrs[variable_name] = filter_sensitive_attributes(
-                dataset[variable_name].attrs
-            )
+            variable_attrs[variable_name] = dataset[variable_name].attrs
     else:
         # Extract attributes for all data variables
         for var_name, var_data in dataset.data_vars.items():
-            variable_attrs[var_name] = filter_sensitive_attributes(var_data.attrs)
+            variable_attrs[var_name] = var_data.attrs
 
-    return AttributesMetadata(dataset_attrs=dataset_attrs, variable_attrs=variable_attrs)
+    return AttributesMetadata(dataset_attrs=dataset.attrs, variable_attrs=variable_attrs)
 
 
 def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSetMetadata:

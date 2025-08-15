@@ -5,34 +5,6 @@ import numpy as np
 import xarray as xr
 
 
-def test_filter_sensitive_attributes():
-    """Test that sensitive attributes are filtered out"""
-    from xpublish_tiles.xpublish.tiles.metadata import filter_sensitive_attributes
-
-    attrs = {
-        "title": "Test Dataset",
-        "author": "Test Author",
-        "password": "secret123",
-        "api_token": "abc123",
-        "private_key": "xyz789",
-        "_private_info": "hidden",
-        "description": "A test dataset",
-    }
-
-    filtered = filter_sensitive_attributes(attrs)
-
-    # Should keep normal attributes
-    assert "title" in filtered
-    assert "author" in filtered
-    assert "description" in filtered
-
-    # Should remove sensitive attributes
-    assert "password" not in filtered
-    assert "api_token" not in filtered
-    assert "private_key" not in filtered
-    assert "_private_info" not in filtered
-
-
 def test_extract_attributes_metadata():
     """Test extraction of attributes metadata from dataset"""
     from xpublish_tiles.xpublish.tiles.metadata import extract_attributes_metadata
