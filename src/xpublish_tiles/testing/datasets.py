@@ -310,9 +310,17 @@ IFS = Dataset(
             chunk_size=5,
             data=pd.to_timedelta(np.arange(0, 49), unit="h"),
         ),
-        Dim(name="latitude", size=721, chunk_size=240, data=np.linspace(90, -90, 721)),
         Dim(
-            name="longitude", size=1440, chunk_size=360, data=np.linspace(-180, 180, 1440)
+            name="latitude",
+            size=721,
+            chunk_size=240,
+            data=np.linspace(90, -90, 721),
+        ),
+        Dim(
+            name="longitude",
+            size=1440,
+            chunk_size=360,
+            data=np.linspace(-180 + 0.125, 180 - 0.125, 1440),
         ),
     ),
     dtype=np.float32,
@@ -321,6 +329,37 @@ IFS = Dataset(
     tiles=WGS84_TILES + WEBMERC_TILES,
     benchmark_tiles=GLOBAL_BENCHMARK_TILES,
 )
+
+ERA5 = Dataset(
+    # https://app.earthmover.io/earthmover-demos/ecmwf-ifs-oper/array/main/tprate
+    name="era5",
+    dims=(
+        Dim(
+            name="time",
+            size=2,
+            chunk_size=1,
+            data=np.array(["2000-01-01", "2000-01-02"], dtype="datetime64[h]"),
+        ),
+        Dim(
+            name="latitude",
+            size=721,
+            chunk_size=240,
+            data=np.linspace(90, -90, 721),
+        ),
+        Dim(
+            name="longitude",
+            size=1440,
+            chunk_size=360,
+            data=np.linspace(0, 359.75, 1440),
+        ),
+    ),
+    dtype=np.float32,
+    setup=uniform_grid,
+    edge_case_tiles=WGS84_TILES_EDGE_CASES + WEBMERC_TILES_EDGE_CASES,
+    tiles=WGS84_TILES + WEBMERC_TILES,
+    benchmark_tiles=GLOBAL_BENCHMARK_TILES,
+)
+
 
 SENTINEL2_NOCOORDS = Dataset(
     # https://app.earthmover.io/earthmover-demos/sentinel-datacube-South-America-3-icechunk

@@ -378,7 +378,7 @@ def test_extract_variable_bounding_box():
     dataset = xr.Dataset(
         {
             "temperature": xr.DataArray(
-                np.random.randn(5, 10),
+                np.random.randn(5, 11),
                 dims=["lat", "lon"],
                 coords={
                     "lat": (
@@ -388,7 +388,7 @@ def test_extract_variable_bounding_box():
                     ),
                     "lon": (
                         ["lon"],
-                        np.linspace(-5, 5, 10),
+                        np.linspace(-5, 5, 11),
                         {"axis": "X", "standard_name": "longitude"},
                     ),
                 },
@@ -410,12 +410,12 @@ def test_extract_variable_bounding_box():
         assert len(bbox.upperRight) == 2
 
         # Lower left should be min values
-        assert bbox.lowerLeft[0] == pytest.approx(-5.0, abs=1e-6)  # min lon
-        assert bbox.lowerLeft[1] == pytest.approx(-2.0, abs=1e-6)  # min lat
+        assert bbox.lowerLeft[0] == pytest.approx(-5.5, abs=1e-6)  # min lon
+        assert bbox.lowerLeft[1] == pytest.approx(-2.5, abs=1e-6)  # min lat
 
         # Upper right should be max values
-        assert bbox.upperRight[0] == pytest.approx(5.0, abs=1e-6)  # max lon
-        assert bbox.upperRight[1] == pytest.approx(2.0, abs=1e-6)  # max lat
+        assert bbox.upperRight[0] == pytest.approx(5.5, abs=1e-6)  # max lon
+        assert bbox.upperRight[1] == pytest.approx(2.5, abs=1e-6)  # max lat
 
         # CRS should be set correctly
         assert bbox.crs == "EPSG:4326"

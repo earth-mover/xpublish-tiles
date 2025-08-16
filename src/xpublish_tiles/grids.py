@@ -254,7 +254,10 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
 
 @dataclass(kw_only=True)
 class Rectilinear(RectilinearSelMixin, GridSystem):
-    """2D horizontal grid defined by two explicit 1D basis vectors."""
+    """
+    2D horizontal grid defined by two explicit 1D basis vectors.
+    Assumes coordinates are cell centers.
+    """
 
     crs: CRS
     bbox: BBox
@@ -266,6 +269,61 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
 
     def __post_init__(self) -> None:
         self.dims = {self.X, self.Y}
+
+    @classmethod
+    def from_dataset(
+        cls,
+        ds: xr.Dataset,
+        crs: CRS,
+        Xname: str,
+        Yname: str,
+    ) -> "Rectilinear":
+        """Create a Rectilinear grid from a dataset with cell-center adjusted bbox."""
+        X = ds[Xname]
+        Y = ds[Yname]
+
+        # Get min/max values
+        xmin = numbagg.nanmin(X.data).item()
+        xmax = numbagg.nanmax(X.data).item()
+        ymin = numbagg.nanmin(Y.data).item()
+        ymax = numbagg.nanmax(Y.data).item()
+
+        # Calculate dx for first and last cells to adjust bbox for cell centers
+        if len(X) > 1:
+            dx_first = abs(X.data[1] - X.data[0]) / 2
+            dx_last = abs(X.data[-1] - X.data[-2]) / 2
+        else:
+            dx_first = dx_last = 0
+
+        if len(Y) > 1:
+            dy_first = abs(Y.data[1] - Y.data[0]) / 2
+            dy_last = abs(Y.data[-1] - Y.data[-2]) / 2
+        else:
+            dy_first = dy_last = 0
+
+        west = np.round(xmin - dx_first, 3)
+        east = np.round(xmax + dx_last, 3)
+        south = np.round(ymin - dy_first, 3)
+        north = np.round(ymax + dy_last, 3)
+        if crs.is_geographic:
+            if 360 - (east - west) < abs(dx_first):
+                if xmax > 180:
+                    west, east = 0, 360
+                elif xmin < 0:
+                    west, east = -180, 180
+            south = max(-90, south)
+            north = min(90, north)
+        bbox = BBox(west=west, east=east, south=south, north=north)
+        return cls(
+            crs=crs,
+            X=Xname,
+            Y=Yname,
+            bbox=bbox,
+            indexes=(
+                cast(xr.indexes.PandasIndex, ds.xindexes[Xname]),
+                cast(xr.indexes.PandasIndex, ds.xindexes[Yname]),
+            ),
+        )
 
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         """
@@ -500,24 +558,18 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
         X = ds[Xname]
         Y = ds[Yname]
 
-        bbox = BBox(
-            west=numbagg.nanmin(X.data).item(),
-            east=numbagg.nanmax(X.data).item(),
-            south=numbagg.nanmin(Y.data).item(),
-            north=numbagg.nanmax(Y.data).item(),
-        )
         if X.ndim == 1 and Y.ndim == 1:
-            return Rectilinear(
-                crs=crs,
-                X=Xname,
-                Y=Yname,
-                bbox=bbox,
-                indexes=(
-                    cast(xr.indexes.PandasIndex, ds.xindexes[Xname]),
-                    cast(xr.indexes.PandasIndex, ds.xindexes[Yname]),
-                ),
-            )
+            if is_rotated_pole(crs):
+                raise NotImplementedError("Rotated pole grids are not supported yet.")
+            return Rectilinear.from_dataset(ds, crs, Xname, Yname)
         elif X.ndim == 2 and Y.ndim == 2:
+            # TODO: bbox is wrong here
+            bbox = BBox(
+                west=numbagg.nanmin(X.data).item(),
+                east=numbagg.nanmax(X.data).item(),
+                south=numbagg.nanmin(Y.data).item(),
+                north=numbagg.nanmax(Y.data).item(),
+            )
             dims = set(X.dims) | set(Y.dims)
             # See discussion in https://github.com/pydata/xarray/issues/10572
             return Curvilinear(

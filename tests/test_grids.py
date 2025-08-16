@@ -18,6 +18,7 @@ from xpublish_tiles.grids import (
     guess_grid_system,
 )
 from xpublish_tiles.testing.datasets import (
+    ERA5,
     EU3035,
     FORECAST,
     HRRR,
@@ -51,11 +52,28 @@ from xpublish_tiles.testing.tiles import TILES
             ),
         ),
         (
+            ERA5.create(),
+            "foo",
+            Rectilinear(
+                crs=CRS.from_epsg(4326),
+                bbox=BBox(
+                    west=0,
+                    south=-90,
+                    east=360,
+                    north=90,
+                ),
+                X="longitude",
+                Y="latitude",
+                Z=None,
+                indexes=(),  # type: ignore[arg-type]
+            ),
+        ),
+        (
             FORECAST,
             "sst",
             Rectilinear(
                 crs=CRS.from_user_input(4326),
-                bbox=BBox(south=0, north=5, east=4, west=0),
+                bbox=BBox(south=-0.5, north=5.5, east=4.5, west=-0.5),
                 X="X",
                 Y="Y",
                 Z=None,
@@ -88,34 +106,34 @@ from xpublish_tiles.testing.tiles import TILES
                 indexes=(),  # type: ignore[arg-type]
             ),
         ),
-        (
-            cfxr.datasets.rotds,
-            "temp",
-            Rectilinear(
-                crs=CRS.from_cf(
-                    {
-                        "grid_mapping_name": "rotated_latitude_longitude",
-                        "grid_north_pole_latitude": 39.25,
-                        "grid_north_pole_longitude": -162.0,
-                    }
-                ),
-                bbox=BBox(south=21.615, north=21.835, east=18.155, west=17.935),
-                X="rlon",
-                Y="rlat",
-                Z=None,
-                indexes=(),  # type: ignore[arg-type]
-            ),
-        ),
+        # (
+        #     cfxr.datasets.rotds,
+        #     "temp",
+        #     Rectilinear(
+        #         crs=CRS.from_cf(
+        #             {
+        #                 "grid_mapping_name": "rotated_latitude_longitude",
+        #                 "grid_north_pole_latitude": 39.25,
+        #                 "grid_north_pole_longitude": -162.0,
+        #             }
+        #         ),
+        #         bbox=BBox(south=21.615, north=21.835, east=18.155, west=17.935),
+        #         X="rlon",
+        #         Y="rlat",
+        #         Z=None,
+        #         indexes=(),  # type: ignore[arg-type]
+        #     ),
+        # ),
         (
             HRRR.create(),
             "foo",
             Rectilinear(
                 crs=CRS.from_wkt(HRRR_CRS_WKT),
                 bbox=BBox(
-                    west=-2697520.142522,
-                    south=-1587306.152557,
-                    east=2696479.857478,
-                    north=1586693.847443,
+                    west=-2697520.143 - 1500,
+                    south=-1587306.153 - 1500,
+                    east=2696479.857 + 1500,
+                    north=1586693.847 + 1500,
                 ),
                 X="x",
                 Y="y",
