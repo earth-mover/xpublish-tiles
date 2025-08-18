@@ -5,6 +5,7 @@ import io
 import logging
 import math
 import operator
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache, partial, wraps
@@ -35,8 +36,12 @@ class TileTooBigError(Exception):
 
 logger = logging.getLogger(__name__)
 
+
+THREAD_POOL_NUM_THREADS = int(os.environ.get("XPUBLISH_TILES_NUM_THREADS", 16))
+logger.info("setting up thread pool with num threads: ", THREAD_POOL_NUM_THREADS)
 EXECUTOR = ThreadPoolExecutor(
-    max_workers=16, thread_name_prefix="xpublish-tiles-threadpool"
+    max_workers=THREAD_POOL_NUM_THREADS,
+    thread_name_prefix="xpublish-tiles-threadpool",
 )
 
 OTHER_4326 = CRS.from_user_input("""
@@ -85,7 +90,9 @@ transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=
 # 155 ms ± 2.75 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
 # 156 ms ± 5.07 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
 # 772 ms ± 27 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
-CHUNKED_TRANSFORM_CHUNK_SIZE = (250, 250)
+chunk_size = int(os.environ.get("XPUBLISH_TILES_TRANSFORM_CHUNK_SIZE", 250))
+CHUNKED_TRANSFORM_CHUNK_SIZE = (chunk_size, chunk_size)
+logger.info("transform chunk size: ", CHUNKED_TRANSFORM_CHUNK_SIZE)
 
 
 def timing_debug(func):
@@ -220,6 +227,7 @@ def check_transparent_pixels(image_bytes):
     return (transparent_count / total_pixels) * 100
 
 
+@timing_debug
 async def transform_coordinates(
     subset: xr.DataArray,
     grid_x_name: str,
