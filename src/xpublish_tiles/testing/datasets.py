@@ -134,18 +134,18 @@ def generate_flag_values_data(
     noisy_tanh = tanh_data + scaled_noise
     noisy_tanh = np.clip(noisy_tanh, -1, 1)
 
-    # Discretize to 10 levels by mapping [-1, 1] to [0, 9] indices
-    # First normalize to [0, 1], then scale to [0, 9], then round to integers
+    # Discretize to N levels based on number of flag values
+    num_categories = len(flag_values)
+    # First normalize to [0, 1], then scale to [0, num_categories-1], then round to integers
     normalized = (noisy_tanh + 1) / 2  # Map [-1, 1] to [0, 1]
-    scaled = normalized * 9  # Map [0, 1] to [0, 9]
+    scaled = normalized * (num_categories - 1)  # Map [0, 1] to [0, num_categories-1]
     indices = np.round(scaled).astype(int)  # Round and convert to int
 
-    # Clip to ensure indices are in valid range [0, 9]
-    indices = np.clip(indices, 0, 9)
+    # Clip to ensure indices are in valid range
+    indices = np.clip(indices, 0, num_categories - 1)
 
     # Map indices to actual flag values
-    # Only use the first 10 flag values if more are provided
-    flag_array = np.array(flag_values[:10], dtype=dtype)
+    flag_array = np.array(flag_values, dtype=dtype)
     array = dask.array.map_blocks(
         lambda chunk, flags: flags[chunk],
         indices,
@@ -439,10 +439,10 @@ PARA = Dataset(
     attrs={
         "flag_meanings": (
             "water ocean forest grassland agriculture urban barren shrubland "
-            "wetland cropland tundra ice"
+            "wetland cropland"
         ),
-        "flag_values": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-        "flag_colors": "#1f77b4 #17becf #2ca02c #8c564b #ff7f0e #d62728 #bcbd22 #9467bd #e377c2 #7f7f7f #c5b0d5 #ffffff",
+        "flag_values": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "flag_colors": "#1f77b4 #17becf #2ca02c #8c564b #ff7f0e #d62728 #bcbd22 #9467bd #e377c2 #7f7f7f",
     },
     setup=partial(
         raster_grid,
