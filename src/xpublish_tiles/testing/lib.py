@@ -430,6 +430,40 @@ def assert_render_matches_snapshot(
     assert content == png_snapshot
 
 
+def visualize_tile(result: io.BytesIO, tile: Tile) -> None:
+    """Visualize a rendered tile with matplotlib showing RGB and alpha channels.
+
+    Args:
+        result: BytesIO buffer containing PNG image data
+        tile: Tile object with z, x, y coordinates
+    """
+    result.seek(0)
+    pil_img = Image.open(result)
+    img_array = np.array(pil_img)
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+
+    # Show the rendered tile
+    axes[0].imshow(img_array)
+    axes[0].set_title(f"Tile z={tile.z}, x={tile.x}, y={tile.y}")
+
+    # Show alpha channel if present
+    if img_array.shape[2] == 4:
+        alpha = img_array[:, :, 3]
+        im = axes[1].imshow(alpha, cmap="gray", vmin=0, vmax=255)
+        axes[1].set_title(
+            f"Alpha Channel\n{((alpha == 0).sum() / alpha.size * 100):.1f}% transparent"
+        )
+        plt.colorbar(im, ax=axes[1])
+    else:
+        axes[1].text(
+            0.5, 0.5, "No Alpha", ha="center", va="center", transform=axes[1].transAxes
+        )
+
+    plt.tight_layout()
+    plt.show(block=True)  # Block until window is closed
+
+
 # Export the fixture name for easier importing
 __all__ = [
     "assert_render_matches_snapshot",
@@ -437,4 +471,5 @@ __all__ = [
     "create_debug_visualization",
     "png_snapshot",
     "validate_transparency",
+    "visualize_tile",
 ]
