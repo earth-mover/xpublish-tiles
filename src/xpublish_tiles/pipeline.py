@@ -334,10 +334,7 @@ async def subset_to_bbox(
             result[var_name] = NullRenderContext()
             continue
 
-        # Create extended bbox to prevent coordinate sampling gaps
-        # This is a lot easier to do in coordinate space because of anti-meridian handling
-        extended_bbox = grid.pad_bbox(input_bbox, array.da)
-        subset = grid.sel(array.da, bbox=extended_bbox)
+        subset = grid.sel(array.da, bbox=input_bbox)
 
         # Check for insufficient data - either dimension has too few points
         if min(subset.shape) < 2:

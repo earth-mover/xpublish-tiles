@@ -1,17 +1,20 @@
 import itertools
 import re
 import warnings
+from collections.abc import Hashable
 from dataclasses import dataclass, field
 from typing import Self, cast
 
 import cachetools
 import numbagg
 import numpy as np
+import pandas as pd
 import rasterix
 from pyproj import CRS
 from pyproj.aoi import BBox
 
 import xarray as xr
+from xarray.core.indexing import IndexSelResult
 
 DEFAULT_CRS = CRS.from_epsg(4326)
 
@@ -29,105 +32,287 @@ def _get_xy_pad(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
     return x_pad, y_pad
 
 
-def pad_bbox(bbox: BBox, da: xr.DataArray, *, x_pad: float, y_pad: float) -> BBox:
+def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
     """
-    Extend bbox slightly to account for discrete coordinate sampling.
-    This prevents transparency gaps at tile edges due to coordinate resolution.
+    Compute interval bounds from cell centers, handling non-uniform spacing.
+    Handles both increasing and decreasing coordinate arrays.
 
-    The function ensures that the padded bbox does not cross the anti-meridian
-    by checking if padding would cause west > east.
+    Parameters
+    ----------
+    centers : np.ndarray
+        Array of cell center coordinates
+
+    Returns
+    -------
+    np.ndarray
+        Array of bounds with length len(centers) + 1
     """
-    x_pad = abs(x_pad)
-    y_pad = abs(y_pad)
-    padded_west = float(bbox.west - x_pad)
-    padded_east = float(bbox.east + x_pad)
+    size = centers.size
+    if size < 2:
+        raise ValueError("lat/lon vector with size < 2!")
 
-    # Check if padding would cause anti-meridian crossing
-    # This happens when the padded west > padded east
-    if padded_west > padded_east:
-        # Don't pad in the x direction to avoid crossing
-        padded_west = float(bbox.west)
-        padded_east = float(bbox.east)
+    # Calculate differences between adjacent centers
+    halfwidth = np.diff(centers) / 2
 
-    return BBox(
-        west=padded_west,
-        east=padded_east,
-        south=float(bbox.south - y_pad),
-        north=float(bbox.north + y_pad),
-    )
+    # Initialize bounds array
+    bounds = np.empty(len(centers) + 1)
+    bounds[0] = centers[0] - halfwidth[0]
+    bounds[1:-1] = centers[:-1] + halfwidth
+    bounds[-1] = centers[-1] + halfwidth[-1]
+    return bounds
+
+
+class LongitudeCellIndex(xr.indexes.PandasIndex):
+    def __init__(self, interval_index: pd.IntervalIndex, dim: str):
+        """
+        Initialize LongitudeCellIndex with an IntervalIndex.
+
+        Parameters
+        ----------
+        interval_index : pd.IntervalIndex
+            The IntervalIndex representing cell bounds
+        dim : str
+            The dimension name
+        """
+        super().__init__(interval_index, dim)
+        self.index = interval_index
+        self._xrindex = xr.indexes.PandasIndex(interval_index, dim)
+        self._is_global = self._determine_global_coverage()
+
+        # Determine if dataset uses 0→360 or -180→180 coordinate system
+        coord_centers = self.cell_centers
+        self._uses_0_360 = coord_centers.min() >= 0 and coord_centers.max() > 180
+
+    @property
+    def cell_bounds(self) -> np.ndarray:
+        """Get the cell bounds as an array."""
+        return np.array([self.index.left.values, self.index.right.values]).T
+
+    @property
+    def cell_centers(self) -> np.ndarray:
+        """Get the cell centers as an array."""
+        return self.index.mid.values
+
+    @property
+    def is_global(self) -> bool:
+        """Check if this longitude index covers the full globe."""
+        return self._is_global
+
+    @property
+    def uses_0_360(self) -> bool:
+        """Check if this longitude index uses 0→360 coordinate system (vs -180→180)."""
+        return self._uses_0_360
+
+    def _determine_global_coverage(self) -> bool:
+        """
+        Determine if the longitude coverage is global.
+
+        Returns True if the longitude spans nearly 360 degrees, indicating
+        global coverage.
+        """
+        left_bounds = self.index.left.values
+        right_bounds = self.index.right.values
+
+        # Get the full span from leftmost left bound to rightmost right bound
+        min_lon = left_bounds.min()
+        max_lon = right_bounds.max()
+        lon_span = max_lon - min_lon
+
+        # Consider global if span is at least 359 degrees (allowing small tolerance)
+        return lon_span >= 359.0
+
+    def sel(self, labels, method=None, tolerance=None):
+        """
+        Select values from the longitude index with coordinate system conversion.
+
+        Handles selection for both -180→180 and 0→360 longitude coordinate systems.
+        Automatically converts coordinates when needed to match the dataset's convention.
+
+        Parameters
+        ----------
+        labels : scalar or array-like
+            Labels to select (can be scalar, slice, or array-like)
+        method : str, optional
+            Selection method (e.g., 'nearest', 'ffill', 'bfill')
+        tolerance : optional
+            Tolerance for inexact matches
+
+        Returns
+        -------
+        Selection result with potentially multiple indexers for boundary crossing
+        """
+        # Handle slice objects specially for longitude coordinate conversion
+        key, value = next(iter(labels.items()))
+        if isinstance(value, slice):
+            converted_slices = self._convert_longitude_slice(value)
+
+            # If we got multiple slices (for boundary crossing), create multiple indexers
+            if isinstance(converted_slices, tuple):
+                # Handle multiple slices by selecting each and creating multiple indexers
+                all_indexers = []
+                for slice_part in converted_slices:
+                    sel_dict = {self.dim: slice_part}
+                    result = self._xrindex.sel(
+                        sel_dict, method=method, tolerance=tolerance
+                    )
+                    indexer = next(iter(result.dim_indexers.values()))
+
+                    # Convert to integer indices
+                    start, stop, step = indexer.indices(len(self))
+                    all_indexers.append(slice(start, stop, step))
+                return IndexSelResult({self.dim: tuple(all_indexers)})
+            else:
+                value = converted_slices
+        return self._xrindex.sel({key: value}, method=method, tolerance=tolerance)
+
+    def _convert_longitude_slice(self, lon_slice: slice) -> slice | tuple[slice, ...]:
+        """
+        Convert longitude slice to match the coordinate system of the dataset.
+
+        Handles conversion between -180→180 and 0→360 coordinate systems.
+        May return multiple slices when selection crosses longitude boundaries.
+
+        Parameters
+        ----------
+        lon_slice : slice
+            Input longitude slice (potentially in different coordinate system)
+
+        Returns
+        -------
+        slice or tuple[slice, ...]
+            Converted slice(s) that match dataset's coordinate system.
+            Returns tuple of slices when selection crosses boundaries.
+        """
+        if lon_slice.start is None or lon_slice.stop is None:
+            raise ValueError("start and stop should not be None")
+
+        start, stop = lon_slice.start, lon_slice.stop
+
+        # For dataset using 0→360 coordinate system
+        if self.uses_0_360:
+            # Check if we need to split across the 0/360 boundary
+            if start < 0 <= stop:
+                # Selection crosses from negative to positive
+                # e.g., slice(-180, 10) becomes slice(180, 360) + slice(0, 10)
+                return (slice(start + 360, 360), slice(0, stop))
+            elif start < 0 and stop < 0:
+                # Both negative, convert to 0→360
+                return slice(start + 360, stop + 360)
+            return lon_slice
+
+        else:
+            # Check if we need to split across the -180/180 boundary
+            if start > 180 >= stop or (start > 180 and stop <= start):
+                # Selection might cross boundary, but this is less common
+                # For now, just convert values > 180
+                if start > 180:
+                    start = start - 360
+                if stop > 180:
+                    stop = stop - 360
+                return slice(start, stop, lon_slice.step)
+            elif start > 180:
+                start -= 360
+            if stop > 180:
+                stop -= 360
+            return slice(start, stop, lon_slice.step)
+
+    def __len__(self) -> int:
+        """Return the length of the longitude index."""
+        return len(self.index)
 
 
 def is_rotated_pole(crs: CRS) -> bool:
     return crs.to_cf().get("grid_mapping_name") == "rotated_latitude_longitude"
 
 
-def _handle_longitude_selection(lon_coord: xr.DataArray, bbox: BBox) -> tuple[slice, ...]:
+def _is_raster_index_global(raster_index, grid_bbox, crs) -> bool:
     """
-    Handle longitude coordinate selection with support for different conventions.
-
-    This function handles coordinate convention conversion between bbox (-180→180) and data
-    (which may be 0→360), as well as anti-meridian crossing bboxes that can occur after
-    coordinate transformation from Web Mercator to geographic coordinates.
+    Determine if a RasterIndex represents global longitude coverage.
 
     Parameters
     ----------
-    lon_coord : xr.DataArray
-        The longitude/X coordinate array
+    raster_index : RasterIndex
+        The raster index to check
+    grid_bbox : BBox
+        The grid's bounding box
+    crs : CRS
+        The coordinate reference system
+
+    Returns
+    -------
+    bool
+        True if the index covers the full globe
+    """
+    if not crs.is_geographic:
+        return False
+
+    # Check if longitude span is nearly 360 degrees
+    lon_span = grid_bbox.east - grid_bbox.west
+    return lon_span >= 359.0
+
+
+def _handle_longitude_selection(
+    lon_index: xr.Index, bbox: BBox, grid_bbox: BBox, crs: CRS, dimname: Hashable
+) -> list[slice]:
+    """
+    Handle longitude coordinate selection with support for different conventions.
+
+    Uses the longitude index to determine selection strategy. For global RasterIndex or
+    LongitudeCellIndex, applies complex anti-meridian and boundary logic. Otherwise,
+    uses simple .sel() method to determine slices.
+
+    Parameters
+    ----------
+    lon_index : xr.Index
+        The longitude/X coordinate index (first element from grid.indexes)
     bbox : BBox
         Bounding box for selection (may cross anti-meridian after coordinate transformation)
+    grid_bbox : BBox, optional
+        The grid's overall bounding box (needed for RasterIndex global detection)
+    crs : CRS, optional
+        The coordinate reference system (needed for RasterIndex global detection)
 
     Returns
     -------
     tuple[slice, ...]
         Tuple of slices for coordinate selection. Usually one slice, but two slices
-        when bbox crosses the anti-meridian or 360°/0° boundary.
+        when bbox crosses boundaries or anti-meridian.
     """
-    lon_values = lon_coord.data
-    lon_min, lon_max = lon_values.min().item(), lon_values.max().item()
-
-    # Determine if data uses 0→360 or -180→180 convention
-    uses_0_360 = lon_min >= 0 and lon_max > 180
-
-    # Handle anti-meridian crossing bboxes (west > east)
-    if bbox.west > bbox.east:
-        if uses_0_360:
-            # Data is 0→360, bbox crosses anti-meridian
-            # Convert to 0→360 convention
-            # Region 1: from west+360 to 360, Region 2: from 0 to east+360
-            west_360 = bbox.west + 360 if bbox.west < 0 else bbox.west
-            east_360 = bbox.east + 360
-            return (slice(west_360, 360.0), slice(0.0, east_360))
-        else:
-            # Data is -180→180, bbox crosses anti-meridian
-            # Region 1: from west to 180, Region 2: from -180 to east
-            return (slice(bbox.west, 180.0), slice(-180.0, bbox.east))
-
-    # No anti-meridian crossing
-    bbox_west = bbox.west
-    bbox_east = bbox.east
-
-    if uses_0_360 and bbox.west < 0:
-        # Data is 0→360, bbox is typically -180→180
-        # Convert negative longitudes to 0→360 range
-        bbox_west_360 = bbox.west + 360
-        bbox_east_360 = bbox.east + 360 if bbox.east < 0 else bbox.east
-
-        if bbox_west_360 > bbox_east_360:
-            # Bbox crosses 360°/0° boundary - need to select two ranges
-            # Return two slices: [bbox_west_360, 360] and [0, bbox_east_360]
-            slice1 = slice(bbox_west_360, 360)
-            slice2 = slice(0, bbox_east_360)
-            return (slice1, slice2)
-        else:
-            # Single range in 0→360 convention - but need to convert coordinates for tiles at -180° boundary
-            single_slice = slice(bbox_west_360, bbox_east_360)
-            return (single_slice,)
+    if isinstance(lon_index, rasterix.RasterIndex):
+        handle_wraparound = _is_raster_index_global(lon_index, grid_bbox, crs)
+        size = lon_index._xy_shape[0]
+    elif isinstance(lon_index, LongitudeCellIndex):
+        handle_wraparound = lon_index.is_global
+        size = len(lon_index.index)
     else:
-        # Use original bbox coordinates (data is -180→180 or no negative bbox values)
-        return (slice(bbox_west, bbox_east),)
+        handle_wraparound = False
+        assert isinstance(lon_index, xr.indexes.PandasIndex)
+        size = len(lon_index.index)
+
+    sel_result = lon_index.sel({dimname: slice(bbox.west, bbox.east)})
+    indexer = next(iter(sel_result.dim_indexers.values()))
+    indexers = (indexer,) if isinstance(indexer, slice) else indexer
+    indexers: list[slice] = [slice(*idxr.indices(size)) for idxr in indexers]
+    first, last = indexers[0], indexers[-1]
+    if len(indexers) == 1:
+        indexers = [slice(max(0, first.start - 1), first.stop + 1)]
+    else:
+        indexers = [
+            slice(max(0, first.start - 1), first.stop),
+            *indexers[1:-1],
+            slice(last.start, last.stop + 1, 1),
+        ]
+    if handle_wraparound:
+        if indexers[0].start == 0:
+            # Starts at beginning, add wraparound from end
+            indexers = [slice(-1, None), *indexers]
+        if indexers[-1].stop >= size - 1:
+            # Ends at end, add wraparound from beginning
+            indexers = indexers + [slice(0, 1)]
+    return indexers
 
 
-@dataclass
+@dataclass(eq=False)
 class GridSystem:
     """
     Marker class for Grid Systems.
@@ -160,13 +345,15 @@ class GridSystem:
             return False
         return True
 
+    def __eq__(self, other) -> bool:
+        """Override dataclass __eq__ to use our custom equals() method."""
+        if not isinstance(other, GridSystem):
+            return False
+        return self.equals(other)
+
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("Subclasses must implement sel method")
-
-    def pad_bbox(self, bbox: BBox, da: xr.DataArray) -> BBox:
-        """Extend bbox slightly to account for discrete coordinate sampling."""
-        raise NotImplementedError("Subclasses must implement pad_bbox method")
 
 
 class RectilinearSelMixin:
@@ -183,36 +370,40 @@ class RectilinearSelMixin:
         This method handles coordinate selection for rectilinear grids, automatically
         converting between different longitude conventions (0→360 vs -180→180).
         """
+
+        assert len(self.indexes) >= 1
+        xindex, yindex = self.indexes[0], self.indexes[-1]
+        # yes, this works for increasing & decreasing y
         if y_is_increasing:
-            yslice = slice(bbox.south, bbox.north)
+            yslice = yindex.sel({self.Y: slice(bbox.south, bbox.north)}).dim_indexers[
+                self.Y
+            ]
         else:
-            yslice = slice(bbox.north, bbox.south)
-        slicers = {self.Y: yslice}
+            yslice = yindex.sel({self.Y: slice(bbox.north, bbox.south)}).dim_indexers[
+                self.Y
+            ]
 
-        if self.crs.is_geographic:
-            lon_slices = _handle_longitude_selection(da[self.X], bbox)
-            if len(lon_slices) == 1:
-                # Single slice - normal case
-                slicers[self.X] = lon_slices[0]
-                result = da.sel(slicers)
-            else:
-                # Multiple slices - bbox crosses 360°/0° boundary
-                results = []
-                for lon_slice in lon_slices:
-                    subset_slicers = slicers.copy()
-                    subset_slicers[self.X] = lon_slice
-                    results.append(da.sel(subset_slicers))
-                # Concatenate along longitude dimension
-                result = xr.concat(results, dim=self.X)
+        yslice = slice(max(0, yslice.start - 1), yslice.stop + 1, 1)
 
+        # Notes:
+        # 1. I am relying on these slices being in the correct order
+        # 2. There is no point to transforming the coordinate values so that they are contiguous
+        #    pyproj will reintroduce the discontintuity at the anti-meridian after transforming
+        #    coordinate systems
+        lon_slices = _handle_longitude_selection(
+            xindex, bbox, self.bbox, self.crs, self.X
+        )
+        results = [
+            da.isel({self.X: lon_slice, self.Y: yslice}) for lon_slice in lon_slices
+        ]
+        if len(results) > 1:
+            result = xr.concat(results, dim=self.X)
         else:
-            # Non-geographic coordinates
-            slicers[self.X] = slice(bbox.west, bbox.east)
-            result = da.sel(slicers)
+            (result,) = results
         return result
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, eq=False)
 class RasterAffine(RectilinearSelMixin, GridSystem):
     """2D horizontal grid defined by an affine transform."""
 
@@ -226,12 +417,6 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
 
     def __post_init__(self) -> None:
         self.dims = {self.X, self.Y}
-
-    def pad_bbox(self, bbox: BBox, da: xr.DataArray) -> BBox:
-        """Extend bbox slightly to account for discrete coordinate sampling."""
-        (index,) = self.indexes
-        affine = index.transform()
-        return pad_bbox(bbox, da, x_pad=abs(affine.a), y_pad=abs(affine.e))
 
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         (index,) = self.indexes
@@ -252,7 +437,7 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
             return False
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, eq=False)
 class Rectilinear(RectilinearSelMixin, GridSystem):
     """
     2D horizontal grid defined by two explicit 1D basis vectors.
@@ -282,47 +467,46 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
         X = ds[Xname]
         Y = ds[Yname]
 
-        # Get min/max values
-        xmin = numbagg.nanmin(X.data).item()
-        xmax = numbagg.nanmax(X.data).item()
-        ymin = numbagg.nanmin(Y.data).item()
-        ymax = numbagg.nanmax(Y.data).item()
-
-        # Calculate dx for first and last cells to adjust bbox for cell centers
-        if len(X) > 1:
-            dx_first = abs(X.data[1] - X.data[0]) / 2
-            dx_last = abs(X.data[-1] - X.data[-2]) / 2
-        else:
-            dx_first = dx_last = 0
-
-        if len(Y) > 1:
-            dy_first = abs(Y.data[1] - Y.data[0]) / 2
-            dy_last = abs(Y.data[-1] - Y.data[-2]) / 2
-        else:
-            dy_first = dy_last = 0
-
-        west = np.round(xmin - dx_first, 3)
-        east = np.round(xmax + dx_last, 3)
-        south = np.round(ymin - dy_first, 3)
-        north = np.round(ymax + dy_last, 3)
+        x_bounds = _compute_interval_bounds(X.data)
+        x_intervals = pd.IntervalIndex.from_breaks(x_bounds, closed="left")
         if crs.is_geographic:
-            if 360 - (east - west) < abs(dx_first):
-                if xmax > 180:
+            x_index = LongitudeCellIndex(x_intervals, Xname)
+        else:
+            x_index = xr.indexes.PandasIndex(x_intervals, Xname)
+
+        y_bounds = _compute_interval_bounds(Y.data)
+        if Y.data[-1] > Y.data[0]:
+            y_intervals = pd.IntervalIndex.from_breaks(y_bounds, closed="left")
+        else:
+            y_intervals = pd.IntervalIndex.from_breaks(y_bounds[::-1], closed="right")[
+                ::-1
+            ]
+        y_index = xr.indexes.PandasIndex(y_intervals, Yname)
+
+        west = np.round(float(x_bounds[0]), 3)
+        east = np.round(float(x_bounds[-1]), 3)
+        south = np.round(float(y_bounds[0]), 3)
+        north = np.round(float(y_bounds[-1]), 3)
+        south, north = min(south, north), max(south, north)
+
+        if crs.is_geographic:
+            # Handle global datasets
+            x_span = east - west
+            if x_span >= 359.0:  # Nearly global in longitude
+                if east > 180:
                     west, east = 0, 360
-                elif xmin < 0:
+                elif west < 0:
                     west, east = -180, 180
             south = max(-90, south)
             north = min(90, north)
+
         bbox = BBox(west=west, east=east, south=south, north=north)
         return cls(
             crs=crs,
             X=Xname,
             Y=Yname,
             bbox=bbox,
-            indexes=(
-                cast(xr.indexes.PandasIndex, ds.xindexes[Xname]),
-                cast(xr.indexes.PandasIndex, ds.xindexes[Yname]),
-            ),
+            indexes=(x_index, y_index),
         )
 
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
@@ -338,14 +522,6 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
             y_is_increasing=y_index.index.is_monotonic_increasing,
         )
 
-    def pad_bbox(self, bbox: BBox, da: xr.DataArray) -> BBox:
-        """
-        Extend bbox by maximum coordinate spacing on each side
-        This is needed for high zoom tiles smaller than coordinate spacing
-        """
-        x_pad, y_pad = _get_xy_pad(da[self.X].data, da[self.Y].data)
-        return pad_bbox(bbox, da, x_pad=x_pad, y_pad=y_pad)
-
     def equals(self, other: Self) -> bool:
         if (self.crs == other.crs and self.bbox == other.bbox) or (
             self.X == other.X and self.Y == other.Y
@@ -355,7 +531,7 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
             return False
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, eq=False)
 class Curvilinear(GridSystem):
     """2D horizontal grid defined by two 2D arrays."""
 
@@ -403,11 +579,6 @@ class Curvilinear(GridSystem):
         result = da.isel(slicers)
         return result
 
-    def pad_bbox(self, bbox: BBox, da: xr.DataArray) -> BBox:
-        """Extend bbox slightly to account for discrete coordinate sampling."""
-        x_pad, y_pad = _get_xy_pad(da[self.X].data, da[self.Y].data)
-        return pad_bbox(bbox, da, x_pad=x_pad, y_pad=y_pad)
-
     # def sel_ndpoint(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
     #     # https://github.com/pydata/xarray/issues/10572
     #     assert len(self.indexes) == 1
@@ -436,7 +607,7 @@ class Curvilinear(GridSystem):
     #     return da.isel(new_slicers)
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, eq=False)
 class DGGS(GridSystem):
     cells: str
     dims: set[str]
@@ -446,10 +617,6 @@ class DGGS(GridSystem):
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("sel not implemented for DGGS grids")
-
-    def pad_bbox(self, bbox: BBox, da: xr.DataArray) -> BBox:
-        """Extend bbox slightly to account for discrete coordinate sampling."""
-        raise NotImplementedError("pad_bbox not implemented for DGGS grids")
 
     def equals(self, other: Self) -> bool:
         if self.cells == other.cells:

@@ -3,7 +3,11 @@
 
 import cf_xarray as cfxr
 import cf_xarray.datasets
+import numpy as np
+import pandas as pd
 import pytest
+import rasterix
+from affine import Affine
 from pyproj import CRS
 from pyproj.aoi import BBox
 
@@ -13,6 +17,7 @@ from xpublish_tiles.grids import (
     Y_COORD_PATTERN,
     Curvilinear,
     GridSystem,
+    LongitudeCellIndex,
     RasterAffine,
     Rectilinear,
     guess_grid_system,
@@ -33,42 +38,60 @@ from xpublish_tiles.testing.tiles import TILES
 
 @pytest.mark.parametrize(
     "ds, array_name, expected",
-    (
-        (
+    [
+        pytest.param(
             IFS.create(),
             "foo",
             Rectilinear(
                 crs=CRS.from_epsg(4326),
-                bbox=BBox(
-                    west=-180,
-                    south=-90,
-                    east=180,
-                    north=90,
-                ),
+                bbox=BBox(west=-180, south=-90, east=180, north=90),
                 X="longitude",
                 Y="latitude",
                 Z=None,
-                indexes=(),  # type: ignore[arg-type]
+                indexes=(
+                    LongitudeCellIndex(
+                        pd.IntervalIndex.from_breaks(
+                            np.arange(-180.0, 180.0 + 0.25, 0.25), closed="left"
+                        ),
+                        "longitude",
+                    ),
+                    xr.indexes.PandasIndex(
+                        pd.IntervalIndex.from_breaks(
+                            np.arange(-90.125, 90.125 + 0.25, 0.25), closed="right"
+                        )[::-1],
+                        "latitude",
+                    ),
+                ),
             ),
+            id="ifs",
         ),
-        (
+        pytest.param(
             ERA5.create(),
             "foo",
             Rectilinear(
                 crs=CRS.from_epsg(4326),
-                bbox=BBox(
-                    west=0,
-                    south=-90,
-                    east=360,
-                    north=90,
-                ),
+                bbox=BBox(west=0, south=-90, east=360, north=90),
                 X="longitude",
                 Y="latitude",
                 Z=None,
-                indexes=(),  # type: ignore[arg-type]
+                indexes=(
+                    LongitudeCellIndex(
+                        pd.IntervalIndex.from_breaks(
+                            np.arange(-0.125, 359.875 + 0.25, 0.25), closed="left"
+                        ),
+                        "longitude",
+                    ),
+                    xr.indexes.PandasIndex(
+                        pd.IntervalIndex.from_breaks(
+                            np.arange(-90.125, 90.125 + 0.25, 0.25), closed="right"
+                        )[::-1],
+                        "latitude",
+                    ),
+                ),
             ),
+            id="era5",
         ),
-        (
+        pytest.param(
             FORECAST,
             "sst",
             Rectilinear(
@@ -77,10 +100,24 @@ from xpublish_tiles.testing.tiles import TILES
                 X="X",
                 Y="Y",
                 Z=None,
-                indexes=(),  # type: ignore[arg-type]
+                indexes=(
+                    LongitudeCellIndex(
+                        pd.IntervalIndex.from_breaks(
+                            np.arange(-0.5, 4.5 + 1.0, 1.0), closed="left"
+                        ),
+                        "X",
+                    ),
+                    xr.indexes.PandasIndex(
+                        pd.IntervalIndex.from_breaks(
+                            np.arange(-0.5, 5.5 + 1.0, 1.0), closed="left"
+                        ),
+                        "Y",
+                    ),
+                ),
             ),
+            id="forecast",
         ),
-        (
+        pytest.param(
             ROMSDS,
             "temp",
             Curvilinear(
@@ -92,8 +129,9 @@ from xpublish_tiles.testing.tiles import TILES
                 dims={"eta_rho", "xi_rho"},
                 indexes=(),  # type: ignore[arg-type]
             ),
+            id="roms",
         ),
-        (
+        pytest.param(
             cfxr.datasets.popds,
             "UVEL",
             Curvilinear(
@@ -105,8 +143,9 @@ from xpublish_tiles.testing.tiles import TILES
                 dims={"nlon", "nlat"},
                 indexes=(),  # type: ignore[arg-type]
             ),
+            id="pop",
         ),
-        # (
+        # pytest.param(
         #     cfxr.datasets.rotds,
         #     "temp",
         #     Rectilinear(
@@ -123,25 +162,44 @@ from xpublish_tiles.testing.tiles import TILES
         #         Z=None,
         #         indexes=(),  # type: ignore[arg-type]
         #     ),
+        #     id="rotated_pole"
         # ),
-        (
+        pytest.param(
             HRRR.create(),
             "foo",
             Rectilinear(
                 crs=CRS.from_wkt(HRRR_CRS_WKT),
                 bbox=BBox(
-                    west=-2697520.143 - 1500,
-                    south=-1587306.153 - 1500,
-                    east=2696479.857 + 1500,
-                    north=1586693.847 + 1500,
+                    west=-2699020.143,
+                    south=-1588806.153,
+                    east=2697979.857,
+                    north=1588193.847,
                 ),
                 X="x",
                 Y="y",
                 Z=None,
-                indexes=(),  # type: ignore[arg-type]
+                indexes=(
+                    xr.indexes.PandasIndex(
+                        pd.IntervalIndex.from_breaks(
+                            np.arange(-2699020.142522, 2697979.857478 + 3000, 3000),
+                            closed="left",
+                            name="x",
+                        ),
+                        "x",
+                    ),
+                    xr.indexes.PandasIndex(
+                        pd.IntervalIndex.from_breaks(
+                            np.arange(-1588806.152557, 1588193.847443 + 3000, 3000),
+                            closed="left",
+                            name="y",
+                        ),
+                        "y",
+                    ),
+                ),
             ),
+            id="hrrr",
         ),
-        (
+        pytest.param(
             EU3035.create(),
             "foo",
             RasterAffine(
@@ -155,14 +213,22 @@ from xpublish_tiles.testing.tiles import TILES
                 X="x",
                 Y="y",
                 Z=None,
-                indexes=(),  # type: ignore[arg-type]
+                indexes=(
+                    rasterix.RasterIndex.from_transform(
+                        Affine(1200.0, 0.0, 2635780.0, 0.0, -1200.0, 5416000.0),
+                        x_dim="x",
+                        y_dim="y",
+                        width=3000,
+                        height=3000,
+                    ),
+                ),
             ),
+            id="eu3035",
         ),
-    ),
+    ],
 )
 def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> None:
     actual = guess_grid_system(ds, array_name)
-    actual.indexes = ()  # FIXME
     assert expected == actual
 
 
@@ -184,8 +250,8 @@ def test_subset(global_datasets, tile, tms):
 
     # Check that coordinates are within expected bounds (exact matching with controlled grid)
     lat_min, lat_max = actual.latitude.min().item(), actual.latitude.max().item()
-    assert lat_min >= bbox_geo.south, f"Latitude too low: {lat_min} < {bbox_geo.south}"
-    assert lat_max <= bbox_geo.north, f"Latitude too high: {lat_max} > {bbox_geo.north}"
+    assert lat_min <= bbox_geo.south, f"Latitude too low: {lat_min} < {bbox_geo.south}"
+    assert lat_max >= bbox_geo.north, f"Latitude too high: {lat_max} > {bbox_geo.north}"
 
 
 def test_x_coordinate_regex_patterns():
@@ -242,3 +308,17 @@ def test_y_coordinate_regex_patterns():
 
     for name in y_invalid_names:
         assert not Y_COORD_PATTERN.match(name), f"Y pattern should not match '{name}'"
+
+
+def test_longitude_cell_index_sel():
+    """Test that LongitudeCellIndex.sel() method works correctly."""
+    # Create a simple longitude index with regular spacing
+    centers = np.array([-2.0, -1.0, 0.0, 1.0, 2.0])  # Simple regional grid
+    lon_index = LongitudeCellIndex(
+        pd.IntervalIndex.from_arrays(centers - 0.5, centers + 0.5), "longitude"
+    )
+
+    assert bool(lon_index.is_global) is False  # 5 degree span should not be global
+    assert len(lon_index) == 5  # Should have 5 intervals from 5 centers
+    result = lon_index.sel({"longitude": slice(0, 1)})
+    assert result.dim_indexers == {"longitude": slice(2, 4)}
