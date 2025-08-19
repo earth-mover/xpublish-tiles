@@ -69,8 +69,7 @@ def has_coordinate_discontinuity(coordinates: np.ndarray) -> bool:
         return False
 
     x_min, x_max = coordinates.min(), coordinates.max()
-    x_sorted = np.sort(coordinates)
-    gaps = np.diff(x_sorted)
+    gaps = np.abs(np.diff(coordinates))
 
     if len(gaps) == 0:
         return False
@@ -89,7 +88,7 @@ def has_coordinate_discontinuity(coordinates: np.ndarray) -> bool:
 
 
 def fix_coordinate_discontinuities(
-    coordinates: np.ndarray, transformer: pyproj.Transformer
+    coordinates: np.ndarray, transformer: pyproj.Transformer, *, axis: int, bbox: BBox
 ) -> np.ndarray:
     """
     Fix coordinate discontinuities that occur during coordinate transformation.
@@ -100,42 +99,57 @@ def fix_coordinate_discontinuities(
     intelligent offset corrections to make coordinates continuous.
 
     The algorithm:
-    1. Finds the largest gap in sorted coordinates
+    1. Uses np.unwrap to fix coordinate discontinuities automatically
     2. Calculates the expected coordinate space width using transformer bounds
-    3. If the gap is >30% of coordinate space width, applies an offset
-    4. Chooses which side to offset based on which has fewer coordinates
+    3. Shifts the result to maximize overlap with the bbox
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> import pyproj
+    >>> from pyproj.aoi import BBox
+    >>> coords = np.array([350, 355, 360, 0, 5, 10])  # Wrap from 360 to 0
+    >>> transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:4326", always_xy=True)
+    >>> bbox = BBox(west=-10, east=20, south=-90, north=90)
+    >>> fixed = fix_coordinate_discontinuities(coords, transformer, axis=0, bbox=bbox)
+    >>> gaps = np.diff(fixed)
+    >>> assert np.all(np.abs(gaps) < 20), f"Large gap remains: {gaps}"
     """
-    coords_sorted = np.sort(coordinates.flat)
-    gaps = np.diff(coords_sorted)
-
-    if len(gaps) == 0:
+    # Only handle X coordinates (longitude) for now
+    if axis != 0:
         return coordinates
-
-    max_gap = gaps.max()
 
     # Calculate coordinate space width using ±180° transform
     # This is unavoidable since AreaOfUse for a CRS is always in lat/lon
     x_bounds, _ = transformer.transform([-180.0, 180.0], [0.0, 0.0])
     coordinate_space_width = abs(x_bounds[1] - x_bounds[0])
 
-    # Apply fix if gap is significant (>30% of coordinate space width)
-    if max_gap > coordinate_space_width * 0.3:
-        gap_idx = np.argmax(gaps)
-        split_value = coords_sorted[gap_idx]
-        low_side_mask = coordinates <= split_value
-        low_count = np.sum(low_side_mask)
-        if low_count < (coordinates.size / 2):
-            # More coordinates on high side, shift low side up
-            coordinates = np.where(
-                low_side_mask, coordinates + coordinate_space_width, coordinates
-            )
-        else:
-            # More coordinates on low side, shift high side down
-            coordinates = np.where(
-                ~low_side_mask, coordinates - coordinate_space_width, coordinates
-            )
+    if coordinate_space_width == 0:
+        # ETRS89 returns +N for both -180 & 180
+        # it's area of use is (-35.58, 24.6, 44.83, 84.73)
+        # we ignore such things for now
+        return coordinates
 
-    return coordinates
+    # Step 1: Use np.unwrap to fix discontinuities
+    unwrapped_coords = np.unwrap(
+        coordinates,
+        discont=coordinate_space_width / 2,
+        axis=axis,
+        period=coordinate_space_width,
+    )
+
+    # Step 2: Determine optimal shift based on coordinate and bbox bounds
+    coord_min, coord_max = unwrapped_coords.min(), unwrapped_coords.max()
+    bbox_center = (bbox.west + bbox.east) / 2
+    coord_center = (coord_min + coord_max) / 2
+
+    # Calculate how many coordinate_space_widths we need to shift to align centers
+    center_diff = bbox_center - coord_center
+    shift_multiple = round(center_diff / coordinate_space_width)
+
+    # Apply the calculated shift
+    result = unwrapped_coords + (shift_multiple * coordinate_space_width)
+    return result.reshape(coordinates.shape)
 
 
 def check_bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool:
@@ -360,7 +374,12 @@ async def subset_to_bbox(
         # at the anti-meridian
         if has_discontinuity:
             newX = newX.copy(
-                data=fix_coordinate_discontinuities(newX.data, input_to_output)
+                data=fix_coordinate_discontinuities(
+                    newX.data,
+                    input_to_output,
+                    axis=subset[grid.X].get_axis_num(grid.X),
+                    bbox=bbox,
+                )
             )
 
         newda = subset.assign_coords({grid.X: newX, grid.Y: newY})
