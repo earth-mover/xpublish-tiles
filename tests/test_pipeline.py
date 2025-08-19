@@ -12,6 +12,7 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from src.xpublish_tiles.render.raster import nearest_on_uniform_grid_quadmesh
+from tests import create_query_params
 from xarray.testing import assert_equal
 from xpublish_tiles.pipeline import (
     apply_query,
@@ -70,35 +71,6 @@ def test_bbox_overlap_detection(bbox, grid_config):
     assert check_bbox_overlap(bbox, grid_bbox, True), (
         f"Valid bbox {bbox} should overlap with global {grid_description} grid. "
         f"Longitude wrapping should handle any longitude values."
-    )
-
-
-def create_query_params(tile, tms, *, colorscalerange=None):
-    """Create QueryParams instance using test tiles and TMS."""
-
-    # Convert TMS CRS to pyproj CRS
-    target_crs = CRS.from_epsg(tms.crs.to_epsg())
-
-    # Get bounds in the TMS's native CRS
-    native_bounds = tms.xy_bounds(tile)
-    bbox = BBox(
-        west=native_bounds[0],
-        south=native_bounds[1],
-        east=native_bounds[2],
-        north=native_bounds[3],
-    )
-
-    return QueryParams(
-        variables=["foo"],
-        crs=OutputCRS(target_crs),
-        bbox=OutputBBox(bbox),
-        selectors={},
-        style="raster",
-        width=256,
-        height=256,
-        cmap="viridis",
-        colorscalerange=colorscalerange,
-        format=ImageFormat.PNG,
     )
 
 
