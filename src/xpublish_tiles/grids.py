@@ -156,9 +156,9 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
                         sel_dict, method=method, tolerance=tolerance
                     )
                     indexer = next(iter(result.dim_indexers.values()))
-
-                    # Convert to integer indices
                     start, stop, step = indexer.indices(len(self))
+                    if len(all_indexers) > 0 and (stop >= all_indexers[-1].start):
+                        stop = all_indexers[-1].start
                     all_indexers.append(slice(start, stop, step))
                 return IndexSelResult({self.dim: tuple(all_indexers)})
             else:
@@ -187,14 +187,16 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
             raise ValueError("start and stop should not be None")
 
         start, stop = lon_slice.start, lon_slice.stop
-
-        # For dataset using 0→360 coordinate system
         if self.uses_0_360:
             # Check if we need to split across the 0/360 boundary
             if start < 0 <= stop:
                 # Selection crosses from negative to positive
                 # e.g., slice(-180, 10) becomes slice(180, 360) + slice(0, 10)
-                return (slice(start + 360, 360), slice(0, stop))
+                if stop != 0:
+                    return (slice(start + 360, 360), slice(0, stop))
+                else:
+                    return (slice(start + 360, 360),)
+
             elif start < 0 and stop < 0:
                 # Both negative, convert to 0→360
                 return slice(start + 360, stop + 360)
@@ -279,14 +281,21 @@ def _handle_longitude_selection(
         when bbox crosses boundaries or anti-meridian.
     """
     if isinstance(lon_index, rasterix.RasterIndex):
-        handle_wraparound = _is_raster_index_global(lon_index, grid_bbox, crs)
+        handle_wraparound = crs.is_geographic and _is_raster_index_global(
+            lon_index, grid_bbox, crs
+        )
         size = lon_index._xy_shape[0]
     elif isinstance(lon_index, LongitudeCellIndex):
-        handle_wraparound = lon_index.is_global
+        handle_wraparound = (
+            crs.is_geographic
+            and lon_index.cell_centers[-1] == 360 + lon_index.cell_centers[0]
+        )
         size = len(lon_index.index)
     else:
-        handle_wraparound = False
         assert isinstance(lon_index, xr.indexes.PandasIndex)
+        handle_wraparound = (
+            crs.is_geographic and lon_index.index[-1] == 360 + lon_index.index[0]
+        )
         size = len(lon_index.index)
 
     sel_result = lon_index.sel({dimname: slice(bbox.west, bbox.east)})
@@ -370,7 +379,6 @@ class RectilinearSelMixin:
         This method handles coordinate selection for rectilinear grids, automatically
         converting between different longitude conventions (0→360 vs -180→180).
         """
-
         assert len(self.indexes) >= 1
         xindex, yindex = self.indexes[0], self.indexes[-1]
         # yes, this works for increasing & decreasing y
