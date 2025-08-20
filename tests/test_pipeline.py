@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 
-import io
 
 import cf_xarray  # noqa: F401 - Enable cf accessor
-import matplotlib.pyplot as plt
 import morecantile
 import numpy as np
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
-from PIL import Image
 from pyproj import CRS
 from pyproj.aoi import BBox
 
@@ -25,43 +22,10 @@ from xpublish_tiles.testing.datasets import FORECAST, PARA, ROMSDS, create_globa
 from xpublish_tiles.testing.lib import (
     assert_render_matches_snapshot,
     compare_image_buffers,
+    visualize_tile,
 )
 from xpublish_tiles.testing.tiles import PARA_TILES, TILES, WEBMERC_TMS
 from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
-
-
-def visualize_tile(result: io.BytesIO, tile: morecantile.Tile) -> None:
-    """Visualize a rendered tile with matplotlib showing RGB and alpha channels.
-
-    Args:
-        result: BytesIO buffer containing PNG image data
-        tile: Tile object with z, x, y coordinates
-    """
-    result.seek(0)
-    pil_img = Image.open(result)
-    img_array = np.array(pil_img)
-
-    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-
-    # Show the rendered tile
-    axes[0].imshow(img_array)
-    axes[0].set_title(f"Tile z={tile.z}, x={tile.x}, y={tile.y}")
-
-    # Show alpha channel if present
-    if img_array.shape[2] == 4:
-        alpha = img_array[:, :, 3]
-        im = axes[1].imshow(alpha, cmap="gray", vmin=0, vmax=255)
-        axes[1].set_title(
-            f"Alpha Channel\n{((alpha == 0).sum() / alpha.size * 100):.1f}% transparent"
-        )
-        plt.colorbar(im, ax=axes[1])
-    else:
-        axes[1].text(
-            0.5, 0.5, "No Alpha", ha="center", va="center", transform=axes[1].transAxes
-        )
-
-    plt.tight_layout()
-    plt.show(block=True)  # Block until window is closed
 
 
 @st.composite
