@@ -15,6 +15,7 @@ from xpublish_tiles.lib import (
     EXECUTOR,
     TileTooBigError,
     check_transparent_pixels,
+    is_4326_like,
     transform_coordinates,
     transformer_from_crs,
 )
@@ -345,12 +346,14 @@ async def subset_to_bbox(
                 "Tile request too big. Please choose a higher zoom level."
             )
 
-        has_discontinuity = (
-            has_coordinate_discontinuity(subset[grid.X].data)
-            if grid.crs.is_geographic
-            else False
-        )
+        check_x = subset[grid.X].data
         newX, newY = await transform_coordinates(subset, grid.X, grid.Y, input_to_output)
+        if is_4326_like(crs) and is_4326_like(grid.crs):
+            # we may have normalized to -180 -> 180
+            check_x = subset[grid.X].data
+        has_discontinuity = (
+            has_coordinate_discontinuity(check_x) if grid.crs.is_geographic else False
+        )
 
         # Fix coordinate discontinuities in transformed coordinates if detected
         # this is important because the transformation may introduce discontinuities

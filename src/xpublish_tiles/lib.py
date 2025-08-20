@@ -261,6 +261,17 @@ async def transform_coordinates(
 
     inx, iny = subset[grid_x_name], subset[grid_y_name]
 
+    assert transformer.source_crs is not None
+    assert transformer.target_crs is not None
+
+    # the ordering of these two fastpaths is important
+    # we want to normalize to -180 -> 180 always
+    if is_4326_like(transformer.source_crs) and is_4326_like(transformer.target_crs):
+        # for some reason pyproj does not normalize these to -180->180
+        newdata = inx.data
+        newdata[newdata >= 180] -= 360
+        return inx.copy(data=newdata), iny
+
     if transformer.source_crs == transformer.target_crs:
         return inx, iny
 
