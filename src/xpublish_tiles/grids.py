@@ -187,7 +187,11 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
             raise ValueError("start and stop should not be None")
 
         # https://github.com/developmentseed/morecantile/issues/175
-        start, stop = round(lon_slice.start, 9), round(lon_slice.stop, 9)
+        # the precision in morecantile tile bounds isn't perfect,
+        # a good way to test is `tms.bounds(Tile(0,0,0))` which should
+        # match the spec exactly: https://docs.ogc.org/is/17-083r4/17-083r4.html#toc48
+        # Example: tests/test_pipeline.py::test_pipeline_tiles[-90->90,0->360-wgs84_prime_meridian(2/2/1)]
+        start, stop = round(lon_slice.start, 8), round(lon_slice.stop, 8)
         if self.uses_0_360:
             # Check if we need to split across the 0/360 boundary
             if start < 0 <= stop:
