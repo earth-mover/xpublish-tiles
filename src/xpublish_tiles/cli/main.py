@@ -13,6 +13,7 @@ from xpublish_tiles.cli.bench import run_benchmark
 from xpublish_tiles.testing.datasets import (
     EU3035,
     EU3035_HIRES,
+    GLOBAL_BENCHMARK_TILES,
     HRRR,
     IFS,
     PARA,
@@ -256,18 +257,35 @@ def main():
     if benchmarking:
         # Get dataset object for potential benchmark tiles
         dataset_obj = get_dataset_object_for_name(dataset_name)
-        if not dataset_obj:
-            raise ValueError(f"No dataset object found for dataset '{dataset_name}'")
+        benchmark_tiles = (
+            dataset_obj.benchmark_tiles
+            if dataset_obj and dataset_obj.benchmark_tiles
+            else GLOBAL_BENCHMARK_TILES
+        )
+
+        # Get the first variable from the dataset
+        if not ds.data_vars:
+            raise ValueError(f"No data variables found in dataset '{dataset_name}'")
+        first_var = next(iter(ds.data_vars))
+
+        # Check if we need colorscalerange
+        needs_colorscale = (
+            "valid_min" not in ds[first_var].attrs
+            or "valid_max" not in ds[first_var].attrs
+        )
+
         bench_thread = threading.Thread(
             target=run_benchmark,
             args=(
                 args.port,
                 "requests",
                 dataset_name,
-                dataset_obj.benchmark_tiles,
+                benchmark_tiles,
                 args.concurrency,
                 args.where,
                 args.sync,
+                first_var,
+                needs_colorscale,
             ),
             daemon=True,
         )

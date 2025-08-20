@@ -17,6 +17,8 @@ def run_benchmark(
     concurrency: int,
     where: str = "local",
     use_sync: bool = False,
+    variable_name: str = "foo",
+    needs_colorscale: bool = False,
 ):
     """Run benchmarking requests for the given dataset."""
 
@@ -55,10 +57,21 @@ def run_benchmark(
         try:
             # Use a tile endpoint for health check and warmup
             z, x, y = warmup_tiles[0].split("/")
+            # Build base URL with required parameters
+            base_params = (
+                f"variables={variable_name}&style=raster/viridis&width=256&height=256"
+            )
+            if needs_colorscale:
+                base_params += "&colorscalerange=-100,100"  # Use reasonable default range
+
             if use_sync:
-                warmup_url = f"{server_url}/tiles/sync/WebMercatorQuad/{z}/{x}/{y}?variables=foo&style=raster/viridis&width=256&height=256"
+                warmup_url = (
+                    f"{server_url}/tiles/sync/WebMercatorQuad/{z}/{x}/{y}?{base_params}"
+                )
             else:
-                warmup_url = f"{server_url}/tiles/WebMercatorQuad/{z}/{x}/{y}?variables=foo&style=raster/viridis&width=256&height=256"
+                warmup_url = (
+                    f"{server_url}/tiles/WebMercatorQuad/{z}/{x}/{y}?{base_params}"
+                )
             response = requests.get(warmup_url, timeout=10)
             if response.status_code == 200:
                 print(
@@ -89,10 +102,19 @@ def run_benchmark(
             # The tile endpoint format is /tiles/{tileMatrixSetId}/{tileMatrix}/{tileCol}/{tileRow}
             # or /tiles/sync/{tileMatrixSetId}/{tileMatrix}/{tileCol}/{tileRow} for sync endpoint
             # Include required query parameters
+            # Build tile URL with required parameters
+            tile_params = (
+                f"variables={variable_name}&style=raster/viridis&width=256&height=256"
+            )
+            if needs_colorscale:
+                tile_params += "&colorscalerange=-100,100"  # Use reasonable default range
+
             if use_sync:
-                tile_url = f"{server_url}/tiles/sync/WebMercatorQuad/{z}/{x}/{y}?variables=foo&style=raster/viridis&width=256&height=256"
+                tile_url = (
+                    f"{server_url}/tiles/sync/WebMercatorQuad/{z}/{x}/{y}?{tile_params}"
+                )
             else:
-                tile_url = f"{server_url}/tiles/WebMercatorQuad/{z}/{x}/{y}?variables=foo&style=raster/viridis&width=256&height=256"
+                tile_url = f"{server_url}/tiles/WebMercatorQuad/{z}/{x}/{y}?{tile_params}"
 
             start_time = time.perf_counter()
             try:
