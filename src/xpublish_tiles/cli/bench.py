@@ -15,6 +15,7 @@ def run_benchmark(
     dataset_name: str,
     benchmark_tiles: list[str],
     concurrency: int,
+    where: str = "local",
 ):
     """Run benchmarking requests for the given dataset."""
 
@@ -39,7 +40,12 @@ def run_benchmark(
     print(f"Benchmark tiles: {len(shuffled_tiles)} tiles (randomized order)")
 
     # Wait for server to start with warmup
-    server_url = f"http://localhost:{port}"
+    if where == "local":
+        server_url = f"http://localhost:{port}"
+    elif where == "local-booth":
+        server_url = f"http://localhost:{port}/services/tiles/earthmover-integration/tiles-icechunk/main/{dataset_name}"
+    else:  # prod
+        server_url = f"https://compute.earthmover.dev/v1/services/tiles/earthmover-integration/tiles-icechunk/main/{dataset_name}"
     max_retries = 10
     for _i in range(max_retries):
         try:
@@ -52,15 +58,17 @@ def run_benchmark(
                     f"Server is ready at {server_url} (warmed up with tile {warmup_tiles[0]})"
                 )
                 break
-        except Exception:
-            pass
-            # import traceback
-            # print(f"Error during server check: {e}")
-            # traceback.print_exc()
+            else:
+                print(
+                    f"Warmup request returned status {response.status_code}, retrying..."
+                )
+        except Exception as e:
+            print(f"Warmup request failed: {e}, retrying...")
         time.sleep(0.5)
     else:
-        print("Server failed to start")
-        return
+        print(f"ERROR: Server warmup failed after {max_retries} attempts")
+        print(f"Failed to get 200 response from: {warmup_url}")
+        raise RuntimeError("Server warmup failed - did not receive 200 response")
 
     # Make requests to benchmark tiles concurrently using async with semaphore
     print(f"Making concurrent benchmark tile requests (max {concurrency} at a time)...")

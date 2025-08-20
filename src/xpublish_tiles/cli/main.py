@@ -219,6 +219,13 @@ def main():
         default=12,
         help="Number of concurrent requests for benchmarking (default: 12)",
     )
+    parser.add_argument(
+        "--where",
+        type=str,
+        choices=["local", "local-booth", "prod"],
+        default="local",
+        help="Where to run benchmark requests: 'local' for localhost (starts server), 'local-booth' for localhost (no server), or 'prod' for production (default: local)",
+    )
     args = parser.parse_args()
 
     # Determine dataset to use and benchmarking mode
@@ -228,13 +235,19 @@ def main():
     ds = get_dataset_for_name(dataset_name, args.branch, args.group, args.cache)
 
     xr.set_options(keep_attrs=True)
-    rest = xpublish.SingleDatasetRest(
-        ds,
-        plugins={"tiles": TilesPlugin(), "wms": WMSPlugin()},
-    )
-    rest.app.add_middleware(CORSMiddleware, allow_origins=["*"])
+    if args.where == "local":
+        rest = xpublish.SingleDatasetRest(
+            ds,
+            plugins={"tiles": TilesPlugin(), "wms": WMSPlugin()},
+        )
+        rest.app.add_middleware(CORSMiddleware, allow_origins=["*"])
+    elif args.where == "local-booth":
+        # For local-booth, we don't start the REST server
+        # Just prepare for benchmarking against existing localhost server
+        pass
 
     # If benchmarking, start the benchmark thread after a delay
+    bench_thread = None
     if benchmarking:
         # Get dataset object for potential benchmark tiles
         dataset_obj = get_dataset_object_for_name(dataset_name)
@@ -248,9 +261,14 @@ def main():
                 dataset_name,
                 dataset_obj.benchmark_tiles,
                 args.concurrency,
+                args.where,
             ),
             daemon=True,
         )
         bench_thread.start()
 
-    rest.serve(host="0.0.0.0", port=args.port)
+    if args.where == "local":
+        rest.serve(host="0.0.0.0", port=args.port)
+    elif args.where in ["local-booth", "prod"] and bench_thread:
+        # When running benchmarks against production or local-booth, wait for the thread to complete
+        bench_thread.join()
