@@ -226,6 +226,11 @@ def main():
         default="local",
         help="Where to run benchmark requests: 'local' for localhost (starts server), 'local-booth' for localhost (no server), or 'prod' for production (default: local)",
     )
+    parser.add_argument(
+        "--sync",
+        action="store_true",
+        help="Use the sync endpoint instead of the regular tiles endpoint for benchmarking",
+    )
     args = parser.parse_args()
 
     # Determine dataset to use and benchmarking mode
@@ -262,6 +267,7 @@ def main():
                 dataset_obj.benchmark_tiles,
                 args.concurrency,
                 args.where,
+                args.sync,
             ),
             daemon=True,
         )
