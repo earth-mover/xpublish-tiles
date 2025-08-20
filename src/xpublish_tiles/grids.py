@@ -186,7 +186,8 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         if lon_slice.start is None or lon_slice.stop is None:
             raise ValueError("start and stop should not be None")
 
-        start, stop = lon_slice.start, lon_slice.stop
+        # https://github.com/developmentseed/morecantile/issues/175
+        start, stop = round(lon_slice.start, 9), round(lon_slice.stop, 9)
         if self.uses_0_360:
             # Check if we need to split across the 0/360 boundary
             if start < 0 <= stop:
