@@ -5,9 +5,8 @@ from pyproj.aoi import BBox
 
 import icechunk
 import xarray as xr
-from xpublish_tiles.testing.datasets import EU3035, HRRR, create_global_dataset
+from xpublish_tiles.testing.datasets import EU3035, HRRR, UTM33S, create_global_dataset
 from xpublish_tiles.testing.lib import compare_image_buffers, png_snapshot  # noqa: F401
-from xpublish_tiles.testing.tiles import ETRS89_TILES, HRRR_TILES
 
 IS_SNAPSHOT_UPDATE = False
 
@@ -99,11 +98,9 @@ def global_datasets(request):
 # Create the product of datasets and their appropriate tiles
 def _get_projected_dataset_tile_params():
     params = []
-    for dataset_class, tiles in [
-        (EU3035, ETRS89_TILES),
-        (HRRR, HRRR_TILES),
-    ]:
-        for tile_param in tiles:
+    for dataset_class in [UTM33S, EU3035, HRRR]:
+        # Use the tiles directly from the dataset class
+        for tile_param in dataset_class.tiles:
             tile, tms = tile_param.values
             param_id = f"{dataset_class.name}_{tile_param.id}"
             params.append(pytest.param((dataset_class, tile, tms), id=param_id))
