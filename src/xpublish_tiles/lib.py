@@ -301,3 +301,67 @@ async def transform_coordinates(
         newX, newY = transformer.transform(bx.data, by.data)
 
     return bx.copy(data=newX), by.copy(data=newY)
+
+
+def sync_transform_coordinates(
+    subset: xr.DataArray,
+    grid_x_name: str,
+    grid_y_name: str,
+    transformer: pyproj.Transformer,
+    chunk_size: tuple[int, int] | None = None,
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """
+    Synchronous version of transform_coordinates.
+
+    Transform coordinates from input CRS to output CRS without async operations.
+
+    Parameters
+    ----------
+    subset : xr.DataArray
+        The subset data array containing coordinates to transform
+    grid_x_name : str
+        Name of the X coordinate dimension
+    grid_y_name : str
+        Name of the Y coordinate dimension
+    transformer : pyproj.Transformer
+        The coordinate transformer
+    chunk_size : tuple[int, int], optional
+        Chunk size for blocked transformation, by default CHUNKED_TRANSFORM_CHUNK_SIZE
+
+    Returns
+    -------
+    tuple[xr.DataArray, xr.DataArray]
+        Transformed X and Y coordinate arrays
+    """
+    if chunk_size is None:
+        chunk_size = CHUNKED_TRANSFORM_CHUNK_SIZE
+
+    inx, iny = subset[grid_x_name], subset[grid_y_name]
+
+    if transformer.source_crs == transformer.target_crs:
+        return inx, iny
+
+    # preserve rectilinear-ness by reimplementing this (easy) transform
+    if (inx.ndim == 1 and iny.ndim == 1) and (
+        transformer == transformer_from_crs(4326, 3857)
+        or transformer == transformer_from_crs(OTHER_4326, 3857)
+    ):
+        newx, newy = epsg4326to3857(inx.data, iny.data)
+        return inx.copy(data=newx), iny.copy(data=newy)
+
+    # Broadcast coordinates
+    bx, by = xr.broadcast(inx, iny)
+
+    # Choose transformation method based on data size
+    if bx.size > math.prod(chunk_size):
+        # Use blocking transform directly without thread pool
+        newX, newY = transform_blocked(
+            bx.data,
+            by.data,
+            transformer,
+            chunk_size,
+        )
+    else:
+        newX, newY = transformer.transform(bx.data, by.data)
+
+    return bx.copy(data=newX), by.copy(data=newY)
