@@ -313,18 +313,31 @@ def test_y_coordinate_regex_patterns():
         assert not Y_COORD_PATTERN.match(name), f"Y pattern should not match '{name}'"
 
 
-def test_longitude_cell_index_sel():
-    """Test that LongitudeCellIndex.sel() method works correctly."""
-    # Create a simple longitude index with regular spacing
-    centers = np.array([-2.0, -1.0, 0.0, 1.0, 2.0])  # Simple regional grid
-    lon_index = LongitudeCellIndex(
-        pd.IntervalIndex.from_arrays(centers - 0.5, centers + 0.5), "longitude"
-    )
+class TestLongitudeCellIndex:
+    def test_longitude_cell_index_regional(self):
+        """Test that LongitudeCellIndex.sel() method works correctly."""
+        centers = np.array([-2.0, -1.0, 0.0, 1.0, 2.0])  # Simple regional grid
+        lon_index = LongitudeCellIndex(
+            pd.IntervalIndex.from_arrays(centers - 0.5, centers + 0.5), "longitude"
+        )
+        assert not lon_index.is_global  # 5 degree span should not be global
+        assert len(lon_index) == len(centers)  # Should have 5 intervals from 5 centers
+        result = lon_index.sel({"longitude": slice(0, 1)})
+        assert result.dim_indexers == {"longitude": slice(2, 4)}
 
-    assert bool(lon_index.is_global) is False  # 5 degree span should not be global
-    assert len(lon_index) == 5  # Should have 5 intervals from 5 centers
-    result = lon_index.sel({"longitude": slice(0, 1)})
-    assert result.dim_indexers == {"longitude": slice(2, 4)}
+    def test_longitude_cell_index_global(self):
+        centers = np.array([-179.5, -1.0, 0.0, 1.0, 179.5])
+        lon_index = LongitudeCellIndex(
+            pd.IntervalIndex.from_arrays(centers - 0.5, centers + 0.5), "longitude"
+        )
+        assert lon_index.is_global  # 5 degree span should not be global
+        assert len(lon_index) == len(centers)  # Should have 5 intervals from 5 centers
+
+        result = lon_index.sel({"longitude": slice(0, 1)})
+        assert result.dim_indexers == {"longitude": slice(2, 4)}
+
+        result = lon_index.sel({"longitude": slice(-185, 1)})
+        assert result.dim_indexers == {"longitude": (slice(4, 5, 1), slice(2, 4, 1))}
 
 
 class TestFixCoordinateDiscontinuities:

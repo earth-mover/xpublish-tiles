@@ -143,26 +143,26 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         """
         # Handle slice objects specially for longitude coordinate conversion
         key, value = next(iter(labels.items()))
-        if isinstance(value, slice):
-            converted_slices = self._convert_longitude_slice(value)
+        if not isinstance(value, slice):
+            raise NotImplementedError
 
-            # If we got multiple slices (for boundary crossing), create multiple indexers
-            if isinstance(converted_slices, tuple):
-                # Handle multiple slices by selecting each and creating multiple indexers
-                all_indexers = []
-                for slice_part in converted_slices:
-                    sel_dict = {self.dim: slice_part}
-                    result = self._xrindex.sel(
-                        sel_dict, method=method, tolerance=tolerance
-                    )
-                    indexer = next(iter(result.dim_indexers.values()))
-                    start, stop, step = indexer.indices(len(self))
-                    if len(all_indexers) > 0 and (stop >= all_indexers[-1].start):
-                        stop = all_indexers[-1].start
-                    all_indexers.append(slice(start, stop, step))
-                return IndexSelResult({self.dim: tuple(all_indexers)})
-            else:
-                value = converted_slices
+        converted_slices = self._convert_longitude_slice(value)
+
+        # If we got multiple slices (for boundary crossing), create multiple indexers
+        if isinstance(converted_slices, tuple):
+            # Handle multiple slices by selecting each and creating multiple indexers
+            all_indexers = []
+            for slice_part in converted_slices:
+                sel_dict = {self.dim: slice_part}
+                result = self._xrindex.sel(sel_dict, method=method, tolerance=tolerance)
+                indexer = next(iter(result.dim_indexers.values()))
+                start, stop, step = indexer.indices(len(self))
+                if len(all_indexers) > 0 and (stop >= all_indexers[-1].start):
+                    stop = all_indexers[-1].start
+                all_indexers.append(slice(start, stop, step))
+            return IndexSelResult({self.dim: tuple(all_indexers)})
+        else:
+            value = converted_slices
         return self._xrindex.sel({key: value}, method=method, tolerance=tolerance)
 
     def _convert_longitude_slice(self, lon_slice: slice) -> slice | tuple[slice, ...]:
@@ -219,6 +219,8 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
                 return slice(start, stop, lon_slice.step)
             elif start > 180:
                 start -= 360
+            elif start < -180:
+                return (slice(360 + start, None), (slice(0, stop)))
             if stop > 180:
                 stop -= 360
             return slice(start, stop, lon_slice.step)
