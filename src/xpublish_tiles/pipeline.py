@@ -366,8 +366,7 @@ def prepare_subset(
 
     # Create extended bbox to prevent coordinate sampling gaps
     # This is a lot easier to do in coordinate space because of anti-meridian handling
-    extended_bbox = grid.pad_bbox(input_bbox, array.da)
-    subset = grid.sel(array.da, bbox=extended_bbox)
+    subset = grid.sel(array.da, bbox=input_bbox)
 
     # Check for insufficient data - either dimension has too few points
     if min(subset.shape) < 2:
@@ -419,7 +418,7 @@ async def subset_to_bbox(
         newda = context.subset.assign_coords({context.grid.X: newX, context.grid.Y: newY})
         result[var_name] = PopulatedRenderContext(
             da=newda,
-            grid=grid,
+            grid=context.grid,
             datatype=array.datatype,
             bbox=bbox,
         )
