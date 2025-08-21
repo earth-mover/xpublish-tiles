@@ -44,17 +44,8 @@ EXECUTOR = ThreadPoolExecutor(
     thread_name_prefix="xpublish-tiles-threadpool",
 )
 
-OTHER_4326 = CRS.from_user_input("""
-GEOGCRS["WGS 84 (with axis order normalized for visualization)",
-ENSEMBLE["World Geodetic System 1984 ensemble",MEMBER["World Geodetic System 1984 (Transit)",ID["EPSG",1166]],
-MEMBER["World Geodetic System 1984 (G730)",ID["EPSG",1152]],MEMBER["World Geodetic System 1984 (G873)",ID["EPSG",1153]],
-MEMBER["World Geodetic System 1984 (G1150)",ID["EPSG",1154]],MEMBER["World Geodetic System 1984 (G1674)",ID["EPSG",1155]],
-MEMBER["World Geodetic System 1984 (G1762)",ID["EPSG",1156]],MEMBER["World Geodetic System 1984 (G2139)",ID["EPSG",1309]],
-MEMBER["World Geodetic System 1984 (G2296)",ID["EPSG",1383]],ELLIPSOID["WGS 84",6378137,298.257223563,LENGTHUNIT["metre",1],
-ID["EPSG",7030]],ENSEMBLEACCURACY[2.0],ID["EPSG",6326]],PRIMEM["Greenwich",0,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8901]],CS[ellipsoidal,2],
-AXIS["geodetic longitude (Lon)",east,ORDER[1],ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]]
-,AXIS["geodetic latitude (Lat)",north,ORDER[2],ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]],
-USAGE[SCOPE["Horizontal component of 3D system."],AREA["World."],BBOX[-90,-180,90,180]],REMARK["Axis order reversed compared to EPSG:4326"]]""")
+# 4326 with order of axes reversed.
+OTHER_4326 = pyproj.CRS.from_user_input("WGS 84 (CRS84)")
 
 # https://pyproj4.github.io/pyproj/stable/advanced_examples.html#caching-pyproj-objects
 transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=True))
@@ -107,6 +98,10 @@ def timing_debug(func):
         return result
 
     return wrapper
+
+
+def is_4326_like(crs: CRS) -> bool:
+    return crs == pyproj.CRS.from_epsg(4326) or crs == OTHER_4326
 
 
 def epsg4326to3857(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -265,6 +260,17 @@ async def transform_coordinates(
         chunk_size = CHUNKED_TRANSFORM_CHUNK_SIZE
 
     inx, iny = subset[grid_x_name], subset[grid_y_name]
+
+    assert transformer.source_crs is not None
+    assert transformer.target_crs is not None
+
+    # the ordering of these two fastpaths is important
+    # we want to normalize to -180 -> 180 always
+    if is_4326_like(transformer.source_crs) and is_4326_like(transformer.target_crs):
+        # for some reason pyproj does not normalize these to -180->180
+        newdata = inx.data
+        newdata[newdata >= 180] -= 360
+        return inx.copy(data=newdata), iny
 
     if transformer.source_crs == transformer.target_crs:
         return inx, iny
