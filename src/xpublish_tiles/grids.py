@@ -74,6 +74,7 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         dim : str
             The dimension name
         """
+        assert interval_index.closed == "left"
         super().__init__(interval_index, dim)
         self.index = interval_index
         self._xrindex = xr.indexes.PandasIndex(interval_index, dim)
@@ -186,44 +187,52 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         if lon_slice.start is None or lon_slice.stop is None:
             raise ValueError("start and stop should not be None")
 
+        assert lon_slice.step in [None, 1]
+
         # https://github.com/developmentseed/morecantile/issues/175
         # the precision in morecantile tile bounds isn't perfect,
         # a good way to test is `tms.bounds(Tile(0,0,0))` which should
         # match the spec exactly: https://docs.ogc.org/is/17-083r4/17-083r4.html#toc48
         # Example: tests/test_pipeline.py::test_pipeline_tiles[-90->90,0->360-wgs84_prime_meridian(2/2/1)]
         start, stop = round(lon_slice.start, 8), round(lon_slice.stop, 8)
-        if self.uses_0_360:
-            # Check if we need to split across the 0/360 boundary
-            if start < 0 <= stop:
-                # Selection crosses from negative to positive
-                # e.g., slice(-180, 10) becomes slice(180, 360) + slice(0, 10)
-                if stop != 0:
-                    return (slice(start + 360, 360), slice(0, stop))
-                else:
-                    return (slice(start + 360, 360),)
 
-            elif start < 0 and stop < 0:
-                # Both negative, convert to 0→360
-                return slice(start + 360, stop + 360)
-            return lon_slice
+        # Determine breakpoints based on coordinate system
+        left_break = 0 if self.uses_0_360 else -180
+        right_break = 360 if self.uses_0_360 else 180
+
+        # Handle different boundary crossing cases
+        if start < left_break and stop < left_break:
+            # Both below left boundary
+            # e.g., -370 to -350 or -190 to -170
+            return slice(start + 360, stop + 360)
+
+        elif start >= right_break and stop > right_break:
+            # Both above right boundary
+            # e.g., 370 to 390 or 190 to 210
+            return slice(start - 360, stop - 360)
+
+        elif start < left_break and ((left_break == stop) or (stop < right_break)):
+            # Crosses left boundary from below
+            # e.g., -185 to 1 or -10 to 10
+            # For 0→360: slice(-10, 10) becomes slice(350, 360) + slice(0, 10)
+            # remember this is left-inclusive intervals
+            return (slice(start + 360, right_break), slice(left_break, stop))
+
+        elif start >= left_break and stop > right_break:
+            # Crosses right boundary from within
+            # e.g., 170 to 190 or 350 to 370
+            # For 0→360: slice(350, 370) becomes slice(350, 360) + slice(0, 10)
+            # For -180→180: slice(170, 190) becomes slice(170, -170)
+            return (slice(start, right_break), slice(left_break, stop - 360))
+
+        elif start >= right_break:
+            # Only start is above right boundary
+            # e.g., 370 to 10 or 190 to 10
+            return slice(start - 360, stop)
 
         else:
-            # Check if we need to split across the -180/180 boundary
-            if start > 180 >= stop or (start > 180 and stop <= start):
-                # Selection might cross boundary, but this is less common
-                # For now, just convert values > 180
-                if start > 180:
-                    start = start - 360
-                if stop > 180:
-                    stop = stop - 360
-                return slice(start, stop, lon_slice.step)
-            elif start > 180:
-                start -= 360
-            elif start < -180:
-                return (slice(360 + start, None), (slice(0, stop)))
-            if stop > 180:
-                stop -= 360
-            return slice(start, stop, lon_slice.step)
+            # Both within valid range
+            return slice(start, stop)
 
     def __len__(self) -> int:
         """Return the length of the longitude index."""

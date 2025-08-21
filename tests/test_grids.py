@@ -318,26 +318,58 @@ class TestLongitudeCellIndex:
         """Test that LongitudeCellIndex.sel() method works correctly."""
         centers = np.array([-2.0, -1.0, 0.0, 1.0, 2.0])  # Simple regional grid
         lon_index = LongitudeCellIndex(
-            pd.IntervalIndex.from_arrays(centers - 0.5, centers + 0.5), "longitude"
+            pd.IntervalIndex.from_arrays(centers - 0.5, centers + 0.5, closed="left"),
+            "longitude",
         )
         assert not lon_index.is_global  # 5 degree span should not be global
         assert len(lon_index) == len(centers)  # Should have 5 intervals from 5 centers
         result = lon_index.sel({"longitude": slice(0, 1)})
         assert result.dim_indexers == {"longitude": slice(2, 4)}
 
-    def test_longitude_cell_index_global(self):
-        centers = np.array([-179.5, -1.0, 0.0, 1.0, 179.5])
+    def test_longitude_cell_index_global_180(self):
         lon_index = LongitudeCellIndex(
-            pd.IntervalIndex.from_arrays(centers - 0.5, centers + 0.5), "longitude"
+            pd.IntervalIndex.from_breaks([-180, -1.0, 0.0, 1.0, 180], closed="left"),
+            "longitude",
         )
-        assert lon_index.is_global  # 5 degree span should not be global
-        assert len(lon_index) == len(centers)  # Should have 5 intervals from 5 centers
+        assert lon_index.is_global
 
         result = lon_index.sel({"longitude": slice(0, 1)})
         assert result.dim_indexers == {"longitude": slice(2, 4)}
 
         result = lon_index.sel({"longitude": slice(-185, 1)})
-        assert result.dim_indexers == {"longitude": (slice(4, 5, 1), slice(2, 4, 1))}
+        assert result.dim_indexers == {"longitude": (slice(3, 4, 1), slice(0, 3, 1))}
+
+        result = lon_index.sel({"longitude": slice(-220, -190)})
+        assert result.dim_indexers == {"longitude": slice(3, 4)}
+
+        result = lon_index.sel({"longitude": slice(190, 220)})
+        assert result.dim_indexers == {"longitude": slice(0, 1)}
+
+        result = lon_index.sel({"longitude": slice(150, 220)})
+        assert result.dim_indexers == {"longitude": (slice(3, 4, 1), slice(0, 1, 1))}
+
+    def test_longitude_cell_index_global_360(self):
+        edges = [0, 90, 180, 270, 360]
+        lon_index = LongitudeCellIndex(
+            pd.IntervalIndex.from_breaks(edges, closed="left"), "longitude"
+        )
+        assert lon_index.is_global
+        assert len(lon_index) == len(edges) - 1
+
+        result = lon_index.sel({"longitude": slice(90, 220)})
+        assert result.dim_indexers == {"longitude": slice(1, 3)}
+
+        result = lon_index.sel({"longitude": slice(-90, 0)})
+        assert result.dim_indexers == {"longitude": (slice(3, 4, 1), slice(0, 1, 1))}
+
+        result = lon_index.sel({"longitude": slice(275, 365)})
+        assert result.dim_indexers == {"longitude": (slice(3, 4, 1), slice(0, 1, 1))}
+
+        result = lon_index.sel({"longitude": slice(-30, -10)})
+        assert result.dim_indexers == {"longitude": slice(3, 4)}
+
+        result = lon_index.sel({"longitude": slice(380, 420)})
+        assert result.dim_indexers == {"longitude": slice(0, 1)}
 
 
 class TestFixCoordinateDiscontinuities:
