@@ -4,6 +4,7 @@
 import cf_xarray as cfxr
 import cf_xarray.datasets
 import numpy as np
+import numpy.testing as npt
 import pandas as pd
 import pytest
 import rasterix
@@ -332,200 +333,72 @@ class TestFixCoordinateDiscontinuities:
     def test_wrap_around_360_to_0_geographic(self):
         """Test fixing discontinuity when geographic coordinates wrap from 360 to 0 in 4326->4326 transform."""
         # This is the actual problematic array from the issue
+        # fmt: off
         coords = np.array(
             [
-                176.4,
-                180.0,
-                183.6,
-                187.2,
-                190.8,
-                194.4,
-                198.0,
-                201.6,
-                205.2,
-                208.8,
-                212.4,
-                216.0,
-                219.6,
-                223.2,
-                226.8,
-                230.4,
-                234.0,
-                237.6,
-                241.2,
-                244.8,
-                248.4,
-                252.0,
-                255.6,
-                259.2,
-                262.8,
-                266.4,
-                270.0,
-                273.6,
-                277.2,
-                280.8,
-                284.4,
-                288.0,
-                291.6,
-                295.2,
-                298.8,
-                302.4,
-                306.0,
-                309.6,
-                313.2,
-                316.8,
-                320.4,
-                324.0,
-                327.6,
-                331.2,
-                334.8,
-                338.4,
-                342.0,
-                345.6,
-                349.2,
-                352.8,
-                356.4,
-                360.0,
-                0.0,
-                3.6,
-                7.2,
-                10.8,
-                14.4,
-                18.0,
-                21.6,
-                25.2,
-                28.8,
-                32.4,
-                36.0,
-                39.6,
-                43.2,
-                46.8,
-                50.4,
-                54.0,
-                57.6,
-                61.2,
-                64.8,
-                68.4,
-                72.0,
-                75.6,
-                79.2,
-                82.8,
-                86.4,
-                90.0,
-                93.6,
-                97.2,
-                100.8,
-                104.4,
-                108.0,
-                111.6,
-                115.2,
-                118.8,
-                122.4,
-                126.0,
-                129.6,
-                133.2,
-                136.8,
-                140.4,
-                144.0,
-                147.6,
-                151.2,
-                154.8,
-                158.4,
-                162.0,
-                165.6,
-                169.2,
-                172.8,
-                176.4,
-                180.0,
+                176.4, 180.0, 183.6, 187.2, 190.8, 194.4, 198.0, 201.6, 205.2, 208.8, 212.4, 216.0, 219.6, 223.2, 226.8, 230.4, 234.0, 237.6, 241.2, 244.8, 248.4, 252.0, 255.6, 259.2, 262.8, 266.4,
+                270.0, 273.6, 277.2, 280.8, 284.4, 288.0, 291.6, 295.2, 298.8, 302.4, 306.0, 309.6, 313.2, 316.8, 320.4, 324.0, 327.6, 331.2, 334.8, 338.4, 342.0, 345.6, 349.2, 352.8, 356.4,
+                0.0, 3.6, 7.2, 10.8, 14.4, 18.0, 21.6, 25.2, 28.8, 32.4, 36.0, 39.6, 43.2, 46.8, 50.4, 54.0, 57.6, 61.2, 64.8, 68.4, 72.0, 75.6, 79.2, 82.8, 86.4,
+                90.0, 93.6, 97.2, 100.8, 104.4, 108.0, 111.6, 115.2, 118.8, 122.4, 126.0, 129.6, 133.2, 136.8, 140.4, 144.0, 147.6, 151.2, 154.8, 158.4, 162.0, 165.6, 169.2, 172.8, 176.4, 180.0,
             ]
         )
-
-        # For 4326 to 4326, coordinates stay the same but we need to fix the wrap
+        # fmt: on
+        expected = np.arange(-183.6, 183.6, 3.6)
         transformer = transformer_from_crs("EPSG:4326", "EPSG:4326", always_xy=True)
-        # Transform first (though it's identity for 4326->4326)
         transformed_x, _ = transformer.transform(coords, np.zeros_like(coords))
-
-        # Create a bbox that covers the data range
         bbox = BBox(west=-180, east=180, south=-90, north=90)
-
-        # Now fix the discontinuity in the transformed coordinates
         fixed = fix_coordinate_discontinuities(
             transformed_x, transformer, axis=0, bbox=bbox
         )
-
-        # After fixing, there should be no large gaps
-        gaps = np.diff(fixed)
-        assert np.abs(gaps).max() < 100, f"Large gap still present: {np.abs(gaps).max()}"
-
-        # The coordinates should be continuous
-        assert np.all(
-            np.abs(gaps) < 10
-        ), "Coordinates should be continuous with small gaps"
+        npt.assert_array_almost_equal(fixed, expected)
 
     def test_wrap_around_web_mercator(self):
         """Test fixing discontinuity in Web Mercator transformed coordinates."""
-        # Geographic coordinates that wrap
-        geo_coords = np.array([170, 175, 180, 185, 190, 195])
-
-        # Transform to Web Mercator
+        coords = np.array([170, 175, 180, 185, 190, 195])
         transformer = transformer_from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
-        transformed_x, _ = transformer.transform(geo_coords, np.zeros_like(geo_coords))
-
-        # Create a bbox around the antimeridian
+        transformed_x, _ = transformer.transform(coords, np.zeros_like(coords))
         bbox = BBox(west=170, east=-170, south=-90, north=90)
-
-        # Fix the discontinuity in transformed coordinates
         fixed = fix_coordinate_discontinuities(
             transformed_x, transformer, axis=0, bbox=bbox
         )
-
-        # After fixing, coordinates should be continuous
-        gaps = np.diff(fixed)
-        # In Web Mercator, gaps should be reasonable (not millions)
-        assert np.all(
-            np.abs(gaps) < 1e6
-        ), f"Coordinates should be continuous, gaps: {gaps}"
+        WIDTH = 40075016.68557849  # SHOULD BE 20037508.34 * 2
+        expected = transformed_x.copy()
+        expected[:3] -= WIDTH
+        npt.assert_array_almost_equal(fixed, expected)
 
     def test_wrap_around_180_to_minus_180(self):
         """Test fixing discontinuity when coordinates wrap from 180 to -180."""
         coords = np.array([170, 175, 180, -175, -170, -165])
+        expected = np.array([170, 175, 180, 185, 190, 195])
 
         transformer = transformer_from_crs("EPSG:4326", "EPSG:4326", always_xy=True)
         transformed_x, _ = transformer.transform(coords, np.zeros_like(coords))
-        bbox = BBox(west=170, east=-170, south=-90, north=90)
+        bbox = BBox(west=170, east=180, south=-90, north=90)
         fixed = fix_coordinate_discontinuities(
             transformed_x, transformer, axis=0, bbox=bbox
         )
-
-        # After fixing, coordinates should be continuous
-        gaps = np.diff(fixed)
-        assert np.all(np.abs(gaps) < 100), "Coordinates should be continuous"
+        npt.assert_array_equal(fixed, expected)
 
     def test_no_discontinuity(self):
         """Test that coordinates without discontinuity are not modified."""
         coords = np.array([0, 10, 20, 30, 40, 50])
-
         transformer = transformer_from_crs("EPSG:4326", "EPSG:4326", always_xy=True)
         transformed_x, _ = transformer.transform(coords, np.zeros_like(coords))
         bbox = BBox(west=-10, east=60, south=-90, north=90)
         fixed = fix_coordinate_discontinuities(
             transformed_x, transformer, axis=0, bbox=bbox
         )
-
         # Should not modify coordinates that don't have discontinuities
-        np.testing.assert_array_almost_equal(transformed_x, fixed)
+        npt.assert_array_equal(coords, fixed)
 
     def test_small_array(self):
         """Test with very small array."""
         coords = np.array([350, 0, 10])
-
+        expected = np.array([-10, 0, 10])
         transformer = transformer_from_crs("EPSG:4326", "EPSG:4326", always_xy=True)
         transformed_x, _ = transformer.transform(coords, np.zeros_like(coords))
         bbox = BBox(west=-10, east=20, south=-90, north=90)
         fixed = fix_coordinate_discontinuities(
             transformed_x, transformer, axis=0, bbox=bbox
         )
-
-        # Should fix the wrap from 350 to 0
-        gaps = np.diff(fixed)
-        assert np.all(np.abs(gaps) < 100), "Should fix wrap-around"
+        npt.assert_array_equal(fixed, expected)
