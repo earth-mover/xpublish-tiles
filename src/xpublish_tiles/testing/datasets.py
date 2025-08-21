@@ -19,6 +19,8 @@ from xpublish_tiles.testing.tiles import (
     HRRR_TILES_EDGE_CASES,
     PARA_TILES,
     PARA_TILES_EDGE_CASES,
+    UTM33S_TILES,
+    UTM33S_TILES_EDGE_CASES,
     WEBMERC_TILES,
     WEBMERC_TILES_EDGE_CASES,
     WGS84_TILES,
@@ -415,6 +417,14 @@ GLOBAL_6KM = Dataset(
 )
 
 # fmt: off
+UTM33S_BENCHMARK_TILES = [
+    "4/8/9", "4/8/10", "4/8/11", "4/9/9", "4/9/10",
+    "5/17/18", "5/17/19", "5/17/20", "5/17/21", "5/17/22",
+    "5/17/23", "5/17/24", "5/17/25", "5/18/18", "5/18/19",
+    "6/34/37", "6/34/38", "6/34/39", "6/34/40", "6/35/37",
+    "6/35/38", "6/35/39", "6/35/40", "6/34/48", "6/35/48",
+]
+
 EU3035_BENCHMARK_TILES = [
     "4/3/8", "4/4/7", "4/4/8", "4/4/9", "4/5/9", "4/5/8", "4/4/6", "4/4/10", "4/3/7",
     "4/3/9", "4/6/8", "4/5/7", "4/6/9", "4/6/7", "4/3/10", "4/3/6", "3/2/5", "3/1/5",
@@ -619,6 +629,46 @@ EU3035_HIRES = Dataset(
     edge_case_tiles=ETRS89_TILES_EDGE_CASES,
     tiles=ETRS89_TILES,
     benchmark_tiles=EU3035_HIRES_BENCHMARK_TILES,
+)
+
+UTM33S = Dataset(
+    name="utm33s",
+    dims=(
+        Dim(name="x", size=2000, chunk_size=2000, data=None),
+        Dim(name="y", size=5000, chunk_size=2000, data=None),
+    ),
+    dtype=np.float32,
+    setup=partial(
+        raster_grid,
+        crs="epsg:32733",
+        geotransform="166021.44 333.98 0.0 10000000.00 0.0 -1776.62",  # UTM Zone 33S coordinates
+        # bbox=BBox(west=-1.763744, south=-80.013566, east=31.763881, north=0.0),
+        # bbox=BBox(west=-1.763744, south=-80.013566, east=31.763881, north=0.0),
+        bbox=BBox(west=12.0, south=-80.0, east=18.0, north=0),
+    ),
+    edge_case_tiles=UTM33S_TILES_EDGE_CASES,
+    tiles=UTM33S_TILES,
+    benchmark_tiles=UTM33S_BENCHMARK_TILES,
+)
+
+UTM33S_HIRES = Dataset(
+    name="utm33s_hires",
+    dims=(
+        Dim(name="x", size=27000, chunk_size=2000, data=None),
+        Dim(name="y", size=75000, chunk_size=2000, data=None),
+    ),
+    dtype=np.float32,
+    setup=partial(
+        raster_grid,
+        crs="epsg:32733",
+        geotransform="688070.98 0.5 0.0 6809115.47 0.0 -0.5",  # Northern Cape, SA at 0.5m resolution
+        bbox=BBox(
+            west=16.927608, south=-29.170151, east=17.072642, north=-28.829823
+        ),  # Northern Cape patch
+    ),
+    edge_case_tiles=UTM33S_TILES_EDGE_CASES,
+    tiles=UTM33S_TILES,
+    benchmark_tiles=UTM33S_BENCHMARK_TILES,
 )
 
 
