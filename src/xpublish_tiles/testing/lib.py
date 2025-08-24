@@ -307,18 +307,14 @@ def _create_png_snapshot_fixture():
                     except Exception:
                         pass
 
-                    if tile_info:
-                        create_debug_visualization(
-                            actual_array,
-                            expected_array,
-                            test_name,
-                            tile_info,
-                            DEBUG_VISUAL_SAVE,
-                        )
-                    else:
-                        print(
-                            f"Warning: Could not extract tile info for debug visualization: {test_name}"
-                        )
+                    # Always create debug visualization, even without tile info
+                    create_debug_visualization(
+                        actual_array,
+                        expected_array,
+                        test_name,
+                        tile_info,
+                        DEBUG_VISUAL_SAVE,
+                    )
                 if not arrays_equal:
                     try:
                         np.testing.assert_array_equal(actual_array, expected_array)

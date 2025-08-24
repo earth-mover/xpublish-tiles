@@ -348,15 +348,12 @@ def prepare_subset(
     output_to_input = transformer_from_crs(crs_from=crs, crs_to=grid.crs)
 
     # Check bounds overlap, return NullRenderContext if no overlap
-    input_bbox_tuple = output_to_input.transform_bounds(
+    west, south, east, north = output_to_input.transform_bounds(
         left=bbox.west, right=bbox.east, top=bbox.north, bottom=bbox.south
     )
-    input_bbox = BBox(
-        west=input_bbox_tuple[0],
-        south=input_bbox_tuple[1],
-        east=input_bbox_tuple[2],
-        north=input_bbox_tuple[3],
-    )
+    input_bbox = BBox(west - 360 if west > east else west, south, east, north)
+    if bbox.west > bbox.east:
+        raise ValueError(f"Invalid Bbox after transformation: {input_bbox!r}")
 
     # Check bounds overlap, accounting for longitude wrapping in geographic data
     has_overlap = check_bbox_overlap(input_bbox, grid.bbox, grid.crs.is_geographic)

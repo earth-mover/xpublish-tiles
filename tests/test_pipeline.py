@@ -86,13 +86,13 @@ async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot, pytestco
     assert_render_matches_snapshot(result, png_snapshot)
 
 
-@pytest.mark.skip(reason="this bbox is slightly outside the bounds of web mercator")
-async def test_pipeline_bad_bbox(global_datasets, png_snapshot):
+async def test_pipeline_bad_bbox(global_datasets, png_snapshot, pytestconfig):
     """Test pipeline with various tiles using their native TMS CRS."""
     ds = global_datasets
     query = QueryParams(
         variables=["foo"],
         crs=OutputCRS(CRS.from_user_input(3857)),
+        # This bbox will transform to west=179.999CXXX, east=-157.XXX
         bbox=OutputBBox(
             BBox(
                 west=-20037508.3428,
