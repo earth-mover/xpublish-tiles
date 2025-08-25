@@ -26,14 +26,14 @@ from xpublish_tiles.types import (
     PopulatedRenderContext,
     RenderContext,
 )
-from xpublish_tiles.utils import timeit
+from xpublish_tiles.utils import time_debug
 
 # Only use lock if tbb is not available
 HAS_TBB = importlib.util.find_spec("tbb") is not None
 LOCK = contextlib.nullcontext() if HAS_TBB else threading.Lock()
 
 
-@timeit
+@time_debug
 def nearest_on_uniform_grid_scipy(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.DataArray:
     """This is quite slow. 10s for a 2000x3000 array"""
     X, Y = da[Xdim], da[Ydim]
@@ -63,7 +63,7 @@ def nearest_on_uniform_grid_scipy(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.
     return new
 
 
-@timeit
+@time_debug
 def nearest_on_uniform_grid_quadmesh(
     da: xr.DataArray, Xdim: str, Ydim: str
 ) -> xr.DataArray:
@@ -106,7 +106,7 @@ class DatashaderRasterRenderer(Renderer):
             totype = totype[:-1] + "4"
         return data.astype(totype, copy=False)
 
-    @timeit
+    @time_debug
     def render(
         self,
         *,

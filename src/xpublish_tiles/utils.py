@@ -14,7 +14,7 @@ def lower_case_keys(d: Any) -> dict[str, Any]:
         return {k.lower(): v for k, v in dict(d).items()}
 
 
-def timeit(func):
+def time_debug(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         start_time = time.perf_counter()

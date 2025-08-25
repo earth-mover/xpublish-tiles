@@ -31,13 +31,13 @@ from xpublish_tiles.types import (
     QueryParams,
     ValidatedArray,
 )
-from xpublish_tiles.utils import timeit
+from xpublish_tiles.utils import time_debug
 
 # This takes the pipeline ~ 1s
 MAX_RENDERABLE_SIZE = 10_000 * 10_000
 
 
-@timeit
+@time_debug
 def has_coordinate_discontinuity(coordinates: np.ndarray) -> bool:
     """
     Detect coordinate discontinuities in geographic longitude coordinates.
@@ -88,7 +88,7 @@ def has_coordinate_discontinuity(coordinates: np.ndarray) -> bool:
     return False
 
 
-@timeit
+@time_debug
 def fix_coordinate_discontinuities(
     coordinates: np.ndarray, transformer: pyproj.Transformer, *, axis: int, bbox: BBox
 ) -> np.ndarray:
@@ -154,7 +154,7 @@ def fix_coordinate_discontinuities(
     return result.reshape(coordinates.shape)
 
 
-@timeit
+@time_debug
 def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool:
     """Check if bboxes overlap, handling longitude wrapping for geographic data."""
     # Standard intersection check
@@ -234,7 +234,7 @@ def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool
     return False
 
 
-@timeit
+@time_debug
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = apply_query(ds, variables=query.variables, selectors=query.selectors)
     subsets = await subset_to_bbox(validated, bbox=query.bbox, crs=query.crs)
@@ -288,7 +288,7 @@ def _infer_datatype(array: xr.DataArray) -> DataType:
     )
 
 
-@timeit
+@time_debug
 def apply_query(
     ds: xr.Dataset, *, variables: list[str], selectors: dict[str, Any]
 ) -> dict[str, ValidatedArray]:
@@ -325,7 +325,7 @@ class SubsetContext:
     has_discontinuity: bool
 
 
-@timeit
+@time_debug
 def prepare_subset(
     var_name: str,
     array: ValidatedArray,
@@ -392,7 +392,7 @@ def prepare_subset(
     )
 
 
-@timeit
+@time_debug
 async def subset_to_bbox(
     validated: dict[str, ValidatedArray], *, bbox: OutputBBox, crs: OutputCRS
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:
@@ -429,7 +429,7 @@ async def subset_to_bbox(
     return result
 
 
-@timeit
+@time_debug
 def sync_subset_to_bbox(
     validated: dict[str, ValidatedArray], *, bbox: OutputBBox, crs: OutputCRS
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:
@@ -474,7 +474,7 @@ def sync_subset_to_bbox(
     return result
 
 
-@timeit
+@time_debug
 def sync_pipeline(ds, query: QueryParams) -> io.BytesIO:
     """
     Synchronous version of pipeline.

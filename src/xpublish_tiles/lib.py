@@ -7,7 +7,7 @@ import operator
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache, partial, wraps
+from functools import lru_cache, partial
 from itertools import product
 
 import numpy as np
@@ -18,6 +18,7 @@ from pyproj import CRS
 
 import xarray as xr
 from xpublish_tiles.logger import logger
+from xpublish_tiles.utils import time_debug
 
 WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)
 
@@ -83,20 +84,6 @@ CHUNKED_TRANSFORM_CHUNK_SIZE = (chunk_size, chunk_size)
 logger.info("transform chunk size: ", CHUNKED_TRANSFORM_CHUNK_SIZE)
 
 
-def timing_debug(func):
-    """Decorator to add debug timing to async functions."""
-
-    @wraps(func)
-    async def wrapper(*args, **kwargs):
-        start_time = time.perf_counter()
-        result = await func(*args, **kwargs)
-        total_time = time.perf_counter() - start_time
-        print("%s completed in %.4f seconds", func.__name__, total_time)
-        return result
-
-    return wrapper
-
-
 def is_4326_like(crs: CRS) -> bool:
     return crs == pyproj.CRS.from_epsg(4326) or crs == OTHER_4326
 
@@ -144,6 +131,7 @@ def slices_from_chunks(chunks):
     return product(*slices)
 
 
+@time_debug
 def transform_chunk(
     x_grid: np.ndarray,
     y_grid: np.ndarray,
@@ -161,6 +149,7 @@ def transform_chunk(
     y_out[row_slice, col_slice] = y_transformed
 
 
+@time_debug
 def transform_blocked(
     x_grid: np.ndarray,
     y_grid: np.ndarray,
@@ -219,7 +208,7 @@ def check_transparent_pixels(image_bytes):
     return (transparent_count / total_pixels) * 100
 
 
-@timing_debug
+@time_debug
 async def transform_coordinates(
     subset: xr.DataArray,
     grid_x_name: str,
@@ -300,6 +289,7 @@ async def transform_coordinates(
     return bx.copy(data=newX), by.copy(data=newY)
 
 
+@time_debug
 def sync_transform_coordinates(
     subset: xr.DataArray,
     grid_x_name: str,
