@@ -153,7 +153,7 @@ def fix_coordinate_discontinuities(
     return result.reshape(coordinates.shape)
 
 
-def check_bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool:
+def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool:
     """Check if bboxes overlap, handling longitude wrapping for geographic data."""
     # Standard intersection check
     if input_bbox.intersects(grid_bbox):
@@ -351,13 +351,14 @@ def prepare_subset(
     west, south, east, north = output_to_input.transform_bounds(
         left=bbox.west, right=bbox.east, top=bbox.north, bottom=bbox.south
     )
-    input_bbox = BBox(west - 360 if west > east else west, south, east, north)
+    if grid.crs.is_geographic:
+        west = west - 360 if west > east else west
+    input_bbox = BBox(west, south, east, north)
     if bbox.west > bbox.east:
         raise ValueError(f"Invalid Bbox after transformation: {input_bbox!r}")
 
     # Check bounds overlap, accounting for longitude wrapping in geographic data
-    has_overlap = check_bbox_overlap(input_bbox, grid.bbox, grid.crs.is_geographic)
-    if not has_overlap:
+    if not bbox_overlap(input_bbox, grid.bbox, grid.crs.is_geographic):
         # No overlap - return NullRenderContext
         return NullRenderContext()
 
