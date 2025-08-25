@@ -20,7 +20,7 @@ dependencies = [
     "xpublish>=0.3.0",
     "fastapi",
     "xarray>=2025.08.0",
-    "zarr>=3.1.1",
+    "zarr>=3.1.2",
     "rasterix>=0.1a4",
     "toolz>=1.0.0",
     "cachetools>=5.5.2",
