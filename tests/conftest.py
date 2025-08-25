@@ -1,5 +1,4 @@
 import logging
-import os
 from itertools import product
 
 import pytest
@@ -10,18 +9,10 @@ import xarray as xr
 from xpublish_tiles.testing.datasets import EU3035, HRRR, UTM33S, create_global_dataset
 from xpublish_tiles.testing.lib import compare_image_buffers, png_snapshot  # noqa: F401
 
-# Get logging level from environment variable, default to WARNING
-log_level_str = os.environ.get("XPUBLISH_TILES_LOG_LEVEL", "WARNING").upper()
-log_level = getattr(logging, log_level_str, logging.WARNING)
-
-# Configure xpublish_tiles logging
-logging.getLogger("xpublish_tiles").setLevel(log_level)
-
-# Disable numba, datashader, and PIL debug logs unless explicitly set to DEBUG
-if log_level != logging.DEBUG:
-    logging.getLogger("numba").setLevel(logging.WARNING)
-    logging.getLogger("datashader").setLevel(logging.WARNING)
-    logging.getLogger("PIL").setLevel(logging.WARNING)
+# Disable numba, datashader, and PIL debug logs
+logging.getLogger("numba").setLevel(logging.WARNING)
+logging.getLogger("datashader").setLevel(logging.WARNING)
+logging.getLogger("PIL").setLevel(logging.WARNING)
 
 IS_SNAPSHOT_UPDATE = False
 

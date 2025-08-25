@@ -101,7 +101,7 @@ class NullRenderContext(RenderContext):
     async def async_load(self) -> Self:
         return type(self)()
 
-    def load(self) -> Self:
+    def sync_load(self) -> Self:
         return type(self)()
 
 
@@ -122,7 +122,7 @@ class PopulatedRenderContext(RenderContext):
         )
 
     @time_debug
-    def load(self) -> Self:
+    def sync_load(self) -> Self:
         new_data = self.da.load()
         return type(self)(
             da=new_data, datatype=self.datatype, grid=self.grid, bbox=self.bbox

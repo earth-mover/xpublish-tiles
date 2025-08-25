@@ -56,6 +56,7 @@ uv run xpublish-tiles [OPTIONS]
 - `--group GROUP`: Group to use for Arraylake datasets (default: '')
 - `--cache`: Enable icechunk cache for Arraylake datasets
 - `--spy`: Run benchmark requests with the specified dataset for performance testing
+- `--log-level`: Set the logging level for xpublish_tiles (choices: debug, info, warning, error; default: warning)
 
 > [!TIP]
 > You can control if the tile servers data loading is async or not with the `XPUBLISH_TILES_ASYNC_LOAD` environment variable (`1` for async mode, `0` for sync mode, async is enabled by default). You can also control the zarr concurrency with the `ZARR_ASYNC__CONCURRENCY` environment variable (default: 10).
@@ -121,4 +122,3 @@ Environment variables
 1. `XPUBLISH_TILES_ASYNC_LOAD: [0, 1]` - controls whether Xarray's async loading is used.
 2. `XPUBLISH_TILES_NUM_THREADS: int` - controls the size of the threadpool
 3. `XPUBLISH_TILES_TRANSFORM_CHUNK_SIZE: int` - when transforming coordinates, do so by submitting (NxN) chunks to the threadpool.
-4. `XPUBLISH_TILES_LOG_LEVEL: str` - controls the logging level for xpublish_tiles (DEBUG, INFO, WARNING, ERROR). Default is WARNING. Note: numba, datashader, and PIL logs are always set to WARNING level to reduce noise.

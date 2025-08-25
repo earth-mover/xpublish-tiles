@@ -242,7 +242,7 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
             *(sub.async_load() for sub in subsets.values())
         )
     else:
-        loaded_contexts = tuple(sub.load() for sub in subsets.values())
+        loaded_contexts = tuple(sub.sync_load() for sub in subsets.values())
     context_dict = dict(zip(subsets.keys(), loaded_contexts, strict=True))
 
     buffer = io.BytesIO()
@@ -482,7 +482,7 @@ def sync_pipeline(ds, query: QueryParams) -> io.BytesIO:
     subsets = sync_subset_to_bbox(validated, bbox=query.bbox, crs=query.crs)
 
     # Use synchronous load
-    loaded_contexts = tuple(sub.load() for sub in subsets.values())
+    loaded_contexts = tuple(sub.sync_load() for sub in subsets.values())
     context_dict = dict(zip(subsets.keys(), loaded_contexts, strict=True))
 
     buffer = io.BytesIO()
