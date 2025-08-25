@@ -182,7 +182,7 @@ def transform_blocked(
         future.result()
 
     total_time = time.perf_counter() - start_time
-    logger.info(
+    logger.debug(
         "transform_blocked completed in %.4f seconds (shape=%s, chunks=%d)",
         total_time,
         shape,
