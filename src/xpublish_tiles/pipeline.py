@@ -31,7 +31,7 @@ from xpublish_tiles.types import (
     QueryParams,
     ValidatedArray,
 )
-from xpublish_tiles.utils import time_debug
+from xpublish_tiles.utils import async_time_debug, time_debug
 
 # This takes the pipeline ~ 1s
 MAX_RENDERABLE_SIZE = 10_000 * 10_000
@@ -234,6 +234,7 @@ def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool
     return False
 
 
+@async_time_debug
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = apply_query(ds, variables=query.variables, selectors=query.selectors)
     subsets = await subset_to_bbox(validated, bbox=query.bbox, crs=query.crs)
@@ -391,6 +392,7 @@ def prepare_subset(
     )
 
 
+@async_time_debug
 async def subset_to_bbox(
     validated: dict[str, ValidatedArray], *, bbox: OutputBBox, crs: OutputCRS
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:

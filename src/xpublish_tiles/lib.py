@@ -18,7 +18,7 @@ from pyproj import CRS
 
 import xarray as xr
 from xpublish_tiles.logger import logger
-from xpublish_tiles.utils import time_debug
+from xpublish_tiles.utils import async_time_debug, time_debug
 
 WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)
 
@@ -206,6 +206,7 @@ def check_transparent_pixels(image_bytes):
     return (transparent_count / total_pixels) * 100
 
 
+@async_time_debug
 async def transform_coordinates(
     subset: xr.DataArray,
     grid_x_name: str,
