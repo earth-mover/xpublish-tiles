@@ -116,3 +116,8 @@ Where `4/4/14` represents the tile coordinates in {z}/{y}/{x}
 
 1. Make sure to limit `NUMBA_NUM_THREADS`; this is used for rendering categorical data with datashader.
 2. The first invocation of a render will block while datashader functions are JIT-compiled. Our attempts to add a precompilation step to remove this have been unsuccessful.
+
+Environment variables
+1. `XPUBLISH_TILES_ASYNC_LOAD: [0, 1]` - controls whether Xarray's async loading is used.
+2. `XPUBLISH_TILES_NUM_THREADS: int` - controls the size of the threadpool
+3. `XPUBLISH_TILES_TRANSFORM_CHUNK_SIZE: int` - when transforming coordinates, do so by submitting (NxN) chunks to the threadpool.

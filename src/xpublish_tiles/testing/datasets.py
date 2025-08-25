@@ -19,6 +19,8 @@ from xpublish_tiles.testing.tiles import (
     HRRR_TILES_EDGE_CASES,
     PARA_TILES,
     PARA_TILES_EDGE_CASES,
+    UTM33S_TILES,
+    UTM33S_TILES_EDGE_CASES,
     WEBMERC_TILES,
     WEBMERC_TILES_EDGE_CASES,
     WGS84_TILES,
@@ -134,18 +136,18 @@ def generate_flag_values_data(
     noisy_tanh = tanh_data + scaled_noise
     noisy_tanh = np.clip(noisy_tanh, -1, 1)
 
-    # Discretize to 10 levels by mapping [-1, 1] to [0, 9] indices
-    # First normalize to [0, 1], then scale to [0, 9], then round to integers
+    # Discretize to N levels based on number of flag values
+    num_categories = len(flag_values)
+    # First normalize to [0, 1], then scale to [0, num_categories-1], then round to integers
     normalized = (noisy_tanh + 1) / 2  # Map [-1, 1] to [0, 1]
-    scaled = normalized * 9  # Map [0, 1] to [0, 9]
+    scaled = normalized * (num_categories - 1)  # Map [0, 1] to [0, num_categories-1]
     indices = np.round(scaled).astype(int)  # Round and convert to int
 
-    # Clip to ensure indices are in valid range [0, 9]
-    indices = np.clip(indices, 0, 9)
+    # Clip to ensure indices are in valid range
+    indices = np.clip(indices, 0, num_categories - 1)
 
     # Map indices to actual flag values
-    # Only use the first 10 flag values if more are provided
-    flag_array = np.array(flag_values[:10], dtype=dtype)
+    flag_array = np.array(flag_values, dtype=dtype)
     array = dask.array.map_blocks(
         lambda chunk, flags: flags[chunk],
         indices,
@@ -310,9 +312,17 @@ IFS = Dataset(
             chunk_size=5,
             data=pd.to_timedelta(np.arange(0, 49), unit="h"),
         ),
-        Dim(name="latitude", size=721, chunk_size=240, data=np.linspace(90, -90, 721)),
         Dim(
-            name="longitude", size=1440, chunk_size=360, data=np.linspace(-180, 180, 1440)
+            name="latitude",
+            size=721,
+            chunk_size=240,
+            data=np.linspace(90, -90, 721),
+        ),
+        Dim(
+            name="longitude",
+            size=1440,
+            chunk_size=360,
+            data=np.linspace(-180 + 0.125, 180 - 0.125, 1440),
         ),
     ),
     dtype=np.float32,
@@ -321,6 +331,37 @@ IFS = Dataset(
     tiles=WGS84_TILES + WEBMERC_TILES,
     benchmark_tiles=GLOBAL_BENCHMARK_TILES,
 )
+
+ERA5 = Dataset(
+    # https://app.earthmover.io/earthmover-demos/ecmwf-ifs-oper/array/main/tprate
+    name="era5",
+    dims=(
+        Dim(
+            name="time",
+            size=2,
+            chunk_size=1,
+            data=np.array(["2000-01-01", "2000-01-02"], dtype="datetime64[h]"),
+        ),
+        Dim(
+            name="latitude",
+            size=721,
+            chunk_size=240,
+            data=np.linspace(90, -90, 721),
+        ),
+        Dim(
+            name="longitude",
+            size=1440,
+            chunk_size=360,
+            data=np.linspace(0, 359.75, 1440),
+        ),
+    ),
+    dtype=np.float32,
+    setup=uniform_grid,
+    edge_case_tiles=WGS84_TILES_EDGE_CASES + WEBMERC_TILES_EDGE_CASES,
+    tiles=WGS84_TILES + WEBMERC_TILES,
+    benchmark_tiles=GLOBAL_BENCHMARK_TILES,
+)
+
 
 SENTINEL2_NOCOORDS = Dataset(
     # https://app.earthmover.io/earthmover-demos/sentinel-datacube-South-America-3-icechunk
@@ -376,6 +417,14 @@ GLOBAL_6KM = Dataset(
 )
 
 # fmt: off
+UTM33S_BENCHMARK_TILES = [
+    "4/8/9", "4/8/10", "4/8/11", "4/9/9", "4/9/10",
+    "5/17/18", "5/17/19", "5/17/20", "5/17/21", "5/17/22",
+    "5/17/23", "5/17/24", "5/17/25", "5/18/18", "5/18/19",
+    "6/34/37", "6/34/38", "6/34/39", "6/34/40", "6/35/37",
+    "6/35/38", "6/35/39", "6/35/40", "6/34/48", "6/35/48",
+]
+
 EU3035_BENCHMARK_TILES = [
     "4/3/8", "4/4/7", "4/4/8", "4/4/9", "4/5/9", "4/5/8", "4/4/6", "4/4/10", "4/3/7",
     "4/3/9", "4/6/8", "4/5/7", "4/6/9", "4/6/7", "4/3/10", "4/3/6", "3/2/5", "3/1/5",
@@ -439,10 +488,10 @@ PARA = Dataset(
     attrs={
         "flag_meanings": (
             "water ocean forest grassland agriculture urban barren shrubland "
-            "wetland cropland tundra ice"
+            "wetland cropland"
         ),
-        "flag_values": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-        "flag_colors": "#1f77b4 #17becf #2ca02c #8c564b #ff7f0e #d62728 #bcbd22 #9467bd #e377c2 #7f7f7f #c5b0d5 #ffffff",
+        "flag_values": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "flag_colors": "#1f77b4 #17becf #2ca02c #8c564b #ff7f0e #d62728 #bcbd22 #9467bd #e377c2 #7f7f7f",
     },
     setup=partial(
         raster_grid,
@@ -580,6 +629,46 @@ EU3035_HIRES = Dataset(
     edge_case_tiles=ETRS89_TILES_EDGE_CASES,
     tiles=ETRS89_TILES,
     benchmark_tiles=EU3035_HIRES_BENCHMARK_TILES,
+)
+
+UTM33S = Dataset(
+    name="utm33s",
+    dims=(
+        Dim(name="x", size=2000, chunk_size=2000, data=None),
+        Dim(name="y", size=5000, chunk_size=2000, data=None),
+    ),
+    dtype=np.float32,
+    setup=partial(
+        raster_grid,
+        crs="epsg:32733",
+        geotransform="166021.44 333.98 0.0 10000000.00 0.0 -1776.62",  # UTM Zone 33S coordinates
+        # bbox=BBox(west=-1.763744, south=-80.013566, east=31.763881, north=0.0),
+        # bbox=BBox(west=-1.763744, south=-80.013566, east=31.763881, north=0.0),
+        bbox=BBox(west=12.0, south=-80.0, east=18.0, north=0),
+    ),
+    edge_case_tiles=UTM33S_TILES_EDGE_CASES,
+    tiles=UTM33S_TILES,
+    benchmark_tiles=UTM33S_BENCHMARK_TILES,
+)
+
+UTM33S_HIRES = Dataset(
+    name="utm33s_hires",
+    dims=(
+        Dim(name="x", size=27000, chunk_size=2000, data=None),
+        Dim(name="y", size=75000, chunk_size=2000, data=None),
+    ),
+    dtype=np.float32,
+    setup=partial(
+        raster_grid,
+        crs="epsg:32733",
+        geotransform="688070.98 0.5 0.0 6809115.47 0.0 -0.5",  # Northern Cape, SA at 0.5m resolution
+        bbox=BBox(
+            west=16.927608, south=-29.170151, east=17.072642, north=-28.829823
+        ),  # Northern Cape patch
+    ),
+    edge_case_tiles=UTM33S_TILES_EDGE_CASES,
+    tiles=UTM33S_TILES,
+    benchmark_tiles=UTM33S_BENCHMARK_TILES,
 )
 
 
