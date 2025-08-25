@@ -121,3 +121,4 @@ Environment variables
 1. `XPUBLISH_TILES_ASYNC_LOAD: [0, 1]` - controls whether Xarray's async loading is used.
 2. `XPUBLISH_TILES_NUM_THREADS: int` - controls the size of the threadpool
 3. `XPUBLISH_TILES_TRANSFORM_CHUNK_SIZE: int` - when transforming coordinates, do so by submitting (NxN) chunks to the threadpool.
+4. `XPUBLISH_TILES_LOG_LEVEL: str` - controls the logging level for xpublish_tiles (DEBUG, INFO, WARNING, ERROR). Default is WARNING. Note: numba, datashader, and PIL logs are always set to WARNING level to reduce noise.

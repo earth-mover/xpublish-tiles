@@ -1,6 +1,8 @@
 """Simple CLI for playing with xpublish-tiles, with a generated sample dataset"""
 
 import argparse
+import logging
+import os
 import threading
 from typing import cast
 
@@ -176,6 +178,29 @@ def get_dataset_object_for_name(name: str):
 
 
 def main():
+    # Configure logging based on environment variable
+    log_level_str = os.environ.get("XPUBLISH_TILES_LOG_LEVEL", "WARNING").upper()
+    log_level = getattr(logging, log_level_str, logging.WARNING)
+
+    # Configure xpublish_tiles logger with handler
+    logger = logging.getLogger("xpublish_tiles")
+    logger.setLevel(log_level)
+
+    # Add console handler if not already present
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setLevel(log_level)
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
+    # Always disable numba and datashader debug logs
+    logging.getLogger("numba").setLevel(logging.WARNING)
+    logging.getLogger("datashader").setLevel(logging.WARNING)
+    logging.getLogger("PIL").setLevel(logging.WARNING)
+
     parser = argparse.ArgumentParser(
         description="Simple CLI for playing with xpublish-tiles"
     )
