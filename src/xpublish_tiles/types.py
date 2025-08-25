@@ -8,6 +8,7 @@ import pyproj.aoi
 
 import xarray as xr
 from xpublish_tiles.grids import GridSystem
+from xpublish_tiles.utils import async_time_debug, time_debug
 
 InputCRS = NewType("InputCRS", pyproj.CRS)
 OutputCRS = NewType("OutputCRS", pyproj.CRS)
@@ -113,12 +114,14 @@ class PopulatedRenderContext(RenderContext):
     grid: GridSystem
     bbox: OutputBBox
 
+    @async_time_debug
     async def async_load(self) -> Self:
         new_data = await self.da.load_async()
         return type(self)(
             da=new_data, datatype=self.datatype, grid=self.grid, bbox=self.bbox
         )
 
+    @time_debug
     def load(self) -> Self:
         new_data = self.da.load()
         return type(self)(
