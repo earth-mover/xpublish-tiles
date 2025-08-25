@@ -20,16 +20,13 @@ dependencies = [
     "xpublish>=0.3.0",
     "fastapi",
     "xarray>=2025.08.0",
-    "zarr",
+    "zarr>=3.1.1",
     "rasterix>=0.1a4",
     "toolz>=1.0.0",
     "cachetools>=5.5.2",
     "tbb>=2022.2.0 ; sys_platform == 'linux'",
 ]
 dynamic = ["version"]
-
-[tool.uv.sources]
-zarr = { git = "https://github.com/zarr-developers/zarr-python.git", rev = "main" }
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
