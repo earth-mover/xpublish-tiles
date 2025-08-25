@@ -15,6 +15,10 @@ def run_benchmark(
     dataset_name: str,
     benchmark_tiles: list[str],
     concurrency: int,
+    where: str = "local",
+    use_sync: bool = False,
+    variable_name: str = "foo",
+    needs_colorscale: bool = False,
 ):
     """Run benchmarking requests for the given dataset."""
 
@@ -34,33 +38,57 @@ def run_benchmark(
     shuffled_tiles = benchmark_tiles.copy()
     random.shuffle(shuffled_tiles)
 
-    print(f"Starting benchmark requests for {dataset_name}")
+    endpoint_type = "sync" if use_sync else "tiles"
+    print(
+        f"Starting benchmark requests for {dataset_name} using {endpoint_type} endpoint"
+    )
     print(f"Warmup tiles: {warmup_tiles}")
     print(f"Benchmark tiles: {len(shuffled_tiles)} tiles (randomized order)")
 
     # Wait for server to start with warmup
-    server_url = f"http://localhost:{port}"
+    if where == "local":
+        server_url = f"http://localhost:{port}"
+    elif where == "local-booth":
+        server_url = f"http://localhost:{port}/services/tiles/earthmover-integration/tiles-icechunk/main/{dataset_name}"
+    else:  # prod
+        server_url = f"https://compute.earthmover.dev/v1/services/tiles/earthmover-integration/tiles-icechunk/main/{dataset_name}"
     max_retries = 10
     for _i in range(max_retries):
         try:
             # Use a tile endpoint for health check and warmup
             z, x, y = warmup_tiles[0].split("/")
-            warmup_url = f"{server_url}/tiles/WebMercatorQuad/{z}/{x}/{y}?variables=foo&style=raster/viridis&width=256&height=256"
+            # Build base URL with required parameters
+            base_params = (
+                f"variables={variable_name}&style=raster/viridis&width=256&height=256"
+            )
+            if needs_colorscale:
+                base_params += "&colorscalerange=-100,100"  # Use reasonable default range
+
+            if use_sync:
+                warmup_url = (
+                    f"{server_url}/tiles/sync/WebMercatorQuad/{z}/{x}/{y}?{base_params}"
+                )
+            else:
+                warmup_url = (
+                    f"{server_url}/tiles/WebMercatorQuad/{z}/{x}/{y}?{base_params}"
+                )
             response = requests.get(warmup_url, timeout=10)
             if response.status_code == 200:
                 print(
                     f"Server is ready at {server_url} (warmed up with tile {warmup_tiles[0]})"
                 )
                 break
-        except Exception:
-            pass
-            # import traceback
-            # print(f"Error during server check: {e}")
-            # traceback.print_exc()
+            else:
+                print(
+                    f"Warmup request returned status {response.status_code}, retrying..."
+                )
+        except Exception as e:
+            print(f"Warmup request failed: {e}, retrying...")
         time.sleep(0.5)
     else:
-        print("Server failed to start")
-        return
+        print(f"ERROR: Server warmup failed after {max_retries} attempts")
+        print(f"Failed to get 200 response from: {warmup_url}")
+        raise RuntimeError("Server warmup failed - did not receive 200 response")
 
     # Make requests to benchmark tiles concurrently using async with semaphore
     print(f"Making concurrent benchmark tile requests (max {concurrency} at a time)...")
@@ -72,8 +100,21 @@ def run_benchmark(
         async with semaphore:  # Acquire semaphore before making request
             z, x, y = tile.split("/")
             # The tile endpoint format is /tiles/{tileMatrixSetId}/{tileMatrix}/{tileCol}/{tileRow}
+            # or /tiles/sync/{tileMatrixSetId}/{tileMatrix}/{tileCol}/{tileRow} for sync endpoint
             # Include required query parameters
-            tile_url = f"{server_url}/tiles/WebMercatorQuad/{z}/{x}/{y}?variables=foo&style=raster/viridis&width=256&height=256"
+            # Build tile URL with required parameters
+            tile_params = (
+                f"variables={variable_name}&style=raster/viridis&width=256&height=256"
+            )
+            if needs_colorscale:
+                tile_params += "&colorscalerange=-100,100"  # Use reasonable default range
+
+            if use_sync:
+                tile_url = (
+                    f"{server_url}/tiles/sync/WebMercatorQuad/{z}/{x}/{y}?{tile_params}"
+                )
+            else:
+                tile_url = f"{server_url}/tiles/WebMercatorQuad/{z}/{x}/{y}?{tile_params}"
 
             start_time = time.perf_counter()
             try:

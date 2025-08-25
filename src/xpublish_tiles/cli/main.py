@@ -13,6 +13,7 @@ from xpublish_tiles.cli.bench import run_benchmark
 from xpublish_tiles.testing.datasets import (
     EU3035,
     EU3035_HIRES,
+    GLOBAL_BENCHMARK_TILES,
     HRRR,
     IFS,
     PARA,
@@ -219,6 +220,18 @@ def main():
         default=12,
         help="Number of concurrent requests for benchmarking (default: 12)",
     )
+    parser.add_argument(
+        "--where",
+        type=str,
+        choices=["local", "local-booth", "prod"],
+        default="local",
+        help="Where to run benchmark requests: 'local' for localhost (starts server), 'local-booth' for localhost (no server), or 'prod' for production (default: local)",
+    )
+    parser.add_argument(
+        "--sync",
+        action="store_true",
+        help="Use the sync endpoint instead of the regular tiles endpoint for benchmarking",
+    )
     args = parser.parse_args()
 
     # Determine dataset to use and benchmarking mode
@@ -228,29 +241,58 @@ def main():
     ds = get_dataset_for_name(dataset_name, args.branch, args.group, args.cache)
 
     xr.set_options(keep_attrs=True)
-    rest = xpublish.SingleDatasetRest(
-        ds,
-        plugins={"tiles": TilesPlugin(), "wms": WMSPlugin()},
-    )
-    rest.app.add_middleware(CORSMiddleware, allow_origins=["*"])
+    if args.where == "local":
+        rest = xpublish.SingleDatasetRest(
+            ds,
+            plugins={"tiles": TilesPlugin(), "wms": WMSPlugin()},
+        )
+        rest.app.add_middleware(CORSMiddleware, allow_origins=["*"])
+    elif args.where == "local-booth":
+        # For local-booth, we don't start the REST server
+        # Just prepare for benchmarking against existing localhost server
+        pass
 
     # If benchmarking, start the benchmark thread after a delay
+    bench_thread = None
     if benchmarking:
         # Get dataset object for potential benchmark tiles
         dataset_obj = get_dataset_object_for_name(dataset_name)
-        if not dataset_obj:
-            raise ValueError(f"No dataset object found for dataset '{dataset_name}'")
+        benchmark_tiles = (
+            dataset_obj.benchmark_tiles
+            if dataset_obj and dataset_obj.benchmark_tiles
+            else GLOBAL_BENCHMARK_TILES
+        )
+
+        # Get the first variable from the dataset
+        if not ds.data_vars:
+            raise ValueError(f"No data variables found in dataset '{dataset_name}'")
+        first_var = next(iter(ds.data_vars))
+
+        # Check if we need colorscalerange
+        needs_colorscale = (
+            "valid_min" not in ds[first_var].attrs
+            or "valid_max" not in ds[first_var].attrs
+        )
+
         bench_thread = threading.Thread(
             target=run_benchmark,
             args=(
                 args.port,
                 "requests",
                 dataset_name,
-                dataset_obj.benchmark_tiles,
+                benchmark_tiles,
                 args.concurrency,
+                args.where,
+                args.sync,
+                first_var,
+                needs_colorscale,
             ),
             daemon=True,
         )
         bench_thread.start()
 
-    rest.serve(host="0.0.0.0", port=args.port)
+    if args.where == "local":
+        rest.serve(host="0.0.0.0", port=args.port)
+    elif args.where in ["local-booth", "prod"] and bench_thread:
+        # When running benchmarks against production or local-booth, wait for the thread to complete
+        bench_thread.join()

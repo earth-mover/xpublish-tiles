@@ -83,7 +83,7 @@ def nearest_on_uniform_grid_quadmesh(
         x_range=(xmin - dx / 2, xmax + dx / 2),
         y_range=(ymin - dy / 2, ymax + dy / 2),
     )
-    res = cvs.quadmesh(da, x="x", y="y", agg=dsh.reductions.first(cast(str, da.name)))
+    res = cvs.quadmesh(da, x=Xdim, y=Ydim, agg=dsh.reductions.first(cast(str, da.name)))
     print(
         f"Tiles : interpolating categorical from {da.shape} to {newshape}: {time.time() - tic} "
     )

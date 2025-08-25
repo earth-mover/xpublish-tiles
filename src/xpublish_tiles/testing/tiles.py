@@ -221,4 +221,58 @@ PARA_TILES_EDGE_CASES = [
 # Para (Brazilian state) tiles for testing South American region - combined
 PARA_TILES = PARA_TILES_REGULAR + PARA_TILES_EDGE_CASES
 
+# UTM Zone 33S tiles - regular cases covering southern Africa to Antarctica
+UTM33S_TILES_REGULAR = [
+    # Zoom 2 - Large coverage
+    pytest.param(Tile(x=2, y=2, z=2), WEBMERC_TMS, id="utm33s_africa_z2(2/2/2)"),
+    pytest.param(Tile(x=2, y=3, z=2), WEBMERC_TMS, id="utm33s_antarctica_z2(2/2/3)"),
+    # Zoom 3 - Medium coverage
+    pytest.param(Tile(x=4, y=4, z=3), WEBMERC_TMS, id="utm33s_africa_z3(3/4/4)"),
+    pytest.param(Tile(x=4, y=5, z=3), WEBMERC_TMS, id="utm33s_mid_z3(3/4/5)"),
+    pytest.param(Tile(x=4, y=6, z=3), WEBMERC_TMS, id="utm33s_deep_z3(3/4/6)"),
+    # Zoom 4 - More detailed
+    pytest.param(Tile(x=8, y=8, z=4), WEBMERC_TMS, id="utm33s_north_z4(4/8/8)"),
+    # pytest.param(Tile(x=8, y=9, z=4), WEBMERC_TMS, id="utm33s_central_z4(4/8/9)"),
+    pytest.param(Tile(x=8, y=10, z=4), WEBMERC_TMS, id="utm33s_south_z4(4/8/10)"),
+    pytest.param(Tile(x=8, y=11, z=4), WEBMERC_TMS, id="utm33s_antarctica_z4(4/8/11)"),
+    pytest.param(
+        Tile(x=8, y=14, z=4), WEBMERC_TMS, id="utm33s_deep_antarctica_z4(4/8/14)"
+    ),
+    # Zoom 5 - Detailed tiles
+    pytest.param(Tile(x=17, y=16, z=5), WEBMERC_TMS, id="utm33s_equator_z5(5/17/16)"),
+    pytest.param(Tile(x=17, y=17, z=5), WEBMERC_TMS, id="utm33s_north_z5(5/17/17)"),
+    pytest.param(Tile(x=17, y=18, z=5), WEBMERC_TMS, id="utm33s_central_z5(5/17/18)"),
+    pytest.param(Tile(x=17, y=20, z=5), WEBMERC_TMS, id="utm33s_south_z5(5/17/20)"),
+    pytest.param(Tile(x=17, y=23, z=5), WEBMERC_TMS, id="utm33s_antarctica_z5(5/17/23)"),
+    # pytest.param(Tile(x=17, y=25, z=5), WEBMERC_TMS, id="utm33s_deep_z5(5/17/25)"),
+    pytest.param(
+        Tile(x=17, y=22, z=5), WEBMERC_TMS, id="utm33s_mid_antarctica_z5(5/17/22)"
+    ),
+]
+
+# UTM Zone 33S tiles - edge cases for equator and Antarctica boundaries
+UTM33S_TILES_EDGE_CASES = [
+    # Equator edge cases (northern boundary at 0°)
+    pytest.param(Tile(x=34, y=32, z=6), WEBMERC_TMS, id="utm33s_equator_z6(6/34/32)"),
+    pytest.param(Tile(x=68, y=64, z=7), WEBMERC_TMS, id="utm33s_equator_z7(7/68/64)"),
+    pytest.param(Tile(x=136, y=128, z=8), WEBMERC_TMS, id="utm33s_equator_z8(8/136/128)"),
+    # Antarctica edge cases (southern boundary at -80°S)
+    pytest.param(
+        Tile(x=17, y=28, z=5), WEBMERC_TMS, id="utm33s_antarctica_edge_z5(5/17/28)"
+    ),
+    pytest.param(
+        Tile(x=34, y=56, z=6), WEBMERC_TMS, id="utm33s_antarctica_edge_z6(6/34/56)"
+    ),
+    # pytest.param(Tile(x=68, y=112, z=7), WEBMERC_TMS, id="utm33s_antarctica_edge_z7(7/68/112)"),
+    # pytest.param(Tile(x=136, y=224, z=8), WEBMERC_TMS, id="utm33s_antarctica_edge_z8(8/136/224)"),
+    # Very high zoom equator and Antarctica
+    pytest.param(Tile(x=277, y=256, z=9), WEBMERC_TMS, id="utm33s_equator_z9(9/277/256)"),
+    pytest.param(
+        Tile(x=277, y=448, z=9), WEBMERC_TMS, id="utm33s_antarctica_z9(9/277/448)"
+    ),
+]
+
+# UTM Zone 33S tiles - combined
+UTM33S_TILES = UTM33S_TILES_REGULAR + UTM33S_TILES_EDGE_CASES
+
 TILES = WEBMERC_TILES + WGS84_TILES + ETRS89_TILES

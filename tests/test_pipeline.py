@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
 
-import io
 
 import cf_xarray  # noqa: F401 - Enable cf accessor
-import matplotlib.pyplot as plt
 import morecantile
 import numpy as np
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
-from PIL import Image
 from pyproj import CRS
 from pyproj.aoi import BBox
 
 import xarray as xr
 from src.xpublish_tiles.render.raster import nearest_on_uniform_grid_quadmesh
+from tests import create_query_params
 from xarray.testing import assert_equal
 from xpublish_tiles.pipeline import (
     apply_query,
@@ -25,43 +23,10 @@ from xpublish_tiles.testing.datasets import FORECAST, PARA, ROMSDS, create_globa
 from xpublish_tiles.testing.lib import (
     assert_render_matches_snapshot,
     compare_image_buffers,
+    visualize_tile,
 )
 from xpublish_tiles.testing.tiles import PARA_TILES, TILES, WEBMERC_TMS
 from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
-
-
-def visualize_tile(result: io.BytesIO, tile: morecantile.Tile) -> None:
-    """Visualize a rendered tile with matplotlib showing RGB and alpha channels.
-
-    Args:
-        result: BytesIO buffer containing PNG image data
-        tile: Tile object with z, x, y coordinates
-    """
-    result.seek(0)
-    pil_img = Image.open(result)
-    img_array = np.array(pil_img)
-
-    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-
-    # Show the rendered tile
-    axes[0].imshow(img_array)
-    axes[0].set_title(f"Tile z={tile.z}, x={tile.x}, y={tile.y}")
-
-    # Show alpha channel if present
-    if img_array.shape[2] == 4:
-        alpha = img_array[:, :, 3]
-        im = axes[1].imshow(alpha, cmap="gray", vmin=0, vmax=255)
-        axes[1].set_title(
-            f"Alpha Channel\n{((alpha == 0).sum() / alpha.size * 100):.1f}% transparent"
-        )
-        plt.colorbar(im, ax=axes[1])
-    else:
-        axes[1].text(
-            0.5, 0.5, "No Alpha", ha="center", va="center", transform=axes[1].transAxes
-        )
-
-    plt.tight_layout()
-    plt.show(block=True)  # Block until window is closed
 
 
 @st.composite
@@ -109,35 +74,6 @@ def test_bbox_overlap_detection(bbox, grid_config):
     )
 
 
-def create_query_params(tile, tms, *, colorscalerange=None):
-    """Create QueryParams instance using test tiles and TMS."""
-
-    # Convert TMS CRS to pyproj CRS
-    target_crs = CRS.from_epsg(tms.crs.to_epsg())
-
-    # Get bounds in the TMS's native CRS
-    native_bounds = tms.xy_bounds(tile)
-    bbox = BBox(
-        west=native_bounds[0],
-        south=native_bounds[1],
-        east=native_bounds[2],
-        north=native_bounds[3],
-    )
-
-    return QueryParams(
-        variables=["foo"],
-        crs=OutputCRS(target_crs),
-        bbox=OutputBBox(bbox),
-        selectors={},
-        style="raster",
-        width=256,
-        height=256,
-        cmap="viridis",
-        colorscalerange=colorscalerange,
-        format=ImageFormat.PNG,
-    )
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tile,tms", TILES)
 async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot, pytestconfig):
@@ -150,13 +86,13 @@ async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot, pytestco
     assert_render_matches_snapshot(result, png_snapshot)
 
 
-@pytest.mark.skip(reason="this bbox is slightly outside the bounds of web mercator")
-async def test_pipeline_bad_bbox(global_datasets, png_snapshot):
+async def test_pipeline_bad_bbox(global_datasets, png_snapshot, pytestconfig):
     """Test pipeline with various tiles using their native TMS CRS."""
     ds = global_datasets
     query = QueryParams(
         variables=["foo"],
         crs=OutputCRS(CRS.from_user_input(3857)),
+        # This bbox will transform to west=179.999CXXX, east=-157.XXX
         bbox=OutputBBox(
             BBox(
                 west=-20037508.3428,
