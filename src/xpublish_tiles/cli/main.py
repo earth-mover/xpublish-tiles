@@ -1,6 +1,7 @@
 """Simple CLI for playing with xpublish-tiles, with a generated sample dataset"""
 
 import argparse
+import logging
 import threading
 from typing import cast
 
@@ -232,7 +233,36 @@ def main():
         action="store_true",
         help="Use the sync endpoint instead of the regular tiles endpoint for benchmarking",
     )
+    parser.add_argument(
+        "--log-level",
+        type=str.lower,
+        choices=["debug", "info", "warning", "error"],
+        default="warning",
+        help="Set the logging level for xpublish_tiles (default: warning)",
+    )
     args = parser.parse_args()
+
+    # Configure logging based on CLI argument
+    log_level = getattr(logging, args.log_level.upper())
+
+    # Configure xpublish_tiles logger with handler
+    logger = logging.getLogger("xpublish_tiles")
+    logger.setLevel(log_level)
+
+    # Add console handler if not already present
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setLevel(log_level)
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
+    # Always disable numba, datashader, and PIL debug logs
+    logging.getLogger("numba").setLevel(logging.WARNING)
+    logging.getLogger("datashader").setLevel(logging.WARNING)
+    logging.getLogger("PIL").setLevel(logging.WARNING)
 
     # Determine dataset to use and benchmarking mode
     dataset_name = args.dataset

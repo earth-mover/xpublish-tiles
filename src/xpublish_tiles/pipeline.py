@@ -1,7 +1,6 @@
 import asyncio
 import copy
 import io
-import logging
 import os
 from dataclasses import dataclass
 from typing import Any, cast
@@ -31,13 +30,13 @@ from xpublish_tiles.types import (
     QueryParams,
     ValidatedArray,
 )
+from xpublish_tiles.utils import async_time_debug, time_debug
 
 # This takes the pipeline ~ 1s
 MAX_RENDERABLE_SIZE = 10_000 * 10_000
 
-logger = logging.getLogger("xpublish-tiles")
 
-
+@time_debug
 def has_coordinate_discontinuity(coordinates: np.ndarray) -> bool:
     """
     Detect coordinate discontinuities in geographic longitude coordinates.
@@ -88,6 +87,7 @@ def has_coordinate_discontinuity(coordinates: np.ndarray) -> bool:
     return False
 
 
+@time_debug
 def fix_coordinate_discontinuities(
     coordinates: np.ndarray, transformer: pyproj.Transformer, *, axis: int, bbox: BBox
 ) -> np.ndarray:
@@ -153,6 +153,7 @@ def fix_coordinate_discontinuities(
     return result.reshape(coordinates.shape)
 
 
+@time_debug
 def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool:
     """Check if bboxes overlap, handling longitude wrapping for geographic data."""
     # Standard intersection check
@@ -232,17 +233,16 @@ def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool
     return False
 
 
+@async_time_debug
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = apply_query(ds, variables=query.variables, selectors=query.selectors)
     subsets = await subset_to_bbox(validated, bbox=query.bbox, crs=query.crs)
     if int(os.environ.get("XPUBLISH_TILES_ASYNC_LOAD", "1")):
-        logger.debug("Using async_load for data loading")
         loaded_contexts = await asyncio.gather(
             *(sub.async_load() for sub in subsets.values())
         )
     else:
-        logger.debug("Using synchronous load for data loading")
-        loaded_contexts = tuple(sub.load() for sub in subsets.values())
+        loaded_contexts = tuple(sub.sync_load() for sub in subsets.values())
     context_dict = dict(zip(subsets.keys(), loaded_contexts, strict=True))
 
     buffer = io.BytesIO()
@@ -285,6 +285,7 @@ def _infer_datatype(array: xr.DataArray) -> DataType:
     )
 
 
+@time_debug
 def apply_query(
     ds: xr.Dataset, *, variables: list[str], selectors: dict[str, Any]
 ) -> dict[str, ValidatedArray]:
@@ -321,6 +322,7 @@ class SubsetContext:
     has_discontinuity: bool
 
 
+@time_debug
 def prepare_subset(
     var_name: str,
     array: ValidatedArray,
@@ -387,6 +389,7 @@ def prepare_subset(
     )
 
 
+@async_time_debug
 async def subset_to_bbox(
     validated: dict[str, ValidatedArray], *, bbox: OutputBBox, crs: OutputCRS
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:
@@ -423,6 +426,7 @@ async def subset_to_bbox(
     return result
 
 
+@time_debug
 def sync_subset_to_bbox(
     validated: dict[str, ValidatedArray], *, bbox: OutputBBox, crs: OutputCRS
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:
@@ -467,6 +471,7 @@ def sync_subset_to_bbox(
     return result
 
 
+@time_debug
 def sync_pipeline(ds, query: QueryParams) -> io.BytesIO:
     """
     Synchronous version of pipeline.
@@ -477,7 +482,7 @@ def sync_pipeline(ds, query: QueryParams) -> io.BytesIO:
     subsets = sync_subset_to_bbox(validated, bbox=query.bbox, crs=query.crs)
 
     # Use synchronous load
-    loaded_contexts = tuple(sub.load() for sub in subsets.values())
+    loaded_contexts = tuple(sub.sync_load() for sub in subsets.values())
     context_dict = dict(zip(subsets.keys(), loaded_contexts, strict=True))
 
     buffer = io.BytesIO()

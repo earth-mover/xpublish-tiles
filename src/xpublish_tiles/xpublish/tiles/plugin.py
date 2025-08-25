@@ -11,6 +11,7 @@ from xarray import Dataset
 from xpublish_tiles.lib import NoCoverageError, TileTooBigError
 from xpublish_tiles.pipeline import pipeline, sync_pipeline
 from xpublish_tiles.types import QueryParams
+from xpublish_tiles.utils import async_time_debug, time_debug
 from xpublish_tiles.xpublish.tiles.metadata import (
     create_tileset_metadata,
     extract_dataset_extents,
@@ -240,6 +241,7 @@ class TilesPlugin(Plugin):
                 raise HTTPException(status_code=404, detail=str(e)) from e
 
         @router.get("/sync/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}")
+        @time_debug
         def get_sync_dataset_tile(
             request: Request,
             tileMatrixSetId: str,
@@ -297,6 +299,7 @@ class TilesPlugin(Plugin):
             )
 
         @router.get("/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}")
+        @async_time_debug
         async def get_dataset_tile(
             request: Request,
             tileMatrixSetId: str,

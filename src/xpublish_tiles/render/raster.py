@@ -1,7 +1,6 @@
 import contextlib
 import importlib.util
 import io
-import logging
 import threading
 import time
 from typing import TYPE_CHECKING, cast
@@ -17,6 +16,7 @@ from scipy.interpolate import NearestNDInterpolator
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear
 from xpublish_tiles.lib import NoCoverageError
+from xpublish_tiles.logger import logger
 from xpublish_tiles.render import Renderer, register_renderer
 from xpublish_tiles.types import (
     ContinuousData,
@@ -26,13 +26,14 @@ from xpublish_tiles.types import (
     PopulatedRenderContext,
     RenderContext,
 )
+from xpublish_tiles.utils import time_debug
 
 # Only use lock if tbb is not available
 HAS_TBB = importlib.util.find_spec("tbb") is not None
 LOCK = contextlib.nullcontext() if HAS_TBB else threading.Lock()
-logger = logging.getLogger("xpublish-tiles")
 
 
+@time_debug
 def nearest_on_uniform_grid_scipy(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.DataArray:
     """This is quite slow. 10s for a 2000x3000 array"""
     X, Y = da[Xdim], da[Ydim]
@@ -62,6 +63,7 @@ def nearest_on_uniform_grid_scipy(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.
     return new
 
 
+@time_debug
 def nearest_on_uniform_grid_quadmesh(
     da: xr.DataArray, Xdim: str, Ydim: str
 ) -> xr.DataArray:
@@ -104,6 +106,7 @@ class DatashaderRasterRenderer(Renderer):
             totype = totype[:-1] + "4"
         return data.astype(totype, copy=False)
 
+    @time_debug
     def render(
         self,
         *,

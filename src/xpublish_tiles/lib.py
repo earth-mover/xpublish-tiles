@@ -2,13 +2,12 @@
 
 import asyncio
 import io
-import logging
 import math
 import operator
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache, partial, wraps
+from functools import lru_cache, partial
 from itertools import product
 
 import numpy as np
@@ -18,6 +17,8 @@ from PIL import Image
 from pyproj import CRS
 
 import xarray as xr
+from xpublish_tiles.logger import logger
+from xpublish_tiles.utils import async_time_debug, time_debug
 
 WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)
 
@@ -32,9 +33,6 @@ class TileTooBigError(Exception):
     """Raised when a tile request would result in too much data to render."""
 
     pass
-
-
-logger = logging.getLogger(__name__)
 
 
 THREAD_POOL_NUM_THREADS = int(os.environ.get("XPUBLISH_TILES_NUM_THREADS", 16))
@@ -84,20 +82,6 @@ transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=
 chunk_size = int(os.environ.get("XPUBLISH_TILES_TRANSFORM_CHUNK_SIZE", 250))
 CHUNKED_TRANSFORM_CHUNK_SIZE = (chunk_size, chunk_size)
 logger.info("transform chunk size: ", CHUNKED_TRANSFORM_CHUNK_SIZE)
-
-
-def timing_debug(func):
-    """Decorator to add debug timing to async functions."""
-
-    @wraps(func)
-    async def wrapper(*args, **kwargs):
-        start_time = time.perf_counter()
-        result = await func(*args, **kwargs)
-        total_time = time.perf_counter() - start_time
-        print("%s completed in %.4f seconds", func.__name__, total_time)
-        return result
-
-    return wrapper
 
 
 def is_4326_like(crs: CRS) -> bool:
@@ -198,7 +182,7 @@ def transform_blocked(
         future.result()
 
     total_time = time.perf_counter() - start_time
-    logger.info(
+    logger.debug(
         "transform_blocked completed in %.4f seconds (shape=%s, chunks=%d)",
         total_time,
         shape,
@@ -222,7 +206,7 @@ def check_transparent_pixels(image_bytes):
     return (transparent_count / total_pixels) * 100
 
 
-@timing_debug
+@async_time_debug
 async def transform_coordinates(
     subset: xr.DataArray,
     grid_x_name: str,
@@ -303,6 +287,7 @@ async def transform_coordinates(
     return bx.copy(data=newX), by.copy(data=newY)
 
 
+@time_debug
 def sync_transform_coordinates(
     subset: xr.DataArray,
     grid_x_name: str,

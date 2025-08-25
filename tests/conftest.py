@@ -1,3 +1,4 @@
+import logging
 from itertools import product
 
 import pytest
@@ -7,6 +8,11 @@ import icechunk
 import xarray as xr
 from xpublish_tiles.testing.datasets import EU3035, HRRR, UTM33S, create_global_dataset
 from xpublish_tiles.testing.lib import compare_image_buffers, png_snapshot  # noqa: F401
+
+# Disable numba, datashader, and PIL debug logs
+logging.getLogger("numba").setLevel(logging.WARNING)
+logging.getLogger("datashader").setLevel(logging.WARNING)
+logging.getLogger("PIL").setLevel(logging.WARNING)
 
 IS_SNAPSHOT_UPDATE = False
 

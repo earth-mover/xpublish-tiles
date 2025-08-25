@@ -15,6 +15,7 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from xarray.core.indexing import IndexSelResult
+from xpublish_tiles.utils import time_debug
 
 DEFAULT_CRS = CRS.from_epsg(4326)
 
@@ -694,6 +695,7 @@ def guess_coordinate_vars(ds: xr.Dataset, crs: CRS) -> tuple[str, str]:
     return Xname, Yname
 
 
+@time_debug
 def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
     """
     Does some grid_mapping & CRS auto-guessing.

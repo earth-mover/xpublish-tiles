@@ -56,6 +56,7 @@ uv run xpublish-tiles [OPTIONS]
 - `--group GROUP`: Group to use for Arraylake datasets (default: '')
 - `--cache`: Enable icechunk cache for Arraylake datasets
 - `--spy`: Run benchmark requests with the specified dataset for performance testing
+- `--log-level`: Set the logging level for xpublish_tiles (choices: debug, info, warning, error; default: warning)
 
 > [!TIP]
 > You can control if the tile servers data loading is async or not with the `XPUBLISH_TILES_ASYNC_LOAD` environment variable (`1` for async mode, `0` for sync mode, async is enabled by default). You can also control the zarr concurrency with the `ZARR_ASYNC__CONCURRENCY` environment variable (default: 10).
