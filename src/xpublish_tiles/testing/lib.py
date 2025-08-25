@@ -1,7 +1,6 @@
 """Test fixtures for xpublish-tiles with optional pytest dependencies."""
 
 import io
-import logging
 import re
 import subprocess
 import sys
@@ -14,8 +13,7 @@ from PIL import Image
 from pyproj.aoi import BBox
 
 from xpublish_tiles.lib import check_transparent_pixels
-
-logger = logging.getLogger(__name__)
+from xpublish_tiles.logger import logger
 
 
 def compare_image_buffers(buffer1: io.BytesIO, buffer2: io.BytesIO) -> bool:

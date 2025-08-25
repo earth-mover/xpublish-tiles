@@ -2,7 +2,6 @@
 
 import asyncio
 import io
-import logging
 import math
 import operator
 import os
@@ -18,6 +17,7 @@ from PIL import Image
 from pyproj import CRS
 
 import xarray as xr
+from xpublish_tiles.logger import logger
 
 WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)
 
@@ -32,9 +32,6 @@ class TileTooBigError(Exception):
     """Raised when a tile request would result in too much data to render."""
 
     pass
-
-
-logger = logging.getLogger(__name__)
 
 
 THREAD_POOL_NUM_THREADS = int(os.environ.get("XPUBLISH_TILES_NUM_THREADS", 16))

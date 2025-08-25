@@ -1,4 +1,8 @@
+import functools
+import time
 from typing import Any
+
+from xpublish_tiles.logger import logger
 
 
 def lower_case_keys(d: Any) -> dict[str, Any]:
@@ -8,3 +12,15 @@ def lower_case_keys(d: Any) -> dict[str, Any]:
     else:
         # Handle other dict-like objects
         return {k.lower(): v for k, v in dict(d).items()}
+
+
+def timeit(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        logger.debug(f"{func.__name__} took {end_time - start_time} seconds")
+        return result
+
+    return wrapper

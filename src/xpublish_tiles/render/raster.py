@@ -1,7 +1,6 @@
 import contextlib
 import importlib.util
 import io
-import logging
 import threading
 import time
 from typing import TYPE_CHECKING, cast
@@ -17,6 +16,7 @@ from scipy.interpolate import NearestNDInterpolator
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear
 from xpublish_tiles.lib import NoCoverageError
+from xpublish_tiles.logger import logger
 from xpublish_tiles.render import Renderer, register_renderer
 from xpublish_tiles.types import (
     ContinuousData,
@@ -30,7 +30,6 @@ from xpublish_tiles.types import (
 # Only use lock if tbb is not available
 HAS_TBB = importlib.util.find_spec("tbb") is not None
 LOCK = contextlib.nullcontext() if HAS_TBB else threading.Lock()
-logger = logging.getLogger("xpublish-tiles")
 
 
 def nearest_on_uniform_grid_scipy(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.DataArray:

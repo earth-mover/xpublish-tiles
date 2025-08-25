@@ -1,7 +1,6 @@
 import asyncio
 import copy
 import io
-import logging
 import os
 from dataclasses import dataclass
 from typing import Any, cast
@@ -20,6 +19,7 @@ from xpublish_tiles.lib import (
     transform_coordinates,
     transformer_from_crs,
 )
+from xpublish_tiles.logger import logger
 from xpublish_tiles.types import (
     ContinuousData,
     DataType,
@@ -34,8 +34,6 @@ from xpublish_tiles.types import (
 
 # This takes the pipeline ~ 1s
 MAX_RENDERABLE_SIZE = 10_000 * 10_000
-
-logger = logging.getLogger("xpublish-tiles")
 
 
 def has_coordinate_discontinuity(coordinates: np.ndarray) -> bool:
