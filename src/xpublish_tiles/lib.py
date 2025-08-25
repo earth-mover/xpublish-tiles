@@ -131,7 +131,6 @@ def slices_from_chunks(chunks):
     return product(*slices)
 
 
-@time_debug
 def transform_chunk(
     x_grid: np.ndarray,
     y_grid: np.ndarray,
@@ -149,7 +148,6 @@ def transform_chunk(
     y_out[row_slice, col_slice] = y_transformed
 
 
-@time_debug
 def transform_blocked(
     x_grid: np.ndarray,
     y_grid: np.ndarray,
@@ -208,7 +206,6 @@ def check_transparent_pixels(image_bytes):
     return (transparent_count / total_pixels) * 100
 
 
-@time_debug
 async def transform_coordinates(
     subset: xr.DataArray,
     grid_x_name: str,
