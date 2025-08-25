@@ -16,7 +16,7 @@ from tests import create_query_params
 from xarray.testing import assert_equal
 from xpublish_tiles.pipeline import (
     apply_query,
-    check_bbox_overlap,
+    bbox_overlap,
     pipeline,
 )
 from xpublish_tiles.testing.datasets import FORECAST, PARA, ROMSDS, create_global_dataset
@@ -68,7 +68,7 @@ def test_bbox_overlap_detection(bbox, grid_config):
     """Test the bbox overlap detection logic handles longitude wrapping correctly."""
     grid_bbox, grid_description = grid_config
     # All valid bboxes should overlap with global grids due to longitude wrapping
-    assert check_bbox_overlap(bbox, grid_bbox, True), (
+    assert bbox_overlap(bbox, grid_bbox, True), (
         f"Valid bbox {bbox} should overlap with global {grid_description} grid. "
         f"Longitude wrapping should handle any longitude values."
     )
