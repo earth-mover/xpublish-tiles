@@ -3087,7 +3087,7 @@ requires-dist = [
     { name = "toolz", specifier = ">=1.0.0" },
     { name = "xarray", specifier = ">=2025.8.0" },
     { name = "xpublish", specifier = ">=0.3.0" },
-    { name = "zarr", git = "https://github.com/zarr-developers/zarr-python.git?rev=main" },
+    { name = "zarr", specifier = ">=3.1.2" },
 ]
 
 [package.metadata.requires-dev]
@@ -3205,14 +3205,18 @@ wheels = [
 
 [[package]]
 name = "zarr"
-version = "3.1.1.dev43+g2271067b"
-source = { git = "https://github.com/zarr-developers/zarr-python.git?rev=main#2271067bf59a6158b93faf60b3a10c13d8691621" }
+version = "3.1.2"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "donfig" },
     { name = "numcodecs", extra = ["crc32c"] },
     { name = "numpy" },
     { name = "packaging" },
     { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/09/04/76261cf5bd065648b7981b41ba1936b8bd9565f80f69534e3cdf2d772ad9/zarr-3.1.2.tar.gz", hash = "sha256:688e4eb79045c110128cd16f301f2f58fa19507b1803dcbea0ea894e66e06274", size = 324221, upload_time = "2025-08-25T15:32:31.153Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/a3/d3d4fd394a10b1256f9dccb2fe0ddd125fc575d7c437b1c70df050f14176/zarr-3.1.2-py3-none-any.whl", hash = "sha256:c3e180f53ee0ef91b86f7feff6f9dd381ddd1b512d1a46580530966a493387b6", size = 261041, upload_time = "2025-08-25T15:32:29.522Z" },
 ]
 
 [[package]]
