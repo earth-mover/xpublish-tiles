@@ -154,18 +154,24 @@ class CurvilinearCellIndex(xr.Index):
         self.uses_0_360 = (X.data > 180).any()
         self.Xdim, self.Ydim = Xdim, Ydim
 
-    def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
+        # derived quantities
         X, Y = self.X.data, self.Y.data
         xaxis = self.X.get_axis_num(self.Xdim)
         yaxis = self.Y.get_axis_num(self.Ydim)
-        Xlen, Ylen = X.shape[xaxis], Y.shape[yaxis]
         dX, dY = np.gradient(X, axis=xaxis), np.gradient(Y, axis=yaxis)
-        left, right = X - dX / 2, X + dX / 2
-        bottom, top = Y - dY / 2, Y + dY / 2
-        y_is_increasing = True
-        if not (bottom < top).all():
-            y_is_increasing = False
-            top, bottom = bottom, top
+        self.left, self.right = X - dX / 2, X + dX / 2
+        self.bottom, self.top = Y - dY / 2, Y + dY / 2
+        self.y_is_increasing = True
+        if not (self.bottom < self.top).all():
+            self.y_is_increasing = False
+            self.top, self.bottom = self.bottom, self.top
+        self.xaxis, self.yaxis = xaxis, yaxis
+
+    def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
+        X, Y = self.X.data, self.Y.data
+        xaxis, yaxis = self.xaxis, self.yaxis
+        bottom, top, left, right = self.bottom, self.top, self.left, self.right
+        Xlen, Ylen = X.shape[xaxis], Y.shape[yaxis]
 
         assert len(labels) == 1
         bbox = next(iter(labels.values()))
@@ -175,7 +181,7 @@ class CurvilinearCellIndex(xr.Index):
             slice(bbox.west, bbox.east), uses_0_360=self.uses_0_360
         )
         # bottom edge is inclusive; similar to IntervalIndex used in Rectilinear grids
-        if y_is_increasing:
+        if self.y_is_increasing:
             ys = [
                 np.append(np.nonzero(bottom <= bbox.north)[yaxis], 0).max(),
                 np.append(np.nonzero(top > bbox.north)[yaxis], Ylen).min(),
