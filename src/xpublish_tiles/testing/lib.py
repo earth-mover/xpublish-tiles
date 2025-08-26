@@ -30,9 +30,7 @@ def compare_image_buffers(buffer1: io.BytesIO, buffer2: io.BytesIO) -> bool:
     return np.array_equal(array1, array2)
 
 
-def compare_images_perceptual(
-    buffer1: io.BytesIO, buffer2: io.BytesIO, *, threshold: float
-) -> tuple[bool, float]:
+def compare_images_perceptual(buffer1: io.BytesIO, buffer2: io.BytesIO) -> float:
     """Compare two images using perceptual similarity (SSIM).
 
     Args:
@@ -54,7 +52,7 @@ def compare_images_perceptual(
 
     # Ensure same shape
     if array1.shape != array2.shape:
-        return False, 0.0
+        return 0.0
 
     # Convert RGBA to RGB if needed (SSIM doesn't handle alpha directly)
     if array1.shape[2] == 4:
@@ -71,8 +69,7 @@ def compare_images_perceptual(
 
     # Calculate SSIM
     ssim_score = ssim(array1, array2, channel_axis=2, data_range=255)
-
-    return ssim_score >= threshold, ssim_score
+    return ssim_score
 
 
 def compare_image_buffers_with_debug(
@@ -84,7 +81,7 @@ def compare_image_buffers_with_debug(
     debug_visual_save: bool = False,
     mode: Literal["exact", "perceptual"] = "exact",
     perceptual_threshold: float = 0.95,
-) -> bool | tuple[bool, float]:
+) -> tuple[bool, float]:
     """
     Compare two image buffers and optionally show debug visualization if they differ.
 
@@ -103,15 +100,11 @@ def compare_image_buffers_with_debug(
         tuple[bool, float]: (match, ssim_score) if perceptual mode
     """
     # Do the comparison based on mode
+    ssim_score = compare_images_perceptual(buffer1, buffer2)
     if mode == "perceptual":
-        images_equal, ssim_score = compare_images_perceptual(
-            buffer1, buffer2, threshold=perceptual_threshold
-        )
-        result = (images_equal, ssim_score)
+        images_equal = ssim_score > perceptual_threshold
     else:
         images_equal = compare_image_buffers(buffer1, buffer2)
-        ssim_score = None
-        result = images_equal
 
     # If not equal and debug is requested, create visualization
     if not images_equal and (debug_visual or debug_visual_save):
@@ -131,7 +124,7 @@ def compare_image_buffers_with_debug(
             ssim_score=ssim_score,
         )
 
-    return result
+    return images_equal, ssim_score
 
 
 def create_debug_visualization(

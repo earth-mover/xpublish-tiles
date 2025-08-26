@@ -157,12 +157,11 @@ def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
         raise ValueError("lat/lon vector with size < 2!")
 
     # Calculate differences between adjacent centers
-    halfwidth = np.diff(centers) / 2
+    halfwidth = np.gradient(centers) / 2
 
     # Initialize bounds array
     bounds = np.empty(len(centers) + 1)
-    bounds[0] = centers[0] - halfwidth[0]
-    bounds[1:-1] = centers[:-1] + halfwidth
+    bounds[:-1] = centers - halfwidth
     bounds[-1] = centers[-1] + halfwidth[-1]
     return bounds
 

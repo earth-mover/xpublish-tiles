@@ -184,7 +184,7 @@ async def test_property_rectilinear_vs_curvilinear_exact(
 
     # Compare images with optional debug visualization using perceptual comparison
     test_name = f"rectilinear_vs_curvilinear_tile_{tile.z}_{tile.x}_{tile.y}"
-    result = compare_image_buffers_with_debug(
+    images_similar, ssim_score = compare_image_buffers_with_debug(
         buffer1=rectilinear_result,  # expected
         buffer2=curvilinear_result,  # actual
         test_name=test_name,
@@ -194,5 +194,4 @@ async def test_property_rectilinear_vs_curvilinear_exact(
         mode="perceptual",
         perceptual_threshold=0.95,  # 95% similarity threshold
     )
-    images_similar, ssim_score = result
     assert images_similar, f"Rectilinear and curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
