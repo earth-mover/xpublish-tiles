@@ -8,7 +8,7 @@ import pyproj
 import pyproj.aoi
 
 import xarray as xr
-from xpublish_tiles.types import OutputBBox, OutputCRS, QueryParams
+from xpublish_tiles.types import OutputBBox, OutputCRS
 from xpublish_tiles.xpublish.tiles.types import (
     Link,
     TileMatrix,

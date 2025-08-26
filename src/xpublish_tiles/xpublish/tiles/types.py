@@ -1482,7 +1482,6 @@ class TileJSON(BaseModel):
     ] = None
 
 
-
 TILES_FILTERED_QUERY_PARAMS: list[str] = [
     "style",
     "colorscalerange",

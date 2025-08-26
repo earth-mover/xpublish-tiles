@@ -261,10 +261,53 @@ class TilesPlugin(Plugin):
             if not query.variables or len(query.variables) == 0:
                 raise HTTPException(status_code=422, detail="No variables specified")
 
-            bounds = extract_variable_bounding_box(dataset, query.variables[0], "EPSG:4326")
+            bounds = extract_variable_bounding_box(
+                dataset, query.variables[0], "EPSG:4326"
+            )
 
+            # Build tile URL template relative to this endpoint
+            base_url = str(request.base_url).rstrip("/")
+            # dataset path prefix already includes /datasets/{id} by xpublish; request.url.path points to /datasets/{id}/tiles/{tms}/tilejson.json
+            # Construct sibling tiles path replacing trailing segment
+            tiles_path = request.url.path.rsplit("/", 1)[0]  # drop 'tilejson.json'
+            # XYZ template
+            url_template = f"{base_url}{tiles_path}/{{tileMatrix}}/{{tileRow}}/{{tileCol}}?variables={','.join(query.variables)}&style={query.style[0]}/{query.style[1]}&width={query.width}&height={query.height}&f={query.f}"
+            # Append selectors
+            if selectors:
+                selector_qs = "&".join(f"{k}={v}" for k, v in selectors.items())
+                url_template = f"{url_template}&{selector_qs}"
+
+            # Compute bounds list if available
+            bounds_list = None
+            if bounds is not None:
+                bounds_list = [
+                    bounds.lowerLeft[0],
+                    bounds.lowerLeft[1],
+                    bounds.upperRight[0],
+                    bounds.upperRight[1],
+                ]
+
+            # Determine min/max zoom from TMS definition
+            tms = TILE_MATRIX_SETS[tileMatrixSetId]()
+            minzoom = 0
+            maxzoom = (
+                max(int(m.id) for m in tms.tileMatrices if str(m.id).isdigit())
+                if tms.tileMatrices
+                else None
+            )
+
+            # Compose TileJSON
             return TileJSON(
-
+                tilejson="3.0.0",
+                tiles=[url_template],
+                name=dataset.attrs.get("title", "Dataset"),
+                description=dataset.attrs.get("description"),
+                version=dataset.attrs.get("version"),
+                scheme="xyz",
+                attribution=dataset.attrs.get("attribution"),
+                bounds=bounds_list,
+                minzoom=minzoom,
+                maxzoom=maxzoom,
             )
 
         @router.get("/sync/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}")
