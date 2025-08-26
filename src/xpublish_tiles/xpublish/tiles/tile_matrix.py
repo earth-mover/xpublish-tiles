@@ -7,10 +7,9 @@ import morecantile.errors
 import pyproj
 import pyproj.aoi
 
-from xarray import Dataset
+import xarray as xr
 from xpublish_tiles.types import OutputBBox, OutputCRS
 from xpublish_tiles.xpublish.tiles.types import (
-    BoundingBox,
     Link,
     TileMatrix,
     TileMatrixSet,
@@ -53,7 +52,7 @@ def get_tile_matrix_set(tms_id: str) -> TileMatrixSet:
         id=str(tms.id),
         title=str(tms.title) if tms.title else tms_id,
         uri=str(tms.uri) if tms.uri else None,
-        crs=str(tms.crs),
+        crs=tms.crs,
         tileMatrices=tile_matrices,
     )
 
@@ -81,7 +80,7 @@ def get_tile_matrix_set_summary(tms_id: str) -> TileMatrixSetSummary:
         id=tms_id_str,
         title=tms_title,
         uri=str(tms.uri) if tms.uri else None,
-        crs=str(tms.crs),
+        crs=tms.crs,
         links=[
             Link(
                 href=f"/tiles/tileMatrixSets/{tms_id_str}",
@@ -156,42 +155,6 @@ def extract_tile_bbox_and_crs(
     return output_bbox, OutputCRS(crs)
 
 
-def extract_dataset_bounds(dataset: Dataset) -> Optional[BoundingBox]:
-    """Extract geographic bounds from a dataset.
-
-    TODO: This functionality may be handled by the tile rendering pipeline in the future.
-
-    Args:
-        dataset: xarray Dataset to extract bounds from
-
-    Returns:
-        BoundingBox object if bounds can be extracted, None otherwise
-    """
-    try:
-        # Try to get bounds from dataset bounds attribute
-        if hasattr(dataset, "bounds"):
-            bounds = dataset.bounds
-            return BoundingBox(
-                lowerLeft=[float(bounds[0]), float(bounds[1])],
-                upperRight=[float(bounds[2]), float(bounds[3])],
-                crs="http://www.opengis.net/def/crs/EPSG/0/4326",
-            )
-        # Try to extract from lat/lon coordinates
-        elif "lat" in dataset.coords and "lon" in dataset.coords:
-            lat_min, lat_max = float(dataset.lat.min()), float(dataset.lat.max())
-            lon_min, lon_max = float(dataset.lon.min()), float(dataset.lon.max())
-            return BoundingBox(
-                lowerLeft=[lon_min, lat_min],
-                upperRight=[lon_max, lat_max],
-                crs="http://www.opengis.net/def/crs/EPSG/0/4326",
-                orderedAxes=["X", "Y"],
-            )
-    except Exception:
-        # If we can't extract bounds, return None
-        pass
-    return None
-
-
 def get_tile_matrix_limits(
     tms_id: str, zoom_levels: Optional[range] = None
 ) -> list[TileMatrixSetLimit]:
@@ -229,7 +192,7 @@ def get_all_tile_matrix_set_ids() -> list[str]:
     return list(TILE_MATRIX_SETS.keys())
 
 
-def extract_dimension_extents(data_array) -> list:
+def extract_dimension_extents(data_array: xr.DataArray) -> list:
     """Extract dimension extent information from an xarray DataArray.
 
     Uses cf_xarray to detect CF-compliant axes for robust dimension classification.
@@ -325,7 +288,7 @@ def extract_dimension_extents(data_array) -> list:
         limited_values = values_list if len(values_list) <= 100 else None
 
         dimension = DimensionExtent(
-            name=dim_name,
+            name=str(dim_name),
             type=dim_type,
             extent=extent,
             values=limited_values,

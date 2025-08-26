@@ -1,10 +1,9 @@
 """OGC Tiles API data models"""
 
-import re
 from enum import Enum
 from typing import Annotated, Any, Optional, Union
 
-import pyproj
+import morecantile.models
 from pydantic import BaseModel, Field, field_validator
 
 from xpublish_tiles.types import ImageFormat
@@ -42,85 +41,6 @@ class MD_ReferenceSystem(BaseModel):
             }
         ),
     ] = None
-
-
-class CRSType(BaseModel):
-    """CRS definition supporting URI, WKT2, or ISO 19115 MD_ReferenceSystem"""
-
-    uri: Annotated[
-        Optional[str],
-        Field(
-            json_schema_extra={
-                "description": "A reference to a CRS, typically EPSG",
-            }
-        ),
-    ] = None
-    wkt: Annotated[
-        Optional[Any],
-        Field(
-            json_schema_extra={
-                "description": "WKT2 CRS definition",
-            }
-        ),
-    ] = None
-    referenceSystem: Annotated[
-        Optional[MD_ReferenceSystem],
-        Field(
-            json_schema_extra={
-                "description": "ISO 19115 reference system",
-            }
-        ),
-    ] = None
-
-    @field_validator("uri")
-    @classmethod
-    def validate_uri(cls, v):
-        if v is not None and not isinstance(v, str):
-            raise ValueError("URI must be a string")
-        return v
-
-    def to_epsg_string(self) -> Optional[str]:
-        """Convert CRS to EPSG string format for pyproj"""
-        if self.uri:
-            # Handle OGC URI format: http://www.opengis.net/def/crs/EPSG/0/4326
-            ogc_match = re.search(r"/epsg/\d+/(\d+)$", self.uri.lower())
-            if ogc_match:
-                return f"EPSG:{ogc_match.group(1)}"
-            # Handle simple EPSG format: epsg:4326 or epsg/4326
-            epsg_match = re.search(r"epsg[:/](\d+)", self.uri.lower())
-            if epsg_match:
-                return f"EPSG:{epsg_match.group(1)}"
-            return self.uri
-        elif self.wkt:
-            return str(self.wkt)
-        elif self.referenceSystem and self.referenceSystem.code:
-            if (
-                self.referenceSystem.codeSpace
-                and "epsg" in self.referenceSystem.codeSpace.lower()
-            ):
-                return f"EPSG:{self.referenceSystem.code}"
-            return self.referenceSystem.code
-        return None
-
-    def to_pyproj_crs(self) -> Optional[pyproj.CRS]:
-        """Convert CRS to pyproj.CRS object for coordinate transformations
-
-        Returns:
-            pyproj.CRS object if conversion successful, None otherwise
-
-        Raises:
-            pyproj.exceptions.CRSError: If CRS string is invalid
-        """
-        epsg_string = self.to_epsg_string()
-        if epsg_string is None:
-            return None
-
-        try:
-            return pyproj.CRS.from_user_input(epsg_string)
-        except Exception:
-            # If pyproj can't parse the CRS string, return None
-            # This allows the caller to handle the error appropriately
-            return None
 
 
 class Link(BaseModel):
@@ -225,7 +145,7 @@ class BoundingBox(BaseModel):
         ),
     ]
     crs: Annotated[
-        Optional[Union[str, CRSType]],
+        Optional[Union[morecantile.models.CRS, str]],
         Field(
             json_schema_extra={
                 "description": "Coordinate reference system of the bounding box",
@@ -331,7 +251,7 @@ class TileMatrixSet(BaseModel):
         ),
     ] = None
     crs: Annotated[
-        Union[str, CRSType],
+        morecantile.models.CRS,
         Field(
             json_schema_extra={
                 "description": "Coordinate reference system used by this tile matrix set",
@@ -376,7 +296,7 @@ class TileMatrixSetSummary(BaseModel):
         ),
     ] = None
     crs: Annotated[
-        Union[str, CRSType],
+        morecantile.models.CRS,
         Field(
             json_schema_extra={
                 "description": "Coordinate reference system used by this tile matrix set",
@@ -457,7 +377,7 @@ class TileSetMetadata(BaseModel):
         ),
     ]
     crs: Annotated[
-        Union[str, CRSType],
+        morecantile.models.CRS,
         Field(
             json_schema_extra={
                 "description": "Coordinate reference system used by this tileset",
@@ -906,13 +826,13 @@ class Layer(BaseModel):
         ),
     ] = None
     crs: Annotated[
-        Optional[Union[str, CRSType]],
+        morecantile.models.CRS,
         Field(
             json_schema_extra={
                 "description": "Coordinate reference system for this layer",
             }
         ),
-    ] = None
+    ]
     epoch: Annotated[
         Optional[float],
         Field(
@@ -1055,7 +975,7 @@ class CenterPoint(BaseModel):
         ),
     ]
     crs: Annotated[
-        Optional[Union[str, CRSType]],
+        Optional[Union[str, morecantile.models.CRS]],
         Field(
             json_schema_extra={
                 "description": "Coordinate reference system for the center point",
@@ -1116,7 +1036,7 @@ class TilesetSummary(BaseModel):
         ),
     ]
     crs: Annotated[
-        Union[str, CRSType],
+        Union[str, morecantile.models.CRS],
         Field(
             json_schema_extra={
                 "description": "Coordinate reference system used by this tileset",
@@ -1397,6 +1317,169 @@ class TileQuery(BaseModel):
         if not v:
             raise ValueError("At least one variable must be specified")
         return v
+
+
+class TileJSON(BaseModel):
+    """TileJSON 3.0.0 specification model"""
+
+    tilejson: Annotated[
+        str,
+        Field(
+            default="3.0.0",
+            json_schema_extra={
+                "description": "TileJSON specification version",
+            },
+        ),
+    ]
+    tiles: Annotated[
+        list[str],
+        Field(
+            json_schema_extra={
+                "description": "An array of tile endpoints. Each endpoint is a string URL template",
+            }
+        ),
+    ]
+    vector_layers: Annotated[
+        Optional[list[dict[str, Any]]],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "An array of vector layer objects (not applicable for raster tiles)",
+            },
+        ),
+    ] = None
+    attribution: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "Attribution text to be displayed when the map is shown to a user",
+            },
+        ),
+    ] = None
+    bounds: Annotated[
+        Optional[list[float]],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "The maximum extent of available map tiles [west, south, east, north]",
+            },
+        ),
+    ] = None
+    center: Annotated[
+        Optional[list[float]],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "The default location of the tileset in the form [longitude, latitude, zoom]",
+            },
+        ),
+    ] = None
+    data: Annotated[
+        Optional[list[str]],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "An array of data files in GeoJSON format",
+            },
+        ),
+    ] = None
+    description: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "A text description of the tileset",
+            },
+        ),
+    ] = None
+    fillzoom: Annotated[
+        Optional[int],
+        Field(
+            default=None,
+            ge=0,
+            le=30,
+            json_schema_extra={
+                "description": "The zoom level at which to switch from the raster tiles to the vector tiles",
+            },
+        ),
+    ] = None
+    grids: Annotated[
+        Optional[list[str]],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "An array of interactivity grid endpoints (not applicable for raster tiles)",
+            },
+        ),
+    ] = None
+    legend: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "A legend to be displayed with the map",
+            },
+        ),
+    ] = None
+    maxzoom: Annotated[
+        Optional[int],
+        Field(
+            default=None,
+            ge=0,
+            le=30,
+            json_schema_extra={
+                "description": "The maximum zoom level available in the tileset",
+            },
+        ),
+    ] = None
+    minzoom: Annotated[
+        Optional[int],
+        Field(
+            default=None,
+            ge=0,
+            le=30,
+            json_schema_extra={
+                "description": "The minimum zoom level available in the tileset",
+            },
+        ),
+    ] = None
+    name: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "A name describing the tileset",
+            },
+        ),
+    ] = None
+    scheme: Annotated[
+        Optional[str],
+        Field(
+            default="xyz",
+            json_schema_extra={
+                "description": "The tile scheme of the tileset (xyz or tms)",
+            },
+        ),
+    ] = None
+    template: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "A mustache template to be used to format data from grids for interaction",
+            },
+        ),
+    ] = None
+    version: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "A semver.org style version number for the tiles contained within the tileset",
+            },
+        ),
+    ] = None
 
 
 TILES_FILTERED_QUERY_PARAMS: list[str] = [

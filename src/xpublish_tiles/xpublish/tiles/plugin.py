@@ -20,7 +20,6 @@ from xpublish_tiles.xpublish.tiles.metadata import (
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     TILE_MATRIX_SETS,
-    extract_dataset_bounds,
     extract_tile_bbox_and_crs,
     get_all_tile_matrix_set_ids,
     get_tile_matrix_limits,
@@ -32,6 +31,7 @@ from xpublish_tiles.xpublish.tiles.types import (
     Layer,
     Link,
     Style,
+    TileJSON,
     TileMatrixSet,
     TileMatrixSets,
     TileQuery,
@@ -100,9 +100,6 @@ class TilesPlugin(Plugin):
             # Get dataset variables that can be tiled
             tilesets = []
 
-            # Extract dataset bounds if available
-            dataset_bounds = extract_dataset_bounds(dataset)
-
             # Get dataset metadata
             dataset_attrs = dataset.attrs
             title = dataset_attrs.get("title", "Dataset")
@@ -162,16 +159,13 @@ class TilesPlugin(Plugin):
                         var_bounding_box = extract_variable_bounding_box(
                             dataset, var_name, tms_summary.crs
                         )
-                        bounding_box = (
-                            var_bounding_box if var_bounding_box else dataset_bounds
-                        )
 
                         layer = Layer(
                             id=var_name,
                             title=var_data.attrs.get("long_name", var_name),
                             description=var_data.attrs.get("description", ""),
                             dataType=DataType.COVERAGE,
-                            boundingBox=bounding_box,
+                            boundingBox=var_bounding_box,
                             crs=tms_summary.crs,
                             links=[
                                 Link(
@@ -212,7 +206,6 @@ class TilesPlugin(Plugin):
                         ],
                         tileMatrixSetLimits=tileMatrixSetLimits,
                         layers=layers if layers else None,
-                        boundingBox=dataset_bounds,
                         keywords=keywords if keywords else None,
                         attribution=dataset_attrs.get("attribution"),
                         license=dataset_attrs.get("license"),
@@ -239,6 +232,83 @@ class TilesPlugin(Plugin):
                 return create_tileset_metadata(dataset, tileMatrixSetId)
             except ValueError as e:
                 raise HTTPException(status_code=404, detail=str(e)) from e
+
+        @router.get(
+            "/{tileMatrixSetId}/tilejson.json",
+            response_model=TileJSON,
+            response_model_exclude_none=True,
+        )
+        async def get_dataset_tilejson(
+            request: Request,
+            tileMatrixSetId: str,
+            query: Annotated[TileQuery, Query()],
+            dataset: Dataset = Depends(deps.dataset),  # noqa: B008
+        ):
+            """Get TileJSON specification for this dataset and tile matrix set"""
+            # Validate that the tile matrix set exists
+            if tileMatrixSetId not in TILE_MATRIX_SET_SUMMARIES:
+                raise HTTPException(status_code=404, detail="Tile matrix set not found")
+
+            # Extract dimension selectors from query parameters
+            selectors = {}
+            for param_name, param_value in request.query_params.items():
+                # Skip the standard tile query parameters
+                if param_name not in TILES_FILTERED_QUERY_PARAMS:
+                    # Check if this parameter corresponds to a dataset dimension
+                    if param_name in dataset.dims:
+                        selectors[param_name] = param_value
+
+            if not query.variables or len(query.variables) == 0:
+                raise HTTPException(status_code=422, detail="No variables specified")
+
+            bounds = extract_variable_bounding_box(
+                dataset, query.variables[0], "EPSG:4326"
+            )
+
+            # Build tile URL template relative to this endpoint
+            base_url = str(request.base_url).rstrip("/")
+            # dataset path prefix already includes /datasets/{id} by xpublish; request.url.path points to /datasets/{id}/tiles/{tms}/tilejson.json
+            # Construct sibling tiles path replacing trailing segment
+            tiles_path = request.url.path.rsplit("/", 1)[0]  # drop 'tilejson.json'
+            # XYZ template
+            url_template = f"{base_url}{tiles_path}/{{z}}/{{y}}/{{x}}?variables={','.join(query.variables)}&style={query.style[0]}/{query.style[1]}&width={query.width}&height={query.height}&f={query.f}"
+            # Append selectors
+            if selectors:
+                selector_qs = "&".join(f"{k}={v}" for k, v in selectors.items())
+                url_template = f"{url_template}&{selector_qs}"
+
+            # Compute bounds list if available
+            bounds_list = None
+            if bounds is not None:
+                bounds_list = [
+                    bounds.lowerLeft[0],
+                    bounds.lowerLeft[1],
+                    bounds.upperRight[0],
+                    bounds.upperRight[1],
+                ]
+
+            # Determine min/max zoom from TMS definition
+            tms = TILE_MATRIX_SETS[tileMatrixSetId]()
+            minzoom = 0
+            maxzoom = (
+                max(int(m.id) for m in tms.tileMatrices if str(m.id).isdigit())
+                if tms.tileMatrices
+                else None
+            )
+
+            # Compose TileJSON
+            return TileJSON(
+                tilejson="3.0.0",
+                tiles=[url_template],
+                name=dataset.attrs.get("title", "Dataset"),
+                description=dataset.attrs.get("description"),
+                version=dataset.attrs.get("version"),
+                scheme="xyz",
+                attribution=dataset.attrs.get("attribution"),
+                bounds=bounds_list,
+                minzoom=minzoom,
+                maxzoom=maxzoom,
+            )
 
         @router.get("/sync/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}")
         @time_debug
