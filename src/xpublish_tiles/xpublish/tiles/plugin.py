@@ -31,6 +31,7 @@ from xpublish_tiles.xpublish.tiles.types import (
     Layer,
     Link,
     Style,
+    TileJSON,
     TileMatrixSet,
     TileMatrixSets,
     TileQuery,
@@ -231,6 +232,40 @@ class TilesPlugin(Plugin):
                 return create_tileset_metadata(dataset, tileMatrixSetId)
             except ValueError as e:
                 raise HTTPException(status_code=404, detail=str(e)) from e
+
+        @router.get(
+            "/{tileMatrixSetId}/tilejson.json",
+            response_model=TileJSON,
+            response_model_exclude_none=True,
+        )
+        async def get_dataset_tilejson(
+            request: Request,
+            tileMatrixSetId: str,
+            query: Annotated[TileQuery, Query()],
+            dataset: Dataset = Depends(deps.dataset),  # noqa: B008
+        ):
+            """Get TileJSON specification for this dataset and tile matrix set"""
+            # Validate that the tile matrix set exists
+            if tileMatrixSetId not in TILE_MATRIX_SET_SUMMARIES:
+                raise HTTPException(status_code=404, detail="Tile matrix set not found")
+
+            # Extract dimension selectors from query parameters
+            selectors = {}
+            for param_name, param_value in request.query_params.items():
+                # Skip the standard tile query parameters
+                if param_name not in TILES_FILTERED_QUERY_PARAMS:
+                    # Check if this parameter corresponds to a dataset dimension
+                    if param_name in dataset.dims:
+                        selectors[param_name] = param_value
+
+            if not query.variables or len(query.variables) == 0:
+                raise HTTPException(status_code=422, detail="No variables specified")
+
+            bounds = extract_variable_bounding_box(dataset, query.variables[0], "EPSG:4326")
+
+            return TileJSON(
+
+            )
 
         @router.get("/sync/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}")
         @time_debug

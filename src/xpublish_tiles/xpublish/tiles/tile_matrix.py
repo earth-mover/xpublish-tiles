@@ -7,7 +7,8 @@ import morecantile.errors
 import pyproj
 import pyproj.aoi
 
-from xpublish_tiles.types import OutputBBox, OutputCRS
+import xarray as xr
+from xpublish_tiles.types import OutputBBox, OutputCRS, QueryParams
 from xpublish_tiles.xpublish.tiles.types import (
     Link,
     TileMatrix,
@@ -191,7 +192,7 @@ def get_all_tile_matrix_set_ids() -> list[str]:
     return list(TILE_MATRIX_SETS.keys())
 
 
-def extract_dimension_extents(data_array) -> list:
+def extract_dimension_extents(data_array: xr.DataArray) -> list:
     """Extract dimension extent information from an xarray DataArray.
 
     Uses cf_xarray to detect CF-compliant axes for robust dimension classification.
