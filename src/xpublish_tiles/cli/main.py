@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import xarray as xr
 from xpublish_tiles.cli.bench import run_benchmark
 from xpublish_tiles.testing.datasets import (
+    CURVILINEAR,
     EU3035,
     EU3035_HIRES,
     GLOBAL_BENCHMARK_TILES,
@@ -42,6 +43,13 @@ def get_dataset_for_name(
         ds = EU3035_HIRES.create().assign_attrs(_xpublish_id=name)
     elif name == "ifs":
         ds = IFS.create().assign_attrs(_xpublish_id=name)
+    elif name == "curvilinear":
+        ds = CURVILINEAR.create().assign_attrs(_xpublish_id=name)
+    elif name.startswith("xarray://"):
+        # xarray tutorial dataset - format: xarray://dataset_name
+        tutorial_name = name.removeprefix("xarray://")
+        # these are mostly netCDF files and async loading does not work
+        ds = xr.tutorial.load_dataset(tutorial_name).assign_attrs(_xpublish_id=name)
     elif name.startswith("local://"):
         # Local icechunk dataset path
         import icechunk
@@ -190,7 +198,7 @@ def main():
         "--dataset",
         type=str,
         default="global",
-        help="Dataset to serve (default: global). Options: global, air, hrrr, para, eu3035, ifs, local://<group_name> (loads group from /tmp/tiles-icechunk/), local:///custom/path::<group_name> (loads group from custom icechunk repo), or an arraylake dataset name",
+        help="Dataset to serve (default: global). Options: global, air, hrrr, para, eu3035, ifs, curvilinear, xarray://<tutorial_name> (loads xarray tutorial dataset), local://<group_name> (loads group from /tmp/tiles-icechunk/), local:///custom/path::<group_name> (loads group from custom icechunk repo), or an arraylake dataset name",
     )
     parser.add_argument(
         "--branch",

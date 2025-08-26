@@ -3,7 +3,6 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 
-import cf_xarray.datasets
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
@@ -202,6 +201,69 @@ def raster_grid(
     # Add bounding box to dataset attributes if provided
     if bbox is not None:
         ds.attrs["bbox"] = bbox
+
+    return ds
+
+
+def curvilinear_grid(
+    *,
+    dims: tuple[Dim, ...],
+    dtype: npt.DTypeLike,
+    attrs: dict[str, Any],
+) -> xr.Dataset:
+    """Create a curvilinear grid dataset with 2D lat/lon coordinates.
+
+    Uses uniform_grid to create the base dataset, then adds curvilinear
+    lat/lon coordinates using quadratic functions.
+    """
+    # Create base uniform grid
+    ds = uniform_grid(dims=dims, dtype=dtype, attrs=attrs)
+
+    # Extract x and y dimensions - should be the first two dims
+    x_dim, y_dim = dims[0], dims[1]
+    xsize, ysize = x_dim.size, y_dim.size
+
+    # Create coordinate arrays
+    x = np.arange(xsize)
+    y = np.arange(ysize)
+
+    # Generate curvilinear lat/lon using tanh functions for smooth, bounded coordinates
+    # Normalize coordinates to [-1, 1] range
+    x_norm = 2 * (x - xsize / 2) / xsize
+    y_norm = 2 * (y - ysize / 2) / ysize
+
+    X, Y = np.meshgrid(x_norm, y_norm, indexing="ij")
+
+    # Base coordinates - create a regular grid first
+    lon_base = (
+        -100.0 + X * 15.0
+    )  # Base longitude range: -115 to -85 (30 degrees, over US)
+    lat_base = 40.0 + Y * 15.0  # Base latitude range: 25 to 55 (30 degrees, over US)
+
+    # Add curvilinear distortion using tanh for smooth, bounded curves
+    # tanh ensures distortions stay bounded and don't cause overlaps
+    # Increased warping especially in latitude to make it less rectangular
+    # Special handling for lower-right corner to wrap it further north
+    lon_distortion = 3.0 * np.tanh(X + 0.8 * Y)  # Stronger longitude warping
+    lat_distortion = 5.0 * np.tanh(Y + 0.6 * X + 0.4 * X * Y)  # Base latitude warping
+
+    # Add extra northward curvature to the lower-right corner (positive X, negative Y)
+    lower_right_mask = (X > 0) & (Y < 0)
+    lat_distortion = np.where(
+        lower_right_mask,
+        lat_distortion
+        + 8.0 * np.tanh(X * -Y * 2.0),  # Strong northward curve in lower-right
+        lat_distortion,
+    )
+
+    lon = lon_base + lon_distortion
+    lat = lat_base + lat_distortion
+
+    # Add curvilinear coordinates to the dataset
+    ds.coords["lat"] = ((x_dim.name, y_dim.name), lat, {"standard_name": "latitude"})
+    ds.coords["lon"] = ((x_dim.name, y_dim.name), lon, {"standard_name": "longitude"})
+
+    ds["foo"].attrs["coordinates"] = "lat lon"
 
     return ds
 
@@ -742,20 +804,69 @@ FORECAST = xr.decode_cf(
     )
 )
 
-
-# TODO: make this curvilinear
-ROMSDS = cf_xarray.datasets.romsds.expand_dims(xi_rho=3, eta_rho=4).assign_coords(
-    lon_rho=(
-        ("eta_rho", "xi_rho"),
-        np.arange(12).reshape(4, 3),
-        {"standard_name": "longitude"},
+CURVILINEAR = Dataset(
+    name="curvilinear",
+    dims=(
+        Dim(name="xi_rho", size=400, chunk_size=200, data=None),
+        Dim(name="eta_rho", size=200, chunk_size=100, data=None),
+        Dim(
+            name="s_rho",
+            size=2,
+            chunk_size=2,
+            data=np.array([0, -1]),
+            attrs={
+                "long_name": "S-coordinate at RHO-points",
+                "valid_min": -1.0,
+                "valid_max": 0.0,
+                "standard_name": "ocean_s_coordinate_g2",
+                "formula_terms": "s: s_rho C: Cs_r eta: zeta depth: h depth_c: hc",
+                "field": "s_rho, scalar",
+            },
+        ),
     ),
-    lat_rho=(
-        ("eta_rho", "xi_rho"),
-        np.arange(12).reshape(4, 3),
-        {"standard_name": "longitude"},
-    ),
+    dtype=np.float64,
+    setup=curvilinear_grid,
 )
 
-ROMSDS.lat_rho.attrs["standard_name"] = "latitude"
-ROMSDS.lon_rho.attrs["standard_name"] = "longitude"
+
+POPDS = xr.Dataset(
+    {
+        "TEMP": (
+            ("nlat", "nlon"),
+            np.ones((20, 30)) * 15,
+            {
+                "coordinates": "TLONG TLAT",
+                "standard_name": "sea_water_potential_temperature",
+            },
+        )
+    },
+    coords={
+        "TLONG": (
+            ("nlat", "nlon"),
+            np.ones((20, 30)),
+            {"units": "degrees_east"},
+        ),
+        "TLAT": (
+            ("nlat", "nlon"),
+            2 * np.ones((20, 30)),
+            {"units": "degrees_north"},
+        ),
+        "ULONG": (
+            ("nlat", "nlon"),
+            0.5 * np.ones((20, 30)),
+            {"units": "degrees_east"},
+        ),
+        "ULAT": (
+            ("nlat", "nlon"),
+            2.5 * np.ones((20, 30)),
+            {"units": "degrees_north"},
+        ),
+        "UVEL": (
+            ("nlat", "nlon"),
+            np.ones((20, 30)) * 15,
+            {"coordinates": "ULONG ULAT", "standard_name": "sea_water_x_velocity"},
+        ),
+        "nlon": ("nlon", np.arange(30), {"axis": "X"}),
+        "nlat": ("nlat", np.arange(20), {"axis": "Y"}),
+    },
+)

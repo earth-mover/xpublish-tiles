@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
+from morecantile import Tile
 from pyproj import CRS
 from pyproj.aoi import BBox
 
@@ -19,13 +20,22 @@ from xpublish_tiles.pipeline import (
     bbox_overlap,
     pipeline,
 )
-from xpublish_tiles.testing.datasets import FORECAST, PARA, ROMSDS, create_global_dataset
+from xpublish_tiles.testing.datasets import (
+    CURVILINEAR,
+    FORECAST,
+    PARA,
+    create_global_dataset,
+)
 from xpublish_tiles.testing.lib import (
     assert_render_matches_snapshot,
     compare_image_buffers,
     visualize_tile,
 )
-from xpublish_tiles.testing.tiles import PARA_TILES, TILES, WEBMERC_TMS
+from xpublish_tiles.testing.tiles import (
+    PARA_TILES,
+    TILES,
+    WEBMERC_TMS,
+)
 from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
 
 
@@ -138,6 +148,47 @@ async def test_projected_coordinate_data(
     )
 
 
+@pytest.fixture(
+    params=[
+        pytest.param(
+            (Tile(x=0, y=1, z=2), WEBMERC_TMS), id="curvilinear_hrrr_west_z2(2/0/1)"
+        ),
+        pytest.param(
+            (Tile(x=1, y=1, z=2), WEBMERC_TMS), id="curvilinear_hrrr_east_z2(2/1/1)"
+        ),
+        pytest.param(
+            (Tile(x=1, y=2, z=3), WEBMERC_TMS), id="curvilinear_hrrr_sw_corner_z3(3/1/2)"
+        ),
+        pytest.param(
+            (Tile(x=2, y=2, z=3), WEBMERC_TMS), id="curvilinear_hrrr_se_corner_z3(3/2/2)"
+        ),
+        pytest.param(
+            (Tile(x=3, y=4, z=4), WEBMERC_TMS), id="curvilinear_hrrr_central_z4(4/3/4)"
+        ),
+        pytest.param(
+            (Tile(x=15, y=24, z=6), WEBMERC_TMS), id="curvilinear_central_us_z6(6/15/24)"
+        ),
+    ]
+)
+def curvilinear_dataset_and_tile(request):
+    tile, tms = request.param
+    return (CURVILINEAR.create(), tile, tms)
+
+
+async def test_curvilinear_data(curvilinear_dataset_and_tile, png_snapshot, pytestconfig):
+    ds, tile, tms = curvilinear_dataset_and_tile
+    tms = morecantile.tms.get("WebMercatorQuad")
+    ds = xr.tutorial.load_dataset("ROMS_example").rename({"salt": "foo"})
+    # tile = Tile(z=10, x=236,y=389)
+    tile = Tile(z=10, x=251, y=425)
+    query_params = create_query_params(tile, tms)
+    query_params.colorscalerange = (28, 35)
+    result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(result, png_snapshot, tile=tile, tms=tms)
+
+
 @pytest.mark.parametrize("tile,tms", PARA_TILES)
 async def test_categorical_data(tile, tms, png_snapshot, pytestconfig):
     ds = PARA.create().squeeze("time")
@@ -171,10 +222,9 @@ def test_apply_query_selectors():
         result["sst"].da, FORECAST.sst.sel(L=0, S="1960-02-01 00:00:00").isel(M=-1, S=-1)
     )
 
-    result = apply_query(ROMSDS, variables=["temp"], selectors={})
-    assert_equal(
-        result["temp"].da, ROMSDS.temp.sel(s_rho=0, method="nearest").isel(ocean_time=-1)
-    )
+    curvilinear_ds = CURVILINEAR.create()
+    result = apply_query(curvilinear_ds, variables=["foo"], selectors={})
+    assert_equal(result["foo"].da, curvilinear_ds.foo.sel(s_rho=0, method="nearest"))
 
 
 def test_datashader_nearest_regridding():

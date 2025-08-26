@@ -1,8 +1,4 @@
-# FIXME: vendor these
-
-
-import cf_xarray as cfxr
-import cf_xarray.datasets
+import cf_xarray as cfxr  # noqa: F401
 import numpy as np
 import numpy.testing as npt
 import pandas as pd
@@ -26,13 +22,14 @@ from xpublish_tiles.grids import (
 from xpublish_tiles.lib import transformer_from_crs
 from xpublish_tiles.pipeline import fix_coordinate_discontinuities
 from xpublish_tiles.testing.datasets import (
+    CURVILINEAR,
     ERA5,
     EU3035,
     FORECAST,
     HRRR,
     HRRR_CRS_WKT,
     IFS,
-    ROMSDS,
+    POPDS,
 )
 from xpublish_tiles.testing.tiles import TILES
 
@@ -121,29 +118,36 @@ from xpublish_tiles.testing.tiles import TILES
             id="forecast",
         ),
         pytest.param(
-            ROMSDS,
-            "temp",
+            CURVILINEAR.create(),
+            "foo",
             Curvilinear(
                 crs=CRS.from_user_input(4326),
-                bbox=BBox(south=0, north=11, east=11, west=0),
-                X="lon_rho",
-                Y="lat_rho",
+                bbox=BBox(
+                    south=-6.723446318626612,
+                    north=12.551367116112495,
+                    east=120.83720198174792,
+                    west=115.1422776195327,
+                ),
+                X="lon",
+                Y="lat",
+                Xdim="x",
+                Ydim="y",
                 Z="s_rho",
-                dims={"eta_rho", "xi_rho"},
                 indexes=(),  # type: ignore[arg-type]
             ),
             id="roms",
         ),
         pytest.param(
-            cfxr.datasets.popds,
+            POPDS,
             "UVEL",
             Curvilinear(
                 crs=CRS.from_user_input(4326),
                 bbox=BBox(south=2.5, north=2.5, east=0.5, west=0.5),
                 X="ULONG",
                 Y="ULAT",
+                Xdim="nlon",
+                Ydim="nlat",
                 Z=None,
-                dims={"nlon", "nlat"},
                 indexes=(),  # type: ignore[arg-type]
             ),
             id="pop",

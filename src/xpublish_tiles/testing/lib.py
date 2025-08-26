@@ -29,6 +29,51 @@ def compare_image_buffers(buffer1: io.BytesIO, buffer2: io.BytesIO) -> bool:
     return np.array_equal(array1, array2)
 
 
+def compare_image_buffers_with_debug(
+    buffer1: io.BytesIO,
+    buffer2: io.BytesIO,
+    test_name: str = "image_comparison",
+    tile_info: Optional[tuple] = None,
+    debug_visual: bool = False,
+    debug_visual_save: bool = False,
+) -> bool:
+    """
+    Compare two image buffers and optionally show debug visualization if they differ.
+
+    Args:
+        buffer1: First image buffer (expected/reference)
+        buffer2: Second image buffer (actual/test)
+        test_name: Name for the test/comparison
+        tile_info: Optional tuple of (Tile, TileMatrixSet) for geographic context
+        debug_visual: Show visualization in matplotlib window if images differ
+        debug_visual_save: Save visualization to file if images differ
+
+    Returns:
+        bool: True if images are identical, False otherwise
+    """
+    # First do the comparison
+    images_equal = compare_image_buffers(buffer1, buffer2)
+
+    # If not equal and debug is requested, create visualization
+    if not images_equal and (debug_visual or debug_visual_save):
+        # Convert buffers to numpy arrays
+        buffer1.seek(0)
+        buffer2.seek(0)
+        array1 = np.array(Image.open(buffer1))
+        array2 = np.array(Image.open(buffer2))
+
+        # Create debug visualization
+        create_debug_visualization(
+            actual_array=array2,
+            expected_array=array1,
+            test_name=test_name,
+            tile_info=tile_info,
+            debug_visual_save=debug_visual_save,
+        )
+
+    return images_equal
+
+
 def create_debug_visualization(
     actual_array: np.ndarray,
     expected_array: np.ndarray,
