@@ -20,7 +20,9 @@ import xarray as xr
 from xpublish_tiles.logger import logger
 from xpublish_tiles.utils import async_time_debug, time_debug
 
-WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)
+WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)  # from proj
+M_PI = 3.14159265358979323846  # from proj
+M_2_PI = 6.28318530717958647693  # from proj
 
 
 class NoCoverageError(Exception):
@@ -98,11 +100,12 @@ def epsg4326to3857(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.nda
     # This preserves precision for values already in the valid range
     # pyproj accepts both -180 and 180 as valid values without wrapping
     needs_normalization = (x > 180) | (x < -180)
+
+    np.deg2rad(x, out=x)
     if np.any(needs_normalization):
         # Only normalize the values that need it to preserve precision
-        x[needs_normalization] = ((x[needs_normalization] + 180) % 360) - 180
-    np.deg2rad(x, out=x)
-
+        # doing it this way matches proj
+        x[needs_normalization] = ((x[needs_normalization] + M_PI) % (2 * M_PI)) - M_PI
     # Clamp latitude to avoid infinity at poles in-place
     # Web Mercator is only valid between ~85.05 degrees
     # Given our padding, we may be sending in data at latitudes poleward of MAX_LAT
