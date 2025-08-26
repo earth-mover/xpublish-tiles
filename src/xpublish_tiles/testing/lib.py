@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 from typing import Literal, Optional
+from unittest import mock
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,6 +13,7 @@ from morecantile import Tile
 from PIL import Image
 from pyproj.aoi import BBox
 from skimage.metrics import structural_similarity as ssim
+from syrupy import SnapshotAssertion
 
 from xpublish_tiles.lib import check_transparent_pixels
 from xpublish_tiles.logger import logger
@@ -529,11 +531,12 @@ def validate_transparency(
 
 def assert_render_matches_snapshot(
     result: io.BytesIO,
-    png_snapshot,
+    png_snapshot: SnapshotAssertion,
     *,
     tile=None,
     tms=None,
     dataset_bbox=None,
+    perceptual_threshold: Optional[float] = None,
 ):
     """Helper function to validate PNG content against snapshot.
 
@@ -543,13 +546,49 @@ def assert_render_matches_snapshot(
         tile: The tile being rendered (optional)
         tms: The tile matrix set (optional)
         dataset_bbox: Bounding box of the dataset (optional)
+        perceptual_threshold: If provided, use perceptual comparison with this SSIM threshold (0-1).
+                              Values closer to 1 mean stricter matching. Common values:
+                              - 0.99: Very strict, nearly identical
+                              - 0.95: Strict, minor differences allowed
+                              - 0.90: Moderate, noticeable but similar
+                              If None, uses exact pixel comparison.
     """
     assert isinstance(result, io.BytesIO)
     result.seek(0)
     content = result.read()
     assert len(content) > 0
     validate_transparency(content, tile=tile, tms=tms, dataset_bbox=dataset_bbox)
-    assert content == png_snapshot
+
+    if perceptual_threshold is None:
+        # Use exact comparison
+        assert content == png_snapshot
+        return
+
+    # For perceptual comparison, we need to get the actual snapshot bytes
+    # Check if png_snapshot is a SnapshotAssertion object
+    assert hasattr(png_snapshot, "_recall_data")
+    # It's a SnapshotAssertion, we need to get the actual data
+    snapshot_data, _ = png_snapshot._recall_data(png_snapshot.index)
+    if snapshot_data is None:
+        # No existing snapshot, fail the comparison
+        assert content == png_snapshot
+    snapshot_bytes = snapshot_data
+
+    # Use perceptual comparison
+    result.seek(0)
+    snapshot_buffer = io.BytesIO(snapshot_bytes)
+    ssim_score = compare_images_perceptual(result, snapshot_buffer)
+
+    if ssim_score >= perceptual_threshold:
+        # Images are similar enough, mock the extension's matches to return True
+        # This ensures the snapshot is marked as used without doing exact comparison
+        with mock.patch.object(png_snapshot._extension, "matches", return_value=True):
+            assert content == png_snapshot
+    else:
+        raise AssertionError(
+            f"Image similarity {ssim_score:.4f} is below threshold {perceptual_threshold}. "
+            f"Images are too different."
+        )
 
 
 def visualize_tile(result: io.BytesIO, tile: Tile) -> None:

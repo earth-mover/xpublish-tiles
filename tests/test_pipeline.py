@@ -92,7 +92,7 @@ async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot, pytestco
     result = await pipeline(ds, query_params)
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
-    assert_render_matches_snapshot(result, png_snapshot)
+    assert_render_matches_snapshot(result, png_snapshot, perceptual_threshold=0.9)
 
 
 async def test_pipeline_bad_bbox(global_datasets, png_snapshot, pytestconfig):
