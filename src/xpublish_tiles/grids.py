@@ -33,6 +33,76 @@ def _get_xy_pad(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
     return x_pad, y_pad
 
 
+def _convert_longitude_slice(lon_slice: slice, *, uses_0_360) -> tuple[slice, ...]:
+    """
+        Convert longitude slice to match the coordinate system of the dataset.
+
+    Handles conversion between -180→180 and 0→360 coordinate systems.
+    May return multiple slices when selection crosses longitude boundaries.
+
+    Parameters
+    ----------
+    lon_slice : slice
+        Input longitude slice (potentially in different coordinate system)
+
+    Returns
+    -------
+    slice or tuple[slice, ...]
+        Converted slice(s) that match dataset's coordinate system.
+        Returns tuple of slices when selection crosses boundaries.
+    """
+    if lon_slice.start is None or lon_slice.stop is None:
+        raise ValueError("start and stop should not be None")
+
+    assert lon_slice.step is None
+    # start, stop = lon_slice.start, lon_slice.stop
+
+    # https://github.com/developmentseed/morecantile/issues/175
+    # the precision in morecantile tile bounds isn't perfect,
+    # a good way to test is `tms.bounds(Tile(0,0,0))` which should
+    # match the spec exactly: https://docs.ogc.org/is/17-083r4/17-083r4.html#toc48
+    # Example: tests/test_pipeline.py::test_pipeline_tiles[-90->90,0->360-wgs84_prime_meridian(2/2/1)]
+    start, stop = lon_slice.start, lon_slice.stop
+
+    # Determine breakpoints based on coordinate system
+    left_break = 0 if uses_0_360 else -180
+    right_break = 360 if uses_0_360 else 180
+
+    # Handle different boundary crossing cases
+    if start < left_break and stop < left_break:
+        # Both below left boundary
+        # e.g., -370 to -350 or -190 to -170
+        return (slice(start + 360, stop + 360),)
+
+    elif start >= right_break and stop > right_break:
+        # Both above right boundary
+        # e.g., 370 to 390 or 190 to 210
+        return (slice(start - 360, stop - 360),)
+
+    elif start < left_break and ((left_break == stop) or (stop < right_break)):
+        # Crosses left boundary from below
+        # e.g., -185 to 1 or -10 to 10
+        # For 0→360: slice(-10, 10) becomes slice(350, 360) + slice(0, 10)
+        # remember this is left-inclusive intervals
+        return (slice(start + 360, right_break), slice(left_break, stop))
+
+    elif start >= left_break and stop > right_break:
+        # Crosses right boundary from within
+        # e.g., 170 to 190 or 350 to 370
+        # For 0→360: slice(350, 370) becomes slice(350, 360) + slice(0, 10)
+        # For -180→180: slice(170, 190) becomes slice(170, -170)
+        return (slice(start, right_break), slice(left_break, stop - 360))
+
+    elif start >= right_break:
+        # Only start is above right boundary
+        # e.g., 370 to 10 or 190 to 10
+        return (slice(start - 360, stop),)
+
+    else:
+        # Both within valid range
+        return (slice(start, stop),)
+
+
 def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
     """
     Compute interval bounds from cell centers, handling non-uniform spacing.
@@ -123,7 +193,7 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         # Consider global if span is at least 359 degrees (allowing small tolerance)
         return lon_span >= 359.0
 
-    def sel(self, labels, method=None, tolerance=None):
+    def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
         """
         Select values from the longitude index with coordinate system conversion.
 
@@ -148,92 +218,20 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         if not isinstance(value, slice):
             raise NotImplementedError
 
-        converted_slices = self._convert_longitude_slice(value)
+        converted_slices = _convert_longitude_slice(value, uses_0_360=self.uses_0_360)
 
         # If we got multiple slices (for boundary crossing), create multiple indexers
-        if isinstance(converted_slices, tuple):
-            # Handle multiple slices by selecting each and creating multiple indexers
-            all_indexers = []
-            for slice_part in converted_slices:
-                sel_dict = {self.dim: slice_part}
-                result = self._xrindex.sel(sel_dict, method=method, tolerance=tolerance)
-                indexer = next(iter(result.dim_indexers.values()))
-                start, stop, step = indexer.indices(len(self))
-                if len(all_indexers) > 0 and (stop >= all_indexers[-1].start):
-                    stop = all_indexers[-1].start
-                all_indexers.append(slice(start, stop, step))
-            return IndexSelResult({self.dim: tuple(all_indexers)})
-        else:
-            value = converted_slices
-        return self._xrindex.sel({key: value}, method=method, tolerance=tolerance)
-
-    def _convert_longitude_slice(self, lon_slice: slice) -> slice | tuple[slice, ...]:
-        """
-        Convert longitude slice to match the coordinate system of the dataset.
-
-        Handles conversion between -180→180 and 0→360 coordinate systems.
-        May return multiple slices when selection crosses longitude boundaries.
-
-        Parameters
-        ----------
-        lon_slice : slice
-            Input longitude slice (potentially in different coordinate system)
-
-        Returns
-        -------
-        slice or tuple[slice, ...]
-            Converted slice(s) that match dataset's coordinate system.
-            Returns tuple of slices when selection crosses boundaries.
-        """
-        if lon_slice.start is None or lon_slice.stop is None:
-            raise ValueError("start and stop should not be None")
-
-        assert lon_slice.step in [None, 1]
-
-        # https://github.com/developmentseed/morecantile/issues/175
-        # the precision in morecantile tile bounds isn't perfect,
-        # a good way to test is `tms.bounds(Tile(0,0,0))` which should
-        # match the spec exactly: https://docs.ogc.org/is/17-083r4/17-083r4.html#toc48
-        # Example: tests/test_pipeline.py::test_pipeline_tiles[-90->90,0->360-wgs84_prime_meridian(2/2/1)]
-        start, stop = round(lon_slice.start, 8), round(lon_slice.stop, 8)
-
-        # Determine breakpoints based on coordinate system
-        left_break = 0 if self.uses_0_360 else -180
-        right_break = 360 if self.uses_0_360 else 180
-
-        # Handle different boundary crossing cases
-        if start < left_break and stop < left_break:
-            # Both below left boundary
-            # e.g., -370 to -350 or -190 to -170
-            return slice(start + 360, stop + 360)
-
-        elif start >= right_break and stop > right_break:
-            # Both above right boundary
-            # e.g., 370 to 390 or 190 to 210
-            return slice(start - 360, stop - 360)
-
-        elif start < left_break and ((left_break == stop) or (stop < right_break)):
-            # Crosses left boundary from below
-            # e.g., -185 to 1 or -10 to 10
-            # For 0→360: slice(-10, 10) becomes slice(350, 360) + slice(0, 10)
-            # remember this is left-inclusive intervals
-            return (slice(start + 360, right_break), slice(left_break, stop))
-
-        elif start >= left_break and stop > right_break:
-            # Crosses right boundary from within
-            # e.g., 170 to 190 or 350 to 370
-            # For 0→360: slice(350, 370) becomes slice(350, 360) + slice(0, 10)
-            # For -180→180: slice(170, 190) becomes slice(170, -170)
-            return (slice(start, right_break), slice(left_break, stop - 360))
-
-        elif start >= right_break:
-            # Only start is above right boundary
-            # e.g., 370 to 10 or 190 to 10
-            return slice(start - 360, stop)
-
-        else:
-            # Both within valid range
-            return slice(start, stop)
+        # Handle multiple slices by selecting each and creating multiple indexers
+        all_indexers: list[slice] = []
+        for slice_part in converted_slices:
+            sel_dict = {self.dim: slice_part}
+            result = self._xrindex.sel(sel_dict, method=method, tolerance=tolerance)
+            indexer = next(iter(result.dim_indexers.values()))
+            start, stop, _ = indexer.indices(len(self))
+            if len(all_indexers) > 0 and (stop >= all_indexers[-1].start):
+                stop = all_indexers[-1].start
+            all_indexers.append(slice(start, stop))
+        return IndexSelResult({self.dim: tuple(all_indexers)})
 
     def __len__(self) -> int:
         """Return the length of the longitude index."""
@@ -272,7 +270,7 @@ def _is_raster_index_global(raster_index, grid_bbox, crs) -> bool:
 
 def _handle_longitude_selection(
     lon_index: xr.Index, bbox: BBox, grid_bbox: BBox, crs: CRS, dimname: Hashable
-) -> list[slice]:
+) -> dict[str, list[slice] | slice]:
     """
     Handle longitude coordinate selection with support for different conventions.
 
@@ -302,21 +300,19 @@ def _handle_longitude_selection(
             lon_index, grid_bbox, crs
         )
         size = lon_index._xy_shape[0]
+        sel_result = lon_index.sel({dimname: slice(bbox.west, bbox.east)})
     elif isinstance(lon_index, LongitudeCellIndex):
-        handle_wraparound = (
-            crs.is_geographic
-            and lon_index.cell_centers[-1] == 360 + lon_index.cell_centers[0]
-        )
+        handle_wraparound = crs.is_geographic and lon_index.is_global
         size = len(lon_index.index)
+        sel_result = lon_index.sel({dimname: slice(bbox.west, bbox.east)})
     else:
         assert isinstance(lon_index, xr.indexes.PandasIndex)
         handle_wraparound = (
             crs.is_geographic and lon_index.index[-1] == 360 + lon_index.index[0]
         )
         size = len(lon_index.index)
-
-    sel_result = lon_index.sel({dimname: slice(bbox.west, bbox.east)})
-    indexer = next(iter(sel_result.dim_indexers.values()))
+        sel_result = lon_index.sel({dimname: slice(bbox.west, bbox.east)})
+    indexer = sel_result.dim_indexers[dimname]
     indexers = (indexer,) if isinstance(indexer, slice) else indexer
     indexers: list[slice] = [slice(*idxr.indices(size)) for idxr in indexers]
     first, last = indexers[0], indexers[-1]
@@ -335,7 +331,9 @@ def _handle_longitude_selection(
         if indexers[-1].stop >= size - 1:
             # Ends at end, add wraparound from beginning
             indexers = indexers + [slice(0, 1)]
-    return indexers
+    new_indexers = sel_result.dim_indexers
+    new_indexers[dimname] = indexers
+    return new_indexers
 
 
 @dataclass(eq=False)
@@ -415,11 +413,10 @@ class RectilinearSelMixin:
         # 2. There is no point to transforming the coordinate values so that they are contiguous
         #    pyproj will reintroduce the discontintuity at the anti-meridian after transforming
         #    coordinate systems
-        lon_slices = _handle_longitude_selection(
-            xindex, bbox, self.bbox, self.crs, self.X
-        )
+        slicers = _handle_longitude_selection(xindex, bbox, self.bbox, self.crs, self.X)
         results = [
-            da.isel({self.X: lon_slice, self.Y: yslice}) for lon_slice in lon_slices
+            da.isel({self.X: lon_slice, self.Y: yslice})
+            for lon_slice in cast(list[slice], slicers[self.X])
         ]
         if len(results) > 1:
             result = xr.concat(results, dim=self.X)

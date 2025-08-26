@@ -252,7 +252,7 @@ async def transform_coordinates(
     # we want to normalize to -180 -> 180 always
     if is_4326_like(transformer.source_crs) and is_4326_like(transformer.target_crs):
         # for some reason pyproj does not normalize these to -180->180
-        newdata = inx.data
+        newdata = inx.data.copy()
         newdata[newdata >= 180] -= 360
         return inx.copy(data=newdata), iny
 
