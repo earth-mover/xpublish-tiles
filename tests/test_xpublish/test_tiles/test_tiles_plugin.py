@@ -702,9 +702,9 @@ def test_tilejson_endpoint():
 
     # Check tile URL template format
     tile_url = tilejson["tiles"][0]
-    assert "{tileMatrix}" in tile_url
-    assert "{tileRow}" in tile_url
-    assert "{tileCol}" in tile_url
+    assert "{z}" in tile_url
+    assert "{y}" in tile_url
+    assert "{x}" in tile_url
     assert "variables=temperature" in tile_url
     assert "style=raster/plasma" in tile_url
     assert "width=512" in tile_url

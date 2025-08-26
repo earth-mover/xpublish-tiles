@@ -271,7 +271,7 @@ class TilesPlugin(Plugin):
             # Construct sibling tiles path replacing trailing segment
             tiles_path = request.url.path.rsplit("/", 1)[0]  # drop 'tilejson.json'
             # XYZ template
-            url_template = f"{base_url}{tiles_path}/{{tileMatrix}}/{{tileRow}}/{{tileCol}}?variables={','.join(query.variables)}&style={query.style[0]}/{query.style[1]}&width={query.width}&height={query.height}&f={query.f}"
+            url_template = f"{base_url}{tiles_path}/{{z}}/{{y}}/{{x}}?variables={','.join(query.variables)}&style={query.style[0]}/{query.style[1]}&width={query.width}&height={query.height}&f={query.f}"
             # Append selectors
             if selectors:
                 selector_qs = "&".join(f"{k}={v}" for k, v in selectors.items())
