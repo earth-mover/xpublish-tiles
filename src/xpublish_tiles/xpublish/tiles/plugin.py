@@ -9,9 +9,9 @@ from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import Dataset
 from xpublish_tiles.lib import NoCoverageError, TileTooBigError
-from xpublish_tiles.pipeline import pipeline, sync_pipeline
+from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.types import QueryParams
-from xpublish_tiles.utils import async_time_debug, time_debug
+from xpublish_tiles.utils import async_time_debug
 from xpublish_tiles.xpublish.tiles.metadata import (
     create_tileset_metadata,
     extract_dataset_extents,
@@ -308,64 +308,6 @@ class TilesPlugin(Plugin):
                 bounds=bounds_list,
                 minzoom=minzoom,
                 maxzoom=maxzoom,
-            )
-
-        @router.get("/sync/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}")
-        @time_debug
-        def get_sync_dataset_tile(
-            request: Request,
-            tileMatrixSetId: str,
-            tileMatrix: int,
-            tileRow: int,
-            tileCol: int,
-            query: Annotated[TileQuery, Query()],
-            dataset: Dataset = Depends(deps.dataset),  # noqa: B008
-        ):
-            """Get individual tile from this dataset (synchronous version)"""
-            try:
-                bbox, crs = extract_tile_bbox_and_crs(
-                    tileMatrixSetId, tileMatrix, tileRow, tileCol
-                )
-            except ValueError as e:
-                raise HTTPException(status_code=404, detail=str(e)) from e
-
-            # Extract dimension selectors from query parameters
-            selectors = {}
-            for param_name, param_value in request.query_params.items():
-                # Skip the standard tile query parameters
-                if param_name not in TILES_FILTERED_QUERY_PARAMS:
-                    # Check if this parameter corresponds to a dataset dimension
-                    if param_name in dataset.dims:
-                        selectors[param_name] = param_value
-
-            render_params = QueryParams(
-                variables=query.variables,
-                style=query.style[0],
-                colorscalerange=query.colorscalerange,
-                cmap=query.style[1],
-                crs=crs,
-                bbox=bbox,
-                width=query.width,
-                height=query.height,
-                format=query.f,
-                selectors=selectors,
-            )
-            try:
-                buffer = sync_pipeline(dataset, render_params)
-            except NoCoverageError:
-                raise HTTPException(  # noqa: B904
-                    status_code=400,
-                    detail=f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} has no overlap with dataset bounds",
-                )
-            except TileTooBigError:
-                raise HTTPException(  # noqa: B904
-                    status_code=413,
-                    detail=f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} request too big. Please choose a higher zoom level.",
-                )
-
-            return StreamingResponse(
-                buffer,
-                media_type="image/png",
             )
 
         @router.get("/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}")
