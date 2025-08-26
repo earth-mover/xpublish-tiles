@@ -138,13 +138,6 @@ def test_tilesets_list_with_metadata():
     assert tileset["pointOfContact"] == "data@example.com"
     assert tileset["mediaTypes"] == ["image/png", "image/jpeg"]
 
-    # Check bounding box
-    assert "boundingBox" in tileset
-    bbox = tileset["boundingBox"]
-    assert bbox["lowerLeft"] == [-180.0, -90.0]
-    assert bbox["upperRight"] == [180.0, 90.0]
-    assert "crs" in bbox
-
     # Check layers
     assert "layers" in tileset
     assert len(tileset["layers"]) == 1
@@ -155,6 +148,13 @@ def test_tilesets_list_with_metadata():
 
     # Check that dimensions are no longer in layers (moved to tileset level)
     assert "dimensions" not in layer or layer["dimensions"] is None
+
+    # Check bounding box
+    assert "boundingBox" in layer
+    bbox = layer["boundingBox"]
+    assert bbox["lowerLeft"] == [-180.0, -90.0]
+    assert bbox["upperRight"] == [180.0, 90.0]
+    assert "crs" in bbox
 
     # Check that extents are now in the layer
     assert "extents" in layer
@@ -581,30 +581,9 @@ def test_cf_axis_detection():
 def test_helper_functions():
     """Test the helper functions for extracting bounds and generating limits"""
     from xpublish_tiles.xpublish.tiles.tile_matrix import (
-        extract_dataset_bounds,
         get_all_tile_matrix_set_ids,
         get_tile_matrix_limits,
     )
-
-    # Test dataset bounds extraction
-    data = xr.Dataset(
-        {
-            "temp": xr.DataArray(
-                np.random.randn(10, 20),
-                dims=["lat", "lon"],
-                coords={
-                    "lat": np.linspace(-45, 45, 10),
-                    "lon": np.linspace(-90, 90, 20),
-                },
-            )
-        }
-    )
-
-    bounds = extract_dataset_bounds(data)
-    assert bounds is not None
-    assert bounds.lowerLeft == [-90.0, -45.0]
-    assert bounds.upperRight == [90.0, 45.0]
-    assert bounds.crs == "http://www.opengis.net/def/crs/EPSG/0/4326"
 
     # Test getting all TMS IDs
     tms_ids = get_all_tile_matrix_set_ids()

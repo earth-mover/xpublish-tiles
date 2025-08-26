@@ -1,17 +1,18 @@
 from typing import Any, Optional, Union, cast
 
+import morecantile.models
+
 from xarray import Dataset
 from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear, guess_grid_system
+from xpublish_tiles.logger import logger
 from xpublish_tiles.pipeline import transformer_from_crs
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
-    extract_dataset_bounds,
     extract_dimension_extents,
 )
 from xpublish_tiles.xpublish.tiles.types import (
     AttributesMetadata,
     BoundingBox,
-    CRSType,
     DataType,
     DimensionType,
     Link,
@@ -57,9 +58,6 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
     # Extract dataset metadata
     dataset_attrs = dataset.attrs
     title = dataset_attrs.get("title", "Dataset")
-
-    # Extract dataset bounds
-    dataset_bounds = extract_dataset_bounds(dataset)
 
     # Get available styles from registered renderers
     from xpublish_tiles.render import RenderRegistry
@@ -118,7 +116,6 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
                 title=f"Definition of {tile_matrix_set_id}",
             ),
         ],
-        boundingBox=dataset_bounds,
         styles=styles,
         attributes=attributes,
     )
@@ -224,7 +221,7 @@ def _calculate_temporal_resolution(values: list[Union[str, float, int]]) -> str:
 
 
 def extract_variable_bounding_box(
-    dataset: Dataset, variable_name: str, target_crs: str | CRSType
+    dataset: Dataset, variable_name: str, target_crs: str | morecantile.models.CRS
 ) -> Optional[BoundingBox]:
     """Extract variable-specific bounding box and transform to target CRS
 
@@ -241,6 +238,7 @@ def extract_variable_bounding_box(
         guessed_grid = guess_grid_system(dataset, variable_name)
 
         if not isinstance(guessed_grid, RasterAffine | Rectilinear | Curvilinear):
+            logger.error(f"Failed to guess grid system for {variable_name}")
             return None
 
         grid = cast(RasterAffine | Rectilinear | Curvilinear, guessed_grid)
@@ -248,10 +246,8 @@ def extract_variable_bounding_box(
         # After isinstance check, grid is guaranteed to have crs and bbox attributes
 
         # Convert target CRS to string format for transformer
-        if isinstance(target_crs, CRSType):
-            target_crs_str = target_crs.to_epsg_string() or str(
-                target_crs.uri or target_crs.wkt or ""
-            )
+        if isinstance(target_crs, morecantile.models.CRS):
+            target_crs_str = target_crs.to_epsg() or target_crs.to_wkt() or ""
         else:
             target_crs_str = target_crs
 
@@ -270,5 +266,6 @@ def extract_variable_bounding_box(
             crs=target_crs,
         )
 
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to transform bounds: {e}")
         return None
