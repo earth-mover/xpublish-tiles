@@ -158,13 +158,13 @@ class CurvilinearCellIndex(xr.Index):
         X, Y = self.X.data, self.Y.data
         xaxis = self.X.get_axis_num(self.Xdim)
         yaxis = self.Y.get_axis_num(self.Ydim)
-        dX = np.gradient(X, axis=xaxis)
-        dY = np.gradient(Y, axis=yaxis)
+        Xlen, Ylen = X.shape[xaxis], Y.shape[yaxis]
+        dX, dY = np.gradient(X, axis=xaxis), np.gradient(Y, axis=yaxis)
         left, right = X - dX / 2, X + dX / 2
         bottom, top = Y - dY / 2, Y + dY / 2
-        y_is_decreasing = False
+        y_is_increasing = True
         if not (bottom < top).all():
-            y_is_decreasing = True
+            y_is_increasing = False
             top, bottom = bottom, top
 
         assert len(labels) == 1
@@ -174,27 +174,31 @@ class CurvilinearCellIndex(xr.Index):
         slices = _convert_longitude_slice(
             slice(bbox.west, bbox.east), uses_0_360=self.uses_0_360
         )
-
-        top_edge = np.nonzero(bottom >= bbox.north)[yaxis]
-        bottom_edge = np.nonzero(top <= bbox.south)[yaxis] + 1
-        if y_is_decreasing:
-            bottom_edge, top_edge = top_edge, bottom_edge
-        bottom_edge = 0 if bottom_edge.size == 0 else bottom_edge.min().item()
-        top_edge = Y.shape[yaxis] if top_edge.size == 0 else top_edge.max().item()
-
-        assert bottom_edge < top_edge
-
+        # bottom edge is inclusive; similar to IntervalIndex used in Rectilinear grids
+        if y_is_increasing:
+            ys = [
+                np.append(np.nonzero(bottom <= bbox.north)[yaxis], 0).max(),
+                np.append(np.nonzero(top > bbox.north)[yaxis], Ylen).min(),
+                np.append(np.nonzero(bottom <= bbox.south)[yaxis], 0).max(),
+                np.append(np.nonzero(top > bbox.south)[yaxis], Ylen).min(),
+            ]
+        else:
+            ys = [
+                np.append(np.nonzero(bottom <= bbox.north)[yaxis], Ylen).min(),
+                np.append(np.nonzero(top > bbox.north)[yaxis], 0).max(),
+                np.append(np.nonzero(bottom <= bbox.south)[yaxis], Ylen).min(),
+                np.append(np.nonzero(top > bbox.south)[yaxis], 0).max(),
+            ]
         all_indexers: list[slice] = []
         for sl in slices:
-            left_edge = np.nonzero(right <= sl.start)[xaxis] + 1
-            right_edge = np.nonzero(left >= sl.stop)[xaxis]
-            left_edge = 0 if left_edge.size == 0 else left_edge.min().item()
-            right_edge = (
-                left.shape[xaxis] if right_edge.size == 0 else right_edge.max().item()
-            )
-            assert left_edge < right_edge
+            xs = [
+                np.append(np.nonzero(left <= sl.start)[xaxis], 0).max(),
+                np.append(np.nonzero(right > sl.start)[xaxis], Xlen).min(),
+                np.append(np.nonzero(left <= sl.stop)[xaxis], 0).max(),
+                np.append(np.nonzero(right > sl.stop)[xaxis], Xlen).min(),
+            ]
             # add 1 to account for slice upper end being exclusive
-            indexer = slice(max(0, left_edge), right_edge + 1)
+            indexer = slice(min(xs), max(xs) + 1)
             start, stop, _ = indexer.indices(X.shape[xaxis])
             if len(all_indexers) > 0 and (stop >= all_indexers[-1].start):
                 stop = all_indexers[-1].start
@@ -203,9 +207,9 @@ class CurvilinearCellIndex(xr.Index):
         slicers = {
             self.Xdim: all_indexers,
             # add 1 to account for slice upper end being exclusive
-            self.Ydim: slice(max(0, bottom_edge), top_edge + 1),
+            # Also add the padding we do in RectilinearSelMixin.sel
+            self.Ydim: slice(max(min(ys) - 1, 0), (max(ys) + 1) + 1),
         }
-        print("curvcellindex", slicers)
         return IndexSelResult(slicers)
 
 
@@ -493,7 +497,10 @@ class RectilinearSelMixin:
                 self.Y
             ]
 
+        # Note: I am padding here
+        # TODO: refactor so this happens elsewhere?
         yslice = slice(max(0, yslice.start - 1), yslice.stop + 1, 1)
+        print("rectilinear sel for y:", yslice)
 
         # Notes:
         # 1. I am relying on these slices being in the correct order
