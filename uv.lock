@@ -3119,27 +3119,7 @@ dependencies = [
     { name = "zarr" },
 ]
 
-[package.dev-dependencies]
-dev = [
-    { name = "arraylake" },
-    { name = "dask" },
-    { name = "hypothesis" },
-    { name = "icechunk" },
-    { name = "ipython" },
-    { name = "matplotlib" },
-    { name = "netcdf4" },
-    { name = "pdbpp" },
-    { name = "pooch" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "pytest-randomly" },
-    { name = "pytest-xdist" },
-    { name = "ruff" },
-    { name = "scikit-image" },
-    { name = "syrupy" },
-    { name = "ty" },
-]
+[package.optional-dependencies]
 testing = [
     { name = "hypothesis" },
     { name = "matplotlib" },
@@ -3150,6 +3130,20 @@ testing = [
     { name = "pytest-xdist" },
     { name = "scikit-image" },
     { name = "syrupy" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "arraylake" },
+    { name = "dask" },
+    { name = "icechunk" },
+    { name = "ipython" },
+    { name = "netcdf4" },
+    { name = "pdbpp" },
+    { name = "pooch" },
+    { name = "ruff" },
+    { name = "ty" },
+    { name = "xpublish-tiles", extra = ["testing"] },
 ]
 
 [package.metadata]
@@ -3159,50 +3153,41 @@ requires-dist = [
     { name = "cftime", specifier = ">=1.6.4.post1" },
     { name = "datashader", specifier = ">=0.18.2" },
     { name = "fastapi" },
+    { name = "hypothesis", marker = "extra == 'testing'", specifier = ">=6.136.6" },
+    { name = "matplotlib", marker = "extra == 'testing'", specifier = ">=3.10.3" },
     { name = "morecantile", specifier = ">=5.4.2" },
     { name = "numba", specifier = ">=0.60.0" },
     { name = "numbagg", specifier = ">=0.9.0" },
     { name = "pydantic-xml", specifier = ">=2.17.3" },
     { name = "pyproj", specifier = ">=3.7.1" },
+    { name = "pytest", marker = "extra == 'testing'", specifier = ">=8.4.1" },
+    { name = "pytest-asyncio", marker = "extra == 'testing'", specifier = ">=1.1.0" },
+    { name = "pytest-cov", marker = "extra == 'testing'", specifier = ">=6.2.1" },
+    { name = "pytest-randomly", marker = "extra == 'testing'", specifier = ">=3.16.0" },
+    { name = "pytest-xdist", marker = "extra == 'testing'", specifier = ">=3.6.1" },
     { name = "rasterix", specifier = ">=0.1a4" },
+    { name = "scikit-image", marker = "extra == 'testing'", specifier = ">=0.25.2" },
+    { name = "syrupy", marker = "extra == 'testing'", specifier = ">=4.9.1" },
     { name = "tbb", marker = "sys_platform == 'linux'", specifier = ">=2022.2.0" },
     { name = "toolz", specifier = ">=1.0.0" },
     { name = "xarray", specifier = ">=2025.8.0" },
     { name = "xpublish", specifier = ">=0.3.0" },
     { name = "zarr", specifier = ">=3.1.2" },
 ]
+provides-extras = ["testing"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "arraylake" },
     { name = "dask" },
-    { name = "hypothesis", specifier = ">=6.136.6" },
     { name = "icechunk" },
     { name = "ipython", specifier = ">=9.4.0" },
-    { name = "matplotlib", specifier = ">=3.10.3" },
     { name = "netcdf4", specifier = ">=1.7.2" },
     { name = "pdbpp", specifier = ">=0.11.7" },
     { name = "pooch", specifier = ">=1.8.2" },
-    { name = "pytest", specifier = ">=8.4.1" },
-    { name = "pytest-asyncio", specifier = ">=1.1.0" },
-    { name = "pytest-cov", specifier = ">=6.2.1" },
-    { name = "pytest-randomly", specifier = ">=3.16.0" },
-    { name = "pytest-xdist", specifier = ">=3.6.1" },
     { name = "ruff", specifier = ">=0.12.4" },
-    { name = "scikit-image", specifier = ">=0.25.2" },
-    { name = "syrupy", specifier = ">=4.9.1" },
     { name = "ty", specifier = ">=0.0.1a15" },
-]
-testing = [
-    { name = "hypothesis", specifier = ">=6.136.6" },
-    { name = "matplotlib", specifier = ">=3.10.3" },
-    { name = "pytest", specifier = ">=8.4.1" },
-    { name = "pytest-asyncio", specifier = ">=1.1.0" },
-    { name = "pytest-cov", specifier = ">=6.2.1" },
-    { name = "pytest-randomly", specifier = ">=3.16.0" },
-    { name = "pytest-xdist", specifier = ">=3.6.1" },
-    { name = "scikit-image", specifier = ">=0.25.2" },
-    { name = "syrupy", specifier = ">=4.9.1" },
+    { name = "xpublish-tiles", extras = ["testing"] },
 ]
 
 [[package]]
