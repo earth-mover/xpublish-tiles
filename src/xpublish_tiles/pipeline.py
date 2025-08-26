@@ -2,7 +2,6 @@ import asyncio
 import copy
 import io
 import os
-from dataclasses import dataclass
 from typing import Any, cast
 
 import numpy as np
@@ -15,7 +14,6 @@ from xpublish_tiles.lib import (
     EXECUTOR,
     TileTooBigError,
     check_transparent_pixels,
-    sync_transform_coordinates,
     transform_coordinates,
     transformer_from_crs,
 )
@@ -329,160 +327,78 @@ def apply_query(
     return validated
 
 
-@dataclass
-class SubsetContext:
-    """Context for subset operations before coordinate transformation."""
-
-    subset: xr.DataArray
-    grid: RasterAffine | Rectilinear | Curvilinear
-    input_to_output: pyproj.Transformer
-    has_discontinuity: bool
-
-
-@time_debug
-def prepare_subset(
-    var_name: str,
-    array: ValidatedArray,
-    bbox: OutputBBox,
-    crs: OutputCRS,
-) -> SubsetContext | NullRenderContext:
-    """
-    Prepare subset for coordinate transformation.
-
-    This function contains all the shared logic between sync and async paths
-    up to the point where coordinate transformation is needed.
-    """
-    grid = array.grid
-    if (ndim := array.da.ndim) > 2:
-        raise ValueError(f"Attempting to visualize array with {ndim=!r} > 2.")
-    # Check for insufficient data - either dimension has too few points
-    if min(array.da.shape) < 2:
-        raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
-
-    if not isinstance(grid, RasterAffine | Rectilinear | Curvilinear):
-        raise NotImplementedError(f"{grid=!r} not supported yet.")
-    # Cast to help type checker understand narrowed type
-    grid = cast(RasterAffine | Rectilinear | Curvilinear, grid)
-    input_to_output = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
-    output_to_input = transformer_from_crs(crs_from=crs, crs_to=grid.crs)
-
-    # Check bounds overlap, return NullRenderContext if no overlap
-    west, south, east, north = output_to_input.transform_bounds(
-        left=bbox.west, right=bbox.east, top=bbox.north, bottom=bbox.south
-    )
-    if grid.crs.is_geographic:
-        west = west - 360 if west > east else west
-
-    input_bbox = BBox(west=west, south=south, east=east, north=north)
-    input_bbox = round_bbox(input_bbox)
-
-    if bbox.west > bbox.east:
-        raise ValueError(f"Invalid Bbox after transformation: {input_bbox!r}")
-
-    # Check bounds overlap, accounting for longitude wrapping in geographic data
-    if not bbox_overlap(input_bbox, grid.bbox, grid.crs.is_geographic):
-        # No overlap - return NullRenderContext
-        return NullRenderContext()
-
-    # Create extended bbox to prevent coordinate sampling gaps
-    # This is a lot easier to do in coordinate space because of anti-meridian handling
-    subset = grid.sel(array.da, bbox=input_bbox)
-
-    # Check for insufficient data - either dimension has too few points
-    if min(subset.shape) < 2:
-        raise ValueError("Tile request resulted in insufficient data for rendering.")
-
-    if subset.size > MAX_RENDERABLE_SIZE:
-        raise TileTooBigError("Tile request too big. Please choose a higher zoom level.")
-
-    has_discontinuity = (
-        has_coordinate_discontinuity(
-            subset[grid.X].data, axis=subset[grid.X].get_axis_num(grid.Xdim)
-        )
-        if grid.crs.is_geographic
-        else False
-    )
-
-    return SubsetContext(
-        subset=subset,
-        grid=grid,
-        input_to_output=input_to_output,
-        has_discontinuity=has_discontinuity,
-    )
-
-
 @async_time_debug
 async def subset_to_bbox(
     validated: dict[str, ValidatedArray], *, bbox: OutputBBox, crs: OutputCRS
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:
     result = {}
     for var_name, array in validated.items():
-        context = prepare_subset(var_name, array, bbox, crs)
+        grid = array.grid
+        if (ndim := array.da.ndim) > 2:
+            raise ValueError(f"Attempting to visualize array with {ndim=!r} > 2.")
+        # Check for insufficient data - either dimension has too few points
+        if min(array.da.shape) < 2:
+            raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
 
-        if isinstance(context, NullRenderContext):
-            result[var_name] = context
+        if not isinstance(grid, RasterAffine | Rectilinear | Curvilinear):
+            raise NotImplementedError(f"{grid=!r} not supported yet.")
+        # Cast to help type checker understand narrowed type
+        grid = cast(RasterAffine | Rectilinear | Curvilinear, grid)
+        input_to_output = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
+        output_to_input = transformer_from_crs(crs_from=crs, crs_to=grid.crs)
+
+        # Check bounds overlap, return NullRenderContext if no overlap
+        west, south, east, north = output_to_input.transform_bounds(
+            left=bbox.west, right=bbox.east, top=bbox.north, bottom=bbox.south
+        )
+        if grid.crs.is_geographic:
+            west = west - 360 if west > east else west
+
+        input_bbox = BBox(west=west, south=south, east=east, north=north)
+        input_bbox = round_bbox(input_bbox)
+
+        if input_bbox.west > input_bbox.east:
+            raise ValueError(f"Invalid Bbox after transformation: {input_bbox!r}")
+
+        # Check bounds overlap, accounting for longitude wrapping in geographic data
+        if not bbox_overlap(input_bbox, grid.bbox, grid.crs.is_geographic):
+            # No overlap - return NullRenderContext
+            result[var_name] = NullRenderContext()
             continue
 
-        grid = context.grid
-        newX, newY = await transform_coordinates(
-            context.subset, grid.X, grid.Y, context.input_to_output
+        # Create extended bbox to prevent coordinate sampling gaps
+        # This is a lot easier to do in coordinate space because of anti-meridian handling
+        subset = grid.sel(array.da, bbox=input_bbox)
+
+        # Check for insufficient data - either dimension has too few points
+        if min(subset.shape) < 2:
+            raise ValueError("Tile request resulted in insufficient data for rendering.")
+
+        if subset.size > MAX_RENDERABLE_SIZE:
+            raise TileTooBigError(
+                "Tile request too big. Please choose a higher zoom level."
+            )
+
+        has_discontinuity = (
+            has_coordinate_discontinuity(
+                subset[grid.X].data, axis=subset[grid.X].get_axis_num(grid.Xdim)
+            )
+            if grid.crs.is_geographic
+            else False
         )
+        newX, newY = await transform_coordinates(subset, grid.X, grid.Y, input_to_output)
+
         # Fix coordinate discontinuities in transformed coordinates if detected
-        if context.has_discontinuity:
+        if has_discontinuity:
             fixed = fix_coordinate_discontinuities(
                 newX.data,
-                context.input_to_output,
-                axis=context.subset[grid.X].get_axis_num(grid.Xdim),
+                input_to_output,
+                axis=subset[grid.X].get_axis_num(grid.Xdim),
                 bbox=bbox,
             )
             newX = newX.copy(data=fixed)
 
-        newda = context.subset.assign_coords({context.grid.X: newX, context.grid.Y: newY})
-        result[var_name] = PopulatedRenderContext(
-            da=newda,
-            grid=context.grid,
-            datatype=array.datatype,
-            bbox=bbox,
-        )
-    return result
-
-
-@time_debug
-def sync_subset_to_bbox(
-    validated: dict[str, ValidatedArray], *, bbox: OutputBBox, crs: OutputCRS
-) -> dict[str, PopulatedRenderContext | NullRenderContext]:
-    """
-    Synchronous version of subset_to_bbox.
-
-    Transform and subset validated arrays to the specified bbox and CRS without async operations.
-    """
-    result = {}
-    for var_name, array in validated.items():
-        context = prepare_subset(var_name, array, bbox, crs)
-
-        if isinstance(context, NullRenderContext):
-            result[var_name] = context
-            continue
-
-        grid = context.grid
-
-        # Transform coordinates synchronously
-        newX, newY = sync_transform_coordinates(
-            context.subset, grid.X, grid.Y, context.input_to_output
-        )
-
-        # Fix coordinate discontinuities in transformed coordinates if detected
-        if context.has_discontinuity:
-            newX = newX.copy(
-                data=fix_coordinate_discontinuities(
-                    newX.data,
-                    context.input_to_output,
-                    axis=context.subset[grid.X].get_axis_num(grid.X),
-                    bbox=bbox,
-                )
-            )
-
-        newda = context.subset.assign_coords({grid.X: newX, grid.Y: newY})
+        newda = subset.assign_coords({grid.X: newX, grid.Y: newY})
         result[var_name] = PopulatedRenderContext(
             da=newda,
             grid=grid,
@@ -490,37 +406,3 @@ def sync_subset_to_bbox(
             bbox=bbox,
         )
     return result
-
-
-@time_debug
-def sync_pipeline(ds, query: QueryParams) -> io.BytesIO:
-    """
-    Synchronous version of pipeline.
-
-    Process dataset through rendering pipeline without async operations or thread pool submission.
-    """
-    validated = apply_query(ds, variables=query.variables, selectors=query.selectors)
-    subsets = sync_subset_to_bbox(validated, bbox=query.bbox, crs=query.crs)
-
-    # Use synchronous load
-    loaded_contexts = tuple(sub.sync_load() for sub in subsets.values())
-    context_dict = dict(zip(subsets.keys(), loaded_contexts, strict=True))
-
-    buffer = io.BytesIO()
-    renderer = query.get_renderer()
-
-    # Run render directly without executor
-    renderer.render(
-        contexts=context_dict,
-        buffer=buffer,
-        width=query.width,
-        height=query.height,
-        cmap=query.cmap,
-        colorscalerange=query.colorscalerange,
-        format=query.format,
-    )
-
-    buffer.seek(0)
-    if int(os.environ.get("XPUBLISH_TILES_DEBUG_CHECKS", "0")):
-        assert check_transparent_pixels(copy.deepcopy(buffer).read()) == 0, query
-    return buffer

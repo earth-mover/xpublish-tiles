@@ -64,14 +64,7 @@ def run_benchmark(
             if needs_colorscale:
                 base_params += "&colorscalerange=-100,100"  # Use reasonable default range
 
-            if use_sync:
-                warmup_url = (
-                    f"{server_url}/tiles/sync/WebMercatorQuad/{z}/{x}/{y}?{base_params}"
-                )
-            else:
-                warmup_url = (
-                    f"{server_url}/tiles/WebMercatorQuad/{z}/{x}/{y}?{base_params}"
-                )
+            warmup_url = f"{server_url}/tiles/WebMercatorQuad/{z}/{x}/{y}?{base_params}"
             response = requests.get(warmup_url, timeout=10)
             if response.status_code == 200:
                 print(
@@ -100,7 +93,6 @@ def run_benchmark(
         async with semaphore:  # Acquire semaphore before making request
             z, x, y = tile.split("/")
             # The tile endpoint format is /tiles/{tileMatrixSetId}/{tileMatrix}/{tileCol}/{tileRow}
-            # or /tiles/sync/{tileMatrixSetId}/{tileMatrix}/{tileCol}/{tileRow} for sync endpoint
             # Include required query parameters
             # Build tile URL with required parameters
             tile_params = (
@@ -109,12 +101,7 @@ def run_benchmark(
             if needs_colorscale:
                 tile_params += "&colorscalerange=-100,100"  # Use reasonable default range
 
-            if use_sync:
-                tile_url = (
-                    f"{server_url}/tiles/sync/WebMercatorQuad/{z}/{x}/{y}?{tile_params}"
-                )
-            else:
-                tile_url = f"{server_url}/tiles/WebMercatorQuad/{z}/{x}/{y}?{tile_params}"
+            tile_url = f"{server_url}/tiles/WebMercatorQuad/{z}/{x}/{y}?{tile_params}"
 
             start_time = time.perf_counter()
             try:

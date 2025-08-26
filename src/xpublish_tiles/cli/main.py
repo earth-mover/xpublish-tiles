@@ -237,11 +237,6 @@ def main():
         help="Where to run benchmark requests: 'local' for localhost (starts server), 'local-booth' for localhost (no server), or 'prod' for production (default: local)",
     )
     parser.add_argument(
-        "--sync",
-        action="store_true",
-        help="Use the sync endpoint instead of the regular tiles endpoint for benchmarking",
-    )
-    parser.add_argument(
         "--log-level",
         type=str.lower,
         choices=["debug", "info", "warning", "error"],
@@ -321,7 +316,6 @@ def main():
                 benchmark_tiles,
                 args.concurrency,
                 args.where,
-                args.sync,
                 first_var,
                 needs_colorscale,
             ),
