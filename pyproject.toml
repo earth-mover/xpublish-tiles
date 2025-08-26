@@ -64,6 +64,7 @@ testing = [
     "hypothesis>=6.136.6",
     "pytest-randomly>=3.16.0",
     "matplotlib>=3.10.3",
+    "scikit-image>=0.25.2",
 ]
 
 [project.entry-points."xpublish.plugin"]

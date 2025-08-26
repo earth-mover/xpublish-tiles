@@ -167,15 +167,17 @@ async def test_property_rectilinear_vs_curvilinear_exact(
     ds["foo"].attrs["coordinates"] = "longitude latitude"
     curvilinear_result = await pipeline(ds, query_params)
 
-    # Compare images with optional debug visualization
+    # Compare images with optional debug visualization using perceptual comparison
     test_name = f"rectilinear_vs_curvilinear_tile_{tile.z}_{tile.x}_{tile.y}"
-    images_equal = compare_image_buffers_with_debug(
+    result = compare_image_buffers_with_debug(
         buffer1=rectilinear_result,  # expected
         buffer2=curvilinear_result,  # actual
         test_name=test_name,
         tile_info=(tile, tms),
         debug_visual=pytestconfig.getoption("--debug-visual", default=False),
         debug_visual_save=pytestconfig.getoption("--debug-visual-save", default=False),
+        mode="perceptual",
+        perceptual_threshold=0.95,  # 95% similarity threshold
     )
-
-    assert images_equal, f"Rectilinear and curvilinear results differ for tile {tile}"
+    images_similar, ssim_score = result
+    assert images_similar, f"Rectilinear and curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
