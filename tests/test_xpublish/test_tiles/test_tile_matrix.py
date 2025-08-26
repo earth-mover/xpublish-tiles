@@ -20,7 +20,7 @@ class TestTileMatrixFunctions:
 
         assert tms.id == "WebMercatorQuad"
         assert tms.title == "Google Maps Compatible for the World"
-        assert tms.crs == "root='http://www.opengis.net/def/crs/EPSG/0/3857'"
+        assert tms.crs.to_epsg() == 3857
         assert len(tms.tileMatrices) == 25  # Zoom levels 0-24
 
         # Test zoom level 0
@@ -43,7 +43,7 @@ class TestTileMatrixFunctions:
 
         assert summary.id == "WebMercatorQuad"
         assert summary.title == "Google Maps Compatible for the World"
-        assert summary.crs == "root='http://www.opengis.net/def/crs/EPSG/0/3857'"
+        assert summary.crs.to_epsg() == 3857
         assert len(summary.links) == 1
         assert summary.links[0].href == "/tiles/tileMatrixSets/WebMercatorQuad"
 

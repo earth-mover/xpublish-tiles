@@ -20,7 +20,6 @@ from xpublish_tiles.xpublish.tiles.metadata import (
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     TILE_MATRIX_SETS,
-    extract_dataset_bounds,
     extract_tile_bbox_and_crs,
     get_all_tile_matrix_set_ids,
     get_tile_matrix_limits,
@@ -100,9 +99,6 @@ class TilesPlugin(Plugin):
             # Get dataset variables that can be tiled
             tilesets = []
 
-            # Extract dataset bounds if available
-            dataset_bounds = extract_dataset_bounds(dataset)
-
             # Get dataset metadata
             dataset_attrs = dataset.attrs
             title = dataset_attrs.get("title", "Dataset")
@@ -162,16 +158,13 @@ class TilesPlugin(Plugin):
                         var_bounding_box = extract_variable_bounding_box(
                             dataset, var_name, tms_summary.crs
                         )
-                        bounding_box = (
-                            var_bounding_box if var_bounding_box else dataset_bounds
-                        )
 
                         layer = Layer(
                             id=var_name,
                             title=var_data.attrs.get("long_name", var_name),
                             description=var_data.attrs.get("description", ""),
                             dataType=DataType.COVERAGE,
-                            boundingBox=bounding_box,
+                            boundingBox=var_bounding_box,
                             crs=tms_summary.crs,
                             links=[
                                 Link(
@@ -212,7 +205,6 @@ class TilesPlugin(Plugin):
                         ],
                         tileMatrixSetLimits=tileMatrixSetLimits,
                         layers=layers if layers else None,
-                        boundingBox=dataset_bounds,
                         keywords=keywords if keywords else None,
                         attribution=dataset_attrs.get("attribution"),
                         license=dataset_attrs.get("license"),
