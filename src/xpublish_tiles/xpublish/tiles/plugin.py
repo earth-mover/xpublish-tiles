@@ -350,6 +350,11 @@ class TilesPlugin(Plugin):
                     status_code=413,
                     detail=f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} request too big. Please choose a higher zoom level.",
                 )
+            except KeyError:
+                raise HTTPException(  # noqa: B904
+                    status_code=422,
+                    detail=f"Invalid variable name(s): {query.variables!r}.",
+                )
 
             return StreamingResponse(
                 buffer,
