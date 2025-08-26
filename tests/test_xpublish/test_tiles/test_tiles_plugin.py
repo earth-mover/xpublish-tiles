@@ -634,3 +634,135 @@ def test_para_hires_zoom_level_2_size_limit():
     assert "WebMercatorQuad/2/1/1" in error_detail
     assert "request too big" in error_detail
     assert "Please choose a higher zoom level" in error_detail
+
+
+def test_tilejson_endpoint():
+    """Test the TileJSON endpoint functionality comprehensively"""
+    import pandas as pd
+
+    # Create dataset with rich metadata and time dimension
+    time_coords = pd.date_range("2020-01-01", periods=3, freq="MS")
+    data = xr.Dataset(
+        {
+            "temperature": xr.DataArray(
+                np.random.randn(3, 90, 180),
+                dims=["time", "lat", "lon"],
+                coords={
+                    "time": (
+                        ["time"],
+                        time_coords,
+                        {"axis": "T", "standard_name": "time"},
+                    ),
+                    "lat": (
+                        ["lat"],
+                        np.linspace(-90, 90, 90),
+                        {
+                            "axis": "Y",
+                            "standard_name": "latitude",
+                            "units": "degrees_north",
+                        },
+                    ),
+                    "lon": (
+                        ["lon"],
+                        np.linspace(-180, 180, 180),
+                        {
+                            "axis": "X",
+                            "standard_name": "longitude",
+                            "units": "degrees_east",
+                        },
+                    ),
+                },
+                attrs={"long_name": "Temperature"},
+            )
+        },
+        attrs={
+            "title": "Global Temperature Data",
+            "description": "Sample temperature dataset",
+            "attribution": "Test Data Corp",
+            "version": "2.0.1",
+        },
+    )
+
+    rest = xpublish.Rest({"temp": data}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    # Test TileJSON endpoint with dimension selectors
+    response = client.get(
+        "/datasets/temp/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=temperature&style=raster/plasma&width=512&height=512&time=2020-02-01"
+    )
+    assert response.status_code == 200
+
+    tilejson = response.json()
+
+    # Check required TileJSON fields
+    assert tilejson["tilejson"] == "3.0.0"
+    assert "tiles" in tilejson
+    assert len(tilejson["tiles"]) == 1
+
+    # Check tile URL template format
+    tile_url = tilejson["tiles"][0]
+    assert "{tileMatrix}" in tile_url
+    assert "{tileRow}" in tile_url
+    assert "{tileCol}" in tile_url
+    assert "variables=temperature" in tile_url
+    assert "style=raster/plasma" in tile_url
+    assert "width=512" in tile_url
+    assert "height=512" in tile_url
+    assert "time=2020-02-01" in tile_url  # Dimension selector preserved
+
+    # Check optional fields
+    assert tilejson["scheme"] == "xyz"
+    assert "bounds" in tilejson
+    assert "minzoom" in tilejson
+    assert "maxzoom" in tilejson
+
+    # Check that dataset metadata is included
+    assert tilejson["name"] == "Global Temperature Data"
+    assert tilejson["description"] == "Sample temperature dataset"
+    assert tilejson["attribution"] == "Test Data Corp"
+    assert tilejson["version"] == "2.0.1"
+
+    # Bounds should be a 4-element array [west, south, east, north]
+    if tilejson["bounds"] is not None:
+        assert len(tilejson["bounds"]) == 4
+        west, south, east, north = tilejson["bounds"]
+        assert west < east
+        assert south < north
+
+    # Zoom levels should be valid
+    if tilejson["minzoom"] is not None:
+        assert 0 <= tilejson["minzoom"] <= 30
+    if tilejson["maxzoom"] is not None:
+        assert 0 <= tilejson["maxzoom"] <= 30
+        if tilejson["minzoom"] is not None:
+            assert tilejson["minzoom"] <= tilejson["maxzoom"]
+
+
+def test_tilejson_invalid_tile_matrix_set():
+    """Test TileJSON endpoint returns 404 for invalid tile matrix set"""
+    rest = xpublish.Rest({"air": xr.Dataset()}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    response = client.get(
+        "/datasets/air/tiles/InvalidTMS/tilejson.json"
+        "?variables=air&style=raster/viridis&width=256&height=256"
+    )
+    assert response.status_code == 404
+    assert "Tile matrix set not found" in response.json()["detail"]
+
+
+def test_tilejson_missing_variables():
+    """Test TileJSON endpoint handles validation errors for missing required fields"""
+    rest = xpublish.Rest({"air": xr.Dataset()}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    # Test missing variables parameter (required field)
+    response = client.get(
+        "/datasets/air/tiles/WebMercatorQuad/tilejson.json"
+        "?style=raster/viridis&width=256&height=256"
+    )
+    assert response.status_code == 422
+    # Check that validation error mentions missing variables field
+    detail = response.json()["detail"]
+    assert any(error.get("loc") == ["query", "variables"] for error in detail)
