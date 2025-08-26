@@ -83,8 +83,11 @@ def air_dataset():
 
 
 @pytest.fixture
-def repo():
+def repo(pytestconfig):
     """Generate an icechunk Repository for local filesystem storage."""
+    if not pytestconfig.getoption("--setup", default=False):
+        pytest.skip("repo fixture only available when --setup flag is provided")
+
     prefix = "/tmp/tiles-icechunk/"
     storage = icechunk.local_filesystem_storage(prefix)
     try:
