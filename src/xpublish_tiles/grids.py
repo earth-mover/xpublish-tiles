@@ -33,6 +33,33 @@ Y_COORD_PATTERN = re.compile(
 _GRID_CACHE = cachetools.TTLCache(maxsize=128, ttl=300)
 
 
+def _grab_edges(
+    left: np.ndarray,
+    right: np.ndarray,
+    *,
+    slicer: slice,
+    axis: int,
+    size: int,
+    increasing: bool,
+) -> list:
+    # bottom edge is inclusive; similar to IntervalIndex used in Rectilinear grids
+    if increasing:
+        ys = [
+            np.append(np.nonzero(left <= slicer.stop)[axis], 0).max(),
+            np.append(np.nonzero(right > slicer.stop)[axis], size).min(),
+            np.append(np.nonzero(left <= slicer.start)[axis], 0).max(),
+            np.append(np.nonzero(right > slicer.start)[axis], size).min(),
+        ]
+    else:
+        ys = [
+            np.append(np.nonzero(left <= slicer.stop)[axis], size).min(),
+            np.append(np.nonzero(right > slicer.stop)[axis], 0).max(),
+            np.append(np.nonzero(left <= slicer.start)[axis], size).min(),
+            np.append(np.nonzero(right > slicer.start)[axis], 0).max(),
+        ]
+    return ys
+
+
 def _get_xy_pad(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
     x_pad = numbagg.nanmax(np.abs(np.diff(x)))
     y_pad = numbagg.nanmax(np.abs(np.diff(y)))
@@ -140,12 +167,18 @@ def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
 
 
 class CurvilinearCellIndex(xr.Index):
-    is_global: bool
     uses_0_360: bool
     Xdim: str
     Ydim: str
     X: xr.DataArray
     Y: xr.DataArray
+    xaxis: int
+    yaxis: int
+    y_is_increasing: bool
+    left: np.ndarray
+    right: np.ndarray
+    bottom: np.ndarray
+    top: np.ndarray
 
     def __init__(self, *, X: xr.DataArray, Y: xr.DataArray, Xdim: str, Ydim: str):
         self.X, self.Y = X.reset_coords(drop=True), Y.reset_coords(drop=True)
@@ -178,29 +211,20 @@ class CurvilinearCellIndex(xr.Index):
         slices = _convert_longitude_slice(
             slice(bbox.west, bbox.east), uses_0_360=self.uses_0_360
         )
-        # bottom edge is inclusive; similar to IntervalIndex used in Rectilinear grids
-        if self.y_is_increasing:
-            ys = [
-                np.append(np.nonzero(bottom <= bbox.north)[yaxis], 0).max(),
-                np.append(np.nonzero(top > bbox.north)[yaxis], Ylen).min(),
-                np.append(np.nonzero(bottom <= bbox.south)[yaxis], 0).max(),
-                np.append(np.nonzero(top > bbox.south)[yaxis], Ylen).min(),
-            ]
-        else:
-            ys = [
-                np.append(np.nonzero(bottom <= bbox.north)[yaxis], Ylen).min(),
-                np.append(np.nonzero(top > bbox.north)[yaxis], 0).max(),
-                np.append(np.nonzero(bottom <= bbox.south)[yaxis], Ylen).min(),
-                np.append(np.nonzero(top > bbox.south)[yaxis], 0).max(),
-            ]
+
+        ys = _grab_edges(
+            bottom,
+            top,
+            slicer=slice(bbox.south, bbox.north),
+            axis=yaxis,
+            size=Ylen,
+            increasing=self.y_is_increasing,
+        )
         all_indexers: list[slice] = []
         for sl in slices:
-            xs = [
-                np.append(np.nonzero(left <= sl.start)[xaxis], 0).max(),
-                np.append(np.nonzero(right > sl.start)[xaxis], Xlen).min(),
-                np.append(np.nonzero(left <= sl.stop)[xaxis], 0).max(),
-                np.append(np.nonzero(right > sl.stop)[xaxis], Xlen).min(),
-            ]
+            xs = _grab_edges(
+                left, right, slicer=sl, axis=xaxis, size=Xlen, increasing=True
+            )
             # add 1 to account for slice upper end being exclusive
             indexer = slice(min(xs), max(xs) + 1)
             start, stop, _ = indexer.indices(X.shape[xaxis])
@@ -512,7 +536,6 @@ class RectilinearSelMixin:
         # Note: I am padding here
         # TODO: refactor so this happens elsewhere?
         yslice = slice(max(0, yslice.start - 1), yslice.stop + 1, 1)
-        print("rectilinear sel for y:", yslice)
 
         # Notes:
         # 1. I am relying on these slices being in the correct order
@@ -738,24 +761,13 @@ class Curvilinear(GridSystem):
     def from_dataset(cls, ds: xr.Dataset, crs: CRS, Xname: str, Yname: str) -> Self:
         X, Y = ds[Xname], ds[Yname]
         Xdim, Ydim = Curvilinear._guess_dims(ds, X=X, Y=Y)
-
-        dX = X.diff(Xdim).data
-        dY = Y.diff(Ydim).data
-        if np.median(np.sign(dY)) < 0:
-            south_slicer = slice(1, None)
-            north_slicer = slice(-1)
-        else:
-            south_slicer = slice(-1)
-            north_slicer = slice(1, None)
-        dY = np.abs(dY)
-        bbox = BBox(
-            west=numbagg.nanmin(X.isel({Xdim: slice(-1)}).data - dX / 2),
-            east=numbagg.nanmax(X.isel({Xdim: slice(1, None)}).data + dX / 2),
-            south=numbagg.nanmin(Y.isel({Ydim: south_slicer}).data - dY / 2),
-            north=numbagg.nanmax(Y.isel({Ydim: north_slicer}).data + dY / 2),
-        )
-
         index = CurvilinearCellIndex(X=X, Y=Y, Xdim=Xdim, Ydim=Ydim)
+        bbox = BBox(
+            west=numbagg.nanmin(index.left),
+            east=numbagg.nanmax(index.right),
+            south=numbagg.nanmin(index.bottom),
+            north=numbagg.nanmax(index.top),
+        )
         return cls(
             crs=crs,
             X=Xname,
