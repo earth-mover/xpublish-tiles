@@ -515,10 +515,10 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
             # Handle global datasets
             x_span = east - west
             if x_span >= 359.0:  # Nearly global in longitude
-                if east > 180:
-                    west, east = 0, 360
-                elif west < 0:
+                if west < -179.0:
                     west, east = -180, 180
+                elif east > 181:
+                    west, east = 0, 360
             south = max(-90, south)
             north = min(90, north)
 
