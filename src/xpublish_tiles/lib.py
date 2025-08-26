@@ -104,8 +104,9 @@ def epsg4326to3857(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.nda
 
     # Clamp latitude to avoid infinity at poles in-place
     # Web Mercator is only valid between ~85.05 degrees
-    # MAX_LAT = 85.051128779806604  # atan(sinh(pi)) * 180 / pi
-    # np.clip(y, -MAX_LAT, MAX_LAT, out=y)
+    # Given our padding, we may be sending in data at latitudes poleward of MAX_LAT
+    MAX_LAT = 85.051128779806604  # atan(sinh(pi)) * 180 / pi
+    np.clip(y, -MAX_LAT, MAX_LAT, out=y)
 
     np.deg2rad(x, out=x)
 
@@ -260,10 +261,9 @@ async def transform_coordinates(
         return inx, iny
 
     # preserve rectilinear-ness by reimplementing this (easy) transform
-    if (inx.ndim == 1 and iny.ndim == 1) and (
-        transformer == transformer_from_crs(4326, 3857)
-        or transformer == transformer_from_crs(OTHER_4326, 3857)
-    ):
+    if transformer == transformer_from_crs(
+        4326, 3857
+    ) or transformer == transformer_from_crs(OTHER_4326, 3857):
         newx, newy = epsg4326to3857(inx.data, iny.data)
         return inx.copy(data=newx), iny.copy(data=newy)
 
@@ -335,7 +335,7 @@ def sync_transform_coordinates(
         return inx.copy(data=newx), iny.copy(data=newy)
 
     # Broadcast coordinates
-    bx, by = xr.broadcast(inx, iny)
+    bx, by = tuple(x.data.astype(np.float64, copy=False) for x in xr.broadcast(inx, iny))
 
     # Choose transformation method based on data size
     if bx.size > math.prod(chunk_size):
