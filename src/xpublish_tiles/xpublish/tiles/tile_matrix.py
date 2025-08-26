@@ -288,7 +288,7 @@ def extract_dimension_extents(data_array: xr.DataArray) -> list:
         limited_values = values_list if len(values_list) <= 100 else None
 
         dimension = DimensionExtent(
-            name=dim_name,
+            name=str(dim_name),
             type=dim_type,
             extent=extent,
             values=limited_values,
