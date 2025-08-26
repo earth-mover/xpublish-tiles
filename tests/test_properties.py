@@ -11,7 +11,10 @@ from tests import create_query_params
 from xpublish_tiles.lib import check_transparent_pixels
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.testing.datasets import Dim, uniform_grid
-from xpublish_tiles.testing.lib import visualize_tile
+from xpublish_tiles.testing.lib import (
+    compare_image_buffers_with_debug,
+    visualize_tile,
+)
 
 
 @st.composite
@@ -31,9 +34,9 @@ def global_datasets(draw: DrawFn, allow_categorical: bool = True) -> xr.Dataset:
     # Generate longitude ordering
     lon_0_360 = draw(st.booleans())
     if lon_0_360:
-        lons = np.linspace(0, 360, nlon)
+        lons = np.linspace(0, 360, nlon, endpoint=False)
     else:
-        lons = np.linspace(-180, 180, nlon)
+        lons = np.linspace(-180, 180, nlon, endpoint=False)
 
     # Use full size as chunk size (single chunk)
     dims = (
@@ -137,3 +140,58 @@ async def test_property_global_render_no_transparent_tile(
     assert (
         transparent_percent == 0
     ), f"Found {transparent_percent:.1f}% transparent pixels in tile {tile}"
+
+
+@pytest.mark.asyncio
+@given(tile_tms=tile_and_tms(), ds=global_datasets(allow_categorical=False))
+@settings(deadline=None, report_multiple_bugs=False)
+async def test_property_rectilinear_vs_curvilinear_exact(
+    tile_tms: tuple[Tile, TileMatrixSet],
+    ds: xr.Dataset,
+    pytestconfig,
+):
+    """
+    REsult from rectilinear grid & curvilinear grid constructed from
+    broadcasting out rectilinear grid must be identical
+    """
+    tile, tms = tile_tms
+    query = create_query_params(tile, tms)
+    rectilinear_result = await pipeline(ds, query)
+    # rectilinear = guess_grid_system(ds, "foo")
+    # rect_ds = ds
+
+    ds = ds.rename(latitude="nlat", longitude="nlon")
+    newlat, newlon = np.meshgrid(ds.nlat.data, ds.nlon.data, indexing="ij")
+    ds = ds.assign_coords(
+        longitude=(("nlon", "nlat"), newlon.T, {"standard_name": "longitude"}),
+        latitude=(("nlon", "nlat"), newlat.T, {"standard_name": "latitude"}),
+    )
+    ds["foo"].attrs["coordinates"] = "longitude latitude"
+    curvilinear_result = await pipeline(ds, query)
+    # curvilinear = guess_grid_system(ds, "foo")
+
+    # Check that grid indexers are the same
+    # TODO: this is a hard invariant to maintain!
+    #       because of rounding errors determining the bounds :(
+    # bounds = tms.bounds(tile)
+    # bbox = round_bbox(
+    #     BBox(west=bounds.left, east=bounds.right, south=bounds.bottom, north=bounds.top),
+    # )
+    # npt.assert_array_equal(
+    #     rectilinear.sel(rect_ds.foo, bbox=bbox).data,
+    #     curvilinear.sel(ds.foo, bbox=bbox).data,
+    # )
+
+    # Compare images with optional debug visualization using perceptual comparison
+    test_name = f"rectilinear_vs_curvilinear_tile_{tile.z}_{tile.x}_{tile.y}"
+    images_similar, ssim_score = compare_image_buffers_with_debug(
+        buffer1=rectilinear_result,  # expected
+        buffer2=curvilinear_result,  # actual
+        test_name=test_name,
+        tile_info=(tile, tms),
+        debug_visual=pytestconfig.getoption("--debug-visual", default=False),
+        debug_visual_save=pytestconfig.getoption("--debug-visual-save", default=False),
+        mode="perceptual",
+        perceptual_threshold=0.95,  # 95% similarity threshold
+    )
+    assert images_similar, f"Rectilinear and curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"

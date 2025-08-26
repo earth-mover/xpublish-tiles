@@ -4,13 +4,14 @@ import io
 import re
 import subprocess
 import sys
-from typing import Optional
+from typing import Literal, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 from morecantile import Tile
 from PIL import Image
 from pyproj.aoi import BBox
+from skimage.metrics import structural_similarity as ssim
 
 from xpublish_tiles.lib import check_transparent_pixels
 from xpublish_tiles.logger import logger
@@ -29,14 +30,133 @@ def compare_image_buffers(buffer1: io.BytesIO, buffer2: io.BytesIO) -> bool:
     return np.array_equal(array1, array2)
 
 
+def compare_images_perceptual(buffer1: io.BytesIO, buffer2: io.BytesIO) -> float:
+    """Compare two images using perceptual similarity (SSIM).
+
+    Args:
+        buffer1: First image buffer
+        buffer2: Second image buffer
+        threshold: SSIM threshold for considering images similar
+
+    Returns:
+        tuple: (images_similar, ssim_score) where ssim_score is between -1 and 1
+    """
+    buffer1.seek(0)
+    buffer2.seek(0)
+
+    # Convert to numpy arrays
+    img1 = Image.open(buffer1)
+    img2 = Image.open(buffer2)
+    array1 = np.array(img1)
+    array2 = np.array(img2)
+
+    # Ensure same shape
+    if array1.shape != array2.shape:
+        return 0.0
+
+    # Convert RGBA to RGB if needed (SSIM doesn't handle alpha directly)
+    if array1.shape[2] == 4:
+        # Use alpha channel to blend with white background
+        alpha1 = array1[:, :, 3:4] / 255.0
+        alpha2 = array2[:, :, 3:4] / 255.0
+        rgb1 = array1[:, :, :3] * alpha1 + 255 * (1 - alpha1)
+        rgb2 = array2[:, :, :3] * alpha2 + 255 * (1 - alpha2)
+        array1 = rgb1.astype(np.uint8)
+        array2 = rgb2.astype(np.uint8)
+    else:
+        array1 = array1[:, :, :3]
+        array2 = array2[:, :, :3]
+
+    # Calculate SSIM
+    ssim_score = ssim(array1, array2, channel_axis=2, data_range=255)
+    return ssim_score
+
+
+def compare_image_buffers_with_debug(
+    buffer1: io.BytesIO,
+    buffer2: io.BytesIO,
+    test_name: str = "image_comparison",
+    tile_info: Optional[tuple] = None,
+    debug_visual: bool = False,
+    debug_visual_save: bool = False,
+    mode: Literal["exact", "perceptual"] = "exact",
+    perceptual_threshold: float = 0.95,
+) -> tuple[bool, float]:
+    """
+    Compare two image buffers and optionally show debug visualization if they differ.
+
+    Args:
+        buffer1: First image buffer (expected/reference)
+        buffer2: Second image buffer (actual/test)
+        test_name: Name for the test/comparison
+        tile_info: Optional tuple of (Tile, TileMatrixSet) for geographic context
+        debug_visual: Show visualization in matplotlib window if images differ
+        debug_visual_save: Save visualization to file if images differ
+        mode: Comparison mode - "exact" for pixel-perfect, "perceptual" for SSIM-based
+        perceptual_threshold: SSIM threshold for perceptual similarity (default 0.95)
+
+    Returns:
+        bool: True if images match (exact mode)
+        tuple[bool, float]: (match, ssim_score) if perceptual mode
+    """
+    # Do the comparison based on mode
+    ssim_score = compare_images_perceptual(buffer1, buffer2)
+    if mode == "perceptual":
+        images_equal = ssim_score > perceptual_threshold
+    else:
+        images_equal = compare_image_buffers(buffer1, buffer2)
+
+    # If not equal and debug is requested, create visualization
+    if not images_equal and (debug_visual or debug_visual_save):
+        # Convert buffers to numpy arrays
+        buffer1.seek(0)
+        buffer2.seek(0)
+        array1 = np.array(Image.open(buffer1))
+        array2 = np.array(Image.open(buffer2))
+
+        # Create debug visualization with SSIM info if available
+        create_debug_visualization(
+            actual_array=array2,
+            expected_array=array1,
+            test_name=test_name,
+            tile_info=tile_info,
+            debug_visual_save=debug_visual_save,
+            ssim_score=ssim_score,
+        )
+
+    return images_equal, ssim_score
+
+
 def create_debug_visualization(
     actual_array: np.ndarray,
     expected_array: np.ndarray,
     test_name: str,
     tile_info: Optional[tuple] = None,
     debug_visual_save: bool = False,
+    ssim_score: Optional[float] = None,
 ) -> None:
     """Create a 3-panel debug visualization: Expected | Actual | Differences."""
+
+    # Calculate SSIM if not provided
+    if ssim_score is None:
+        # Handle RGBA to RGB conversion for SSIM calculation
+        array1 = expected_array.copy()
+        array2 = actual_array.copy()
+
+        if array1.shape[2] == 4:
+            # Use alpha channel to blend with white background
+            alpha1 = array1[:, :, 3:4] / 255.0
+            alpha2 = array2[:, :, 3:4] / 255.0
+            rgb1 = array1[:, :, :3] * alpha1 + 255 * (1 - alpha1)
+            rgb2 = array2[:, :, :3] * alpha2 + 255 * (1 - alpha2)
+            array1 = rgb1.astype(np.uint8)
+            array2 = rgb2.astype(np.uint8)
+        else:
+            array1 = array1[:, :, :3]
+            array2 = array2[:, :, :3]
+
+        # Calculate SSIM
+        ssim_score = ssim(array1, array2, channel_axis=2, data_range=255)
 
     def extract_tile_info(test_name: str, tile_info: Optional[tuple]) -> dict:
         """Extract tile coordinates and TMS info from tile parameter."""
@@ -189,9 +309,12 @@ Y: {xy_bounds[1]:.0f} to {xy_bounds[3]:.0f}
         "✓ Minimal differences" if diff_pct < 0.5 else "⚠ Noticeable differences"
     )
 
+    # Add SSIM score if available
+    ssim_text = f" | SSIM: {ssim_score:.4f}" if ssim_score is not None else ""
+
     diff_text = f"""{tile_info_str}
 {bounds_str}
-Diff: {diff_pixels:,}/{total_pixels:,} pixels ({diff_pct:.2f}%) | RGB Δ: max={max_diff:.0f}, mean={mean_diff:.1f} | Transparency: {actual_transparent - expected_transparent:+,} px | {diff_status}"""
+Diff: {diff_pixels:,}/{total_pixels:,} pixels ({diff_pct:.2f}%) | RGB Δ: max={max_diff:.0f}, mean={mean_diff:.1f} | Transparency: {actual_transparent - expected_transparent:+,} px{ssim_text} | {diff_status}"""
 
     # Add text to the bottom panel with minimal padding
     ax_text.text(
@@ -218,6 +341,8 @@ Diff: {diff_pixels:,}/{total_pixels:,} pixels ({diff_pct:.2f}%) | RGB Δ: max={m
             f"   Different pixels: {diff_pixels:,} / {total_pixels:,} ({diff_pct:.3f}%)"
         )
         print(f"   Max RGB difference: {max_diff:.1f} / 255")
+        if ssim_score is not None:
+            print(f"   SSIM score: {ssim_score:.4f}")
         print(
             f"   Transparency change: {actual_transparent - expected_transparent:+,} pixels"
         )
@@ -240,6 +365,8 @@ Diff: {diff_pixels:,}/{total_pixels:,} pixels ({diff_pct:.2f}%) | RGB Δ: max={m
             f"   Different pixels: {diff_pixels:,} / {total_pixels:,} ({diff_pct:.3f}%)"
         )
         print(f"   Max RGB difference: {max_diff:.1f} / 255")
+        if ssim_score is not None:
+            print(f"   SSIM score: {ssim_score:.4f}")
         print(
             f"   Transparency change: {actual_transparent - expected_transparent:+,} pixels"
         )
@@ -463,6 +590,8 @@ def visualize_tile(result: io.BytesIO, tile: Tile) -> None:
 __all__ = [
     "assert_render_matches_snapshot",
     "compare_image_buffers",
+    "compare_image_buffers_with_debug",
+    "compare_images_perceptual",
     "create_debug_visualization",
     "png_snapshot",
     "validate_transparency",

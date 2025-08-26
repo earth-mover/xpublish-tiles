@@ -275,4 +275,27 @@ UTM33S_TILES_EDGE_CASES = [
 # UTM Zone 33S tiles - combined
 UTM33S_TILES = UTM33S_TILES_REGULAR + UTM33S_TILES_EDGE_CASES
 
+# Curvilinear tiles - for testing curvilinear coordinate data
+CURVILINEAR_TILES = [
+    pytest.param(
+        (Tile(x=3, y=5, z=4), WEBMERC_TMS), id="curvilinear_hrrr_east_z4(4/3/5)"
+    ),
+    pytest.param(
+        (Tile(x=7, y=12, z=5), WEBMERC_TMS), id="curvilinear_hrrr_sw_corner_z5(5/7/12)"
+    ),
+    pytest.param(
+        (Tile(x=6, y=11, z=5), WEBMERC_TMS), id="curvilinear_hrrr_se_corner_z5(5/6/11)"
+    ),
+    pytest.param(
+        (Tile(x=27, y=48, z=7), WEBMERC_TMS), id="curvilinear_hrrr_central_z7(7/27/48)"
+    ),
+    pytest.param(
+        (Tile(x=15, y=24, z=6), WEBMERC_TMS), id="curvilinear_central_us_z6(6/15/24)"
+    ),
+    pytest.param(
+        (Tile(x=442, y=744, z=11), WEBMERC_TMS),
+        id="curvilinear_central_us_z11(11/442/744)",
+    ),
+]
+
 TILES = WEBMERC_TILES + WGS84_TILES + ETRS89_TILES

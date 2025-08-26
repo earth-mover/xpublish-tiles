@@ -20,7 +20,9 @@ import xarray as xr
 from xpublish_tiles.logger import logger
 from xpublish_tiles.utils import async_time_debug, time_debug
 
-WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)
+WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)  # from proj
+M_PI = 3.14159265358979323846  # from proj
+M_2_PI = 6.28318530717958647693  # from proj
 
 
 class NoCoverageError(Exception):
@@ -98,22 +100,27 @@ def epsg4326to3857(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.nda
     # This preserves precision for values already in the valid range
     # pyproj accepts both -180 and 180 as valid values without wrapping
     needs_normalization = (x > 180) | (x < -180)
+
+    np.deg2rad(x, out=x)
     if np.any(needs_normalization):
         # Only normalize the values that need it to preserve precision
-        x[needs_normalization] = ((x[needs_normalization] + 180) % 360) - 180
-
+        # doing it this way matches proj
+        x[needs_normalization] = ((x[needs_normalization] + M_PI) % (2 * M_PI)) - M_PI
     # Clamp latitude to avoid infinity at poles in-place
     # Web Mercator is only valid between ~85.05 degrees
+    # Given our padding, we may be sending in data at latitudes poleward of MAX_LAT
     # MAX_LAT = 85.051128779806604  # atan(sinh(pi)) * 180 / pi
     # np.clip(y, -MAX_LAT, MAX_LAT, out=y)
 
-    np.deg2rad(x, out=x)
-
     # Y coordinate: use more stable formula for large latitudes
-    # Using: y = a * atanh(sin(φ)) for better numerical stability
+    # Using: y = a * asinh(tan(φ)) for better numerical stability
+    # following the proj formula
+    # https://github.com/OSGeo/PROJ/blob/ff43c46b19802f5953a1546b05f59c5b9ee65795/src/projections/merc.cpp#L14
+    # https://proj.org/en/stable/operations/projections/merc.html#forward-projection
+    # Note: WebMercator uses the "spherical form"
     np.deg2rad(y, out=y)
-    np.sin(y, out=y)
-    np.arctanh(y, out=y)
+    np.tan(y, out=y)
+    np.arcsinh(y, out=y)
 
     x *= a
     y *= a
@@ -335,7 +342,7 @@ def sync_transform_coordinates(
         return inx.copy(data=newx), iny.copy(data=newy)
 
     # Broadcast coordinates
-    bx, by = xr.broadcast(inx, iny)
+    bx, by = tuple(x.data.astype(np.float64, copy=False) for x in xr.broadcast(inx, iny))
 
     # Choose transformation method based on data size
     if bx.size > math.prod(chunk_size):

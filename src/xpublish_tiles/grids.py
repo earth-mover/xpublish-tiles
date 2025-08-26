@@ -1,11 +1,13 @@
 import itertools
 import re
 import warnings
+from abc import ABC, abstractmethod
 from collections.abc import Hashable
 from dataclasses import dataclass, field
 from typing import Self, cast
 
 import cachetools
+import cf_xarray  # noqa: F401
 import numbagg
 import numpy as np
 import pandas as pd
@@ -20,11 +22,43 @@ from xpublish_tiles.utils import time_debug
 DEFAULT_CRS = CRS.from_epsg(4326)
 
 # Regex patterns for coordinate detection
-X_COORD_PATTERN = re.compile(r"^(x|i|nlon|rlon|ni|x?(nav_lon|lon|glam)[a-z0-9]*)$")
-Y_COORD_PATTERN = re.compile(r"^(y|j|nlat|rlat|nj|y?(nav_lat|lat|gphi)[a-z0-9]*)$")
+X_COORD_PATTERN = re.compile(
+    r"^(x|i|xi|nlon|rlon|ni)[a-z0-9_]*$|^x?(nav_lon|lon|glam)[a-z0-9_]*$"
+)
+Y_COORD_PATTERN = re.compile(
+    r"^(y|j|eta|nlat|rlat|nj)[a-z0-9_]*$|^y?(nav_lat|lat|gphi)[a-z0-9_]*$"
+)
 
 # TTL cache for grid systems (5 minute TTL, max 128 entries)
 _GRID_CACHE = cachetools.TTLCache(maxsize=128, ttl=300)
+
+
+def _grab_edges(
+    left: np.ndarray,
+    right: np.ndarray,
+    *,
+    slicer: slice,
+    axis: int,
+    size: int,
+    increasing: bool,
+) -> list:
+    # bottom edge is inclusive; similar to IntervalIndex used in Rectilinear grids
+    assert slicer.start <= slicer.stop
+    if increasing:
+        ys = [
+            np.append(np.nonzero(left <= slicer.stop)[axis], 0).max(),
+            np.append(np.nonzero(right > slicer.stop)[axis], size).min(),
+            np.append(np.nonzero(left <= slicer.start)[axis], 0).max(),
+            np.append(np.nonzero(right > slicer.start)[axis], size).min(),
+        ]
+    else:
+        ys = [
+            np.append(np.nonzero(left < slicer.stop)[axis], size).min(),
+            np.append(np.nonzero(right >= slicer.stop)[axis], 0).max(),
+            np.append(np.nonzero(left < slicer.start)[axis], size).min(),
+            np.append(np.nonzero(right >= slicer.start)[axis], 0).max(),
+        ]
+    return ys
 
 
 def _get_xy_pad(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
@@ -123,14 +157,96 @@ def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
         raise ValueError("lat/lon vector with size < 2!")
 
     # Calculate differences between adjacent centers
-    halfwidth = np.diff(centers) / 2
+    halfwidth = np.gradient(centers) / 2
 
     # Initialize bounds array
     bounds = np.empty(len(centers) + 1)
-    bounds[0] = centers[0] - halfwidth[0]
-    bounds[1:-1] = centers[:-1] + halfwidth
+    bounds[:-1] = centers - halfwidth
     bounds[-1] = centers[-1] + halfwidth[-1]
     return bounds
+
+
+class CurvilinearCellIndex(xr.Index):
+    uses_0_360: bool
+    Xdim: str
+    Ydim: str
+    X: xr.DataArray
+    Y: xr.DataArray
+    xaxis: int
+    yaxis: int
+    y_is_increasing: bool
+    left: np.ndarray
+    right: np.ndarray
+    bottom: np.ndarray
+    top: np.ndarray
+
+    def __init__(self, *, X: xr.DataArray, Y: xr.DataArray, Xdim: str, Ydim: str):
+        self.X, self.Y = X.reset_coords(drop=True), Y.reset_coords(drop=True)
+        self.uses_0_360 = (X.data > 180).any()
+        self.Xdim, self.Ydim = Xdim, Ydim
+
+        # derived quantities
+        X, Y = self.X.data, self.Y.data
+        xaxis = self.X.get_axis_num(self.Xdim)
+        yaxis = self.Y.get_axis_num(self.Ydim)
+        dX, dY = np.gradient(X, axis=xaxis), np.gradient(Y, axis=yaxis)
+        self.left, self.right = X - dX / 2, X + dX / 2
+        self.bottom, self.top = Y - dY / 2, Y + dY / 2
+        self.y_is_increasing = True
+        if not (self.bottom < self.top).all():
+            self.y_is_increasing = False
+            self.top, self.bottom = self.bottom, self.top
+        self.xaxis, self.yaxis = xaxis, yaxis
+
+    def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
+        X, Y = self.X.data, self.Y.data
+        xaxis, yaxis = self.xaxis, self.yaxis
+        bottom, top, left, right = self.bottom, self.top, self.left, self.right
+        Xlen, Ylen = X.shape[xaxis], Y.shape[yaxis]
+
+        assert len(labels) == 1
+        bbox = next(iter(labels.values()))
+        assert isinstance(bbox, BBox)
+
+        slices = _convert_longitude_slice(
+            slice(bbox.west, bbox.east), uses_0_360=self.uses_0_360
+        )
+
+        ys = _grab_edges(
+            bottom,
+            top,
+            slicer=slice(bbox.south, bbox.north),
+            axis=yaxis,
+            size=Ylen,
+            increasing=self.y_is_increasing,
+        )
+        all_indexers: list[slice] = []
+        for sl in slices:
+            xs = _grab_edges(
+                left, right, slicer=sl, axis=xaxis, size=Xlen, increasing=True
+            )
+            # add 1 to account for slice upper end being exclusive
+            indexer = slice(min(xs), max(xs) + 1)
+            start, stop, _ = indexer.indices(X.shape[xaxis])
+            if len(all_indexers) > 0 and (stop >= all_indexers[-1].start):
+                stop = all_indexers[-1].start
+            all_indexers.append(slice(start, stop))
+
+        slicers = {
+            self.Xdim: all_indexers,
+            # add 1 to account for slice upper end being exclusive
+            # Also add the padding we do in RectilinearSelMixin.sel
+            self.Ydim: slice(max(min(ys) - 1, 0), (max(ys) + 1) + 1),
+        }
+        return IndexSelResult(slicers)
+
+    def equals(self, other: Self) -> bool:
+        return (
+            self.X.equals(other.X)
+            and self.Y.equals(other.Y)
+            and self.Xdim == other.Xdim
+            and self.Ydim == other.Ydim
+        )
 
 
 class LongitudeCellIndex(xr.indexes.PandasIndex):
@@ -305,6 +421,14 @@ def _handle_longitude_selection(
         handle_wraparound = crs.is_geographic and lon_index.is_global
         size = len(lon_index.index)
         sel_result = lon_index.sel({dimname: slice(bbox.west, bbox.east)})
+    elif isinstance(lon_index, CurvilinearCellIndex):
+        X = lon_index.X
+        handle_wraparound = crs.is_geographic and (
+            # FIXME: Store on CurvilinearCellIndex
+            (numbagg.nanmax(X.data) - numbagg.nanmin(X.data)) >= 350
+        )
+        sel_result = lon_index.sel({dimname: bbox})
+        size = lon_index.X.sizes[dimname]
     else:
         assert isinstance(lon_index, xr.indexes.PandasIndex)
         handle_wraparound = (
@@ -337,7 +461,7 @@ def _handle_longitude_selection(
 
 
 @dataclass(eq=False)
-class GridSystem:
+class GridSystem(ABC):
     """
     Marker class for Grid Systems.
 
@@ -345,7 +469,6 @@ class GridSystem:
     bounds, and reference frame for that specific grid system.
     """
 
-    dims: set[str]
     # FIXME: do we really need these Index objects on the class?
     #   - reconsider when we do curvilinear and triangular grids
     #   - The ugliness is that booth would have to set the right indexes on the dataset.
@@ -354,10 +477,14 @@ class GridSystem:
     indexes: tuple[xr.Index, ...]
     Z: str | None = None
 
+    @property
+    @abstractmethod
+    def dims(self) -> set[str]:
+        """Return the set of dimension names for this grid system."""
+        pass
+
     def equals(self, other: Self) -> bool:
         if not isinstance(self, type(other)):
-            return False
-        if self.dims != other.dims:
             return False
         if len(self.indexes) != len(other.indexes):
             return False
@@ -396,7 +523,6 @@ class RectilinearSelMixin:
         """
         assert len(self.indexes) >= 1
         xindex, yindex = self.indexes[0], self.indexes[-1]
-        # yes, this works for increasing & decreasing y
         if y_is_increasing:
             yslice = yindex.sel({self.Y: slice(bbox.south, bbox.north)}).dim_indexers[
                 self.Y
@@ -406,6 +532,8 @@ class RectilinearSelMixin:
                 self.Y
             ]
 
+        # Note: I am padding here
+        # TODO: refactor so this happens elsewhere?
         yslice = slice(max(0, yslice.start - 1), yslice.stop + 1, 1)
 
         # Notes:
@@ -433,12 +561,19 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
     bbox: BBox
     X: str
     Y: str
-    dims: set[str] = field(init=False)
+    Xdim: str = field(init=False)
+    Ydim: str = field(init=False)
     indexes: tuple[rasterix.RasterIndex]
     Z: str | None = None
 
     def __post_init__(self) -> None:
-        self.dims = {self.X, self.Y}
+        self.Xdim = self.X
+        self.Ydim = self.Y
+
+    @property
+    def dims(self) -> set[str]:
+        """Return the set of dimension names for this grid system."""
+        return {self.Xdim, self.Ydim}
 
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         (index,) = self.indexes
@@ -470,12 +605,19 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
     bbox: BBox
     X: str
     Y: str
-    dims: set[str] = field(init=False)
+    Xdim: str = field(init=False)
+    Ydim: str = field(init=False)
     indexes: tuple[xr.indexes.PandasIndex, xr.indexes.PandasIndex]
     Z: str | None = None
 
     def __post_init__(self) -> None:
-        self.dims = {self.X, self.Y}
+        self.Xdim = self.X
+        self.Ydim = self.Y
+
+    @property
+    def dims(self) -> set[str]:
+        """Return the set of dimension names for this grid system."""
+        return {self.Xdim, self.Ydim}
 
     @classmethod
     def from_dataset(
@@ -561,9 +703,84 @@ class Curvilinear(GridSystem):
     bbox: BBox
     X: str
     Y: str
-    dims: set[str]
+    Xdim: str
+    Ydim: str
     indexes: tuple[xr.Index, ...]
     Z: str | None = None
+
+    def _guess_dims(
+        ds: xr.Dataset, *, X: xr.DataArray, Y: xr.DataArray
+    ) -> tuple[str, str]:
+        # Get the dimension names using cf.axes
+        # For curvilinear grids, we need to find the dimensions that map to X and Y axes
+        axes = ds.cf.axes
+
+        # Find X and Y dimensions - these are the dimensions of the 2D coordinate arrays
+        # that correspond to the logical X and Y axes
+        Xdim_candidates = axes.get("X", [])
+        Ydim_candidates = axes.get("Y", [])
+
+        # Filter to only dimensions that are in the 2D coordinate arrays
+        valid_dims = set(X.dims)
+        Xdim = next((str(d) for d in Xdim_candidates if d in valid_dims), None)
+        Ydim = next((str(d) for d in Ydim_candidates if d in valid_dims), None)
+
+        # If we couldn't identify from cf.axes, try guess_coord_axis
+        if not Xdim or not Ydim:
+            # Try to guess coordinate axes
+            ds = ds.cf.guess_coord_axis()
+            axes = ds.cf.axes
+            Xdim_candidates = axes.get("X", [])
+            Ydim_candidates = axes.get("Y", [])
+
+            # Filter to only dimensions that are in X.dims
+            Xdim = next((str(d) for d in Xdim_candidates if d in valid_dims), None)
+            Ydim = next((str(d) for d in Ydim_candidates if d in valid_dims), None)
+
+            # Final fallback: try pattern matching on dimension names
+            if not Xdim or not Ydim:
+                for dim in X.dims:
+                    dim_str = str(dim)
+                    if X_COORD_PATTERN.match(dim_str) and not Xdim:
+                        Xdim = dim_str
+                    elif Y_COORD_PATTERN.match(dim_str) and not Ydim:
+                        Ydim = dim_str
+
+            # If we still can't identify, raise an error
+            if not Xdim or not Ydim:
+                raise RuntimeError(
+                    f"Could not identify X and Y dimensions for curvilinear grid. "
+                    f"Coordinate dimensions are {list(X.dims)}, but could not determine "
+                    f"which corresponds to X and which to Y axes. "
+                    f"Please ensure your dataset has proper CF axis attributes or add SGRID metadata."
+                )
+        return Xdim, Ydim
+
+    @classmethod
+    def from_dataset(cls, ds: xr.Dataset, crs: CRS, Xname: str, Yname: str) -> Self:
+        X, Y = ds[Xname], ds[Yname]
+        Xdim, Ydim = Curvilinear._guess_dims(ds, X=X, Y=Y)
+        index = CurvilinearCellIndex(X=X, Y=Y, Xdim=Xdim, Ydim=Ydim)
+        bbox = BBox(
+            west=numbagg.nanmin(index.left),
+            east=numbagg.nanmax(index.right),
+            south=numbagg.nanmin(index.bottom),
+            north=numbagg.nanmax(index.top),
+        )
+        return cls(
+            crs=crs,
+            X=Xname,
+            Y=Yname,
+            Xdim=Xdim,
+            Ydim=Ydim,
+            bbox=bbox,
+            indexes=(index,),
+        )
+
+    @property
+    def dims(self) -> set[str]:
+        """Return the set of dimension names for this grid system."""
+        return {self.Xdim, self.Ydim}
 
     def equals(self, other: Self) -> bool:
         if (self.crs == other.crs and self.bbox == other.bbox) or (
@@ -580,25 +797,24 @@ class Curvilinear(GridSystem):
         Uses masking to select out the bbox for curvilinear grids where coordinates
         are 2D arrays. Also normalizes longitude coordinates to -180→180 format.
         """
-        # Assert that bbox doesn't cross anti-meridian (Web Mercator tiles never do)
-        assert (
-            bbox.west <= bbox.east
-        ), f"BBox crosses anti-meridian: west={bbox.west} > east={bbox.east}"
-
         # Uses masking to select out the bbox, following the discussion in
         # https://github.com/pydata/xarray/issues/10572
-        X = da[self.X].data
-        Y = da[self.Y].data
+        if self.crs.is_geographic:
+            # FIXME: assert that bbox is in -180 -> 180
+            assert bbox.east < 181
 
-        xinds, yinds = np.nonzero(
-            (X >= bbox.west) & (X <= bbox.east) & (Y >= bbox.south) & (Y <= bbox.north)
+        slicers = _handle_longitude_selection(
+            next(iter(self.indexes)), bbox, self.bbox, self.crs, self.Xdim
         )
-        slicers = {
-            self.X: slice(xinds.min(), xinds.max() + 1),
-            self.Y: slice(yinds.min(), yinds.max() + 1),
-        }
-
-        result = da.isel(slicers)
+        results = [
+            da.isel({self.Xdim: lon_slice, self.Ydim: slicers[self.Ydim]})
+            for lon_slice in cast(list[slice], slicers[self.Xdim])
+        ]
+        # FIXME: this is sync loading!
+        if len(results) > 1:
+            result = xr.concat(results, dim=self.Xdim)
+        else:
+            (result,) = results
         return result
 
     # def sel_ndpoint(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
@@ -632,9 +848,13 @@ class Curvilinear(GridSystem):
 @dataclass(kw_only=True, eq=False)
 class DGGS(GridSystem):
     cells: str
-    dims: set[str]
     indexes: tuple[xr.Index, ...]
     Z: str | None = None
+
+    @property
+    def dims(self) -> set[str]:
+        """Return the set of dimension names for this grid system."""
+        return {self.cells}
 
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
         """Select a subset of the data array using a bounding box."""
@@ -742,7 +962,17 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
                     f"Creating raster affine grid system failed. Detected {grid_mapping=!r}."
                 )
 
-        # FIXME: nice error here
+        if Xname is not None and len(Xname) > 1:
+            if len(ds.data_vars) == 1:
+                da = next(iter(ds.data_vars.values()))
+                if coords_attr := da.attrs.get("coordinates", ""):
+                    Xname = tuple(x for x in Xname if x in coords_attr.split(" "))
+        if Yname is not None and len(Yname) > 1:
+            if len(ds.data_vars) == 1:
+                da = next(iter(ds.data_vars.values()))
+                if coords_attr := da.attrs.get("coordinates", ""):
+                    Yname = tuple(y for y in Yname if y in coords_attr.split(" "))
+
         (Xname,) = Xname
         (Yname,) = Yname
         X = ds[Xname]
@@ -753,24 +983,7 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
                 raise NotImplementedError("Rotated pole grids are not supported yet.")
             return Rectilinear.from_dataset(ds, crs, Xname, Yname)
         elif X.ndim == 2 and Y.ndim == 2:
-            # TODO: bbox is wrong here
-            bbox = BBox(
-                west=numbagg.nanmin(X.data).item(),
-                east=numbagg.nanmax(X.data).item(),
-                south=numbagg.nanmin(Y.data).item(),
-                north=numbagg.nanmax(Y.data).item(),
-            )
-            dims = set(X.dims) | set(Y.dims)
-            # See discussion in https://github.com/pydata/xarray/issues/10572
-            return Curvilinear(
-                crs=crs,
-                X=Xname,
-                Y=Yname,
-                dims=cast(set[str], dims),
-                bbox=bbox,
-                indexes=tuple(),
-            )
-
+            return Curvilinear.from_dataset(ds, crs, Xname, Yname)
         else:
             raise RuntimeError(
                 f"Unknown grid system: X={Xname!r}, ndim={X.ndim}; Y={Yname!r}, ndim={Y.ndim}"

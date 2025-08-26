@@ -171,7 +171,9 @@ class DatashaderRasterRenderer(Renderer):
                         )
                     )
                 )
-                mesh = cvs.quadmesh(data, x=grid.X, y=grid.Y)
+                mesh = cvs.quadmesh(
+                    data.transpose(grid.Ydim, grid.Xdim), x=grid.X, y=grid.Y
+                )
         else:
             raise NotImplementedError(
                 f"Grid type {type(context.grid)} not supported by DatashaderRasterRenderer"

@@ -6,8 +6,15 @@ from pyproj.aoi import BBox
 
 import icechunk
 import xarray as xr
-from xpublish_tiles.testing.datasets import EU3035, HRRR, UTM33S, create_global_dataset
+from xpublish_tiles.testing.datasets import (
+    CURVILINEAR,
+    EU3035,
+    HRRR,
+    UTM33S,
+    create_global_dataset,
+)
 from xpublish_tiles.testing.lib import compare_image_buffers, png_snapshot  # noqa: F401
+from xpublish_tiles.testing.tiles import CURVILINEAR_TILES
 
 # Disable numba, datashader, and PIL debug logs
 logging.getLogger("numba").setLevel(logging.WARNING)
@@ -76,8 +83,11 @@ def air_dataset():
 
 
 @pytest.fixture
-def repo():
+def repo(pytestconfig):
     """Generate an icechunk Repository for local filesystem storage."""
+    if not pytestconfig.getoption("--setup", default=False):
+        pytest.skip("repo fixture only available when --setup flag is provided")
+
     prefix = "/tmp/tiles-icechunk/"
     storage = icechunk.local_filesystem_storage(prefix)
     try:
@@ -133,3 +143,9 @@ def projected_dataset_and_tile(request):
         pytest.skip(f"Tile {tile} does not overlap with dataset bbox {dataset_bbox}")
 
     return (ds, tile, tms)
+
+
+@pytest.fixture(params=CURVILINEAR_TILES)
+def curvilinear_dataset_and_tile(request):
+    tile, tms = request.param
+    return (CURVILINEAR.create(), tile, tms)

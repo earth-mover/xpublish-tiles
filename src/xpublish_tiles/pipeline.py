@@ -397,7 +397,7 @@ def prepare_subset(
 
     has_discontinuity = (
         has_coordinate_discontinuity(
-            subset[grid.X].data, axis=subset[grid.X].get_axis_num(grid.X)
+            subset[grid.X].data, axis=subset[grid.X].get_axis_num(grid.Xdim)
         )
         if grid.crs.is_geographic
         else False
@@ -432,7 +432,7 @@ async def subset_to_bbox(
             fixed = fix_coordinate_discontinuities(
                 newX.data,
                 context.input_to_output,
-                axis=context.subset[grid.X].get_axis_num(grid.X),
+                axis=context.subset[grid.X].get_axis_num(grid.Xdim),
                 bbox=bbox,
             )
             newX = newX.copy(data=fixed)
