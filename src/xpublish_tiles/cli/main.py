@@ -47,7 +47,7 @@ def get_dataset_for_name(
         import icechunk
 
         # Parse the local path - format: local://dataset_name or local:///path/to/repo::dataset_name
-        local_path = name[8:]  # Remove "local://" prefix
+        local_path = name.removeprefix("local://")
 
         # Check if a custom path is specified (separated by ::)
         if "::" in local_path:
@@ -135,7 +135,7 @@ def get_dataset_object_for_name(name: str):
     # Handle local:// paths by extracting the dataset name
     if name.startswith("local://"):
         # Extract dataset name from local path
-        local_path = name[8:]  # Remove "local://" prefix
+        local_path = name.removeprefix("local://")
         if "::" in local_path:
             # Custom path format: local:///path/to/repo::dataset_name
             _, dataset_name = local_path.rsplit("::", 1)

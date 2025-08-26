@@ -36,8 +36,22 @@ from xpublish_tiles.utils import async_time_debug, time_debug
 MAX_RENDERABLE_SIZE = 10_000 * 10_000
 
 
+def round_bbox(bbox: BBox) -> BBox:
+    # https://github.com/developmentseed/morecantile/issues/175
+    # the precision in morecantile tile bounds isn't perfect,
+    # a good way to test is `tms.bounds(Tile(0,0,0))` which should
+    # match the spec exactly: https://docs.ogc.org/is/17-083r4/17-083r4.html#toc48
+    # Example: tests/test_pipeline.py::test_pipeline_tiles[-90->90,0->360-wgs84_prime_meridian(2/2/1)]
+    return BBox(
+        west=round(bbox.west, 8),
+        south=round(bbox.south, 8),
+        east=round(bbox.east, 8),
+        north=round(bbox.north, 8),
+    )
+
+
 @time_debug
-def has_coordinate_discontinuity(coordinates: np.ndarray) -> bool:
+def has_coordinate_discontinuity(coordinates: np.ndarray, *, axis: int) -> bool:
     """
     Detect coordinate discontinuities in geographic longitude coordinates.
 
@@ -69,7 +83,7 @@ def has_coordinate_discontinuity(coordinates: np.ndarray) -> bool:
         return False
 
     x_min, x_max = coordinates.min(), coordinates.max()
-    gaps = np.abs(np.diff(coordinates))
+    gaps = np.abs(np.diff(coordinates, axis=axis))
 
     if len(gaps) == 0:
         return False
@@ -150,7 +164,7 @@ def fix_coordinate_discontinuities(
 
     # Apply the calculated shift
     result = unwrapped_coords + (shift_multiple * coordinate_space_width)
-    return result.reshape(coordinates.shape)
+    return result
 
 
 @time_debug
@@ -163,7 +177,10 @@ def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool
     # For geographic data, check longitude wrapping
     if is_geographic:
         # If the bbox spans more than 360 degrees, it covers the entire globe
-        if (input_bbox.east - input_bbox.west) >= 360:
+        if (input_bbox.east - input_bbox.west) >= 359:
+            return True
+
+        if (grid_bbox.east - grid_bbox.west) >= 359:
             return True
 
         # Convert input bbox to -180 to 180 range
@@ -355,7 +372,10 @@ def prepare_subset(
     )
     if grid.crs.is_geographic:
         west = west - 360 if west > east else west
-    input_bbox = BBox(west, south, east, north)
+
+    input_bbox = BBox(west=west, south=south, east=east, north=north)
+    input_bbox = round_bbox(input_bbox)
+
     if bbox.west > bbox.east:
         raise ValueError(f"Invalid Bbox after transformation: {input_bbox!r}")
 
@@ -376,7 +396,9 @@ def prepare_subset(
         raise TileTooBigError("Tile request too big. Please choose a higher zoom level.")
 
     has_discontinuity = (
-        has_coordinate_discontinuity(subset[grid.X].data)
+        has_coordinate_discontinuity(
+            subset[grid.X].data, axis=subset[grid.X].get_axis_num(grid.X)
+        )
         if grid.crs.is_geographic
         else False
     )
@@ -407,14 +429,13 @@ async def subset_to_bbox(
         )
         # Fix coordinate discontinuities in transformed coordinates if detected
         if context.has_discontinuity:
-            newX = newX.copy(
-                data=fix_coordinate_discontinuities(
-                    newX.data,
-                    context.input_to_output,
-                    axis=context.subset[grid.X].get_axis_num(grid.X),
-                    bbox=bbox,
-                )
+            fixed = fix_coordinate_discontinuities(
+                newX.data,
+                context.input_to_output,
+                axis=context.subset[grid.X].get_axis_num(grid.X),
+                bbox=bbox,
             )
+            newX = newX.copy(data=fixed)
 
         newda = context.subset.assign_coords({context.grid.X: newX, context.grid.Y: newY})
         result[var_name] = PopulatedRenderContext(
