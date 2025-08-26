@@ -11,6 +11,7 @@ import numpy as np
 from morecantile import Tile
 from PIL import Image
 from pyproj.aoi import BBox
+from skimage.metrics import structural_similarity as ssim
 
 from xpublish_tiles.lib import check_transparent_pixels
 from xpublish_tiles.logger import logger
@@ -37,13 +38,11 @@ def compare_images_perceptual(
     Args:
         buffer1: First image buffer
         buffer2: Second image buffer
-        threshold: SSIM threshold for considering images similar (default 0.95)
+        threshold: SSIM threshold for considering images similar
 
     Returns:
         tuple: (images_similar, ssim_score) where ssim_score is between -1 and 1
     """
-    from skimage.metrics import structural_similarity as ssim
-
     buffer1.seek(0)
     buffer2.seek(0)
 
@@ -144,6 +143,27 @@ def create_debug_visualization(
     ssim_score: Optional[float] = None,
 ) -> None:
     """Create a 3-panel debug visualization: Expected | Actual | Differences."""
+
+    # Calculate SSIM if not provided
+    if ssim_score is None:
+        # Handle RGBA to RGB conversion for SSIM calculation
+        array1 = expected_array.copy()
+        array2 = actual_array.copy()
+
+        if array1.shape[2] == 4:
+            # Use alpha channel to blend with white background
+            alpha1 = array1[:, :, 3:4] / 255.0
+            alpha2 = array2[:, :, 3:4] / 255.0
+            rgb1 = array1[:, :, :3] * alpha1 + 255 * (1 - alpha1)
+            rgb2 = array2[:, :, :3] * alpha2 + 255 * (1 - alpha2)
+            array1 = rgb1.astype(np.uint8)
+            array2 = rgb2.astype(np.uint8)
+        else:
+            array1 = array1[:, :, :3]
+            array2 = array2[:, :, :3]
+
+        # Calculate SSIM
+        ssim_score = ssim(array1, array2, channel_axis=2, data_range=255)
 
     def extract_tile_info(test_name: str, tile_info: Optional[tuple]) -> dict:
         """Extract tile coordinates and TMS info from tile parameter."""

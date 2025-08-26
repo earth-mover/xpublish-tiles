@@ -524,7 +524,6 @@ class RectilinearSelMixin:
         """
         assert len(self.indexes) >= 1
         xindex, yindex = self.indexes[0], self.indexes[-1]
-        # yes, this works for increasing & decreasing y
         if y_is_increasing:
             yslice = yindex.sel({self.Y: slice(bbox.south, bbox.north)}).dim_indexers[
                 self.Y
