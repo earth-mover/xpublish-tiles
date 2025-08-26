@@ -21,7 +21,7 @@ from xpublish_tiles.lib import epsg4326to3857
         dtype=np.float64,
         shape=10,
         elements=st.floats(
-            min_value=-85.0, max_value=85.0, allow_nan=False, allow_infinity=False
+            min_value=-90.0, max_value=90.0, allow_nan=False, allow_infinity=False
         ),
     ),
 )
@@ -30,10 +30,8 @@ def test_epsg4326to3857_matches_pyproj(lon, lat):
     x_ours, y_ours = epsg4326to3857(lon, lat)
     transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
     x_pyproj, y_pyproj = transformer.transform(lon, lat)
-    # Compare results with reasonable tolerance (sub-millimeter precision)
-    # Web Mercator coordinates are in meters, so 1e-3 is 1mm
-    np.testing.assert_allclose(x_ours, x_pyproj, rtol=1e-12, atol=1e-9)
-    np.testing.assert_allclose(y_ours, y_pyproj, rtol=1e-12, atol=1e-9)
+    np.testing.assert_allclose(x_ours, x_pyproj)
+    np.testing.assert_allclose(y_ours, y_pyproj)
 
 
 def test_epsg4326to3857_handles_0_360_range():
@@ -51,8 +49,8 @@ def test_epsg4326to3857_handles_0_360_range():
     x_normal, y_normal = epsg4326to3857(lon_normal, lat)
 
     # Results should be identical for wrapped values
-    np.testing.assert_allclose(x_wrapped, x_normal, rtol=1e-12, atol=1e-9)
-    np.testing.assert_allclose(y_wrapped, y_normal, rtol=1e-12, atol=1e-9)
+    np.testing.assert_allclose(x_wrapped, x_normal)
+    np.testing.assert_allclose(y_wrapped, y_normal)
 
     # Test edge case: longitude 359 should map to -1
     lon_edge = np.array([359.0, 1.0])
@@ -63,7 +61,7 @@ def test_epsg4326to3857_handles_0_360_range():
     lon_expected = np.array([-1.0, 1.0])
     x_expected, _ = epsg4326to3857(lon_expected, lat_edge)
 
-    np.testing.assert_allclose(x_edge, x_expected, rtol=1e-12, atol=1e-9)
+    np.testing.assert_allclose(x_edge, x_expected)
 
     # Test that 180° and -180° are treated as different points (matching pyproj)
     lon_extremes = np.array([-180.0, 180.0])
