@@ -43,6 +43,7 @@ def _grab_edges(
     increasing: bool,
 ) -> list:
     # bottom edge is inclusive; similar to IntervalIndex used in Rectilinear grids
+    assert slicer.start <= slicer.stop
     if increasing:
         ys = [
             np.append(np.nonzero(left <= slicer.stop)[axis], 0).max(),
@@ -52,10 +53,10 @@ def _grab_edges(
         ]
     else:
         ys = [
-            np.append(np.nonzero(left <= slicer.stop)[axis], size).min(),
-            np.append(np.nonzero(right > slicer.stop)[axis], 0).max(),
-            np.append(np.nonzero(left <= slicer.start)[axis], size).min(),
-            np.append(np.nonzero(right > slicer.start)[axis], 0).max(),
+            np.append(np.nonzero(left < slicer.stop)[axis], size).min(),
+            np.append(np.nonzero(right >= slicer.stop)[axis], 0).max(),
+            np.append(np.nonzero(left < slicer.start)[axis], size).min(),
+            np.append(np.nonzero(right >= slicer.start)[axis], 0).max(),
         ]
     return ys
 
