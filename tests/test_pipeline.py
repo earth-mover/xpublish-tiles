@@ -7,7 +7,6 @@ import numpy as np
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
-from morecantile import Tile
 from pyproj import CRS
 from pyproj.aoi import BBox
 
@@ -148,41 +147,10 @@ async def test_projected_coordinate_data(
     )
 
 
-@pytest.fixture(
-    params=[
-        pytest.param(
-            (Tile(x=0, y=1, z=2), WEBMERC_TMS), id="curvilinear_hrrr_west_z2(2/0/1)"
-        ),
-        pytest.param(
-            (Tile(x=1, y=1, z=2), WEBMERC_TMS), id="curvilinear_hrrr_east_z2(2/1/1)"
-        ),
-        pytest.param(
-            (Tile(x=1, y=2, z=3), WEBMERC_TMS), id="curvilinear_hrrr_sw_corner_z3(3/1/2)"
-        ),
-        pytest.param(
-            (Tile(x=2, y=2, z=3), WEBMERC_TMS), id="curvilinear_hrrr_se_corner_z3(3/2/2)"
-        ),
-        pytest.param(
-            (Tile(x=3, y=4, z=4), WEBMERC_TMS), id="curvilinear_hrrr_central_z4(4/3/4)"
-        ),
-        pytest.param(
-            (Tile(x=15, y=24, z=6), WEBMERC_TMS), id="curvilinear_central_us_z6(6/15/24)"
-        ),
-    ]
-)
-def curvilinear_dataset_and_tile(request):
-    tile, tms = request.param
-    return (CURVILINEAR.create(), tile, tms)
-
-
+@pytest.mark.asyncio
 async def test_curvilinear_data(curvilinear_dataset_and_tile, png_snapshot, pytestconfig):
     ds, tile, tms = curvilinear_dataset_and_tile
-    tms = morecantile.tms.get("WebMercatorQuad")
-    ds = xr.tutorial.load_dataset("ROMS_example").rename({"salt": "foo"})
-    # tile = Tile(z=10, x=236,y=389)
-    tile = Tile(z=10, x=251, y=425)
     query_params = create_query_params(tile, tms)
-    query_params.colorscalerange = (28, 35)
     result = await pipeline(ds, query_params)
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)

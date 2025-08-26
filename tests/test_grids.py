@@ -13,6 +13,7 @@ from xpublish_tiles.grids import (
     X_COORD_PATTERN,
     Y_COORD_PATTERN,
     Curvilinear,
+    CurvilinearCellIndex,
     GridSystem,
     LongitudeCellIndex,
     RasterAffine,
@@ -130,10 +131,17 @@ from xpublish_tiles.testing.tiles import TILES
                 ),
                 X="lon",
                 Y="lat",
-                Xdim="x",
-                Ydim="y",
+                Xdim="xi_rho",
+                Ydim="eta_rho",
                 Z="s_rho",
-                indexes=(),  # type: ignore[arg-type]
+                indexes=(
+                    CurvilinearCellIndex(
+                        X=CURVILINEAR.create().lon,
+                        Y=CURVILINEAR.create().lat,
+                        Xdim="xi_rho",
+                        Ydim="eta_rho",
+                    ),
+                ),
             ),
             id="roms",
         ),
@@ -148,7 +156,11 @@ from xpublish_tiles.testing.tiles import TILES
                 Xdim="nlon",
                 Ydim="nlat",
                 Z=None,
-                indexes=(),  # type: ignore[arg-type]
+                indexes=(
+                    CurvilinearCellIndex(
+                        X=POPDS.cf["ULONG"], Y=POPDS.cf["ULAT"], Xdim="nlon", Ydim="nlat"
+                    ),
+                ),
             ),
             id="pop",
         ),

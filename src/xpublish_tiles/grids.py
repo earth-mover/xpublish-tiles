@@ -148,9 +148,7 @@ class CurvilinearCellIndex(xr.Index):
     Y: xr.DataArray
 
     def __init__(self, *, X: xr.DataArray, Y: xr.DataArray, Xdim: str, Ydim: str):
-        # The bbox is always -180 -> 180, so lets normalize the coords
-        # TODO: can this be avoided?
-        self.X, self.Y = X, Y
+        self.X, self.Y = X.reset_coords(drop=True), Y.reset_coords(drop=True)
         self.uses_0_360 = (X.data > 180).any()
         self.Xdim, self.Ydim = Xdim, Ydim
 
@@ -217,6 +215,14 @@ class CurvilinearCellIndex(xr.Index):
             self.Ydim: slice(max(min(ys) - 1, 0), (max(ys) + 1) + 1),
         }
         return IndexSelResult(slicers)
+
+    def equals(self, other: Self) -> bool:
+        return (
+            self.X.equals(other.X)
+            and self.Y.equals(other.Y)
+            and self.Xdim == other.Xdim
+            and self.Ydim == other.Ydim
+        )
 
 
 class LongitudeCellIndex(xr.indexes.PandasIndex):
