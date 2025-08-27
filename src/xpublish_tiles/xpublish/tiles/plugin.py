@@ -10,8 +10,9 @@ from xpublish import Dependencies, Plugin, hookimpl
 from xarray import Dataset
 from xpublish_tiles.lib import NoCoverageError, TileTooBigError
 from xpublish_tiles.pipeline import pipeline
+from xpublish_tiles.render.error import render_error_image
 from xpublish_tiles.types import QueryParams
-from xpublish_tiles.utils import async_time_debug, write_error_image
+from xpublish_tiles.utils import async_time_debug
 from xpublish_tiles.xpublish.tiles.metadata import (
     create_tileset_metadata,
     extract_dataset_extents,
@@ -369,8 +370,8 @@ class TilesPlugin(Plugin):
                     raise HTTPException(status_code=status_code, detail=detail)
                 else:
                     # Render error message into image tile
-                    buffer = write_error_image(
-                        detail, width=query.width, height=query.height
+                    buffer = render_error_image(
+                        detail, width=query.width, height=query.height, format=query.f
                     )
 
             return StreamingResponse(
