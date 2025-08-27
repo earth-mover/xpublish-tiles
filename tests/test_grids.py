@@ -18,10 +18,11 @@ from xpublish_tiles.grids import (
     LongitudeCellIndex,
     RasterAffine,
     Rectilinear,
+    _prevent_slice_overlap,
     guess_grid_system,
 )
 from xpublish_tiles.lib import transformer_from_crs
-from xpublish_tiles.pipeline import fix_coordinate_discontinuities
+from xpublish_tiles.pipeline import apply_slicers, fix_coordinate_discontinuities
 from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
     ERA5,
@@ -251,8 +252,9 @@ def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> Non
     assert expected == actual
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("tile,tms", TILES)
-def test_subset(global_datasets, tile, tms):
+async def test_subset(global_datasets, tile, tms):
     """Test subsetting with tiles that span equator, anti-meridian, and poles."""
     ds = global_datasets
     grid = guess_grid_system(ds, "foo")
@@ -261,13 +263,13 @@ def test_subset(global_datasets, tile, tms):
         west=geo_bounds[0], south=geo_bounds[1], east=geo_bounds[2], north=geo_bounds[3]
     )
 
-    actual = grid.sel(ds.foo, bbox=bbox_geo)
-
-    # Basic validation that we got a result
-    assert isinstance(actual, xr.DataArray)
-    assert actual.size > 0
+    slicers = grid.sel(ds.foo, bbox=bbox_geo)
+    assert isinstance(slicers["latitude"], list)
+    assert isinstance(slicers["longitude"], list)
+    assert len(slicers["latitude"]) == 1  # Y dimension should always have one slice
 
     # Check that coordinates are within expected bounds (exact matching with controlled grid)
+    actual = await apply_slicers(ds.foo, grid=grid, slicers=slicers)
     lat_min, lat_max = actual.latitude.min().item(), actual.latitude.max().item()
     assert lat_min <= bbox_geo.south, f"Latitude too low: {lat_min} < {bbox_geo.south}"
     assert lat_max >= bbox_geo.north, f"Latitude too high: {lat_max} > {bbox_geo.north}"
@@ -463,3 +465,43 @@ class TestFixCoordinateDiscontinuities:
             transformed_x, transformer, axis=0, bbox=bbox
         )
         npt.assert_array_equal(fixed, expected)
+
+
+def test_prevent_slice_overlap():
+    """Test _prevent_slice_overlap function with realistic array index scenarios."""
+    # Test single slice (no overlap possible)
+    single = [slice(0, 10)]
+    assert _prevent_slice_overlap(single) == single
+
+    # Test empty list
+    empty = []
+    assert _prevent_slice_overlap(empty) == empty
+
+    # Test typical longitude wrapping pattern (360-element array)
+    # First slice: indices 300-359, Second slice: indices 0-59 (no overlap)
+    longitude_wrap = [slice(300, 360), slice(0, 60)]
+    result = _prevent_slice_overlap(longitude_wrap)
+    # No adjustment needed since 60 < 300
+    expected = [slice(300, 360), slice(0, 60)]
+    assert result == expected
+
+    # Test case where second slice erroneously extends into first slice's range
+    overlap_case = [slice(300, 360), slice(0, 320)]
+    result = _prevent_slice_overlap(overlap_case)
+    # Second slice: stop=320 >= previous_start=300, so stop becomes 300
+    expected = [slice(300, 360), slice(0, 300)]
+    assert result == expected
+
+    multiple = [slice(100, 200), slice(50, 150)]
+    result = _prevent_slice_overlap(multiple)
+    # First: slice(100, 200) - unchanged
+    # Second: slice(50, 150) - stop=150 >= previous_start=100, so stop becomes 100 -> slice(50, 100)
+    expected = [slice(100, 200), slice(50, 100)]
+    assert result == expected
+
+    # Test with step parameter (should be preserved)
+    with_step = [slice(200, 300, 2), slice(100, 250, 3)]
+    result = _prevent_slice_overlap(with_step)
+    # Second slice: stop=250 >= previous_start=200, so stop becomes 200
+    expected = [slice(200, 300, 2), slice(100, 200, 3)]
+    assert result == expected

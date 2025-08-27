@@ -9,7 +9,13 @@ import pyproj
 from pyproj.aoi import BBox
 
 import xarray as xr
-from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear, guess_grid_system
+from xpublish_tiles.grids import (
+    Curvilinear,
+    GridSystem,
+    RasterAffine,
+    Rectilinear,
+    guess_grid_system,
+)
 from xpublish_tiles.lib import (
     EXECUTOR,
     TileTooBigError,
@@ -46,6 +52,35 @@ def round_bbox(bbox: BBox) -> BBox:
         east=round(bbox.east, 8),
         north=round(bbox.north, 8),
     )
+
+
+async def apply_slicers(
+    da: xr.DataArray, *, grid: GridSystem, slicers: dict[str, list[slice]]
+) -> xr.DataArray:
+    grid = cast(RasterAffine | Rectilinear | Curvilinear, grid)
+
+    # Y dimension should always have exactly one slice
+    y_slice = slicers[grid.Ydim][0]
+
+    subsets = [
+        da.isel({grid.Xdim: lon_slice, grid.Ydim: y_slice})
+        for lon_slice in slicers[grid.Xdim]
+    ]
+    if sum(subset.size for subset in subsets) > MAX_RENDERABLE_SIZE:
+        raise TileTooBigError("Tile request too big. Please choose a higher zoom level.")
+    if (
+        np.sum(np.stack([np.array(subset.shape) for subset in subsets], axis=0), axis=0)
+        < 2
+    ).any():
+        raise ValueError("Tile request resulted in insufficient data for rendering.")
+
+    if int(os.environ.get("XPUBLISH_TILES_ASYNC_LOAD", "1")):
+        coros = [subset.load_async() for subset in subsets]
+        results = await asyncio.gather(*coros)
+    else:
+        results = [subset.load() for subset in subsets]
+    subset = xr.concat(results, dim=grid.Xdim) if len(results) > 1 else results[0]
+    return subset
 
 
 @time_debug
@@ -252,13 +287,6 @@ def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = apply_query(ds, variables=query.variables, selectors=query.selectors)
     subsets = await subset_to_bbox(validated, bbox=query.bbox, crs=query.crs)
-    if int(os.environ.get("XPUBLISH_TILES_ASYNC_LOAD", "1")):
-        loaded_contexts = await asyncio.gather(
-            *(sub.async_load() for sub in subsets.values())
-        )
-    else:
-        loaded_contexts = tuple(sub.sync_load() for sub in subsets.values())
-    context_dict = dict(zip(subsets.keys(), loaded_contexts, strict=True))
 
     buffer = io.BytesIO()
     renderer = query.get_renderer()
@@ -268,7 +296,7 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     await loop.run_in_executor(
         EXECUTOR,
         lambda: renderer.render(
-            contexts=context_dict,
+            contexts=subsets,
             buffer=buffer,
             width=query.width,
             height=query.height,
@@ -366,19 +394,9 @@ async def subset_to_bbox(
             result[var_name] = NullRenderContext()
             continue
 
-        # Create extended bbox to prevent coordinate sampling gaps
-        # This is a lot easier to do in coordinate space because of anti-meridian handling
-        subset = grid.sel(array.da, bbox=input_bbox)
-
-        # Check for insufficient data - either dimension has too few points
-        if min(subset.shape) < 2:
-            raise ValueError("Tile request resulted in insufficient data for rendering.")
-
-        if subset.size > MAX_RENDERABLE_SIZE:
-            raise TileTooBigError(
-                "Tile request too big. Please choose a higher zoom level."
-            )
-
+        slicers = grid.sel(array.da, bbox=input_bbox)
+        da = grid.assign_index(array.da)
+        subset = await apply_slicers(da, grid=grid, slicers=slicers)
         has_discontinuity = (
             has_coordinate_discontinuity(
                 subset[grid.X].data, axis=subset[grid.X].get_axis_num(grid.Xdim)
