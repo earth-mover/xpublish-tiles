@@ -401,22 +401,23 @@ def _prevent_slice_overlap(indexers: list[slice]) -> list[slice]:
     """
     Prevent overlapping slices by adjusting stop positions.
 
-    If a slice's stop position would overlap with the next slice's start,
-    adjust the stop to prevent overlap. This is used for anti-meridian
-    longitude selections.
+    This mimics the original logic: if a slice's stop position would overlap
+    with a previously added slice's start, adjust the stop to prevent overlap.
+    This is used for anti-meridian longitude selections where slices may be
+    processed in an order that could cause overlaps.
     """
     if len(indexers) <= 1:
         return indexers
 
     result = []
-    for i, indexer in enumerate(indexers):
+    for indexer in indexers:
         start, stop, step = indexer.start, indexer.stop, indexer.step
 
-        # Check for overlap with next slice
-        if i < len(indexers) - 1:
-            next_start = indexers[i + 1].start
-            if stop >= next_start:
-                stop = next_start
+        # Apply the same logic as the original inline code:
+        # if len(all_indexers) > 0 and (stop >= all_indexers[-1].start):
+        #     stop = all_indexers[-1].start
+        if len(result) > 0 and stop >= result[-1].start:
+            stop = result[-1].start
 
         result.append(slice(start, stop, step))
 
