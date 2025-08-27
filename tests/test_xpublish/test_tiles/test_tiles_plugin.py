@@ -600,7 +600,8 @@ def test_helper_functions():
     assert limits[2].maxTileRow == 3  # 2^2 - 1 = 3
 
 
-def test_bbox_overlap_error():
+@pytest.mark.parametrize("render_errors", [True, False])
+def test_bbox_overlap_error(render_errors):
     """Test that requesting a tile with no overlap with dataset bounds returns proper error"""
     # EU3035 covers Europe, so we'll request a tile that's far away (e.g., in Pacific Ocean)
     rest = xpublish.Rest({"europe": EU3035.create()}, plugins={"tiles": TilesPlugin()})
@@ -610,14 +611,20 @@ def test_bbox_overlap_error():
     # This tile at zoom 9 should be in the Pacific Ocean, far from Europe
     response = client.get(
         "/datasets/europe/tiles/WebMercatorQuad/9/10/200"
-        "?variables=foo&style=raster/viridis&width=256&height=256"
+        f"?variables=foo&style=raster/viridis&width=256&height=256&render_errors={render_errors}"
     )
 
     # Should return 400 Bad Request with appropriate error message
-    assert response.status_code == 400
-    error_detail = response.json()["detail"]
-    assert "no overlap with dataset bounds" in error_detail
-    assert "WebMercatorQuad/9/10/200" in error_detail
+    if render_errors:
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/png"
+        # The content should be a PNG image (error rendered as image)
+        assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+    else:
+        assert response.status_code == 400
+        error_detail = response.json()["detail"]
+        assert "no overlap with dataset bounds" in error_detail
+        assert "WebMercatorQuad/9/10/200" in error_detail
 
 
 def test_para_hires_zoom_level_2_size_limit():

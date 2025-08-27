@@ -10,6 +10,7 @@ from xpublish import Dependencies, Plugin, hookimpl
 from xarray import Dataset
 from xpublish_tiles.lib import NoCoverageError, TileTooBigError
 from xpublish_tiles.pipeline import pipeline
+from xpublish_tiles.render.error import render_error_image
 from xpublish_tiles.types import QueryParams
 from xpublish_tiles.utils import async_time_debug
 from xpublish_tiles.xpublish.tiles.metadata import (
@@ -352,21 +353,26 @@ class TilesPlugin(Plugin):
             )
             try:
                 buffer = await pipeline(dataset, render_params)
+                status_code = 200  # only used as a sentinel value
+                detail = "OK"
             except NoCoverageError:
-                raise HTTPException(  # noqa: B904
-                    status_code=400,
-                    detail=f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} has no overlap with dataset bounds",
-                )
+                status_code = 400
+                detail = f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} has no overlap with dataset bounds"
             except TileTooBigError:
-                raise HTTPException(  # noqa: B904
-                    status_code=413,
-                    detail=f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} request too big. Please choose a higher zoom level.",
-                )
+                status_code = 413
+                detail = f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} request too big. Please choose a higher zoom level."
             except KeyError:
-                raise HTTPException(  # noqa: B904
-                    status_code=422,
-                    detail=f"Invalid variable name(s): {query.variables!r}.",
-                )
+                status_code = 422
+                detail = f"Invalid variable name(s): {query.variables!r}."
+
+            if status_code != 200:
+                if not query.render_errors:
+                    raise HTTPException(status_code=status_code, detail=detail)
+                else:
+                    # Render error message into image tile
+                    buffer = render_error_image(
+                        detail, width=query.width, height=query.height, format=query.f
+                    )
 
             return StreamingResponse(
                 buffer,

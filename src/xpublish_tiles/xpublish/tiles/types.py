@@ -1295,6 +1295,15 @@ class TileQuery(BaseModel):
             },
         ),
     ]
+    render_errors: Annotated[
+        bool,
+        Field(
+            default=False,
+            json_schema_extra={
+                "description": "Whether to render errors as image tiles",
+            },
+        ),
+    ]
 
     @field_validator("style", mode="before")
     @classmethod
