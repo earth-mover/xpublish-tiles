@@ -236,8 +236,7 @@ class CurvilinearCellIndex(xr.Index):
         slicers = {
             self.Xdim: all_indexers,
             # add 1 to account for slice upper end being exclusive
-            # Also add the padding we do in RectilinearSelMixin.sel
-            self.Ydim: slice(max(min(ys) - 1, 0), (max(ys) + 1) + 1),
+            self.Ydim: slice(min(ys), max(ys) + 1),
         }
         return IndexSelResult(slicers)
 
@@ -389,7 +388,7 @@ def pad_slicers(
     slicers: slice | tuple[slice, ...], *, wraparound: bool = False, size: int, pad: int
 ) -> list[slice]:
     idxrs = (slicers,) if isinstance(slicers, slice) else slicers
-    indexers: list[slice] = [slice(*idxr.indices(size)) for idxr in idxrs]
+    indexers: list[slice] = [slice(*idxr.indices(size)) for idxr in idxrs]  # type: ignore[arg-type, var-annotated]
     first, last = indexers[0], indexers[-1]
     if len(indexers) == 1:
         indexers = [slice(max(0, first.start - pad), first.stop + pad)]

@@ -55,7 +55,7 @@ def round_bbox(bbox: BBox) -> BBox:
 
 
 async def apply_slicers(
-    da: xr.DataArray, *, grid: GridSystem, slicers: dict[str, slice | tuple[slice, ...]]
+    da: xr.DataArray, *, grid: GridSystem, slicers: dict[str, slice | list[slice]]
 ) -> xr.DataArray:
     grid = cast(RasterAffine | Rectilinear | Curvilinear, grid)
 
