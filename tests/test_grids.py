@@ -21,7 +21,7 @@ from xpublish_tiles.grids import (
     guess_grid_system,
 )
 from xpublish_tiles.lib import transformer_from_crs
-from xpublish_tiles.pipeline import fix_coordinate_discontinuities
+from xpublish_tiles.pipeline import apply_slicers, fix_coordinate_discontinuities
 from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
     ERA5,
@@ -251,8 +251,9 @@ def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> Non
     assert expected == actual
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("tile,tms", TILES)
-def test_subset(global_datasets, tile, tms):
+async def test_subset(global_datasets, tile, tms):
     """Test subsetting with tiles that span equator, anti-meridian, and poles."""
     ds = global_datasets
     grid = guess_grid_system(ds, "foo")
@@ -261,13 +262,12 @@ def test_subset(global_datasets, tile, tms):
         west=geo_bounds[0], south=geo_bounds[1], east=geo_bounds[2], north=geo_bounds[3]
     )
 
-    actual = grid.sel(ds.foo, bbox=bbox_geo)
-
-    # Basic validation that we got a result
-    assert isinstance(actual, xr.DataArray)
-    assert actual.size > 0
+    slicers = grid.sel(ds.foo, bbox=bbox_geo)
+    assert isinstance(slicers["latitude"], slice)
+    assert isinstance(slicers["longitude"], list)
 
     # Check that coordinates are within expected bounds (exact matching with controlled grid)
+    actual = await apply_slicers(ds.foo, grid=grid, slicers=slicers)
     lat_min, lat_max = actual.latitude.min().item(), actual.latitude.max().item()
     assert lat_min <= bbox_geo.south, f"Latitude too low: {lat_min} < {bbox_geo.south}"
     assert lat_max >= bbox_geo.north, f"Latitude too high: {lat_max} > {bbox_geo.north}"

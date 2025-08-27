@@ -20,6 +20,7 @@ from xarray.core.indexing import IndexSelResult
 from xpublish_tiles.utils import time_debug
 
 DEFAULT_CRS = CRS.from_epsg(4326)
+DEFAULT_PAD = 1
 
 # Regex patterns for coordinate detection
 X_COORD_PATTERN = re.compile(
@@ -384,6 +385,30 @@ def _is_raster_index_global(raster_index, grid_bbox, crs) -> bool:
     return lon_span >= 359.0
 
 
+def pad_slicers(
+    slicers: slice | tuple[slice, ...], *, wraparound: bool = False, size: int, pad: int
+) -> list[slice]:
+    idxrs = (slicers,) if isinstance(slicers, slice) else slicers
+    indexers: list[slice] = [slice(*idxr.indices(size)) for idxr in idxrs]
+    first, last = indexers[0], indexers[-1]
+    if len(indexers) == 1:
+        indexers = [slice(max(0, first.start - pad), first.stop + pad)]
+    else:
+        indexers = [
+            slice(max(0, first.start - pad), first.stop),
+            *indexers[1:-1],
+            slice(last.start, last.stop + pad, 1),
+        ]
+    if wraparound:
+        if indexers[0].start == 0:
+            # Starts at beginning, add wraparound from end
+            indexers = [slice(-pad, None), *indexers]
+        if indexers[-1].stop >= size - 1:
+            # Ends at end, add wraparound from beginning
+            indexers = indexers + [slice(0, pad)]
+    return indexers
+
+
 def _handle_longitude_selection(
     lon_index: xr.Index, bbox: BBox, grid_bbox: BBox, crs: CRS, dimname: Hashable
 ) -> dict[str, list[slice] | slice]:
@@ -393,6 +418,12 @@ def _handle_longitude_selection(
     Uses the longitude index to determine selection strategy. For global RasterIndex or
     LongitudeCellIndex, applies complex anti-meridian and boundary logic. Otherwise,
     uses simple .sel() method to determine slices.
+
+    Notes:
+    1. I am relying on these slices being in the correct order
+    2. There is no point to transforming the coordinate values so that they are contiguous
+       pyproj will reintroduce the discontintuity at the anti-meridian after transforming
+       coordinate systems
 
     Parameters
     ----------
@@ -436,27 +467,13 @@ def _handle_longitude_selection(
         )
         size = len(lon_index.index)
         sel_result = lon_index.sel({dimname: slice(bbox.west, bbox.east)})
-    indexer = sel_result.dim_indexers[dimname]
-    indexers = (indexer,) if isinstance(indexer, slice) else indexer
-    indexers: list[slice] = [slice(*idxr.indices(size)) for idxr in indexers]
-    first, last = indexers[0], indexers[-1]
-    if len(indexers) == 1:
-        indexers = [slice(max(0, first.start - 1), first.stop + 1)]
-    else:
-        indexers = [
-            slice(max(0, first.start - 1), first.stop),
-            *indexers[1:-1],
-            slice(last.start, last.stop + 1, 1),
-        ]
-    if handle_wraparound:
-        if indexers[0].start == 0:
-            # Starts at beginning, add wraparound from end
-            indexers = [slice(-1, None), *indexers]
-        if indexers[-1].stop >= size - 1:
-            # Ends at end, add wraparound from beginning
-            indexers = indexers + [slice(0, 1)]
     new_indexers = sel_result.dim_indexers
-    new_indexers[dimname] = indexers
+    new_indexers[dimname] = pad_slicers(
+        sel_result.dim_indexers[dimname],
+        wraparound=handle_wraparound,
+        size=size,
+        pad=DEFAULT_PAD,
+    )
     return new_indexers
 
 
@@ -483,6 +500,9 @@ class GridSystem(ABC):
         """Return the set of dimension names for this grid system."""
         pass
 
+    def assign_index(self, da: xr.DataArray) -> xr.DataArray:
+        return da
+
     def equals(self, other: Self) -> bool:
         if not isinstance(self, type(other)):
             return False
@@ -502,7 +522,7 @@ class GridSystem(ABC):
             return False
         return self.equals(other)
 
-    def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
+    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, slice | list[slice]]:
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("Subclasses must implement sel method")
 
@@ -516,7 +536,7 @@ class RectilinearSelMixin:
         da: xr.DataArray,
         bbox: BBox,
         y_is_increasing: bool,
-    ) -> xr.DataArray:
+    ) -> dict[str, slice | list[slice]]:
         """
         This method handles coordinate selection for rectilinear grids, automatically
         converting between different longitude conventions (0→360 vs -180→180).
@@ -531,26 +551,24 @@ class RectilinearSelMixin:
             yslice = yindex.sel({self.Y: slice(bbox.north, bbox.south)}).dim_indexers[
                 self.Y
             ]
-
-        # Note: I am padding here
-        # TODO: refactor so this happens elsewhere?
-        yslice = slice(max(0, yslice.start - 1), yslice.stop + 1, 1)
-
-        # Notes:
-        # 1. I am relying on these slices being in the correct order
-        # 2. There is no point to transforming the coordinate values so that they are contiguous
-        #    pyproj will reintroduce the discontintuity at the anti-meridian after transforming
-        #    coordinate systems
-        slicers = _handle_longitude_selection(xindex, bbox, self.bbox, self.crs, self.X)
-        results = [
-            da.isel({self.X: lon_slice, self.Y: yslice})
-            for lon_slice in cast(list[slice], slicers[self.X])
-        ]
-        if len(results) > 1:
-            result = xr.concat(results, dim=self.X)
+        if isinstance(yindex, xr.indexes.PandasIndex):
+            ysize = len(yindex.index)
+        elif isinstance(yindex, rasterix.RasterIndex):
+            ysize = yindex._xy_shape[1]
         else:
-            (result,) = results
-        return result
+            raise ValueError
+        slicers = _handle_longitude_selection(xindex, bbox, self.bbox, self.crs, self.X)
+        slicers[self.Y] = next(
+            iter(
+                pad_slicers(
+                    (yslice,),
+                    wraparound=False,
+                    pad=DEFAULT_PAD,
+                    size=ysize,
+                )
+            )
+        )
+        return slicers
 
 
 @dataclass(kw_only=True, eq=False)
@@ -575,10 +593,13 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
         """Return the set of dimension names for this grid system."""
         return {self.Xdim, self.Ydim}
 
-    def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
+    def assign_index(self, da: xr.DataArray) -> xr.DataArray:
+        (index,) = self.indexes
+        return da.assign_coords(xr.Coordinates.from_xindex(index))
+
+    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, slice | list[slice]]:
         (index,) = self.indexes
         affine = index.transform()
-        da = da.assign_coords(xr.Coordinates.from_xindex(index))
         return super().sel(
             da=da,
             bbox=bbox,
@@ -673,7 +694,7 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
             indexes=(x_index, y_index),
         )
 
-    def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
+    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, slice | list[slice]]:
         """
         Select a subset of the data array using a bounding box.
         """
@@ -790,7 +811,7 @@ class Curvilinear(GridSystem):
         else:
             return False
 
-    def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
+    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, slice | list[slice]]:
         """
         Select a subset of the data array using a bounding box.
 
@@ -799,50 +820,10 @@ class Curvilinear(GridSystem):
         """
         # Uses masking to select out the bbox, following the discussion in
         # https://github.com/pydata/xarray/issues/10572
-        if self.crs.is_geographic:
-            # FIXME: assert that bbox is in -180 -> 180
-            assert bbox.east < 181
-
         slicers = _handle_longitude_selection(
             next(iter(self.indexes)), bbox, self.bbox, self.crs, self.Xdim
         )
-        results = [
-            da.isel({self.Xdim: lon_slice, self.Ydim: slicers[self.Ydim]})
-            for lon_slice in cast(list[slice], slicers[self.Xdim])
-        ]
-        # FIXME: this is sync loading!
-        if len(results) > 1:
-            result = xr.concat(results, dim=self.Xdim)
-        else:
-            (result,) = results
-        return result
-
-    # def sel_ndpoint(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
-    #     # https://github.com/pydata/xarray/issues/10572
-    #     assert len(self.indexes) == 1
-    #     (index,) = self.indexes
-    #     assert isinstance(index, xr.indexes.NDPointIndex)
-
-    #     slicers = {
-    #         self.X: slice(bbox.west, bbox.east),
-    #         self.Y: slice(bbox.south, bbox.north),
-    #     }
-    #     index = da.xindexes[self.X]
-    #     edges = tuple((slicer.start, slicer.stop) for slicer in slicers.values())
-    #     vectorized_sel = {
-    #         name: xr.DataArray(dims=("pts",), data=data)
-    #         for name, data in zip(
-    #             slicers.keys(),
-    #             map(np.asarray, zip(*itertools.product(*edges), strict=False)),
-    #             strict=False,
-    #         )
-    #     }
-    #     idxrs = index.sel(vectorized_sel, method="nearest").dim_indexers
-    #     new_slicers = {
-    #         name: slice(array.min().item(), array.max().item())
-    #         for name, array in idxrs.items()
-    #     }
-    #     return da.isel(new_slicers)
+        return slicers
 
 
 @dataclass(kw_only=True, eq=False)
