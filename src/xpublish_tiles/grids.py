@@ -457,26 +457,17 @@ def pad_slicers(
             indexers = _prevent_slice_overlap(indexers)
 
         # Apply padding
+        first, last = indexers[0], indexers[-1]
         if len(indexers) == 1:
-            first = indexers[0]
             indexers = [
                 slice(max(0, first.start - dim.pad), min(dim.size, first.stop + dim.pad))
             ]
         else:
-            padded = []
-            for i, indexer in enumerate(indexers):
-                if i == 0:
-                    # First slice: pad start only
-                    padded.append(slice(max(0, indexer.start - dim.pad), indexer.stop))
-                elif i == len(indexers) - 1:
-                    # Last slice: pad end only
-                    padded.append(
-                        slice(indexer.start, min(dim.size, indexer.stop + dim.pad))
-                    )
-                else:
-                    # Middle slices: no padding
-                    padded.append(indexer)
-            indexers = padded
+            indexers = [
+                slice(max(0, first.start - dim.pad), first.stop),
+                *indexers[1:-1],
+                slice(last.start, min(dim.size, last.stop + dim.pad)),
+            ]
 
         # Apply wraparound if enabled for this dimension
         if dim.wraparound:
