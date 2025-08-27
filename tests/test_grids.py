@@ -263,8 +263,9 @@ async def test_subset(global_datasets, tile, tms):
     )
 
     slicers = grid.sel(ds.foo, bbox=bbox_geo)
-    assert isinstance(slicers["latitude"], slice)
+    assert isinstance(slicers["latitude"], list)
     assert isinstance(slicers["longitude"], list)
+    assert len(slicers["latitude"]) == 1  # Y dimension should always have one slice
 
     # Check that coordinates are within expected bounds (exact matching with controlled grid)
     actual = await apply_slicers(ds.foo, grid=grid, slicers=slicers)

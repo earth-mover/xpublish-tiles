@@ -55,13 +55,16 @@ def round_bbox(bbox: BBox) -> BBox:
 
 
 async def apply_slicers(
-    da: xr.DataArray, *, grid: GridSystem, slicers: dict[str, slice | list[slice]]
+    da: xr.DataArray, *, grid: GridSystem, slicers: dict[str, list[slice]]
 ) -> xr.DataArray:
     grid = cast(RasterAffine | Rectilinear | Curvilinear, grid)
 
+    # Y dimension should always have exactly one slice
+    y_slice = slicers[grid.Ydim][0]
+
     subsets = [
-        da.isel({grid.Xdim: lon_slice, grid.Ydim: slicers[grid.Ydim]})
-        for lon_slice in cast(list[slice], slicers[grid.Xdim])
+        da.isel({grid.Xdim: lon_slice, grid.Ydim: y_slice})
+        for lon_slice in slicers[grid.Xdim]
     ]
     if sum(subset.size for subset in subsets) > MAX_RENDERABLE_SIZE:
         raise TileTooBigError("Tile request too big. Please choose a higher zoom level.")
