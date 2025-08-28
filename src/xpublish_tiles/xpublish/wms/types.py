@@ -1,4 +1,4 @@
-from typing import Any, Literal, Union, overload
+from typing import Any, Literal, Optional, Union, overload
 
 from pydantic import (
     AliasChoices,
@@ -48,8 +48,8 @@ class WMSGetMapQuery(WMSBaseQuery):
     layers: str = Field(
         validation_alias=AliasChoices("layername", "layers", "query_layers"),
     )
-    styles: tuple[str, str] = Field(
-        ("raster", "viridis"),
+    styles: Optional[tuple[str, str]] = Field(
+        ("raster", "default"),
         description="Style to use for the query. Defaults to raster/default. Default may be replaced by the name of any colormap available to matplotlibs",
     )
     crs: CRS = Field(
@@ -98,7 +98,10 @@ class WMSGetMapQuery(WMSBaseQuery):
     @field_validator("styles", mode="before")
     @classmethod
     def validate_style(cls, v: str | None) -> tuple[str, str] | None:
-        return validate_style(v)
+        valid_style = validate_style(v)
+        if valid_style is None:
+            return ("raster", "default")
+        return valid_style
 
     @field_validator("crs", mode="before")
     @classmethod

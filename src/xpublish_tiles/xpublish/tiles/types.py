@@ -1258,9 +1258,9 @@ class TileQuery(BaseModel):
         ),
     ]
     style: Annotated[
-        tuple[str, str],
+        Optional[tuple[str, str]],
         Field(
-            default="raster/viridis",
+            default="raster/default",
             json_schema_extra={
                 "description": "Style and colormap to use for the tile, in the format of `{style}/{colormap}`",
             },
@@ -1308,7 +1308,10 @@ class TileQuery(BaseModel):
     @field_validator("style", mode="before")
     @classmethod
     def validate_style(cls, v: str | None) -> tuple[str, str] | None:
-        return validate_style(v)
+        valid_style = validate_style(v)
+        if valid_style is None:
+            return ("raster", "default")
+        return valid_style
 
     @field_validator("colorscalerange", mode="before")
     @classmethod
