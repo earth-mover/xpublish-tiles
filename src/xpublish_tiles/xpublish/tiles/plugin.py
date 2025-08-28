@@ -11,6 +11,7 @@ from xpublish import Dependencies, Plugin, hookimpl
 from xarray import Dataset
 from xpublish_tiles.lib import TileTooBigError
 from xpublish_tiles.pipeline import pipeline
+from xpublish_tiles.render import RenderRegistry
 from xpublish_tiles.types import QueryParams
 from xpublish_tiles.utils import async_time_debug
 from xpublish_tiles.xpublish.tiles.metadata import (

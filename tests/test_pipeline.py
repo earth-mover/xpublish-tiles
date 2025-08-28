@@ -304,7 +304,7 @@ async def test_transparent_tile_no_coverage(pytestconfig):
         style="raster",
         width=256,
         height=256,
-        cmap="viridis",
+        variant="viridis",
         colorscalerange=None,
         format=ImageFormat.PNG,
     )
