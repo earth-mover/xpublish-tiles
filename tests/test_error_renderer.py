@@ -1,6 +1,6 @@
 import pytest
 
-from xpublish_tiles.render.error import render_error_image
+from xpublish_tiles.render import render_error_image
 from xpublish_tiles.types import ImageFormat
 
 

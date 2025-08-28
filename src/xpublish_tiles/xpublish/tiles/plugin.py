@@ -1,5 +1,6 @@
 """OGC Tiles API XPublish Plugin"""
 
+import io
 from enum import Enum
 from typing import Annotated
 
@@ -8,9 +9,9 @@ from fastapi.responses import StreamingResponse
 from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import Dataset
-from xpublish_tiles.lib import NoCoverageError, TileTooBigError
+from xpublish_tiles.lib import TileTooBigError
 from xpublish_tiles.pipeline import pipeline
-from xpublish_tiles.render.error import render_error_image
+from xpublish_tiles.render import RenderRegistry
 from xpublish_tiles.types import QueryParams
 from xpublish_tiles.utils import async_time_debug
 from xpublish_tiles.xpublish.tiles.metadata import (
@@ -112,7 +113,6 @@ class TilesPlugin(Plugin):
                 keywords = []
 
             # Get available styles from registered renderers
-            from xpublish_tiles.render import RenderRegistry
 
             styles = []
             for renderer_cls in RenderRegistry.all().values():
@@ -271,8 +271,12 @@ class TilesPlugin(Plugin):
             # dataset path prefix already includes /datasets/{id} by xpublish; request.url.path points to /datasets/{id}/tiles/{tms}/tilejson.json
             # Construct sibling tiles path replacing trailing segment
             tiles_path = request.url.path.rsplit("/", 1)[0]  # drop 'tilejson.json'
+
+            style = query.style[0] if query.style else "raster"
+            variant = query.style[1] if query.style else "default"
+
             # XYZ template
-            url_template = f"{base_url}{tiles_path}/{{z}}/{{y}}/{{x}}?variables={','.join(query.variables)}&style={query.style[0]}/{query.style[1]}&width={query.width}&height={query.height}&f={query.f}"
+            url_template = f"{base_url}{tiles_path}/{{z}}/{{y}}/{{x}}?variables={','.join(query.variables)}&style={style}/{variant}&width={query.width}&height={query.height}&f={query.f}"
             # Append selectors
             if selectors:
                 selector_qs = "&".join(f"{k}={v}" for k, v in selectors.items())
@@ -339,11 +343,14 @@ class TilesPlugin(Plugin):
                     if param_name in dataset.dims:
                         selectors[param_name] = param_value
 
+            style = query.style[0] if query.style else "raster"
+            variant = query.style[1] if query.style else "default"
+
             render_params = QueryParams(
                 variables=query.variables,
-                style=query.style[0],
+                style=style,
                 colorscalerange=query.colorscalerange,
-                cmap=query.style[1],
+                variant=variant,
                 crs=crs,
                 bbox=bbox,
                 width=query.width,
@@ -355,9 +362,6 @@ class TilesPlugin(Plugin):
                 buffer = await pipeline(dataset, render_params)
                 status_code = 200  # only used as a sentinel value
                 detail = "OK"
-            except NoCoverageError:
-                status_code = 400
-                detail = f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} has no overlap with dataset bounds"
             except TileTooBigError:
                 status_code = 413
                 detail = f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} request too big. Please choose a higher zoom level."
@@ -369,9 +373,15 @@ class TilesPlugin(Plugin):
                 if not query.render_errors:
                     raise HTTPException(status_code=status_code, detail=detail)
                 else:
-                    # Render error message into image tile
-                    buffer = render_error_image(
-                        detail, width=query.width, height=query.height, format=query.f
+                    # Use renderer's render_error method for all error types
+                    renderer = render_params.get_renderer()
+                    buffer = io.BytesIO()
+                    renderer.render_error(
+                        buffer=buffer,
+                        width=query.width,
+                        height=query.height,
+                        message=detail,
+                        format=query.f,
                     )
 
             return StreamingResponse(

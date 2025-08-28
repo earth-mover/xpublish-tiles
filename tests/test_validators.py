@@ -140,6 +140,10 @@ class TestValidateStyle:
         result = validate_style(None)
         assert result is None
 
+    def test_empty_string(self):
+        result = validate_style("")
+        assert result is None
+
     def test_invalid_format_single_value(self):
         with pytest.raises(
             ValueError,
@@ -153,13 +157,6 @@ class TestValidateStyle:
             match="style must be in the format 'stylename/palettename'. A common default for this is 'raster/default'",
         ):
             validate_style("raster/default/extra")
-
-    def test_invalid_format_empty_string(self):
-        with pytest.raises(
-            ValueError,
-            match="style must be in the format 'stylename/palettename'. A common default for this is 'raster/default'",
-        ):
-            validate_style("")
 
     def test_invalid_style_name(self):
         with pytest.raises(

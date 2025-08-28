@@ -19,13 +19,13 @@ class QuiverRenderer(Renderer):
         buffer,
         width: int,
         height: int,
-        cmap: str,
+        variant: str,
         colorscalerange=None,
         format=None,
     ) -> None:
         # Handle "default" alias
-        if cmap == "default":
-            cmap = self.default_variant()
+        if variant == "default":
+            variant = self.default_variant()
 
         # look at CF metadata to find u, v
         pass

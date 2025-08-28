@@ -1,7 +1,10 @@
+import io
+
 import numpy as np
 import pytest
 import xpublish
 from fastapi.testclient import TestClient
+from PIL import Image
 
 import xarray as xr
 from xpublish_tiles.testing.datasets import EU3035, PARA_HIRES
@@ -600,9 +603,8 @@ def test_helper_functions():
     assert limits[2].maxTileRow == 3  # 2^2 - 1 = 3
 
 
-@pytest.mark.parametrize("render_errors", [True, False])
-def test_bbox_overlap_error(render_errors):
-    """Test that requesting a tile with no overlap with dataset bounds returns proper error"""
+def test_no_bbox_overlap_transparent_png():
+    """Test that requesting a tile with no overlap with dataset bounds returns transparent PNG"""
     # EU3035 covers Europe, so we'll request a tile that's far away (e.g., in Pacific Ocean)
     rest = xpublish.Rest({"europe": EU3035.create()}, plugins={"tiles": TilesPlugin()})
     client = TestClient(rest.app)
@@ -611,20 +613,21 @@ def test_bbox_overlap_error(render_errors):
     # This tile at zoom 9 should be in the Pacific Ocean, far from Europe
     response = client.get(
         "/datasets/europe/tiles/WebMercatorQuad/9/10/200"
-        f"?variables=foo&style=raster/viridis&width=256&height=256&render_errors={render_errors}"
+        "?variables=foo&style=raster/viridis&width=512&height=512"
     )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
 
-    # Should return 400 Bad Request with appropriate error message
-    if render_errors:
-        assert response.status_code == 200
-        assert response.headers["content-type"] == "image/png"
-        # The content should be a PNG image (error rendered as image)
-        assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
-    else:
-        assert response.status_code == 400
-        error_detail = response.json()["detail"]
-        assert "no overlap with dataset bounds" in error_detail
-        assert "WebMercatorQuad/9/10/200" in error_detail
+    # Verify the returned image is fully transparent
+    img = Image.open(io.BytesIO(response.content))
+    img = img.convert("RGBA")
+
+    # Check that all pixels are fully transparent (alpha = 0)
+    alpha_channel = np.array(img)[:, :, 3]
+    assert np.all(alpha_channel == 0), "All pixels should be fully transparent"
+
+    # Also check image dimensions
+    assert img.size == (512, 512), "Image should have correct dimensions"
 
 
 def test_para_hires_zoom_level_2_size_limit():

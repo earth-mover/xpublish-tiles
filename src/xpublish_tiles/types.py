@@ -73,7 +73,7 @@ class QueryParams:
     style: str
     width: int
     height: int
-    cmap: str
+    variant: str
     format: ImageFormat
     colorscalerange: tuple[float, float] | None = None
 
