@@ -11,11 +11,11 @@ import datashader.transfer_functions as tf  # type: ignore
 import matplotlib as mpl  # type: ignore
 import numbagg
 import numpy as np
+from PIL import Image
 from scipy.interpolate import NearestNDInterpolator
 
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear
-from xpublish_tiles.lib import NoCoverageError
 from xpublish_tiles.logger import logger
 from xpublish_tiles.render import Renderer, register_renderer
 from xpublish_tiles.types import (
@@ -125,9 +125,13 @@ class DatashaderRasterRenderer(Renderer):
         self.validate(contexts)
         (context,) = contexts.values()
         if isinstance(context, NullRenderContext):
-            raise NoCoverageError("no overlap with requested bbox.")
+            im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            im.save(buffer, format=str(format))
+            return
+
         if TYPE_CHECKING:
             assert isinstance(context, PopulatedRenderContext)
+
         bbox = context.bbox
         cvs = dsh.Canvas(
             plot_height=height,

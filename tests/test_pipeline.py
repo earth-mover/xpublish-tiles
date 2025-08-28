@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
+from PIL import Image
 from pyproj import CRS
 from pyproj.aoi import BBox
 
@@ -276,3 +277,48 @@ async def test_bad_latitude_coordinates(png_snapshot, pytestconfig):
     if pytestconfig.getoption("--visualize"):
         visualize_tile(render, tile)
     assert_render_matches_snapshot(render, png_snapshot)
+
+
+async def test_transparent_tile_no_coverage(pytestconfig):
+    """Test that a fully transparent PNG is returned when there's no bbox coverage."""
+    # Create dataset bounded between lon=0 to 90, lat=0 to 90
+    lon = np.linspace(0, 90, 91)
+    lat = np.linspace(0, 90, 91)
+    ds = xr.DataArray(
+        np.ones(shape=(91, 91), dtype="f4"),
+        dims=("lat", "lon"),
+        coords={
+            "lon": ("lon", lon, {"standard_name": "longitude"}),
+            "lat": ("lat", lat, {"standard_name": "latitude"}),
+        },
+        attrs={"valid_min": 0, "valid_max": 1},
+        name="foo",
+    ).to_dataset()
+
+    # Request a tile in bbox (-180 to -10, -80 to -70) - no overlap with dataset
+    query = QueryParams(
+        variables=["foo"],
+        crs=OutputCRS(CRS.from_user_input(4326)),
+        bbox=OutputBBox(BBox(west=-180, south=-80, east=-10, north=-70)),
+        selectors={},
+        style="raster",
+        width=256,
+        height=256,
+        cmap="viridis",
+        colorscalerange=None,
+        format=ImageFormat.PNG,
+    )
+
+    result = await pipeline(ds, query)
+
+    # Verify the tile is fully transparent
+    result.seek(0)
+    img = Image.open(result)
+    img = img.convert("RGBA")
+
+    # Check that all pixels are fully transparent (alpha = 0)
+    alpha_channel = np.array(img)[:, :, 3]
+    assert np.all(alpha_channel == 0), "All pixels should be fully transparent"
+
+    # Also check image dimensions
+    assert img.size == (256, 256), "Image should have correct dimensions"

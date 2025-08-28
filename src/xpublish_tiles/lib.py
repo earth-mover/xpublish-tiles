@@ -25,12 +25,6 @@ M_PI = 3.14159265358979323846  # from proj
 M_2_PI = 6.28318530717958647693  # from proj
 
 
-class NoCoverageError(Exception):
-    """Raised when a tile has no overlap with the dataset bounds."""
-
-    pass
-
-
 class TileTooBigError(Exception):
     """Raised when a tile request would result in too much data to render."""
 
