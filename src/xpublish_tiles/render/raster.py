@@ -163,21 +163,36 @@ class DatashaderRasterRenderer(Renderer):
                     )
             else:
                 data = self.maybe_cast_data(context.da)
-                # FIXME: without this broadcasting
-                # tests/test_pipeline.py::test_projected_coordinate_data[eu3035_etrs89_center_europe(2/1/1)]
-                # is a fully transparent tile; even though it should be fully populated.
-                data = data.assign_coords(
-                    dict(
-                        zip(
-                            (grid.X, grid.Y),
-                            xr.broadcast(data[grid.X], data[grid.Y]),
-                            strict=False,
+                ydata = data[grid.Y]
+                if (
+                    ydata.ndim == 1
+                    and
+                    # decreasing coordinates are buggy
+                    # https://github.com/holoviz/datashader/issues/1438
+                    (ydata[1] - ydata[0] < 0)
+                ):
+                    data = data.isel({grid.Ydim: slice(None, None, -1)})
+                if ydata.ndim == 1 and (
+                    # for high zoom tiles are usually 3x3
+                    # use curvilinear code path here
+                    # https://github.com/holoviz/datashader/issues/1439
+                    ydata.size < 10
+                ):
+                    data = data.assign_coords(
+                        dict(
+                            zip(
+                                (grid.X, grid.Y),
+                                xr.broadcast(data[grid.X], data[grid.Y]),
+                                strict=False,
+                            )
                         )
                     )
-                )
-                mesh = cvs.quadmesh(
-                    data.transpose(grid.Ydim, grid.Xdim), x=grid.X, y=grid.Y
-                )
+                # Lock is only used when tbb is not available (e.g., on macOS)
+                # AND if we use the rectilinear or raster code path
+                with LOCK if data[grid.Y].ndim == 1 else contextlib.nullcontext():
+                    mesh = cvs.quadmesh(
+                        data.transpose(grid.Ydim, grid.Xdim), x=grid.X, y=grid.Y
+                    )
         else:
             raise NotImplementedError(
                 f"Grid type {type(context.grid)} not supported by DatashaderRasterRenderer"
