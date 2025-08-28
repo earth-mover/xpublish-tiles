@@ -1,5 +1,6 @@
 """OGC Tiles API XPublish Plugin"""
 
+import io
 from enum import Enum
 from typing import Annotated
 
@@ -10,7 +11,6 @@ from xpublish import Dependencies, Plugin, hookimpl
 from xarray import Dataset
 from xpublish_tiles.lib import TileTooBigError
 from xpublish_tiles.pipeline import pipeline
-from xpublish_tiles.render.error import render_error_image
 from xpublish_tiles.types import QueryParams
 from xpublish_tiles.utils import async_time_debug
 from xpublish_tiles.xpublish.tiles.metadata import (
@@ -366,9 +366,15 @@ class TilesPlugin(Plugin):
                 if not query.render_errors:
                     raise HTTPException(status_code=status_code, detail=detail)
                 else:
-                    # Render error message into image tile
-                    buffer = render_error_image(
-                        detail, width=query.width, height=query.height, format=query.f
+                    # Use renderer's render_error method for all error types
+                    renderer = render_params.get_renderer()
+                    buffer = io.BytesIO()
+                    renderer.render_error(
+                        buffer=buffer,
+                        width=query.width,
+                        height=query.height,
+                        message=detail,
+                        format=query.f,
                     )
 
             return StreamingResponse(

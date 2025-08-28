@@ -1,9 +1,27 @@
 import io
+from abc import ABC, abstractmethod
 from numbers import Number
 from typing import TYPE_CHECKING
 
+from PIL import Image, ImageDraw
+
+from xpublish_tiles.types import ImageFormat
+
 if TYPE_CHECKING:
     from xpublish_tiles.types import RenderContext
+
+
+def render_error_image(
+    message: str, *, width: int, height: int, format: ImageFormat
+) -> io.BytesIO:
+    """Render an error message as an image tile."""
+    buffer = io.BytesIO()
+    img = Image.new("RGBA", (width, height), (255, 0, 0, 255))
+    draw = ImageDraw.Draw(img)
+    draw.text((10, 10), message, fill=(255, 255, 255, 255))
+    img.save(buffer, format=format)
+    buffer.seek(0)
+    return buffer
 
 
 class RenderRegistry:
@@ -54,7 +72,8 @@ def register_renderer(cls: type["Renderer"]) -> type["Renderer"]:
     return cls
 
 
-class Renderer:
+class Renderer(ABC):
+    @abstractmethod
     def render(
         self,
         *,
@@ -64,8 +83,25 @@ class Renderer:
         height: int,
         cmap: str,
         colorscalerange: tuple[Number, Number] | None = None,
+        format: ImageFormat = ImageFormat.PNG,
     ):
-        raise NotImplementedError
+        pass
+
+    @abstractmethod
+    def render_error(
+        self,
+        *,
+        buffer: io.BytesIO,
+        width: int,
+        height: int,
+        message: str,
+        format: ImageFormat = ImageFormat.PNG,
+        cmap: str = "",
+        colorscalerange: tuple[Number, Number] | None = None,
+        **kwargs,
+    ):
+        """Render an error tile with the given message."""
+        pass
 
     @staticmethod
     def style_id() -> str:
