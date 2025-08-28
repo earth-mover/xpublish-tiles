@@ -135,4 +135,4 @@ known-first-party = ["dask", "distributed", "icechunk", "xarray", "zarr"]
 ban-relative-imports = "all"
 
 [tool.uv.sources]
-datashader = { path = "../datashader" }
+datashader = { path = "../datashader", editable = true }

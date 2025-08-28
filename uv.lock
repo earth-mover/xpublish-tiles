@@ -841,7 +841,7 @@ wheels = [
 
 [[package]]
 name = "datashader"
-source = { directory = "../datashader" }
+source = { editable = "../datashader" }
 dependencies = [
     { name = "colorcet" },
     { name = "multipledispatch" },
@@ -3784,7 +3784,7 @@ requires-dist = [
     { name = "cachetools", specifier = ">=5.5.2" },
     { name = "cf-xarray", specifier = ">=0.10.6" },
     { name = "cftime", specifier = ">=1.6.4.post1" },
-    { name = "datashader", directory = "../datashader" },
+    { name = "datashader", editable = "../datashader" },
     { name = "fastapi" },
     { name = "hypothesis", marker = "extra == 'testing'", specifier = ">=6.136.6" },
     { name = "matplotlib", marker = "extra == 'testing'", specifier = ">=3.10.3" },

@@ -151,8 +151,10 @@ def _convert_longitude_slice(lon_slice: slice, *, uses_0_360) -> tuple[slice, ..
 
 def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
     """
-    Compute interval bounds from cell centers, handling non-uniform spacing.
-    Handles both increasing and decreasing coordinate arrays.
+    Compute interval bounds from cell centers, matching datashader's infer_interval_breaks.
+
+    This implementation exactly matches datashader.resampling.infer_interval_breaks
+    to ensure consistent rendering behavior.
 
     Parameters
     ----------
@@ -164,18 +166,23 @@ def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
     np.ndarray
         Array of bounds with length len(centers) + 1
     """
-    size = centers.size
-    if size < 2:
-        raise ValueError("lat/lon vector with size < 2!")
+    if centers.size == 0:
+        return np.array([], dtype=centers.dtype)
 
-    # Calculate differences between adjacent centers
-    halfwidth = np.gradient(centers) / 2
+    # Use datashader's algorithm: 0.5 * np.diff for deltas
+    deltas = 0.5 * np.diff(centers)
 
-    # Initialize bounds array
-    bounds = np.empty(len(centers) + 1)
-    bounds[:-1] = centers - halfwidth
-    bounds[-1] = centers[-1] + halfwidth[-1]
-    return bounds
+    # First boundary: first center minus first delta
+    first = centers[0] - deltas[0]
+
+    # Last boundary: last center plus last delta
+    last = centers[-1] + deltas[-1]
+
+    # Middle boundaries: centers + deltas (excluding the last center)
+    middle = centers[:-1] + deltas
+
+    # Concatenate: [first, middle, last]
+    return np.concatenate([[first], middle, [last]])
 
 
 class CurvilinearCellIndex(xr.Index):
