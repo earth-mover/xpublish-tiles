@@ -62,7 +62,7 @@ class Renderer:
         buffer: io.BytesIO,
         width: int,
         height: int,
-        cmap: str,
+        variant: str,
         colorscalerange: tuple[Number, Number] | None = None,
     ):
         raise NotImplementedError
