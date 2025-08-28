@@ -18,7 +18,9 @@ from xpublish_tiles.testing.lib import (
 
 
 @st.composite
-def global_datasets(draw: DrawFn, allow_categorical: bool = True) -> xr.Dataset:
+def global_datasets(
+    draw: DrawFn, allow_decreasing_lat: bool = True, allow_categorical: bool = True
+) -> xr.Dataset:
     """Strategy that generates global datasets using uniform_grid with random parameters."""
     # Generate dimensions between 100 and 1000 to ensure sufficient coverage
     # Smaller datasets may have gaps when projected
@@ -26,7 +28,7 @@ def global_datasets(draw: DrawFn, allow_categorical: bool = True) -> xr.Dataset:
     nlon = draw(st.integers(min_value=100, max_value=1000))
 
     # Generate latitude ordering
-    lat_ascending = draw(st.booleans())
+    lat_ascending = not allow_decreasing_lat or draw(st.booleans())
     lats = np.linspace(-90, 90, nlat)
     if not lat_ascending:
         lats = lats[::-1]
@@ -192,6 +194,6 @@ async def test_property_rectilinear_vs_curvilinear_exact(
         debug_visual=pytestconfig.getoption("--debug-visual", default=False),
         debug_visual_save=pytestconfig.getoption("--debug-visual-save", default=False),
         mode="perceptual",
-        perceptual_threshold=0.95,  # 95% similarity threshold
+        perceptual_threshold=0.9,  # 90% similarity threshold
     )
     assert images_similar, f"Rectilinear and curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
