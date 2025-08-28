@@ -11,13 +11,13 @@ import datashader.transfer_functions as tf  # type: ignore
 import matplotlib as mpl  # type: ignore
 import numbagg
 import numpy as np
+from PIL import Image
 from scipy.interpolate import NearestNDInterpolator
 
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear
-from xpublish_tiles.lib import NoCoverageError
 from xpublish_tiles.logger import logger
-from xpublish_tiles.render import Renderer, register_renderer
+from xpublish_tiles.render import Renderer, register_renderer, render_error_image
 from xpublish_tiles.types import (
     ContinuousData,
     DiscreteData,
@@ -125,9 +125,13 @@ class DatashaderRasterRenderer(Renderer):
         self.validate(contexts)
         (context,) = contexts.values()
         if isinstance(context, NullRenderContext):
-            raise NoCoverageError("no overlap with requested bbox.")
+            im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            im.save(buffer, format=str(format))
+            return
+
         if TYPE_CHECKING:
             assert isinstance(context, PopulatedRenderContext)
+
         bbox = context.bbox
         cvs = dsh.Canvas(
             plot_height=height,
@@ -215,6 +219,25 @@ class DatashaderRasterRenderer(Renderer):
 
         im = shaded.to_pil()
         im.save(buffer, format=str(format))
+
+    def render_error(
+        self,
+        *,
+        buffer: io.BytesIO,
+        width: int,
+        height: int,
+        message: str,
+        format: ImageFormat = ImageFormat.PNG,
+        cmap: str = "",
+        colorscalerange: tuple[float, float] | None = None,
+        **kwargs,
+    ):
+        """Render an error tile with the given message."""
+        error_buffer = render_error_image(
+            message, width=width, height=height, format=format
+        )
+        buffer.write(error_buffer.getvalue())
+        error_buffer.close()
 
     @staticmethod
     def style_id() -> str:
