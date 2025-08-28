@@ -64,6 +64,10 @@ def validate_style(v: str | list[str] | None) -> tuple[str, str] | None:
                 "style must be in the format 'stylename/palettename'. A common default for this is 'raster/default'"
             )
 
+    # An empty string is valid, but not None
+    if not v:
+        return None
+
     values = v.split("/")
     if len(values) != 2:
         raise ValueError(

@@ -165,11 +165,14 @@ async def handle_get_map(
             if vertical_name:
                 selectors[vertical_name[0]] = query.elevation
 
+    style = query.styles[0] if query.styles else "raster"
+    variant = query.styles[1] if query.styles else "default"
+
     render_params = QueryParams(
         variables=[query.layers],  # TODO: Support multiple layers
-        style=query.styles[0],
+        style=style,
         colorscalerange=query.colorscalerange,
-        cmap=query.styles[1],
+        variant=variant,
         crs=OutputCRS(query.crs),
         bbox=OutputBBox(query.bbox),
         width=query.width,

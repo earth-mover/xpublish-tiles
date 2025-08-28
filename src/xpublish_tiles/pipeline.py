@@ -300,7 +300,7 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
             buffer=buffer,
             width=query.width,
             height=query.height,
-            cmap=query.cmap,
+            variant=query.variant,
             colorscalerange=query.colorscalerange,
             format=query.format,
         ),
