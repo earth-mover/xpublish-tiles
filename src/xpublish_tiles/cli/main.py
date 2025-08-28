@@ -236,8 +236,8 @@ def main():
     parser.add_argument(
         "--cache",
         action="store_true",
-        default=False,
-        help="Enable the icechunk cache for Arraylake datasets (default: False)",
+        default=True,
+        help="Enable the icechunk cache for Arraylake datasets (default: True)",
     )
     parser.add_argument(
         "--spy",
