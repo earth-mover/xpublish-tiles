@@ -10,6 +10,7 @@ from xpublish import Dependencies, Plugin, hookimpl
 from xarray import Dataset
 from xpublish_tiles.lib import NoCoverageError, TileTooBigError
 from xpublish_tiles.pipeline import pipeline
+from xpublish_tiles.render import RenderRegistry
 from xpublish_tiles.render.error import render_error_image
 from xpublish_tiles.types import QueryParams
 from xpublish_tiles.utils import async_time_debug
@@ -271,8 +272,12 @@ class TilesPlugin(Plugin):
             # dataset path prefix already includes /datasets/{id} by xpublish; request.url.path points to /datasets/{id}/tiles/{tms}/tilejson.json
             # Construct sibling tiles path replacing trailing segment
             tiles_path = request.url.path.rsplit("/", 1)[0]  # drop 'tilejson.json'
+
+            style = query.style[0] if query.style else "raster"
+            cmap = query.style[1] if query.style else "default"
+
             # XYZ template
-            url_template = f"{base_url}{tiles_path}/{{z}}/{{y}}/{{x}}?variables={','.join(query.variables)}&style={query.style[0]}/{query.style[1]}&width={query.width}&height={query.height}&f={query.f}"
+            url_template = f"{base_url}{tiles_path}/{{z}}/{{y}}/{{x}}?variables={','.join(query.variables)}&style={style}/{cmap}&width={query.width}&height={query.height}&f={query.f}"
             # Append selectors
             if selectors:
                 selector_qs = "&".join(f"{k}={v}" for k, v in selectors.items())
@@ -339,11 +344,14 @@ class TilesPlugin(Plugin):
                     if param_name in dataset.dims:
                         selectors[param_name] = param_value
 
+            style = query.style[0] if query.style else "raster"
+            cmap = query.style[1] if query.style else "default"
+
             render_params = QueryParams(
                 variables=query.variables,
-                style=query.style[0],
+                style=style,
                 colorscalerange=query.colorscalerange,
-                cmap=query.style[1],
+                cmap=cmap,
                 crs=crs,
                 bbox=bbox,
                 width=query.width,

@@ -5,13 +5,14 @@ from io import BytesIO
 from typing import Annotated
 
 import cf_xarray  # noqa: F401
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
 from PIL import Image
 from xpublish import Dependencies, Plugin, hookimpl
 
 import xarray as xr
 from xpublish_tiles.pipeline import pipeline
+from xpublish_tiles.render import RenderRegistry
 from xpublish_tiles.types import OutputBBox, OutputCRS, QueryParams
 from xpublish_tiles.utils import lower_case_keys
 from xpublish_tiles.xpublish.wms.types import (
@@ -165,11 +166,14 @@ async def handle_get_map(
             if vertical_name:
                 selectors[vertical_name[0]] = query.elevation
 
+    style = query.styles[0] if query.styles else "raster"
+    cmap = query.styles[1] if query.styles else "default"
+
     render_params = QueryParams(
         variables=[query.layers],  # TODO: Support multiple layers
-        style=query.styles[0],
+        style=style,
         colorscalerange=query.colorscalerange,
-        cmap=query.styles[1],
+        cmap=cmap,
         crs=OutputCRS(query.crs),
         bbox=OutputBBox(query.bbox),
         width=query.width,
