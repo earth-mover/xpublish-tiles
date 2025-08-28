@@ -3,6 +3,7 @@
 import argparse
 import logging
 import threading
+import warnings
 from typing import cast
 
 import cf_xarray  # noqa: F401
@@ -15,11 +16,15 @@ from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
     EU3035,
     EU3035_HIRES,
+    GLOBAL_6KM,
     GLOBAL_BENCHMARK_TILES,
     HRRR,
     IFS,
     PARA,
     PARA_HIRES,
+    SENTINEL2_NOCOORDS,
+    UTM33S,
+    UTM33S_HIRES,
     create_global_dataset,
 )
 from xpublish_tiles.xpublish.tiles.plugin import TilesPlugin
@@ -45,6 +50,10 @@ def get_dataset_for_name(
         ds = IFS.create().assign_attrs(_xpublish_id=name)
     elif name == "curvilinear":
         ds = CURVILINEAR.create().assign_attrs(_xpublish_id=name)
+    elif name == "sentinel":
+        ds = SENTINEL2_NOCOORDS.create().assign_attrs(_xpublish_id=name)
+    elif name == "global-6km":
+        ds = GLOBAL_6KM.create().assign_attrs(_xpublish_id=name)
     elif name.startswith("xarray://"):
         # xarray tutorial dataset - format: xarray://dataset_name
         tutorial_name = name.removeprefix("xarray://")
@@ -164,6 +173,14 @@ def get_dataset_object_for_name(name: str):
             return EU3035_HIRES
         elif dataset_name == "ifs":
             return IFS
+        elif dataset_name == "sentinel":
+            return SENTINEL2_NOCOORDS
+        elif dataset_name == "global-6km":
+            return GLOBAL_6KM
+        elif dataset_name == "utm33s":
+            return UTM33S
+        elif dataset_name == "utm33s_hires":
+            return UTM33S_HIRES
         else:
             return None
 
@@ -180,6 +197,10 @@ def get_dataset_object_for_name(name: str):
         return EU3035_HIRES
     elif name == "ifs":
         return IFS
+    elif name == "sentinel":
+        return SENTINEL2_NOCOORDS
+    elif name == "global-6km":
+        return GLOBAL_6KM
     else:
         return None
 
@@ -198,7 +219,7 @@ def main():
         "--dataset",
         type=str,
         default="global",
-        help="Dataset to serve (default: global). Options: global, air, hrrr, para, eu3035, ifs, curvilinear, xarray://<tutorial_name> (loads xarray tutorial dataset), local://<group_name> (loads group from /tmp/tiles-icechunk/), local:///custom/path::<group_name> (loads group from custom icechunk repo), or an arraylake dataset name",
+        help="Dataset to serve (default: global). Options: global, air, hrrr, para, eu3035, ifs, curvilinear, sentinel, global-6km, xarray://<tutorial_name> (loads xarray tutorial dataset), local://<group_name> (loads group from /tmp/tiles-icechunk/), local:///custom/path::<group_name> (loads group from custom icechunk repo), or an arraylake dataset name",
     )
     parser.add_argument(
         "--branch",
@@ -290,11 +311,13 @@ def main():
     if benchmarking:
         # Get dataset object for potential benchmark tiles
         dataset_obj = get_dataset_object_for_name(dataset_name)
-        benchmark_tiles = (
-            dataset_obj.benchmark_tiles
-            if dataset_obj and dataset_obj.benchmark_tiles
-            else GLOBAL_BENCHMARK_TILES
-        )
+        if dataset_obj and dataset_obj.benchmark_tiles:
+            benchmark_tiles = dataset_obj.benchmark_tiles
+        else:
+            warnings.warn(
+                "Unknown dataset; using global tiles", RuntimeWarning, stacklevel=2
+            )
+            benchmark_tiles = GLOBAL_BENCHMARK_TILES
 
         # Get the first variable from the dataset
         if not ds.data_vars:
@@ -328,3 +351,7 @@ def main():
     elif args.where in ["local-booth", "prod"] and bench_thread:
         # When running benchmarks against production or local-booth, wait for the thread to complete
         bench_thread.join()
+
+
+if __name__ == "__main__":
+    main()

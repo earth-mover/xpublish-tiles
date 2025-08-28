@@ -18,6 +18,7 @@ from xpublish_tiles.testing.tiles import (
     HRRR_TILES_EDGE_CASES,
     PARA_TILES,
     PARA_TILES_EDGE_CASES,
+    SOUTH_AMERICA_BENCHMARK_TILES,
     UTM33S_TILES,
     UTM33S_TILES_EDGE_CASES,
     WEBMERC_TILES,
@@ -427,7 +428,7 @@ ERA5 = Dataset(
 
 SENTINEL2_NOCOORDS = Dataset(
     # https://app.earthmover.io/earthmover-demos/sentinel-datacube-South-America-3-icechunk
-    name="s2-no-coords",
+    name="sentinel",
     dims=(
         Dim(
             name="time",
@@ -447,6 +448,7 @@ SENTINEL2_NOCOORDS = Dataset(
     ),
     edge_case_tiles=WGS84_TILES_EDGE_CASES + WEBMERC_TILES_EDGE_CASES,
     tiles=WGS84_TILES + WEBMERC_TILES,
+    benchmark_tiles=SOUTH_AMERICA_BENCHMARK_TILES,
 )
 
 GLOBAL_6KM = Dataset(
@@ -462,13 +464,13 @@ GLOBAL_6KM = Dataset(
             name="latitude",
             size=3000,
             chunk_size=500,
-            data=np.linspace(-89.97, -89.9700001, 3000),
+            data=np.linspace(-89.97, 89.97, 3000),
         ),
         Dim(
             name="longitude",
             size=6000,
             chunk_size=500,
-            data=np.linspace(-179.97, 180.0001, 6000),
+            data=np.linspace(-179.97, 179.97, 6000),
         ),
         Dim(name="band", size=3, chunk_size=3, data=np.array(["R", "G", "B"])),
     ),
@@ -476,16 +478,23 @@ GLOBAL_6KM = Dataset(
     setup=uniform_grid,
     edge_case_tiles=WGS84_TILES_EDGE_CASES + WEBMERC_TILES_EDGE_CASES,
     tiles=WGS84_TILES + WEBMERC_TILES,
+    benchmark_tiles=GLOBAL_BENCHMARK_TILES,
 )
 
 # fmt: off
 UTM33S_BENCHMARK_TILES = [
-    "4/8/9", "4/8/10", "4/8/11", "4/9/9", "4/9/10",
-    "5/17/18", "5/17/19", "5/17/20", "5/17/21", "5/17/22",
-    "5/17/23", "5/17/24", "5/17/25", "5/18/18", "5/18/19",
-    "6/34/37", "6/34/38", "6/34/39", "6/34/40", "6/35/37",
-    "6/35/38", "6/35/39", "6/35/40", "6/34/48", "6/35/48",
+    "3/4/4", "4/8/8", "4/9/8", "5/17/17", "5/18/17", "6/34/36", "6/35/34",
+    "7/71/68", "7/72/68", "8/143/137", "8/144/137", "8/145/137", "9/286/272",
+    "9/286/273", "9/286/274", "9/286/275", "9/287/272", "9/287/273", "9/287/274",
+    "9/287/275", "9/288/272", "9/288/273", "9/288/274", "9/288/275", "9/289/272",
+    "9/289/273", "9/289/274", "9/289/275", "9/290/272", "9/290/273", "9/290/274",
+    "9/290/275", "9/285/272", "9/285/273", "9/285/274", "9/285/275", "10/574/545",
+    "10/574/546", "10/574/547", "10/574/548", "10/574/549", "10/575/545", "10/575/546",
+    "10/575/547", "10/575/548", "10/575/549", "10/576/545", "10/576/546", "10/576/547",
+    "10/576/548", "10/576/549", "10/577/545", "10/577/546", "10/577/547", "10/577/548",
+    "10/577/549", "10/578/545", "10/578/546", "10/578/547", "10/578/548", "10/578/549",
 ]
+UTM33S_BENCHMARK_TILES= ["3/4/4"] * 100
 
 EU3035_BENCHMARK_TILES = [
     "4/3/8", "4/4/7", "4/4/8", "4/4/9", "4/5/9", "4/5/8", "4/4/6", "4/4/10", "4/3/7",

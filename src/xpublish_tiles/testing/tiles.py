@@ -298,4 +298,28 @@ CURVILINEAR_TILES = [
     ),
 ]
 
+# South America benchmark tiles (for Sentinel dataset)
+# Coverage area roughly: -82°W to -27°W, 13°N to -55°S
+# Focused on the region that's working in the logs (tiles 120-122, 72-73)
+# fmt: off
+SOUTH_AMERICA_BENCHMARK_TILES = [
+    # Zoom 7 - Broader coverage of the working region
+    # "7/60/36", "7/61/36",
+    # Zoom 8 - The confirmed working tiles
+    "8/120/72", "8/121/72", "8/122/72",
+    "8/120/73", "8/121/73", "8/122/73",
+    # Zoom 9 - Higher detail within the working region
+    "9/240/144", "9/241/144", "9/242/144", "9/243/144", "9/244/144", "9/245/144",
+    "9/240/145", "9/241/145", "9/242/145", "9/243/145", "9/244/145", "9/245/145",
+    "9/240/146", "9/241/146", "9/242/146", "9/243/146", "9/244/146", "9/245/146",
+    "9/240/147", "9/241/147", "9/242/147", "9/243/147", "9/244/147", "9/245/147",
+    # Zoom 10 - Very high detail for center of region
+    "10/482/289", "10/483/289", "10/484/289", "10/485/289",
+    "10/482/290", "10/483/290", "10/484/290", "10/485/290",
+    "10/482/291", "10/483/291", "10/484/291", "10/485/291",
+    # Zoom 11 - Ultra high detail for a small area
+    "11/966/580", "11/967/580", "11/966/581", "11/967/581",
+]
+# fmt: on
+
 TILES = WEBMERC_TILES + WGS84_TILES + ETRS89_TILES

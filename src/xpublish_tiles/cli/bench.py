@@ -16,7 +16,6 @@ def run_benchmark(
     benchmark_tiles: list[str],
     concurrency: int,
     where: str = "local",
-    use_sync: bool = False,
     variable_name: str = "foo",
     needs_colorscale: bool = False,
 ):
@@ -38,10 +37,7 @@ def run_benchmark(
     shuffled_tiles = benchmark_tiles.copy()
     random.shuffle(shuffled_tiles)
 
-    endpoint_type = "sync" if use_sync else "tiles"
-    print(
-        f"Starting benchmark requests for {dataset_name} using {endpoint_type} endpoint"
-    )
+    print(f"Starting benchmark requests for {dataset_name} using endpoint")
     print(f"Warmup tiles: {warmup_tiles}")
     print(f"Benchmark tiles: {len(shuffled_tiles)} tiles (randomized order)")
 
