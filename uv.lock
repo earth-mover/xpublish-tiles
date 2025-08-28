@@ -841,8 +841,7 @@ wheels = [
 
 [[package]]
 name = "datashader"
-version = "0.18.2"
-source = { registry = "https://pypi.org/simple" }
+source = { directory = "../datashader" }
 dependencies = [
     { name = "colorcet" },
     { name = "multipledispatch" },
@@ -857,10 +856,24 @@ dependencies = [
     { name = "toolz" },
     { name = "xarray" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3f/5d/3f8db3f4fa141c577eb8953323670d91e6c18bd135bf2346fb02ae0b1768/datashader-0.18.2.tar.gz", hash = "sha256:53ef0bc35b9ba1034bdf290a2e28babf0fa2b075a3e5a822c79dcde12183d1ff", size = 18195212, upload-time = "2025-08-05T10:04:37.793Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/28/0e/b11ad5fd77e3dd0baad9cac3184315be7654ae401e3b0b0c324503f23d96/datashader-0.18.2-py3-none-any.whl", hash = "sha256:2aa90e867a46b1e75248f32a47c5b14bb5dc869524152f88c0af8369d47359e7", size = 18330272, upload-time = "2025-08-05T10:04:35.288Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "colorcet" },
+    { name = "multipledispatch" },
+    { name = "numba" },
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "pandas" },
+    { name = "param" },
+    { name = "pyct" },
+    { name = "pytest", marker = "extra == 'tests'" },
+    { name = "requests" },
+    { name = "scipy" },
+    { name = "toolz" },
+    { name = "xarray" },
 ]
+provides-extras = ["tests"]
 
 [[package]]
 name = "decorator"
@@ -3771,7 +3784,7 @@ requires-dist = [
     { name = "cachetools", specifier = ">=5.5.2" },
     { name = "cf-xarray", specifier = ">=0.10.6" },
     { name = "cftime", specifier = ">=1.6.4.post1" },
-    { name = "datashader", specifier = ">=0.18.2" },
+    { name = "datashader", directory = "../datashader" },
     { name = "fastapi" },
     { name = "hypothesis", marker = "extra == 'testing'", specifier = ">=6.136.6" },
     { name = "matplotlib", marker = "extra == 'testing'", specifier = ">=3.10.3" },

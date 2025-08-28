@@ -133,3 +133,6 @@ known-first-party = ["dask", "distributed", "icechunk", "xarray", "zarr"]
 [tool.ruff.lint.flake8-tidy-imports]
 # Disallow all relative imports.
 ban-relative-imports = "all"
+
+[tool.uv.sources]
+datashader = { path = "../datashader" }

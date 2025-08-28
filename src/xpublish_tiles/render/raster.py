@@ -148,7 +148,6 @@ class DatashaderRasterRenderer(Renderer):
                 # we nearest-neighbour resample to a rectilinear grid, and the use
                 # the mode aggregation.
                 # https://github.com/holoviz/datashader/issues/1435
-                # Lock is only used when tbb is not available (e.g., on macOS)
                 with LOCK:
                     data = self.maybe_cast_data(context.da)
                     data = nearest_on_uniform_grid_quadmesh(data, grid.X, grid.Y)
@@ -159,21 +158,12 @@ class DatashaderRasterRenderer(Renderer):
                     )
             else:
                 data = self.maybe_cast_data(context.da)
-                # FIXME: without this broadcasting
-                # tests/test_pipeline.py::test_projected_coordinate_data[eu3035_etrs89_center_europe(2/1/1)]
-                # is a fully transparent tile; even though it should be fully populated.
-                data = data.assign_coords(
-                    dict(
-                        zip(
-                            (grid.X, grid.Y),
-                            xr.broadcast(data[grid.X], data[grid.Y]),
-                            strict=False,
-                        )
+                # Lock is only used when tbb is not available (e.g., on macOS)
+                # AND if we use the rectilinear or raster code path
+                with LOCK if data[grid.Y].ndim == 1 else contextlib.nullcontext():
+                    mesh = cvs.quadmesh(
+                        data.transpose(grid.Ydim, grid.Xdim), x=grid.X, y=grid.Y
                     )
-                )
-                mesh = cvs.quadmesh(
-                    data.transpose(grid.Ydim, grid.Xdim), x=grid.X, y=grid.Y
-                )
         else:
             raise NotImplementedError(
                 f"Grid type {type(context.grid)} not supported by DatashaderRasterRenderer"
