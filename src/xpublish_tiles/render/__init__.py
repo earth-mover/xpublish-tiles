@@ -81,7 +81,7 @@ class Renderer(ABC):
         buffer: io.BytesIO,
         width: int,
         height: int,
-        cmap: str,
+        variant: str,
         colorscalerange: tuple[Number, Number] | None = None,
         format: ImageFormat = ImageFormat.PNG,
     ):

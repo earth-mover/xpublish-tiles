@@ -112,7 +112,6 @@ class TilesPlugin(Plugin):
                 keywords = []
 
             # Get available styles from registered renderers
-            from xpublish_tiles.render import RenderRegistry
 
             styles = []
             for renderer_cls in RenderRegistry.all().values():
@@ -271,8 +270,12 @@ class TilesPlugin(Plugin):
             # dataset path prefix already includes /datasets/{id} by xpublish; request.url.path points to /datasets/{id}/tiles/{tms}/tilejson.json
             # Construct sibling tiles path replacing trailing segment
             tiles_path = request.url.path.rsplit("/", 1)[0]  # drop 'tilejson.json'
+
+            style = query.style[0] if query.style else "raster"
+            variant = query.style[1] if query.style else "default"
+
             # XYZ template
-            url_template = f"{base_url}{tiles_path}/{{z}}/{{y}}/{{x}}?variables={','.join(query.variables)}&style={query.style[0]}/{query.style[1]}&width={query.width}&height={query.height}&f={query.f}"
+            url_template = f"{base_url}{tiles_path}/{{z}}/{{y}}/{{x}}?variables={','.join(query.variables)}&style={style}/{variant}&width={query.width}&height={query.height}&f={query.f}"
             # Append selectors
             if selectors:
                 selector_qs = "&".join(f"{k}={v}" for k, v in selectors.items())
@@ -339,11 +342,14 @@ class TilesPlugin(Plugin):
                     if param_name in dataset.dims:
                         selectors[param_name] = param_value
 
+            style = query.style[0] if query.style else "raster"
+            variant = query.style[1] if query.style else "default"
+
             render_params = QueryParams(
                 variables=query.variables,
-                style=query.style[0],
+                style=style,
                 colorscalerange=query.colorscalerange,
-                cmap=query.style[1],
+                variant=variant,
                 crs=crs,
                 bbox=bbox,
                 width=query.width,

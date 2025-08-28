@@ -30,7 +30,7 @@ def create_query_params(tile, tms, *, colorscalerange=None):
         style="raster",
         width=256,
         height=256,
-        cmap="viridis",
+        variant="viridis",
         colorscalerange=colorscalerange,
         format=ImageFormat.PNG,
     )

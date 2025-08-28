@@ -114,13 +114,13 @@ class DatashaderRasterRenderer(Renderer):
         buffer: io.BytesIO,
         width: int,
         height: int,
-        cmap: str,
+        variant: str,
         colorscalerange: tuple[float, float] | None = None,
         format: ImageFormat = ImageFormat.PNG,
     ):
         # Handle "default" alias
-        if cmap == "default":
-            cmap = self.default_variant()
+        if variant == "default":
+            variant = self.default_variant()
 
         self.validate(contexts)
         (context,) = contexts.values()
@@ -196,7 +196,7 @@ class DatashaderRasterRenderer(Renderer):
             with np.errstate(invalid="ignore"):
                 shaded = tf.shade(
                     mesh,
-                    cmap=mpl.colormaps.get_cmap(cmap),
+                    cmap=mpl.colormaps.get_cmap(variant),
                     how="linear",
                     span=colorscalerange,
                 )
@@ -207,7 +207,7 @@ class DatashaderRasterRenderer(Renderer):
                     zip(context.datatype.values, context.datatype.colors, strict=True)
                 )
             else:
-                kwargs["cmap"] = mpl.colormaps.get_cmap(cmap)
+                kwargs["cmap"] = mpl.colormaps.get_cmap(variant)
                 kwargs["span"] = (
                     min(context.datatype.values),
                     max(context.datatype.values),

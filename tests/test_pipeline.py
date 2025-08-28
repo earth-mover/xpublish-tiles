@@ -115,7 +115,7 @@ async def test_pipeline_bad_bbox(global_datasets, png_snapshot, pytestconfig):
         style="raster",
         width=256,
         height=256,
-        cmap="viridis",
+        variant="viridis",
         colorscalerange=None,
         format=ImageFormat.PNG,
     )
@@ -243,7 +243,7 @@ async def test_datashader_casting(data_type, size, kind, pytestconfig):
         style="raster",
         width=256,
         height=256,
-        cmap="viridis",
+        variant="viridis",
         colorscalerange=None,
         format=ImageFormat.PNG,
     )
