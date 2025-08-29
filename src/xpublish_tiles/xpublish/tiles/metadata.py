@@ -156,9 +156,9 @@ def extract_dataset_extents(
             elif isinstance(values.data[0].item(), int | float):
                 # For numeric dimensions, calculate step size
                 data = values.data
-                diffs = [abs(data[i + 1] - data[i]) for i in range(len(data) - 1)]
+                diffs = [abs(data[i + 1] - data[i]).item() for i in range(len(data) - 1)]
                 if diffs:
-                    extent_dict["resolution"] = min(diffs)
+                    extent_dict["resolution"] = min(diffs).item()
 
         # Add units if available
         if dim_extent.units:

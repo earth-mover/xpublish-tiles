@@ -181,7 +181,7 @@ def get_tile_matrix_limits(
 
     limits = []
     for z in zoom_levels:
-        max_tiles = 2**z - 1
+        max_tiles = int(2**z - 1)
         limits.append(
             TileMatrixSetLimit(
                 tileMatrix=str(z),
@@ -225,7 +225,7 @@ def extract_dimension_extents(ds: xr.Dataset, name: Hashable) -> list:
     # Identify spatial and temporal dimensions using CF conventions
     spatial_dims = {grid.Xdim, grid.Ydim}
     temporal_dims = set()
-    vertical_dims = set(grid.Z or ())
+    vertical_dims = {grid.Z} if grid.Z else set()
 
     # Add CF-detected temporal dimensions (T axis)
     temporal_dims.update(cf_axes.get("T", []))

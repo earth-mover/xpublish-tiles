@@ -335,7 +335,7 @@ def test_dimension_extraction_utilities():
         },
     )
 
-    ds = data_array.to_dataset("foo")
+    ds = data_array.to_dataset(name="foo")
     dimensions = extract_dimension_extents(ds, "foo")
 
     # Should extract time and depth, but not lat/lon (spatial)
@@ -433,7 +433,7 @@ def test_cf_axis_detection():
         },
     )
 
-    ds = data_array.to_dataset("foo")
+    ds = data_array.to_dataset(name="foo")
     dimensions = extract_dimension_extents(ds, "foo")
 
     # Should detect temporal and vertical dimensions despite non-standard names
