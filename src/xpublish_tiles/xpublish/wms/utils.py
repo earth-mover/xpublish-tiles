@@ -80,15 +80,15 @@ def extract_dimensions(dataset: xr.Dataset) -> list[WMSDimensionResponse]:
                 if np.issubdtype(coord.dtype, np.timedelta64):
                     # Convert timedelta64 to strings
                     values = ",".join(str(v) for v in coord.values)
-                    default = str(coord.values[0]) if len(coord.values) > 0 else None
+                    default = str(coord.values[-1]) if len(coord.values) > 0 else None
                 elif np.issubdtype(coord.dtype, np.datetime64):
                     # Convert datetime64 to ISO strings
                     times = [np.datetime_as_string(t, unit="s") for t in coord.values]
                     values = ",".join(times)
-                    default = times[0] if times else None
+                    default = times[-1] if times else None
                 else:
                     values = ",".join(str(v) for v in coord.values)
-                    default = str(coord.values[0]) if len(coord.values) > 0 else None
+                    default = str(coord.values[-1]) if len(coord.values) > 0 else None
             else:
                 values = ""
                 default = None
@@ -131,24 +131,24 @@ def extract_dimensions(dataset: xr.Dataset) -> list[WMSDimensionResponse]:
                 if np.issubdtype(coord.dtype, np.timedelta64):
                     # convert timedelta64 to strings
                     values = ",".join(str(t) for t in coord.values)
-                    default = str(coord.values[0]) if len(coord.values) > 0 else None
+                    default = str(coord.values[-1]) if len(coord.values) > 0 else None
                 elif np.issubdtype(coord.dtype, np.datetime64):
                     values = ",".join(
                         np.datetime_as_string(t, unit="s") for t in coord.values
                     )
                     default = (
-                        np.datetime_as_string(coord.values[0], unit="s")
+                        np.datetime_as_string(coord.values[-1], unit="s")
                         if len(coord.values) > 0
                         else None
                     )
                 elif np.issubdtype(coord.dtype, np.number):
                     values = ",".join(str(float(v)) for v in coord.values)
                     default = (
-                        str(float(coord.values[0])) if len(coord.values) > 0 else None
+                        str(float(coord.values[-1])) if len(coord.values) > 0 else None
                     )
                 else:
                     values = ",".join(str(v) for v in coord.values)
-                    default = str(coord.values[0]) if len(coord.values) > 0 else None
+                    default = str(coord.values[-1]) if len(coord.values) > 0 else None
             else:
                 values = ""
                 default = None

@@ -286,7 +286,12 @@ def extract_dimension_extents(data_array: xr.DataArray) -> list:
         description = coord.attrs.get("long_name") or coord.attrs.get("description")
 
         # Determine default value (first value)
-        default = values_list[0] if values_list else None
+        default = None
+        if values_list:
+            if dim_type == DimensionType.VERTICAL:
+                default = values_list[0]
+            else:
+                default = values_list[-1]
 
         # Limit values list size for performance
         limited_values = values_list if len(values_list) <= 100 else None
