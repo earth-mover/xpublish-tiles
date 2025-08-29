@@ -114,6 +114,7 @@ class TilesPlugin(Plugin):
                 keywords = []
 
             # Get available styles from registered renderers
+            logger.info(f"Getting available styles for dataset '{title}'")
 
             styles = []
             for renderer_cls in RenderRegistry.all().values():
@@ -144,6 +145,8 @@ class TilesPlugin(Plugin):
                             description=style_info["description"],
                         )
                     )
+
+            logger.info("loading extents for dataset vars")
 
             layer_extents = {}
             for var_name in dataset.data_vars.keys():

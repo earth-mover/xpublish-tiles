@@ -253,33 +253,23 @@ def extract_dimension_extents(data_array: xr.DataArray) -> list:
         values = coord.values
 
         # Handle different coordinate types
-        values_list: list[Union[str, float, int]]
         extent: list[Union[str, float, int]]
 
         if np.issubdtype(values.dtype, np.timedelta64):
-            # Convert strings to timedelta64
-            values_list = [str(val) for val in values]
-            extent = [values_list[0], values_list[-1]]
+            if len(values) > 0:
+                extent = [str(values[0]), str(values[-1])]
         elif np.issubdtype(values.dtype, np.datetime64):
-            # Convert datetime to ISO strings
-            if hasattr(values, "astype"):
-                datetime_series = pd.to_datetime(values)
-                formatted_series = datetime_series.strftime("%Y-%m-%dT%H:%M:%SZ")
-                str_values = list(formatted_series)
-            else:
-                str_values = [
-                    pd.to_datetime(val).strftime("%Y-%m-%dT%H:%M:%SZ") for val in values
-                ]
-            extent = [str_values[0], str_values[-1]]
-            values_list = list(str_values)
+            # Convert datetime to ISO strings - only get first and last values for extent
+            first_datetime = pd.to_datetime(values[0]).strftime("%Y-%m-%dT%H:%M:%SZ")
+            last_datetime = pd.to_datetime(values[-1]).strftime("%Y-%m-%dT%H:%M:%SZ")
+            extent = [first_datetime, last_datetime]
         elif np.issubdtype(values.dtype, np.number):
             # Numeric coordinates
             extent = [float(values.min()), float(values.max())]
-            values_list = [float(val) for val in values]
         else:
             # String/categorical coordinates
-            values_list = [str(val) for val in values]
-            extent = values_list  # For categorical, extent is all values
+            if len(values) > 0:
+                extent = [str(values[0]), str(values[-1])]
 
         # Get units and description from attributes
         units = coord.attrs.get("units")
@@ -287,20 +277,16 @@ def extract_dimension_extents(data_array: xr.DataArray) -> list:
 
         # Determine default value (first value)
         default = None
-        if values_list:
+        if extent:
             if dim_type == DimensionType.VERTICAL:
-                default = values_list[0]
+                default = extent[0]
             else:
-                default = values_list[-1]
-
-        # Limit values list size for performance
-        limited_values = values_list if len(values_list) <= 100 else None
+                default = extent[-1]
 
         dimension = DimensionExtent(
             name=str(dim_name),
             type=dim_type,
             extent=extent,
-            values=limited_values,
             units=units,
             description=description,
             default=default,

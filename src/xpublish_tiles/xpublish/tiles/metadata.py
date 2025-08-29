@@ -143,9 +143,11 @@ def extract_dataset_extents(
     for dim_name, dim_extent in all_dimensions.items():
         extent_dict = {"interval": dim_extent.extent}
 
+        print("wehrhehrehrheher")
+
         # Calculate resolution if possible
-        if dim_extent.values and len(dim_extent.values) > 1:
-            values = dim_extent.values
+        if dim_extent.extent and len(dim_extent.extent) > 1:
+            values = dataset[dim_name]
             if dim_extent.type == DimensionType.TEMPORAL:
                 # For temporal dimensions, try to calculate time resolution
                 extent_dict["resolution"] = _calculate_temporal_resolution(values)
@@ -178,19 +180,8 @@ def _calculate_temporal_resolution(values: list[Union[str, float, int]]) -> str:
         return "PT1H"  # Default to hourly
 
     try:
-        import pandas as pd
-
-        # Convert to datetime if they're strings
-        if isinstance(values[0], str):
-            dt_values = [pd.to_datetime(v) for v in values[:10]]  # Sample first 10
-        else:
-            return "PT1H"  # Default for non-string values
-
         # Calculate differences
-        diffs = [
-            (dt_values[i + 1] - dt_values[i]).total_seconds()
-            for i in range(len(dt_values) - 1)
-        ]
+        diffs = values[:10].diff(values.name).dt.seconds.data
 
         if not diffs:
             return "PT1H"
