@@ -10,6 +10,7 @@ from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import Dataset
 from xpublish_tiles.lib import TileTooBigError
+from xpublish_tiles.logger import logger
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.render import RenderRegistry
 from xpublish_tiles.types import QueryParams
@@ -365,7 +366,8 @@ class TilesPlugin(Plugin):
             except TileTooBigError:
                 status_code = 413
                 detail = f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} request too big. Please choose a higher zoom level."
-            except KeyError:
+            except KeyError as ke:
+                logger.error(f"KeyError: {ke}")
                 status_code = 422
                 detail = f"Invalid variable name(s): {query.variables!r}."
 
