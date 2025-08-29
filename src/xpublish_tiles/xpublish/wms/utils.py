@@ -77,7 +77,11 @@ def extract_dimensions(dataset: xr.Dataset) -> list[WMSDimensionResponse]:
         if coord_name_str.lower() in ["time", "t"]:
             # Time dimension
             if hasattr(coord, "values"):
-                if np.issubdtype(coord.dtype, np.datetime64):
+                if np.issubdtype(coord.dtype, np.timedelta64):
+                    # Convert timedelta64 to strings
+                    values = ",".join(str(v) for v in coord.values)
+                    default = str(coord.values[0]) if len(coord.values) > 0 else None
+                elif np.issubdtype(coord.dtype, np.datetime64):
                     # Convert datetime64 to ISO strings
                     times = [np.datetime_as_string(t, unit="s") for t in coord.values]
                     values = ",".join(times)
@@ -124,7 +128,11 @@ def extract_dimensions(dataset: xr.Dataset) -> list[WMSDimensionResponse]:
             # Arbitrary dimension
             if hasattr(coord, "values"):
                 # Handle different data types
-                if np.issubdtype(coord.dtype, np.datetime64):
+                if np.issubdtype(coord.dtype, np.timedelta64):
+                    # convert timedelta64 to strings
+                    values = ",".join(str(t) for t in coord.values)
+                    default = str(coord.values[0]) if len(coord.values) > 0 else None
+                elif np.issubdtype(coord.dtype, np.datetime64):
                     values = ",".join(
                         np.datetime_as_string(t, unit="s") for t in coord.values
                     )

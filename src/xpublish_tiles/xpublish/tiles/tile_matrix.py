@@ -256,7 +256,11 @@ def extract_dimension_extents(data_array: xr.DataArray) -> list:
         values_list: list[Union[str, float, int]]
         extent: list[Union[str, float, int]]
 
-        if np.issubdtype(values.dtype, np.datetime64):
+        if np.issubdtype(values.dtype, np.timedelta64):
+            # Convert strings to timedelta64
+            values_list = [str(val) for val in values]
+            extent = [values_list[0], values_list[-1]]
+        elif np.issubdtype(values.dtype, np.datetime64):
             # Convert datetime to ISO strings
             if hasattr(values, "astype"):
                 datetime_series = pd.to_datetime(values)
