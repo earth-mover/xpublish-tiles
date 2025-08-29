@@ -474,6 +474,7 @@ def test_dimension_extraction_utilities():
     assert len(time_dim.values) == 4
     assert time_dim.extent[0] == "2021-01-01T00:00:00Z"
     assert time_dim.extent[1] == "2021-01-04T00:00:00Z"
+    assert time_dim.default == "2021-01-04T00:00:00Z"
 
     # Check depth dimension
     depth_dim = next(d for d in dimensions if d.name == "depth")
@@ -481,6 +482,7 @@ def test_dimension_extraction_utilities():
     assert depth_dim.units == "m"
     assert depth_dim.description == "Ocean depth"
     assert depth_dim.extent == [0.0, 50.0]
+    assert depth_dim.default == 0.0
 
 
 def test_no_dimensions_dataset():

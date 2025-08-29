@@ -92,9 +92,6 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
                 )
             )
 
-    # Extract attributes metadata
-    attributes = extract_attributes_metadata(dataset)
-
     # Create main tileset metadata
     return TileSetMetadata(
         title=f"{title} - {tile_matrix_set_id}",
@@ -117,7 +114,6 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
             ),
         ],
         styles=styles,
-        attributes=attributes,
     )
 
 

@@ -416,14 +416,6 @@ class TileSetMetadata(BaseModel):
             }
         ),
     ] = None
-    attributes: Annotated[
-        Optional[AttributesMetadata],
-        Field(
-            json_schema_extra={
-                "description": "Attributes from the underlying xarray Dataset and DataArrays",
-            }
-        ),
-    ] = None
 
 
 class TileMatrixSetLimit(BaseModel):
