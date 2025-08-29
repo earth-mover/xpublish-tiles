@@ -1,15 +1,22 @@
 """Tile matrix set definitions for OGC Tiles API"""
 
-from typing import Optional, Union
+from collections.abc import Hashable
+from typing import Optional, Union, cast
 
+import cf_xarray as cfxr  # noqa: F401 - needed to enable .cf accessor
 import morecantile
 import morecantile.errors
+import numpy as np
+import pandas as pd
 import pyproj
 import pyproj.aoi
 
 import xarray as xr
+from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear, guess_grid_system
 from xpublish_tiles.types import OutputBBox, OutputCRS
 from xpublish_tiles.xpublish.tiles.types import (
+    DimensionExtent,
+    DimensionType,
     Link,
     TileMatrix,
     TileMatrixSet,
@@ -192,7 +199,7 @@ def get_all_tile_matrix_set_ids() -> list[str]:
     return list(TILE_MATRIX_SETS.keys())
 
 
-def extract_dimension_extents(data_array: xr.DataArray) -> list:
+def extract_dimension_extents(ds: xr.Dataset, name: Hashable) -> list:
     """Extract dimension extent information from an xarray DataArray.
 
     Uses cf_xarray to detect CF-compliant axes for robust dimension classification.
@@ -203,13 +210,10 @@ def extract_dimension_extents(data_array: xr.DataArray) -> list:
     Returns:
         List of DimensionExtent objects for non-spatial dimensions
     """
-    import cf_xarray as cfxr  # noqa: F401 - needed to enable .cf accessor
-    import numpy as np
-    import pandas as pd
-
-    from xpublish_tiles.xpublish.tiles.types import DimensionExtent, DimensionType
-
     dimensions = []
+
+    grid = cast(RasterAffine | Rectilinear | Curvilinear, guess_grid_system(ds, name))
+    data_array = ds[name]
 
     # Get CF axes information
     try:
@@ -219,19 +223,12 @@ def extract_dimension_extents(data_array: xr.DataArray) -> list:
         cf_axes = {}
 
     # Identify spatial and temporal dimensions using CF conventions
-    spatial_dims = set()
+    spatial_dims = {grid.Xdim, grid.Ydim}
     temporal_dims = set()
-    vertical_dims = set()
-
-    # Add CF-detected spatial dimensions (X, Y axes)
-    spatial_dims.update(cf_axes.get("X", []))
-    spatial_dims.update(cf_axes.get("Y", []))
+    vertical_dims = set(grid.Z or ())
 
     # Add CF-detected temporal dimensions (T axis)
     temporal_dims.update(cf_axes.get("T", []))
-
-    # Add CF-detected vertical dimensions (Z axis)
-    vertical_dims.update(cf_axes.get("Z", []))
 
     for dim_name in data_array.dims:
         # Skip spatial dimensions (X, Y axes)

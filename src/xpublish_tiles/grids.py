@@ -2,6 +2,7 @@ import itertools
 import re
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Hashable
 from dataclasses import dataclass, field
 from typing import Self, cast
 
@@ -1077,7 +1078,7 @@ def _guess_z_dimension(da: xr.DataArray) -> str | None:
     return None
 
 
-def guess_grid_system(ds: xr.Dataset, name: str) -> GridSystem:
+def guess_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
     """
     Guess the grid system for a dataset.
 

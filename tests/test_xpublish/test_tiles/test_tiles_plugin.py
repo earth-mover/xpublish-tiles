@@ -1,6 +1,7 @@
 import io
 
 import numpy as np
+import pandas as pd
 import pytest
 import xpublish
 from fastapi.testclient import TestClient
@@ -9,6 +10,8 @@ from PIL import Image
 import xarray as xr
 from xpublish_tiles.testing.datasets import EU3035, PARA_HIRES
 from xpublish_tiles.xpublish.tiles import TilesPlugin
+from xpublish_tiles.xpublish.tiles.metadata import extract_dataset_extents
+from xpublish_tiles.xpublish.tiles.tile_matrix import extract_dimension_extents
 
 
 @pytest.fixture(scope="session")
@@ -298,8 +301,6 @@ def test_multi_dimensional_dataset():
     assert scenario_extent["description"] == "Climate scenario"
     assert scenario_extent["interval"] == ["RCP45", "RCP85", "Historical"]
 
-    from xpublish_tiles.xpublish.tiles.metadata import extract_dataset_extents
-
     # Create a dataset with multiple dimensions
     time_coords = pd.date_range("2023-01-01", periods=3, freq="h")
     elevation_coords = [0, 100, 500]
@@ -428,9 +429,6 @@ def test_calculate_temporal_resolution():
 
 def test_dimension_extraction_utilities():
     """Test the dimension extraction utility functions directly"""
-    import pandas as pd
-
-    from xpublish_tiles.xpublish.tiles.tile_matrix import extract_dimension_extents
 
     # Create test data array with various dimension types
     time_coords = pd.date_range("2021-01-01", periods=4, freq="D")
@@ -463,7 +461,8 @@ def test_dimension_extraction_utilities():
         },
     )
 
-    dimensions = extract_dimension_extents(data_array)
+    ds = data_array.to_dataset("foo")
+    dimensions = extract_dimension_extents(ds, "foo")
 
     # Should extract time and depth, but not lat/lon (spatial)
     assert len(dimensions) == 2
@@ -534,10 +533,6 @@ def test_no_dimensions_dataset():
 
 def test_cf_axis_detection():
     """Test that CF axis detection works correctly"""
-    import pandas as pd
-
-    from xpublish_tiles.xpublish.tiles.tile_matrix import extract_dimension_extents
-
     # Create dataset with non-standard dimension names but proper CF attributes
     time_coords = pd.date_range("2022-01-01", periods=3, freq="ME")
 
@@ -564,7 +559,8 @@ def test_cf_axis_detection():
         },
     )
 
-    dimensions = extract_dimension_extents(data_array)
+    ds = data_array.to_dataset("foo")
+    dimensions = extract_dimension_extents(ds, "foo")
 
     # Should detect temporal and vertical dimensions despite non-standard names
     assert len(dimensions) == 2
