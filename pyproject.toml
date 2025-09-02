@@ -7,6 +7,10 @@ authors = [
     { name = "Deepak Cherian", email = "deepak@earthmover.io" },
     { name = "Tom Nicholas", email = "tom@earthmover.io" },
 ]
+license = { text = "Apache-2.0" }
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+]
 requires-python = ">=3.11"
 dependencies = [
     "cf-xarray>=0.10.6",
