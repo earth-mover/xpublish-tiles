@@ -146,10 +146,10 @@ def extract_dataset_extents(
     # Convert DimensionExtent objects to OGC extents format
     for dim_name, dim_extent in all_dimensions.items():
         extent_dict = {"interval": dim_extent.extent}
+        values = dataset[dim_name]
 
         # Calculate resolution if possible
-        if dim_extent.extent and len(dim_extent.extent) > 1:
-            values = dataset[dim_name]
+        if len(values) > 1:
             if dim_extent.type == DimensionType.TEMPORAL:
                 # For temporal dimensions, try to calculate time resolution
                 extent_dict["resolution"] = _calculate_temporal_resolution(values)
@@ -158,7 +158,7 @@ def extract_dataset_extents(
                 data = values.data
                 diffs = [abs(data[i + 1] - data[i]).item() for i in range(len(data) - 1)]
                 if diffs:
-                    extent_dict["resolution"] = min(diffs).item()
+                    extent_dict["resolution"] = min(diffs)
 
         # Add units if available
         if dim_extent.units:

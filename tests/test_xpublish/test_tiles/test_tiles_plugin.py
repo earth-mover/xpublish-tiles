@@ -169,8 +169,8 @@ def test_tilesets_list_with_metadata():
     time_extent = layer["extents"]["time"]
     assert "interval" in time_extent
     assert len(time_extent["interval"]) == 2
-    assert time_extent["interval"][0] == "2020-01-01T00:00:00Z"
-    assert time_extent["interval"][1] == "2020-12-01T00:00:00Z"
+    assert time_extent["interval"][0] == "2020-01-01T00:00:00"
+    assert time_extent["interval"][1] == "2020-12-01T00:00:00"
 
     # Test the tileset metadata endpoint - extents should no longer be at tileset level
     metadata_response = client.get("/datasets/climate/tiles/WebMercatorQuad")
@@ -279,8 +279,8 @@ def test_multi_dimensional_dataset():
 
     metadata = metadata_response.json()
     assert "extents" not in metadata
-    assert time_extent["interval"][0] == "2020-01-01T00:00:00Z"
-    assert time_extent["interval"][1] == "2020-06-01T00:00:00Z"
+    assert time_extent["interval"][0] == "2020-01-01T00:00:00"
+    assert time_extent["interval"][1] == "2020-06-01T00:00:00"
 
     # Check elevation extent (now in layer)
     assert "elevation" in layer["extents"]
@@ -298,7 +298,7 @@ def test_multi_dimensional_dataset():
     assert "interval" in scenario_extent
     assert "description" in scenario_extent
     assert scenario_extent["description"] == "Climate scenario"
-    assert scenario_extent["interval"] == ["RCP45", "RCP85", "Historical"]
+    assert scenario_extent["interval"] == ["RCP45", "Historical"]
 
 
 def test_dimension_extraction_utilities():
@@ -345,9 +345,9 @@ def test_dimension_extraction_utilities():
     time_dim = next(d for d in dimensions if d.name == "time")
     assert time_dim.type.value == "temporal"
     assert len(time_dim.values) == 4
-    assert time_dim.extent[0] == "2021-01-01T00:00:00Z"
-    assert time_dim.extent[1] == "2021-01-04T00:00:00Z"
-    assert time_dim.default == "2021-01-04T00:00:00Z"
+    assert time_dim.extent[0] == "2021-01-01T00:00:00"
+    assert time_dim.extent[1] == "2021-01-04T00:00:00"
+    assert time_dim.default == "2021-01-04T00:00:00"
 
     # Check depth dimension
     depth_dim = next(d for d in dimensions if d.name == "depth")

@@ -70,8 +70,8 @@ def test_extract_dataset_extents():
     time_extent = extents["time"]
     assert "interval" in time_extent
     assert "resolution" in time_extent
-    assert time_extent["interval"][0] == "2023-01-01T00:00:00Z"
-    assert time_extent["interval"][1] == "2023-01-01T02:00:00Z"
+    assert time_extent["interval"][0] == "2023-01-01T00:00:00"
+    assert time_extent["interval"][1] == "2023-01-01T02:00:00"
     assert time_extent["resolution"] == "PT1H"  # Hourly
 
     # Check elevation extent
@@ -197,8 +197,8 @@ def test_extract_dataset_extents_multiple_variables():
 
     # Time should be from the ocean_temp variable
     time_extent = extents_ocean["time"]
-    assert time_extent["interval"][0] == "2023-01-01T00:00:00Z"
-    assert time_extent["interval"][1] == "2023-01-02T00:00:00Z"
+    assert time_extent["interval"][0] == "2023-01-01T00:00:00"
+    assert time_extent["interval"][1] == "2023-01-02T00:00:00"
 
     # Depth should be from the ocean_temp variable
     depth_extent = extents_ocean["depth"]
@@ -272,7 +272,7 @@ def test_calculate_temporal_resolution_edge_cases():
     )  # Empty list
     assert (
         _calculate_temporal_resolution(
-            xr.DataArray(pd.DatetimeIndex(["2023-01-01T00:00:00Z"]), dims="time")
+            xr.DataArray(pd.DatetimeIndex(["2023-01-01T00:00:00"]), dims="time")
         )
         == "PT1H"
     )  # Single value
@@ -284,9 +284,9 @@ def test_calculate_temporal_resolution_edge_cases():
     irregular_values = xr.DataArray(
         pd.DatetimeIndex(
             [
-                "2023-01-01T00:00:00Z",
-                "2023-01-01T01:00:00Z",  # 1 hour gap
-                "2023-01-01T04:00:00Z",  # 3 hour gap
+                "2023-01-01T00:00:00",
+                "2023-01-01T01:00:00",  # 1 hour gap
+                "2023-01-01T04:00:00",  # 3 hour gap
             ]
         ),
         dims="time",

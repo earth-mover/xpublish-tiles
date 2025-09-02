@@ -199,13 +199,18 @@ def get_all_tile_matrix_set_ids() -> list[str]:
     return list(TILE_MATRIX_SETS.keys())
 
 
-def extract_dimension_extents(ds: xr.Dataset, name: Hashable) -> list:
+def extract_dimension_extents(
+    ds: xr.Dataset, name: Hashable, max_actual_values: int = 50
+) -> list[DimensionExtent]:
     """Extract dimension extent information from an xarray DataArray.
 
     Uses cf_xarray to detect CF-compliant axes for robust dimension classification.
 
     Args:
         data_array: xarray DataArray to extract dimensions from
+        name: Name of the data array
+        max_actual_values: Maximum number of actual values to extract,
+            otherwise only extents and resolution will be extracted.
 
     Returns:
         List of DimensionExtent objects for non-spatial dimensions
@@ -251,22 +256,31 @@ def extract_dimension_extents(ds: xr.Dataset, name: Hashable) -> list:
 
         # Handle different coordinate types
         extent: list[Union[str, float, int]]
+        actual_values: list[str | float | int] | None = None
 
-        if np.issubdtype(values.dtype, np.timedelta64):
-            if len(values) > 0:
-                extent = [str(values[0]), str(values[-1])]
+        if len(values) == 0:
+            extent = []
+        elif np.issubdtype(values.dtype, np.timedelta64):
+            extent = [str(values[0]), str(values[-1])]
+            if len(values) <= max_actual_values:
+                actual_values = [str(value) for value in values]
         elif np.issubdtype(values.dtype, np.datetime64):
+            dt_values = cast(list[pd.Timestamp], pd.to_datetime(values))
             # Convert datetime to ISO strings - only get first and last values for extent
-            first_datetime = pd.to_datetime(values[0]).strftime("%Y-%m-%dT%H:%M:%S")
-            last_datetime = pd.to_datetime(values[-1]).strftime("%Y-%m-%dT%H:%M:%S")
+            first_datetime = dt_values[0].isoformat()
+            last_datetime = dt_values[-1].isoformat()
             extent = [first_datetime, last_datetime]
+            if len(values) <= max_actual_values:
+                actual_values = [value.isoformat() for value in dt_values]
         elif np.issubdtype(values.dtype, np.number):
             # Numeric coordinates
-            extent = [float(values.min()), float(values.max())]
+            extent = [values.min(), values.max()]
+            if len(values) <= max_actual_values:
+                actual_values = values
         else:
-            # String/categorical coordinates
-            if len(values) > 0:
-                extent = [str(values[0]), str(values[-1])]
+            extent = [str(values[0]), str(values[-1])]
+            if len(values) <= max_actual_values:
+                actual_values = [str(value) for value in values]
 
         # Get units and description from attributes
         units = coord.attrs.get("units")
@@ -287,6 +301,7 @@ def extract_dimension_extents(ds: xr.Dataset, name: Hashable) -> list:
             units=units,
             description=description,
             default=default,
+            values=actual_values,
         )
         dimensions.append(dimension)
 
