@@ -163,23 +163,6 @@ class DatashaderRasterRenderer(Renderer):
                     )
             else:
                 data = self.maybe_cast_data(context.da)
-                ydata = data[grid.Y]
-                if (
-                    ydata.ndim == 1
-                    and
-                    # decreasing coordinates are buggy
-                    # https://github.com/holoviz/datashader/issues/1438
-                    (ydata[1] - ydata[0] < 0)
-                ):
-                    data = data.assign_coords(
-                        dict(
-                            zip(
-                                (grid.X, grid.Y),
-                                xr.broadcast(data[grid.X], data[grid.Y]),
-                                strict=False,
-                            )
-                        )
-                    )
                 # Lock is only used when tbb is not available (e.g., on macOS)
                 # AND if we use the rectilinear or raster code path
                 with LOCK if data[grid.Y].ndim == 1 else contextlib.nullcontext():
