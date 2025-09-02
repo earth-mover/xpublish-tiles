@@ -257,8 +257,8 @@ def extract_dimension_extents(ds: xr.Dataset, name: Hashable) -> list:
                 extent = [str(values[0]), str(values[-1])]
         elif np.issubdtype(values.dtype, np.datetime64):
             # Convert datetime to ISO strings - only get first and last values for extent
-            first_datetime = pd.to_datetime(values[0]).strftime("%Y-%m-%dT%H:%M:%SZ")
-            last_datetime = pd.to_datetime(values[-1]).strftime("%Y-%m-%dT%H:%M:%SZ")
+            first_datetime = pd.to_datetime(values[0]).strftime("%Y-%m-%dT%H:%M:%S")
+            last_datetime = pd.to_datetime(values[-1]).strftime("%Y-%m-%dT%H:%M:%S")
             extent = [first_datetime, last_datetime]
         elif np.issubdtype(values.dtype, np.number):
             # Numeric coordinates
