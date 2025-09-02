@@ -114,6 +114,7 @@ class TilesPlugin(Plugin):
                 keywords = []
 
             # Get available styles from registered renderers
+            logger.info(f"Getting available styles for dataset '{title}'")
 
             styles = []
             for renderer_cls in RenderRegistry.all().values():
@@ -145,6 +146,13 @@ class TilesPlugin(Plugin):
                         )
                     )
 
+            logger.info("loading extents for dataset vars")
+
+            layer_extents = {}
+            for var_name in dataset.data_vars.keys():
+                extents = extract_dataset_extents(dataset, var_name)
+                layer_extents[var_name] = extents
+
             # Create one tileset entry per supported tile matrix set
             supported_tms = get_all_tile_matrix_set_ids()
 
@@ -155,7 +163,7 @@ class TilesPlugin(Plugin):
                     # Create layers for each data variable
                     layers = []
                     for var_name, var_data in dataset.data_vars.items():
-                        extents = extract_dataset_extents(dataset, var_name)
+                        extents = layer_extents[var_name]
 
                         # Extract variable-specific bounding box, fallback to dataset bounds
                         var_bounding_box = extract_variable_bounding_box(

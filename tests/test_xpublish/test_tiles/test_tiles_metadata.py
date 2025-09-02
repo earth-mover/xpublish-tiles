@@ -1,6 +1,7 @@
 """Tests for tiles metadata functionality"""
 
 import numpy as np
+import pandas as pd
 import pytest
 
 import xarray as xr
@@ -69,8 +70,8 @@ def test_extract_dataset_extents():
     time_extent = extents["time"]
     assert "interval" in time_extent
     assert "resolution" in time_extent
-    assert time_extent["interval"][0] == "2023-01-01T00:00:00Z"
-    assert time_extent["interval"][1] == "2023-01-01T02:00:00Z"
+    assert time_extent["interval"][0] == "2023-01-01T00:00:00"
+    assert time_extent["interval"][1] == "2023-01-01T02:00:00"
     assert time_extent["resolution"] == "PT1H"  # Hourly
 
     # Check elevation extent
@@ -196,8 +197,8 @@ def test_extract_dataset_extents_multiple_variables():
 
     # Time should be from the ocean_temp variable
     time_extent = extents_ocean["time"]
-    assert time_extent["interval"][0] == "2023-01-01T00:00:00Z"
-    assert time_extent["interval"][1] == "2023-01-02T00:00:00Z"
+    assert time_extent["interval"][0] == "2023-01-01T00:00:00"
+    assert time_extent["interval"][1] == "2023-01-02T00:00:00"
 
     # Depth should be from the ocean_temp variable
     depth_extent = extents_ocean["depth"]
@@ -205,50 +206,59 @@ def test_extract_dataset_extents_multiple_variables():
     assert depth_extent["units"] == "m"
 
 
-def test_calculate_temporal_resolution():
+@pytest.mark.parametrize("use_cftime", [True, False])
+def test_calculate_temporal_resolution(use_cftime):
     """Test the _calculate_temporal_resolution function directly"""
     from xpublish_tiles.xpublish.tiles.metadata import _calculate_temporal_resolution
 
     # Test hourly resolution
-    hourly_values = [
-        "2023-01-01T00:00:00Z",
-        "2023-01-01T01:00:00Z",
-        "2023-01-01T02:00:00Z",
-        "2023-01-01T03:00:00Z",
-    ]
+    hourly_values = xr.DataArray(
+        xr.date_range("2023-01-01T00:00:00", periods=4, freq="h", use_cftime=use_cftime),
+        dims="time",
+        name="time",
+    )
     assert _calculate_temporal_resolution(hourly_values) == "PT1H"
 
     # Test daily resolution
-    daily_values = [
-        "2023-01-01T00:00:00Z",
-        "2023-01-02T00:00:00Z",
-        "2023-01-03T00:00:00Z",
-    ]
+    daily_values = xr.DataArray(
+        xr.date_range(
+            "2023-01-01T00:00:00", periods=4, freq="24h", use_cftime=use_cftime
+        ),
+        dims="time",
+        name="time",
+    )
     assert _calculate_temporal_resolution(daily_values) == "P1D"
 
     # Test monthly resolution (approximately)
-    monthly_values = [
-        "2023-01-01T00:00:00Z",
-        "2023-02-01T00:00:00Z",
-        "2023-03-01T00:00:00Z",
-    ]
+    monthly_values = xr.DataArray(
+        xr.date_range("2023-01-01T00:00:00", periods=4, freq="MS", use_cftime=use_cftime),
+        dims="time",
+        name="time",
+    )
+
     result = _calculate_temporal_resolution(monthly_values)
     assert result.startswith("P") and result.endswith("D")  # Should be in days
 
     # Test 15-minute resolution
-    minute_values = [
-        "2023-01-01T00:00:00Z",
-        "2023-01-01T00:15:00Z",
-        "2023-01-01T00:30:00Z",
-    ]
+    minute_values = xr.DataArray(
+        xr.date_range(
+            "2023-01-01T00:00:00", periods=4, freq="15min", use_cftime=use_cftime
+        ),
+        dims="time",
+        name="time",
+    )
+
     assert _calculate_temporal_resolution(minute_values) == "PT15M"
 
     # Test 30-second resolution
-    second_values = [
-        "2023-01-01T00:00:00Z",
-        "2023-01-01T00:00:30Z",
-        "2023-01-01T00:01:00Z",
-    ]
+    second_values = xr.DataArray(
+        xr.date_range(
+            "2023-01-01T00:00:00", periods=4, freq="30s", use_cftime=use_cftime
+        ),
+        dims="time",
+        name="time",
+    )
+
     assert _calculate_temporal_resolution(second_values) == "PT30S"
 
 
@@ -257,23 +267,38 @@ def test_calculate_temporal_resolution_edge_cases():
     from xpublish_tiles.xpublish.tiles.metadata import _calculate_temporal_resolution
 
     # Test edge cases
-    assert _calculate_temporal_resolution([]) == "PT1H"  # Empty list
     assert (
-        _calculate_temporal_resolution(["2023-01-01T00:00:00Z"]) == "PT1H"
+        _calculate_temporal_resolution(xr.DataArray([], dims="time")) == "PT1H"
+    )  # Empty list
+    assert (
+        _calculate_temporal_resolution(
+            xr.DataArray(pd.DatetimeIndex(["2023-01-01T00:00:00"]), dims="time")
+        )
+        == "PT1H"
     )  # Single value
-    assert _calculate_temporal_resolution([1, 2, 3]) == "PT1H"  # Non-string values
+    assert (
+        _calculate_temporal_resolution(xr.DataArray([1, 2, 3], dims="time")) == "PT1H"
+    )  # Non-string values
 
     # Test irregular intervals (should use average)
-    irregular_values = [
-        "2023-01-01T00:00:00Z",
-        "2023-01-01T01:00:00Z",  # 1 hour gap
-        "2023-01-01T04:00:00Z",  # 3 hour gap
-    ]
+    irregular_values = xr.DataArray(
+        pd.DatetimeIndex(
+            [
+                "2023-01-01T00:00:00",
+                "2023-01-01T01:00:00",  # 1 hour gap
+                "2023-01-01T04:00:00",  # 3 hour gap
+            ]
+        ),
+        dims="time",
+        name="time",
+    )
     result = _calculate_temporal_resolution(irregular_values)
     assert result == "PT2H"  # Average of 1 and 3 hours
 
     # Test with invalid datetime strings (should fallback)
-    invalid_values = ["not-a-date", "also-not-a-date"]
+    invalid_values = xr.DataArray(
+        ["not-a-date", "also-not-a-date"], dims="time", name="time"
+    )
     assert _calculate_temporal_resolution(invalid_values) == "PT1H"
 
 

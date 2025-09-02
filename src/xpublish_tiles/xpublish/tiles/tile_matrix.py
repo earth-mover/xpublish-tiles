@@ -1,15 +1,22 @@
 """Tile matrix set definitions for OGC Tiles API"""
 
-from typing import Optional, Union
+from collections.abc import Hashable
+from typing import Optional, Union, cast
 
+import cf_xarray as cfxr  # noqa: F401 - needed to enable .cf accessor
 import morecantile
 import morecantile.errors
+import numpy as np
+import pandas as pd
 import pyproj
 import pyproj.aoi
 
 import xarray as xr
+from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear, guess_grid_system
 from xpublish_tiles.types import OutputBBox, OutputCRS
 from xpublish_tiles.xpublish.tiles.types import (
+    DimensionExtent,
+    DimensionType,
     Link,
     TileMatrix,
     TileMatrixSet,
@@ -174,7 +181,7 @@ def get_tile_matrix_limits(
 
     limits = []
     for z in zoom_levels:
-        max_tiles = 2**z - 1
+        max_tiles = int(2**z - 1)
         limits.append(
             TileMatrixSetLimit(
                 tileMatrix=str(z),
@@ -192,24 +199,26 @@ def get_all_tile_matrix_set_ids() -> list[str]:
     return list(TILE_MATRIX_SETS.keys())
 
 
-def extract_dimension_extents(data_array: xr.DataArray) -> list:
+def extract_dimension_extents(
+    ds: xr.Dataset, name: Hashable, max_actual_values: int = 50
+) -> list[DimensionExtent]:
     """Extract dimension extent information from an xarray DataArray.
 
     Uses cf_xarray to detect CF-compliant axes for robust dimension classification.
 
     Args:
         data_array: xarray DataArray to extract dimensions from
+        name: Name of the data array
+        max_actual_values: Maximum number of actual values to extract,
+            otherwise only extents and resolution will be extracted.
 
     Returns:
         List of DimensionExtent objects for non-spatial dimensions
     """
-    import cf_xarray as cfxr  # noqa: F401 - needed to enable .cf accessor
-    import numpy as np
-    import pandas as pd
-
-    from xpublish_tiles.xpublish.tiles.types import DimensionExtent, DimensionType
-
     dimensions = []
+
+    grid = cast(RasterAffine | Rectilinear | Curvilinear, guess_grid_system(ds, name))
+    data_array = ds[name]
 
     # Get CF axes information
     try:
@@ -219,19 +228,12 @@ def extract_dimension_extents(data_array: xr.DataArray) -> list:
         cf_axes = {}
 
     # Identify spatial and temporal dimensions using CF conventions
-    spatial_dims = set()
+    spatial_dims = {grid.Xdim, grid.Ydim}
     temporal_dims = set()
-    vertical_dims = set()
-
-    # Add CF-detected spatial dimensions (X, Y axes)
-    spatial_dims.update(cf_axes.get("X", []))
-    spatial_dims.update(cf_axes.get("Y", []))
+    vertical_dims = {grid.Z} if grid.Z else set()
 
     # Add CF-detected temporal dimensions (T axis)
     temporal_dims.update(cf_axes.get("T", []))
-
-    # Add CF-detected vertical dimensions (Z axis)
-    vertical_dims.update(cf_axes.get("Z", []))
 
     for dim_name in data_array.dims:
         # Skip spatial dimensions (X, Y axes)
@@ -253,33 +255,32 @@ def extract_dimension_extents(data_array: xr.DataArray) -> list:
         values = coord.values
 
         # Handle different coordinate types
-        values_list: list[Union[str, float, int]]
         extent: list[Union[str, float, int]]
+        actual_values: list[str | float | int] | None = None
 
-        if np.issubdtype(values.dtype, np.timedelta64):
-            # Convert strings to timedelta64
-            values_list = [str(val) for val in values]
-            extent = [values_list[0], values_list[-1]]
+        if len(values) == 0:
+            extent = []
+        elif np.issubdtype(values.dtype, np.timedelta64):
+            extent = [str(values[0]), str(values[-1])]
+            if len(values) <= max_actual_values:
+                actual_values = [str(value) for value in values]
         elif np.issubdtype(values.dtype, np.datetime64):
-            # Convert datetime to ISO strings
-            if hasattr(values, "astype"):
-                datetime_series = pd.to_datetime(values)
-                formatted_series = datetime_series.strftime("%Y-%m-%dT%H:%M:%SZ")
-                str_values = list(formatted_series)
-            else:
-                str_values = [
-                    pd.to_datetime(val).strftime("%Y-%m-%dT%H:%M:%SZ") for val in values
-                ]
-            extent = [str_values[0], str_values[-1]]
-            values_list = list(str_values)
+            dt_values = cast(list[pd.Timestamp], pd.to_datetime(values))
+            # Convert datetime to ISO strings - only get first and last values for extent
+            first_datetime = dt_values[0].isoformat()
+            last_datetime = dt_values[-1].isoformat()
+            extent = [first_datetime, last_datetime]
+            if len(values) <= max_actual_values:
+                actual_values = [value.isoformat() for value in dt_values]
         elif np.issubdtype(values.dtype, np.number):
             # Numeric coordinates
-            extent = [float(values.min()), float(values.max())]
-            values_list = [float(val) for val in values]
+            extent = [values.min(), values.max()]
+            if len(values) <= max_actual_values:
+                actual_values = values
         else:
-            # String/categorical coordinates
-            values_list = [str(val) for val in values]
-            extent = values_list  # For categorical, extent is all values
+            extent = [str(values[0]), str(values[-1])]
+            if len(values) <= max_actual_values:
+                actual_values = [str(value) for value in values]
 
         # Get units and description from attributes
         units = coord.attrs.get("units")
@@ -287,23 +288,20 @@ def extract_dimension_extents(data_array: xr.DataArray) -> list:
 
         # Determine default value (first value)
         default = None
-        if values_list:
+        if extent:
             if dim_type == DimensionType.VERTICAL:
-                default = values_list[0]
+                default = extent[0]
             else:
-                default = values_list[-1]
-
-        # Limit values list size for performance
-        limited_values = values_list if len(values_list) <= 100 else None
+                default = extent[-1]
 
         dimension = DimensionExtent(
             name=str(dim_name),
             type=dim_type,
             extent=extent,
-            values=limited_values,
             units=units,
             description=description,
             default=default,
+            values=actual_values,
         )
         dimensions.append(dimension)
 

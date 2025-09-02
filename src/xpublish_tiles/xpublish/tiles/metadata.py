@@ -1,11 +1,14 @@
-from typing import Any, Optional, Union, cast
+import functools
+from typing import Any, Optional, cast
 
 import morecantile.models
 
+import xarray as xr
 from xarray import Dataset
 from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear, guess_grid_system
 from xpublish_tiles.logger import logger
 from xpublish_tiles.pipeline import transformer_from_crs
+from xpublish_tiles.render import RenderRegistry
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     extract_dimension_extents,
@@ -19,6 +22,40 @@ from xpublish_tiles.xpublish.tiles.types import (
     Style,
     TileSetMetadata,
 )
+
+
+@functools.cache
+def get_styles():
+    styles = []
+    for renderer_cls in RenderRegistry.all().values():
+        # Add default variant alias
+        default_variant = renderer_cls.default_variant()
+        default_style_info = renderer_cls.describe_style("default")
+        default_style_info["title"] = (
+            f"{renderer_cls.style_id().title()} - Default ({default_variant.title()})"
+        )
+        default_style_info["description"] = (
+            f"Default {renderer_cls.style_id()} rendering (alias for {default_variant})"
+        )
+        styles.append(
+            Style(
+                id=default_style_info["id"],
+                title=default_style_info["title"],
+                description=default_style_info["description"],
+            )
+        )
+
+        # Add all actual variants
+        for variant in renderer_cls.supported_variants():
+            style_info = renderer_cls.describe_style(variant)
+            styles.append(
+                Style(
+                    id=style_info["id"],
+                    title=style_info["title"],
+                    description=style_info["description"],
+                )
+            )
+    return styles
 
 
 def extract_attributes_metadata(
@@ -59,39 +96,6 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
     dataset_attrs = dataset.attrs
     title = dataset_attrs.get("title", "Dataset")
 
-    # Get available styles from registered renderers
-    from xpublish_tiles.render import RenderRegistry
-
-    styles = []
-    for renderer_cls in RenderRegistry.all().values():
-        # Add default variant alias
-        default_variant = renderer_cls.default_variant()
-        default_style_info = renderer_cls.describe_style("default")
-        default_style_info["title"] = (
-            f"{renderer_cls.style_id().title()} - Default ({default_variant.title()})"
-        )
-        default_style_info["description"] = (
-            f"Default {renderer_cls.style_id()} rendering (alias for {default_variant})"
-        )
-        styles.append(
-            Style(
-                id=default_style_info["id"],
-                title=default_style_info["title"],
-                description=default_style_info["description"],
-            )
-        )
-
-        # Add all actual variants
-        for variant in renderer_cls.supported_variants():
-            style_info = renderer_cls.describe_style(variant)
-            styles.append(
-                Style(
-                    id=style_info["id"],
-                    title=style_info["title"],
-                    description=style_info["description"],
-                )
-            )
-
     # Create main tileset metadata
     return TileSetMetadata(
         title=f"{title} - {tile_matrix_set_id}",
@@ -113,7 +117,7 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
                 title=f"Definition of {tile_matrix_set_id}",
             ),
         ],
-        styles=styles,
+        styles=get_styles(),
     )
 
 
@@ -128,12 +132,12 @@ def extract_dataset_extents(
 
     # When a variable name is provided, extract dimensions from that variable only
     if variable_name:
-        ds = dataset[[variable_name]]
+        ds = cast(xr.Dataset, dataset[[variable_name]])
     else:
         ds = dataset
 
-    for var_data in ds.data_vars.values():
-        dimensions = extract_dimension_extents(var_data)
+    for var in ds.data_vars:
+        dimensions = extract_dimension_extents(ds, var)
         for dim in dimensions:
             # Use the first occurrence of each dimension name
             if dim.name not in all_dimensions:
@@ -142,16 +146,17 @@ def extract_dataset_extents(
     # Convert DimensionExtent objects to OGC extents format
     for dim_name, dim_extent in all_dimensions.items():
         extent_dict = {"interval": dim_extent.extent}
+        values = dataset[dim_name]
 
         # Calculate resolution if possible
-        if dim_extent.values and len(dim_extent.values) > 1:
-            values = dim_extent.values
+        if len(values) > 1:
             if dim_extent.type == DimensionType.TEMPORAL:
                 # For temporal dimensions, try to calculate time resolution
                 extent_dict["resolution"] = _calculate_temporal_resolution(values)
-            elif isinstance(values[0], int | float):
+            elif isinstance(values.data[0].item(), int | float):
                 # For numeric dimensions, calculate step size
-                diffs = [abs(values[i + 1] - values[i]) for i in range(len(values) - 1)]
+                data = values.data
+                diffs = [abs(data[i + 1] - data[i]).item() for i in range(len(data) - 1)]
                 if diffs:
                     extent_dict["resolution"] = min(diffs)
 
@@ -172,31 +177,20 @@ def extract_dataset_extents(
     return extents
 
 
-def _calculate_temporal_resolution(values: list[Union[str, float, int]]) -> str:
+def _calculate_temporal_resolution(values: xr.DataArray) -> str:
     """Calculate temporal resolution from datetime values"""
-    if len(values) < 2:
+    if hasattr(values, "size"):
+        if values.size < 2:
+            return "PT1H"  # Default to hourly
+    elif not bool(values):
         return "PT1H"  # Default to hourly
 
     try:
-        import pandas as pd
-
-        # Convert to datetime if they're strings
-        if isinstance(values[0], str):
-            dt_values = [pd.to_datetime(v) for v in values[:10]]  # Sample first 10
-        else:
-            return "PT1H"  # Default for non-string values
-
         # Calculate differences
-        diffs = [
-            (dt_values[i + 1] - dt_values[i]).total_seconds()
-            for i in range(len(dt_values) - 1)
-        ]
-
-        if not diffs:
-            return "PT1H"
+        diffs = values[:10].diff(values.name).dt.total_seconds().data
 
         # Get the most common difference
-        avg_diff = sum(diffs) / len(diffs)
+        avg_diff = diffs.mean()
 
         # Convert to ISO 8601 duration format
         if avg_diff >= 86400:  # >= 1 day
