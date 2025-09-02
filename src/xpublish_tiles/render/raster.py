@@ -164,15 +164,11 @@ class DatashaderRasterRenderer(Renderer):
             else:
                 data = self.maybe_cast_data(context.da)
                 ydata = data[grid.Y]
-                if (
-                    ydata.ndim == 1
-                    and
+                if ydata.ndim == 1 and (
                     # decreasing coordinates are buggy
                     # https://github.com/holoviz/datashader/issues/1438
                     (ydata[1] - ydata[0] < 0)
-                ):
-                    data = data.isel({grid.Ydim: slice(None, None, -1)})
-                if ydata.ndim == 1 and (
+                    or
                     # for high zoom tiles are usually 3x3
                     # use curvilinear code path here
                     # https://github.com/holoviz/datashader/issues/1439
