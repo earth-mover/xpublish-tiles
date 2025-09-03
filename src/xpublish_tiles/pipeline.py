@@ -12,6 +12,7 @@ import xarray as xr
 from xpublish_tiles.grids import (
     Curvilinear,
     GridSystem,
+    GridSystem2D,
     RasterAffine,
     Rectilinear,
     guess_grid_system,
@@ -20,6 +21,7 @@ from xpublish_tiles.lib import (
     EXECUTOR,
     TileTooBigError,
     check_transparent_pixels,
+    is_4326_like,
     transform_coordinates,
     transformer_from_crs,
 )
@@ -404,7 +406,8 @@ async def subset_to_bbox(
             if grid.crs.is_geographic
             else False
         )
-        newX, newY = await transform_coordinates(subset, grid.X, grid.Y, input_to_output)
+        newgrid, newtrans = pick_grid(grid, crs, input_to_output)
+        newX, newY = await transform_coordinates(subset, newgrid.X, newgrid.Y, newtrans)
 
         # Fix coordinate discontinuities in transformed coordinates if detected
         if has_discontinuity:
@@ -424,3 +427,22 @@ async def subset_to_bbox(
             bbox=bbox,
         )
     return result
+
+
+def pick_grid(
+    grid: GridSystem, crs: pyproj.CRS, transformer: pyproj.Transformer
+) -> tuple[GridSystem, pyproj.Transformer]:
+    if not grid.alternates:
+        return grid, transformer
+
+    for alt in grid.alternates:
+        assert isinstance(alt, GridSystem2D)
+        if alt.crs == crs:
+            return alt, transformer_from_crs(alt.crs, crs)
+
+    for alt in grid.alternates:
+        assert isinstance(alt, GridSystem2D)
+        if is_4326_like(alt.crs):
+            return alt, transformer_from_crs(alt.crs, crs)
+
+    return grid, transformer

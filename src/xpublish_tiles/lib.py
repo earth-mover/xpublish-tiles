@@ -269,7 +269,8 @@ async def transform_coordinates(
         return inx.copy(data=newx), iny.copy(data=newy)
 
     # Broadcast coordinates
-    bx, by = xr.broadcast(inx, iny)
+    # FIXME: dropping indexes is a workaround for broadcasting RasterIndex
+    bx, by = xr.broadcast(inx.drop_indexes(inx.dims), iny.drop_indexes(iny.dims))
 
     # Choose transformation method based on data size
     if bx.size > math.prod(chunk_size):
