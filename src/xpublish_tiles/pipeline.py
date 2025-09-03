@@ -11,8 +11,8 @@ from pyproj.aoi import BBox
 import xarray as xr
 from xpublish_tiles.grids import (
     Curvilinear,
+    GridMetadata,
     GridSystem,
-    GridSystem2D,
     RasterAffine,
     Rectilinear,
     guess_grid_system,
@@ -21,7 +21,6 @@ from xpublish_tiles.lib import (
     EXECUTOR,
     TileTooBigError,
     check_transparent_pixels,
-    is_4326_like,
     transform_coordinates,
     transformer_from_crs,
 )
@@ -57,21 +56,43 @@ def round_bbox(bbox: BBox) -> BBox:
 
 
 async def apply_slicers(
-    da: xr.DataArray, *, grid: GridSystem, slicers: dict[str, list[slice]]
+    da: xr.DataArray,
+    *,
+    grid: GridSystem,
+    alternate: GridMetadata,
+    slicers: dict[str, list[slice]],
 ) -> xr.DataArray:
     grid = cast(RasterAffine | Rectilinear | Curvilinear, grid)
 
     # Y dimension should always have exactly one slice
     y_slice = slicers[grid.Ydim][0]
 
+    pick = [alternate.X, alternate.Y]
+    ds = (
+        da.to_dataset()
+        # drop any coordinate vars we don't need
+        .reset_coords()[[da.name, *pick]]
+    )
     subsets = [
-        da.isel({grid.Xdim: lon_slice, grid.Ydim: y_slice})
+        ds.isel({grid.Xdim: lon_slice, grid.Ydim: y_slice})
         for lon_slice in slicers[grid.Xdim]
     ]
-    if sum(subset.size for subset in subsets) > MAX_RENDERABLE_SIZE:
+    if (
+        sum(sum(var.size for var in subset.data_vars.values()) for subset in subsets)
+        > MAX_RENDERABLE_SIZE
+    ):
         raise TileTooBigError("Tile request too big. Please choose a higher zoom level.")
     if (
-        np.sum(np.stack([np.array(subset.shape) for subset in subsets], axis=0), axis=0)
+        np.sum(
+            np.stack(
+                [
+                    np.array([subset.sizes[grid.Xdim], subset.sizes[grid.Ydim]])
+                    for subset in subsets
+                ],
+                axis=0,
+            ),
+            axis=0,
+        )
         < 2
     ).any():
         raise ValueError("Tile request resulted in insufficient data for rendering.")
@@ -82,7 +103,8 @@ async def apply_slicers(
     else:
         results = [subset.load() for subset in subsets]
     subset = xr.concat(results, dim=grid.Xdim) if len(results) > 1 else results[0]
-    return subset
+    subset_da = subset.set_coords(pick)[da.name]
+    return subset_da
 
 
 @time_debug
@@ -398,7 +420,8 @@ async def subset_to_bbox(
 
         slicers = grid.sel(array.da, bbox=input_bbox)
         da = grid.assign_index(array.da)
-        subset = await apply_slicers(da, grid=grid, slicers=slicers)
+        alternate = grid.pick_alternate_grid(crs)
+        subset = await apply_slicers(da, grid=grid, alternate=alternate, slicers=slicers)
         has_discontinuity = (
             has_coordinate_discontinuity(
                 subset[grid.X].data, axis=subset[grid.X].get_axis_num(grid.Xdim)
@@ -406,8 +429,9 @@ async def subset_to_bbox(
             if grid.crs.is_geographic
             else False
         )
-        newgrid, newtrans = pick_grid(grid, crs, input_to_output)
-        newX, newY = await transform_coordinates(subset, newgrid.X, newgrid.Y, newtrans)
+        newX, newY = await transform_coordinates(
+            subset, alternate.X, alternate.Y, transformer_from_crs(alternate.crs, crs)
+        )
 
         # Fix coordinate discontinuities in transformed coordinates if detected
         if has_discontinuity:
@@ -427,22 +451,3 @@ async def subset_to_bbox(
             bbox=bbox,
         )
     return result
-
-
-def pick_grid(
-    grid: GridSystem, crs: pyproj.CRS, transformer: pyproj.Transformer
-) -> tuple[GridSystem, pyproj.Transformer]:
-    if not grid.alternates:
-        return grid, transformer
-
-    for alt in grid.alternates:
-        assert isinstance(alt, GridSystem2D)
-        if alt.crs == crs:
-            return alt, transformer_from_crs(alt.crs, crs)
-
-    for alt in grid.alternates:
-        assert isinstance(alt, GridSystem2D)
-        if is_4326_like(alt.crs):
-            return alt, transformer_from_crs(alt.crs, crs)
-
-    return grid, transformer

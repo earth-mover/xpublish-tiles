@@ -2,7 +2,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -209,10 +209,14 @@ def raster_grid(
     if bbox is not None:
         ds.attrs["bbox"] = bbox
 
+    new_gm = ""
+    if alternate_epsg_crs:
+        new_gm = "spatial_ref:"
+        ds = rasterix.assign_index(ds)
     for alt in alternate_epsg_crs:
         altcrs = pyproj.CRS.from_epsg(alt)
-        ds = rasterix.assign_index(ds)
         transformer = transformer_from_crs(crs, alt)
+        # FIXME: use dask instead to save memory
         xa, ya = asyncio.run(transform_coordinates(ds, "x", "y", transformer))
         if altcrs.is_geographic:
             xname, yname = "longitude", "latitude"
@@ -220,16 +224,39 @@ def raster_grid(
             xname, yname = "projection_x_coordinate", "projection_y_coordinate"
         else:
             raise NotImplementedError
-
         ds = ds.assign_coords(
             {
                 # has the side-effect of dropping indexes, which is good
-                f"x_{alt}": (xa.dims, xa.data, {"standard_name": xname}),
-                f"y_{alt}": (ya.dims, ya.data, {"standard_name": yname}),
+                f"x_{alt}": (
+                    xa.dims,
+                    xa.data.astype(np.float32),
+                    {"standard_name": xname},
+                ),
+                f"y_{alt}": (
+                    ya.dims,
+                    ya.data.astype(np.float32),
+                    {"standard_name": yname},
+                ),
             }
         )
-        ds = ds.drop_indexes(("x", "y"))
-    return ds
+        chunks = []
+        for dim in xa.dims:
+            for dimension in dims:
+                if dimension.name == dim:
+                    chunks.extend([dimension.chunk_size])
+        ds[f"x_{alt}"].encoding["chunks"] = tuple(chunks)
+        ds[f"y_{alt}"].encoding["chunks"] = tuple(chunks)
+        ds.coords[f"crs_{alt}"] = ((), 0, altcrs.to_cf())
+        new_gm += f" crs_{alt}: x_{alt} y_{alt}"
+    if new_gm:
+        ds.foo.attrs["grid_mapping"] = new_gm
+        # Only drop indexes if we added alternate coordinates
+        if "x" in ds.coords and "y" in ds.coords:
+            ds = ds.drop_vars(("x", "y"))
+        if geotransform:
+            # rasterix removes this!
+            ds.spatial_ref.attrs["GeoTransform"] = geotransform
+    return cast(xr.Dataset, ds)
 
 
 def curvilinear_grid(
