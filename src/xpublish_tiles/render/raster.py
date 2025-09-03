@@ -165,7 +165,7 @@ class DatashaderRasterRenderer(Renderer):
                 data = self.maybe_cast_data(context.da)
                 # Lock is only used when tbb is not available (e.g., on macOS)
                 # AND if we use the rectilinear or raster code path
-                with LOCK if data[grid.Y].ndim == 1 else contextlib.nullcontext():
+                with LOCK:
                     mesh = cvs.quadmesh(
                         data.transpose(grid.Ydim, grid.Xdim), x=grid.X, y=grid.Y
                     )
