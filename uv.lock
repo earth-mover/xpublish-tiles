@@ -336,14 +336,10 @@ wheels = [
 
 [[package]]
 name = "cf-xarray"
-version = "0.10.7"
-source = { registry = "https://pypi.org/simple" }
+version = "0.10.8.dev14+gb449735d6"
+source = { git = "https://github.com/xarray-contrib/cf-xarray?rev=complex-grid-mapping#b449735d6289a9575d6f381d0243899b93db5dfa" }
 dependencies = [
     { name = "xarray" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/b3/b6/a589c565fa21e1da88aa2c5029424ec9300ff40aa7211326c2a7f8107532/cf_xarray-0.10.7.tar.gz", hash = "sha256:fbb6f6db9cb98a75554af916f1c293a041d30e54f60c0cf6c509cf4d55b5af7f", size = 515323, upload-time = "2025-08-13T15:13:26.662Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f5/be/67c78c0d9c49c69f4158c1d796b9bd459b016cd71c6b48c312cc0e38a040/cf_xarray-0.10.7-py3-none-any.whl", hash = "sha256:ccf8151c399dcc236ea11da4f5cccc1a80e7d46bbb8299a3f00ffc21a51e9d40", size = 72960, upload-time = "2025-08-13T15:13:25.277Z" },
 ]
 
 [[package]]
@@ -3769,7 +3765,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cachetools", specifier = ">=5.5.2" },
-    { name = "cf-xarray", specifier = ">=0.10.6" },
+    { name = "cf-xarray", git = "https://github.com/xarray-contrib/cf-xarray?rev=complex-grid-mapping" },
     { name = "cftime", specifier = ">=1.6.4.post1" },
     { name = "datashader", specifier = ">=0.18.2" },
     { name = "fastapi" },

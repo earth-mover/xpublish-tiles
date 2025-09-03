@@ -23,6 +23,15 @@ DEFAULT_CRS = CRS.from_epsg(4326)
 DEFAULT_PAD = 1
 
 
+@dataclass
+class GridMappingInfo:
+    """Information about a grid mapping and its coordinates."""
+
+    grid_mapping: xr.DataArray | None
+    crs: CRS | None
+    coordinates: tuple[str, ...] | None
+
+
 @dataclass(frozen=True)
 class PadDimension:
     """Helper class to encapsulate padding parameters for a dimension."""
@@ -512,6 +521,7 @@ class GridSystem(ABC):
     #     plugin and the "orchestrator"
     indexes: tuple[xr.Index, ...]
     Z: str | None = None
+    alternates: tuple["GridSystem", ...] = field(default_factory=tuple)
 
     @property
     @abstractmethod
@@ -529,8 +539,15 @@ class GridSystem(ABC):
             return False
         if self.Z != other.Z:
             return False
+        if len(self.alternates) != len(other.alternates):
+            return False
         if any(
             not a.equals(b) for a, b in zip(self.indexes, other.indexes, strict=False)
+        ):
+            return False
+        if any(
+            not a.equals(b)
+            for a, b in zip(self.alternates, other.alternates, strict=False)
         ):
             return False
         return True
@@ -942,40 +959,89 @@ class DGGS(GridSystem):
             return False
 
 
+# Type alias for 2D grid systems that have X, Y, and crs attributes
+GridSystem2D = RasterAffine | Rectilinear | Curvilinear
+
+
+def _guess_grid_mappings_and_crs(
+    ds: xr.Dataset,
+) -> list[GridMappingInfo]:
+    """
+    Returns all grid mappings, CRS pairs, and coordinate pairs using new cf-xarray API.
+
+    Returns
+    -------
+    list[GridMappingInfo]
+        List of (grid_mapping variable, CRS, (coordinates...)) tuples
+    """
+    grid_mappings = ds.cf.grid_mappings
+    if grid_mappings:
+        result = []
+        for grid_mapping_obj in grid_mappings:
+            grid_mapping_var = grid_mapping_obj.array
+            crs = grid_mapping_obj.crs
+            # Get the coordinates specified in the grid mapping
+            coords = grid_mapping_obj.coordinates or None
+            coordinates = coords if coords and len(coords) == 2 else None
+            result.append(GridMappingInfo(grid_mapping_var, crs, coordinates))
+        return result
+
+    # Fall back to existing single grid mapping approach - construct default grid mapping
+    grid_mapping_names: tuple[str, ...] = ()
+    if "spatial_ref" in ds.variables:
+        grid_mapping_names += ("spatial_ref",)
+    elif "crs" in ds.variables:
+        grid_mapping_names += ("crs",)
+
+    if len(grid_mapping_names) == 0:
+        keys = ds.cf.keys()
+        if "latitude" in keys and "longitude" in keys:
+            # Construct a default geographic grid mapping
+            Xname, Yname = guess_coordinate_vars(ds, DEFAULT_CRS)
+            coordinates = (
+                tuple(itertools.chain(Xname, Yname)) if Xname and Yname else None
+            )
+            return [GridMappingInfo(None, DEFAULT_CRS, coordinates)]
+        else:
+            warnings.warn("No CRS detected", UserWarning, stacklevel=2)
+            return [GridMappingInfo(None, None, None)]
+
+    # Handle case where spatial_ref is present but not linked to by a grid_mapping attribute
+    result = []
+    for grid_mapping_var in grid_mapping_names:
+        grid_mapping = ds[grid_mapping_var]
+        crs = CRS.from_cf(grid_mapping.attrs)
+        # For legacy approach, we don't have explicit coordinate info, so pass None
+        result.append(GridMappingInfo(grid_mapping, crs, None))
+    return result
+
+
 def _guess_grid_mapping_and_crs(
     ds: xr.Dataset,
 ) -> tuple[xr.DataArray | None, CRS | None]:
     """
+    Returns the first grid mapping and CRS (backwards compatibility).
+
     Returns
-    ------
+    -------
     grid_mapping variable
     CRS
     """
-    grid_mapping_names = tuple(itertools.chain(*ds.cf.grid_mapping_names.values()))
-    if not grid_mapping_names:
-        if "spatial_ref" in ds.variables:
-            grid_mapping_names += ("spatial_ref",)
-        elif "crs" in ds.variables:
-            grid_mapping_names += ("crs",)
-    if len(grid_mapping_names) == 0:
-        keys = ds.cf.keys()
-        if "latitude" in keys and "longitude" in keys:
-            return None, DEFAULT_CRS
-        else:
-            warnings.warn("No CRS detected", UserWarning, stacklevel=2)
-            return None, None
-    if len(grid_mapping_names) > 1:
-        raise ValueError(f"Multiple grid mappings found: {grid_mapping_names!r}!")
-    (grid_mapping_var,) = grid_mapping_names
-    grid_mapping = ds[grid_mapping_var]
-    return grid_mapping, CRS.from_cf(grid_mapping.attrs)
+    all_mappings = _guess_grid_mappings_and_crs(ds)
+    return (
+        (all_mappings[0].grid_mapping, all_mappings[0].crs)
+        if all_mappings
+        else (None, None)
+    )
 
 
-def guess_coordinate_vars(ds: xr.Dataset, crs: CRS) -> tuple[str, str]:
+def guess_coordinate_vars(
+    ds: xr.Dataset, crs: CRS
+) -> tuple[tuple[str, ...] | None, tuple[str, ...] | None]:
     if is_rotated_pole(crs):
         stdnames = ds.cf.standard_names
         Xname, Yname = (
-            stdnames.get("grid_longitude", ()),
+            stdnames.get("grid_longitude", None),
             stdnames.get("grid_latitude", None),
         )
     elif crs.is_geographic:
@@ -987,84 +1053,177 @@ def guess_coordinate_vars(ds: xr.Dataset, crs: CRS) -> tuple[str, str]:
     return Xname, Yname
 
 
+def _filter_coordinates(
+    coords: tuple[str, ...] | None, skip_coordinates: set[str]
+) -> tuple[str, ...] | None:
+    """Filter out coordinates that should be skipped. Returns None if no coordinates remain."""
+    if coords is None:
+        return None
+    filtered = tuple(coord for coord in coords if coord not in skip_coordinates)
+    return filtered or None
+
+
+def _create_grid_system_for_crs(
+    ds: xr.Dataset,
+    mapping: GridMappingInfo,
+    skip_coordinates: set[str],
+):
+    """
+    Create a GridSystem for a specific CRS.
+    """
+    # This means we are not DGGS for sure.
+    # TODO: we aren't handling the triangular case very explicitly yet.
+    first = next(iter(ds.data_vars.values()))
+
+    # Compute coordinate variables for this mapping
+    assert mapping.crs is not None, "CRS must not be None at this point"
+
+    if mapping.coordinates:
+        # Use explicit coordinate pair if provided
+        Xname, Yname = guess_coordinate_vars(
+            ds.reset_coords()[list(mapping.coordinates)].set_coords(
+                list(mapping.coordinates)
+            ),
+            mapping.crs,
+        )
+    else:
+        # No explicit coordinates, guess from full dataset
+        Xname, Yname = guess_coordinate_vars(ds, mapping.crs)
+        if Xname is None or Yname is None:
+            # FIXME: Can we be a little more targeted in what we are guessing?
+            ds = ds.cf.guess_coord_axis()
+            Xname, Yname = guess_coordinate_vars(ds, mapping.crs)
+
+    # Apply coordinate filtering, we don't want to have guessed coordinate vars
+    # that belong to *other* grid mapping variables
+    Xname = _filter_coordinates(Xname, skip_coordinates)
+    Yname = _filter_coordinates(Yname, skip_coordinates)
+
+    # TODO: we might use rasterix for when there are explicit coords too?
+    if Xname is None or Yname is None:
+        if mapping.grid_mapping is None:
+            raise RuntimeError("Grid system could not be inferred.")
+        else:
+            # Use regex patterns to find coordinate dimensions
+            x_dim = None
+            y_dim = None
+            for dim in ds.dims:
+                dim = cast(str, dim)
+                if x_dim is None and X_COORD_PATTERN.match(dim):
+                    x_dim = dim
+                if y_dim is None and Y_COORD_PATTERN.match(dim):
+                    y_dim = dim
+
+            if x_dim and y_dim:
+                ds = rasterix.assign_index(ds, x_dim=x_dim, y_dim=y_dim)
+                index = ds.xindexes[x_dim]
+                # After assign_index, the index should be a RasterIndex
+                raster_index = cast(rasterix.RasterIndex, index)
+                return RasterAffine(
+                    crs=mapping.crs,
+                    X=x_dim,
+                    Y=y_dim,
+                    bbox=BBox(
+                        west=raster_index.bbox.left,
+                        east=raster_index.bbox.right,
+                        south=raster_index.bbox.bottom,
+                        north=raster_index.bbox.top,
+                    ),
+                    indexes=(raster_index,),
+                )
+            raise RuntimeError(
+                f"Creating raster affine grid system failed. Detected grid_mapping={mapping.grid_mapping!r}."
+            )
+
+    # multiple options; pick the one referred to in the coordinates attribute if present
+    if (
+        Xname is not None
+        and len(Xname) > 1
+        and len(ds.data_vars) == 1
+        and (coords_attr := first.attrs.get("coordinates", ""))
+    ):
+        Xname = tuple(x for x in Xname if x in coords_attr.split(" "))
+    if (
+        Yname is not None
+        and len(Yname) > 1
+        and len(ds.data_vars) == 1
+        and (coords_attr := first.attrs.get("coordinates", ""))
+    ):
+        Yname = tuple(y for y in Yname if y in coords_attr.split(" "))
+
+    if Xname is None or Yname is None:
+        raise RuntimeError("Grid system could not be inferred.")
+
+    if len(Xname) > 1 or len(Yname) > 1:
+        raise RuntimeError(
+            f"Grid system could not be inferred, detected multiple options for {Xname=!r}, {Yname=!r}."
+        )
+
+    (Xname,) = Xname
+    (Yname,) = Yname
+    X = ds[Xname]
+    Y = ds[Yname]
+
+    if X.ndim == 1 and Y.ndim == 1:
+        if is_rotated_pole(mapping.crs):
+            raise NotImplementedError("Rotated pole grids are not supported yet.")
+        return Rectilinear.from_dataset(ds, mapping.crs, Xname, Yname)
+    elif X.ndim == 2 and Y.ndim == 2:
+        return Curvilinear.from_dataset(ds, mapping.crs, Xname, Yname)
+    else:
+        raise RuntimeError(
+            f"Unknown grid system: X={Xname!r}, ndim={X.ndim}; Y={Yname!r}, ndim={Y.ndim}"
+        )
+
+
 @time_debug
 def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
     """
-    Does some grid_mapping & CRS auto-guessing.
+    Does some grid_mapping & CRS auto-guessing with support for multiple grid mappings.
 
     Raises RuntimeError to indicate that we might try again.
     """
-    grid_mapping, crs = _guess_grid_mapping_and_crs(ds)
-    if crs is not None:
-        # This means we are not DGGS for sure.
-        # TODO: we aren't handling the triangular case very explicitly yet.
-        Xname, Yname = guess_coordinate_vars(ds, crs)
-        if Xname is None or Yname is None:
-            # FIXME: let's be a little more targeted in what we are guessing
-            ds = ds.cf.guess_coord_axis()
-            Xname, Yname = guess_coordinate_vars(ds, crs)
-
-        # TODO: we might use rasterix for when there are explicit coords too?
-        if Xname is None or Yname is None:
-            if grid_mapping is None:
-                raise RuntimeError("Grid system could not be inferred.")
-            else:
-                # Use regex patterns to find coordinate dimensions
-                x_dim = None
-                y_dim = None
-                for dim in ds.dims:
-                    if x_dim is None and X_COORD_PATTERN.match(dim):
-                        x_dim = dim
-                    if y_dim is None and Y_COORD_PATTERN.match(dim):
-                        y_dim = dim
-
-                if x_dim and y_dim:
-                    ds = rasterix.assign_index(ds, x_dim=x_dim, y_dim=y_dim)
-                    index = ds.xindexes[x_dim]
-                    return RasterAffine(
-                        crs=crs,
-                        X=x_dim,
-                        Y=y_dim,
-                        bbox=BBox(
-                            west=index.bbox.left,
-                            east=index.bbox.right,
-                            south=index.bbox.bottom,
-                            north=index.bbox.top,
-                        ),
-                        indexes=(index,),
-                    )
-                raise RuntimeError(
-                    f"Creating raster affine grid system failed. Detected {grid_mapping=!r}."
-                )
-
-        if Xname is not None and len(Xname) > 1:
-            if len(ds.data_vars) == 1:
-                da = next(iter(ds.data_vars.values()))
-                if coords_attr := da.attrs.get("coordinates", ""):
-                    Xname = tuple(x for x in Xname if x in coords_attr.split(" "))
-        if Yname is not None and len(Yname) > 1:
-            if len(ds.data_vars) == 1:
-                da = next(iter(ds.data_vars.values()))
-                if coords_attr := da.attrs.get("coordinates", ""):
-                    Yname = tuple(y for y in Yname if y in coords_attr.split(" "))
-
-        (Xname,) = Xname
-        (Yname,) = Yname
-        X = ds[Xname]
-        Y = ds[Yname]
-
-        if X.ndim == 1 and Y.ndim == 1:
-            if is_rotated_pole(crs):
-                raise NotImplementedError("Rotated pole grids are not supported yet.")
-            return Rectilinear.from_dataset(ds, crs, Xname, Yname)
-        elif X.ndim == 2 and Y.ndim == 2:
-            return Curvilinear.from_dataset(ds, crs, Xname, Yname)
-        else:
-            raise RuntimeError(
-                f"Unknown grid system: X={Xname!r}, ndim={X.ndim}; Y={Yname!r}, ndim={Y.ndim}"
-            )
-    else:
+    all_mappings = _guess_grid_mappings_and_crs(ds)
+    if not all_mappings or all_mappings[0].crs is None:
         raise RuntimeError("CRS/grid system not detected")
+
+    # Create primary grid system from first mapping
+    primary_mapping = all_mappings[0]
+    # make sure we don't detect coordinates referred to by OTHER grid_mapping variables
+    skip_coordinates = set(
+        itertools.chain(*(mapping.coordinates or [] for mapping in all_mappings[1:]))
+    )
+    primary_grid = _create_grid_system_for_crs(
+        ds,
+        primary_mapping,
+        skip_coordinates,
+    )
+
+    # Create alternate grid systems from remaining mappings
+    alternates = []
+    for mapping in all_mappings[1:]:
+        try:
+            alternate_grid = _create_grid_system_for_crs(ds, mapping, set())
+            alternates.append(alternate_grid)
+        except RuntimeError as e:
+            # Skip grid systems that can't be created but warn about it
+            grid_mapping_name = (
+                mapping.grid_mapping.name
+                if mapping.grid_mapping is not None
+                else "unknown"
+            )
+            warnings.warn(
+                f"Could not create alternate grid system for grid mapping '{grid_mapping_name}': {e}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            continue
+
+    # Update primary grid with alternates
+    # Since dataclass is frozen=False for base class, we can modify alternates directly
+    primary_grid.alternates = tuple(alternates)
+
+    return primary_grid
 
 
 def _guess_z_dimension(da: xr.DataArray) -> str | None:

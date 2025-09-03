@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING, cast
+
 import cf_xarray as cfxr  # noqa: F401
 import numpy as np
 import numpy.testing as npt
@@ -15,6 +17,7 @@ from xpublish_tiles.grids import (
     Curvilinear,
     CurvilinearCellIndex,
     GridSystem,
+    GridSystem2D,
     LongitudeCellIndex,
     RasterAffine,
     Rectilinear,
@@ -30,6 +33,7 @@ from xpublish_tiles.testing.datasets import (
     FORECAST,
     HRRR,
     HRRR_CRS_WKT,
+    HRRR_MULTIPLE,
     IFS,
     POPDS,
 )
@@ -250,6 +254,49 @@ from xpublish_tiles.testing.tiles import TILES
 def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> None:
     actual = guess_grid_system(ds, array_name)
     assert expected == actual
+
+
+def test_multiple_grid_mappings_detection() -> None:
+    """Test detection of datasets with multiple grid mappings that create alternates."""
+    ds = HRRR_MULTIPLE.create()
+    grid = guess_grid_system(ds, "foo")
+
+    # Should be a RasterAffine grid system (HRRR's native Lambert Conformal Conic projection)
+    assert isinstance(grid, RasterAffine)
+
+    # Should have 2 alternates (since 3 total grid mappings, first becomes primary)
+    assert len(grid.alternates) == 2
+
+    # Alternates can be various grid system types depending on the CRS
+    # We expect at least one Curvilinear (for geographic coordinates)
+    assert any(isinstance(alt, Curvilinear) for alt in grid.alternates)
+
+    # Check that we have the expected CRS systems
+    # Grid should be a GridSystem2D which has crs, X, Y attributes
+    assert isinstance(grid, GridSystem2D)
+    if TYPE_CHECKING:
+        grid = cast(GridSystem2D, grid)
+
+    all_crs = [grid.crs]
+    for alt in grid.alternates:
+        assert isinstance(alt, GridSystem2D), f"Expected GridSystem2D, got {type(alt)}"
+        if TYPE_CHECKING:
+            alt = cast(GridSystem2D, alt)
+        all_crs.append(alt.crs)
+    assert {crs.to_epsg() for crs in all_crs} == {None, 4326, 27700}
+
+    # Check coordinate variables are different for each grid system
+    coord_pairs = [(grid.X, grid.Y)]
+    for alt in grid.alternates:
+        assert isinstance(alt, GridSystem2D), f"Expected GridSystem2D, got {type(alt)}"
+        if TYPE_CHECKING:
+            alt = cast(GridSystem2D, alt)
+        coord_pairs.append((alt.X, alt.Y))
+
+    # Should have geographic coordinates and projected coordinates
+    assert ("longitude", "latitude") in coord_pairs  # Geographic coordinates
+    # Should also have projected coordinates (x, y for various projections)
+    assert ("x", "y") in coord_pairs  # Projected coordinates
 
 
 @pytest.mark.asyncio

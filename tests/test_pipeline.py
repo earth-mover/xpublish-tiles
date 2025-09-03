@@ -23,6 +23,7 @@ from xpublish_tiles.pipeline import (
 from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
     FORECAST,
+    HRRR,
     PARA,
     create_global_dataset,
 )
@@ -322,3 +323,31 @@ async def test_transparent_tile_no_coverage(pytestconfig):
 
     # Also check image dimensions
     assert img.size == (256, 256), "Image should have correct dimensions"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tile,tms", HRRR.tiles)
+async def test_hrrr_multiple_vs_hrrr_rendering(tile, tms, pytestconfig):
+    """Test that HRRR_MULTIPLE renders identically to HRRR for the same tiles."""
+    from xpublish_tiles.testing.datasets import HRRR_MULTIPLE
+
+    # Create both datasets
+    hrrr_ds = HRRR.create()
+    hrrr_multiple_ds = HRRR_MULTIPLE.create()
+
+    # Create query params for the tile
+    query_params = create_query_params(tile, tms)
+
+    # Render both datasets with the same parameters
+    hrrr_result = await pipeline(hrrr_ds, query_params)
+    hrrr_multiple_result = await pipeline(hrrr_multiple_ds, query_params)
+
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(hrrr_result, tile)
+        visualize_tile(hrrr_multiple_result, tile)
+
+    # Compare the rendered images
+    assert compare_image_buffers(hrrr_result, hrrr_multiple_result), (
+        f"HRRR_MULTIPLE should render identically to HRRR for tile {tile} "
+        f"but images differ"
+    )
