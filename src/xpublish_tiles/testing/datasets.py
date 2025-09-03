@@ -21,6 +21,7 @@ from xpublish_tiles.testing.tiles import (
     SOUTH_AMERICA_BENCHMARK_TILES,
     UTM33S_TILES,
     UTM33S_TILES_EDGE_CASES,
+    UTM50S_HIRES_BENCHMARK_TILES,
     WEBMERC_TILES,
     WEBMERC_TILES_EDGE_CASES,
     WGS84_TILES,
@@ -740,6 +741,26 @@ UTM33S_HIRES = Dataset(
     edge_case_tiles=UTM33S_TILES_EDGE_CASES,
     tiles=UTM33S_TILES,
     benchmark_tiles=UTM33S_BENCHMARK_TILES,
+)
+
+UTM50S_HIRES = Dataset(
+    name="utm50s_hires",
+    dims=(
+        Dim(name="x", size=53601, chunk_size=1000, data=None),
+        Dim(name="y", size=15263, chunk_size=1000, data=None),
+    ),
+    dtype=np.float32,
+    setup=partial(
+        raster_grid,
+        crs="epsg:32750",
+        geotransform="475329.3985621558 1.0 0.0 7705246.438310209 0.0 -1.0",
+        # bbox=BBox(
+        #     west=16.927608, south=-29.170151, east=17.072642, north=-28.829823
+        # ),
+    ),
+    # edge_case_tiles=UTM33S_TILES_EDGE_CASES,
+    # tiles=UTM33S_TILES,
+    benchmark_tiles=[UTM50S_HIRES_BENCHMARK_TILES[0]] * 40,
 )
 
 
