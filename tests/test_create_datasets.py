@@ -12,6 +12,7 @@ from xpublish_tiles.testing.datasets import (
     SENTINEL2_NOCOORDS,
     UTM33S,
     UTM33S_HIRES,
+    UTM50S_HIRES,
     Dataset,
 )
 
@@ -28,6 +29,7 @@ from xpublish_tiles.testing.datasets import (
         pytest.param(EU3035_HIRES, id="eu3035_hires"),
         pytest.param(UTM33S, id="utm33s"),
         pytest.param(UTM33S_HIRES, id="utm33s_hires"),
+        pytest.param(UTM50S_HIRES, id="utm50s_hires"),
     ]
 )
 def dataset(request):

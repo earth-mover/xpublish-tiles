@@ -25,6 +25,7 @@ from xpublish_tiles.testing.datasets import (
     SENTINEL2_NOCOORDS,
     UTM33S,
     UTM33S_HIRES,
+    UTM50S_HIRES,
     create_global_dataset,
 )
 from xpublish_tiles.xpublish.tiles.plugin import TilesPlugin
@@ -181,6 +182,8 @@ def get_dataset_object_for_name(name: str):
             return UTM33S
         elif dataset_name == "utm33s_hires":
             return UTM33S_HIRES
+        elif dataset_name == "utm50s_hires":
+            return UTM50S_HIRES
         else:
             return None
 
