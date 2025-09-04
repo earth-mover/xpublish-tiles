@@ -841,7 +841,8 @@ wheels = [
 
 [[package]]
 name = "datashader"
-source = { editable = "../datashader" }
+version = "0.18.2.post1.dev7+g5e0323dc4"
+source = { git = "https://github.com/holoviz/datashader?rev=main#5e0323dc4c1ac2e74ecfbded716b302b87fc1b62" }
 dependencies = [
     { name = "colorcet" },
     { name = "multipledispatch" },
@@ -856,25 +857,6 @@ dependencies = [
     { name = "toolz" },
     { name = "xarray" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "colorcet" },
-    { name = "hypothesis", marker = "extra == 'tests'" },
-    { name = "multipledispatch" },
-    { name = "numba" },
-    { name = "numpy" },
-    { name = "packaging" },
-    { name = "pandas" },
-    { name = "param" },
-    { name = "pyct" },
-    { name = "pytest", marker = "extra == 'tests'" },
-    { name = "requests" },
-    { name = "scipy" },
-    { name = "toolz" },
-    { name = "xarray" },
-]
-provides-extras = ["tests"]
 
 [[package]]
 name = "decorator"
@@ -3785,7 +3767,7 @@ requires-dist = [
     { name = "cachetools", specifier = ">=5.5.2" },
     { name = "cf-xarray", specifier = ">=0.10.6" },
     { name = "cftime", specifier = ">=1.6.4.post1" },
-    { name = "datashader", editable = "../datashader" },
+    { name = "datashader", git = "https://github.com/holoviz/datashader?rev=main" },
     { name = "fastapi" },
     { name = "hypothesis", marker = "extra == 'testing'", specifier = ">=6.136.6" },
     { name = "matplotlib", marker = "extra == 'testing'", specifier = ">=3.10.3" },

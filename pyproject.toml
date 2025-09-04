@@ -15,7 +15,7 @@ requires-python = ">=3.11"
 dependencies = [
     "cf-xarray>=0.10.6",
     "cftime>=1.6.4.post1",
-    "datashader>=0.18.2",
+    "datashader @ git+https://github.com/holoviz/datashader@main",
     "morecantile>=5.4.2",
     "numbagg>=0.9.0",
     "numba>=0.60.0",
@@ -137,6 +137,3 @@ known-first-party = ["dask", "distributed", "icechunk", "xarray", "zarr"]
 [tool.ruff.lint.flake8-tidy-imports]
 # Disallow all relative imports.
 ban-relative-imports = "all"
-
-[tool.uv.sources]
-datashader = { path = "../datashader", editable = true }
