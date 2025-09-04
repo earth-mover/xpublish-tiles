@@ -1,14 +1,18 @@
 import enum
+from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, NewType, Self
 
+import numba
+import numpy as np
 import pyproj
 import pyproj.aoi
 
 import xarray as xr
-from xpublish_tiles.grids import GridSystem
-from xpublish_tiles.utils import async_time_debug, time_debug
+from xpublish_tiles.grids import GridSystem, Rectilinear
+from xpublish_tiles.logger import logger
+from xpublish_tiles.utils import async_time_debug
 
 InputCRS = NewType("InputCRS", pyproj.CRS)
 OutputCRS = NewType("OutputCRS", pyproj.CRS)
@@ -92,17 +96,16 @@ class ValidatedArray:
 
 
 @dataclass
-class RenderContext:
-    pass
+class RenderContext(ABC):
+    @abstractmethod
+    async def maybe_rewrite_to_rectilinear(self, *, width: int, height: int) -> Self:
+        pass
 
 
 @dataclass
 class NullRenderContext(RenderContext):
-    async def async_load(self) -> Self:
-        return type(self)()
-
-    def sync_load(self) -> Self:
-        return type(self)()
+    async def maybe_rewrite_to_rectilinear(self, *, width: int, height: int) -> Self:
+        return self
 
 
 @dataclass
@@ -115,15 +118,94 @@ class PopulatedRenderContext(RenderContext):
     bbox: OutputBBox
 
     @async_time_debug
-    async def async_load(self) -> Self:
-        new_data = await self.da.load_async()
-        return type(self)(
-            da=new_data, datatype=self.datatype, grid=self.grid, bbox=self.bbox
-        )
+    async def maybe_rewrite_to_rectilinear(self, *, width: int, height: int) -> Self:
+        data = self.da
+        grid = self.grid
+        bbox = self.bbox
 
-    @time_debug
-    def sync_load(self) -> Self:
-        new_data = self.da.load()
-        return type(self)(
-            da=new_data, datatype=self.datatype, grid=self.grid, bbox=self.bbox
+        if data[grid.X].ndim == 1 and data[grid.Y].ndim == 1:
+            return self
+
+        xcheck = check_rectilinear(
+            data[grid.X].data[::2, ::2],
+            origin=bbox.west,
+            span=bbox.east - bbox.west,
+            canvas_size=width,
+            axis=data[grid.X].get_axis_num(grid.Ydim),
+            threshold=1,
         )
+        if not xcheck:
+            return self
+
+        ycheck = check_rectilinear(
+            data[grid.Y].data[::2, ::2],
+            origin=bbox.west,
+            span=bbox.east - bbox.west,
+            canvas_size=width,
+            axis=data[grid.Y].get_axis_num(grid.Xdim),
+            threshold=1,
+        )
+        if not ycheck:
+            return self
+
+        data = data.assign_coords(
+            {
+                grid.Xdim: (grid.Xdim, data[grid.X].isel({grid.Ydim: 0}).data),
+                grid.Ydim: (grid.Ydim, data[grid.Y].isel({grid.Xdim: 0}).data),
+            }
+        )
+        grid = Rectilinear(
+            crs=grid.crs,
+            bbox=grid.bbox,
+            X=grid.Xdim,
+            Y=grid.Ydim,
+            indexes=(),
+            Z=None,
+        )
+        logger.debug("✏️ rewriting to rectilinear")
+        return type(self)(da=data, datatype=self.datatype, grid=self.grid, bbox=self.bbox)
+
+
+# def check_rectilinear(
+#     array: np.ndarray,
+#     *,
+#     origin: float,
+#     canvas_size: int,
+#     span: float,
+#     threshold: int,
+#     axis: int,
+# ) -> bool:
+#     pix = array - origin
+#     pix *= canvas_size / span
+#     np.trunc(pix, out=pix)
+#     selector = [slice(None), slice(None)]
+#     selector[axis] = slice(1)
+#     pix -= pix[tuple(selector)]
+#     np.abs(pix, out=pix)
+#     np.less_equal(pix, threshold, out=pix)
+#     return pix.all()
+
+
+@numba.jit(nopython=True, nogil=True)
+def check_rectilinear(
+    array: np.ndarray,
+    *,
+    origin: float,
+    canvas_size: int,
+    span: float,
+    threshold: int,
+    axis: int,
+) -> bool:
+    frac = canvas_size / span
+    res = True
+    for i in range(array.shape[0]):
+        for j in range(array.shape[1]):
+            pix = array[i, j] - origin
+            pix *= frac
+            pix = np.trunc(pix)
+            if axis == 0:
+                pix -= array[0, j]
+            else:
+                pix -= array[i, 0]
+            res &= abs(pix) > threshold
+    return res

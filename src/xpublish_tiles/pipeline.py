@@ -312,15 +312,27 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = apply_query(ds, variables=query.variables, selectors=query.selectors)
     subsets = await subset_to_bbox(validated, bbox=query.bbox, crs=query.crs)
 
+    loop = asyncio.get_event_loop()
+
+    async def rewrite_subset(subset):
+        return await subset.maybe_rewrite_to_rectilinear(
+            width=query.width, height=query.height
+        )
+
+    tasks = [
+        loop.run_in_executor(EXECUTOR, lambda s=subset: asyncio.run(rewrite_subset(s)))
+        for subset in subsets.values()
+    ]
+    results = await asyncio.gather(*tasks)
+    new_subsets = dict(zip(subsets.keys(), results, strict=False))
+
     buffer = io.BytesIO()
     renderer = query.get_renderer()
 
-    # Run render in executor to avoid blocking
-    loop = asyncio.get_event_loop()
     await loop.run_in_executor(
         EXECUTOR,
         lambda: renderer.render(
-            contexts=subsets,
+            contexts=new_subsets,
             buffer=buffer,
             width=query.width,
             height=query.height,
