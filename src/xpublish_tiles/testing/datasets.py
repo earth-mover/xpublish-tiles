@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
@@ -7,10 +8,12 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import pyproj
+import rasterix
 from pyproj.aoi import BBox
 
 import dask.array
 import xarray as xr
+from xpublish_tiles.lib import transform_coordinates, transformer_from_crs
 from xpublish_tiles.testing.tiles import (
     ETRS89_TILES,
     ETRS89_TILES_EDGE_CASES,
@@ -194,6 +197,7 @@ def raster_grid(
     crs: Any,
     geotransform: str,
     bbox: BBox | None = None,
+    alternate_epsg_crs: tuple[int, ...] = (),
 ) -> xr.Dataset:
     ds = uniform_grid(dims=dims, dtype=dtype, attrs=attrs)
     crs = pyproj.CRS.from_user_input(crs)
@@ -205,6 +209,26 @@ def raster_grid(
     if bbox is not None:
         ds.attrs["bbox"] = bbox
 
+    for alt in alternate_epsg_crs:
+        altcrs = pyproj.CRS.from_epsg(alt)
+        ds = rasterix.assign_index(ds)
+        transformer = transformer_from_crs(crs, alt)
+        xa, ya = asyncio.run(transform_coordinates(ds, "x", "y", transformer))
+        if altcrs.is_geographic:
+            xname, yname = "longitude", "latitude"
+        elif altcrs.is_projected:
+            xname, yname = "projection_x_coordinate", "projection_y_coordinate"
+        else:
+            raise NotImplementedError
+
+        ds = ds.assign_coords(
+            {
+                # has the side-effect of dropping indexes, which is good
+                f"x_{alt}": (xa.dims, xa.data, {"standard_name": xname}),
+                f"y_{alt}": (ya.dims, ya.data, {"standard_name": yname}),
+            }
+        )
+        ds = ds.drop_indexes(("x", "y"))
     return ds
 
 
@@ -756,6 +780,7 @@ UTM50S_HIRES = Dataset(
         raster_grid,
         crs="epsg:32750",
         geotransform="475329.3985621558 1.0 0.0 7705246.438310209 0.0 -1.0",
+        alternate_epsg_crs=(4326, 3857),
         # bbox=BBox(
         #     west=16.927608, south=-29.170151, east=17.072642, north=-28.829823
         # ),
