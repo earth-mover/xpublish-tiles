@@ -62,7 +62,7 @@ def generate_tanh_wave_data(dims: tuple[Dim, ...], dtype: npt.DTypeLike):
     Uses tanh to create smooth, bounded patterns in [-1, 1] range.
     For dimensions without coordinates, uses normalized indices.
     """
-    chunks = tuple(d.chunk_size for d in dims)
+    chunks = tuple(4 * d.chunk_size for d in dims)
 
     # Create coordinate arrays for each dimension
     coord_arrays = []
@@ -123,7 +123,7 @@ def generate_flag_values_data(
     # Add random noise that preserves the sign
     # Generate noise proportional to the absolute value to avoid sign changes
     shape = tuple(d.size for d in dims)
-    chunks = tuple(d.chunk_size for d in dims)
+    chunks = tuple(4 * d.chunk_size for d in dims)
 
     # Create random noise array with same chunking
     rng = dask.array.random.default_rng(seed=1234)
@@ -177,6 +177,7 @@ def uniform_grid(*, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str
         },
         coords={d.name: (d.name, d.data, d.attrs) for d in dims if d.data is not None},
     )
+    ds.foo.encoding["chunks"] = tuple(dim.chunk_size for dim in dims)
     # coord vars always single chunk?
     for dim in dims:
         if dim.data is not None:
