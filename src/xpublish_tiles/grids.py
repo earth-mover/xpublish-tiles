@@ -1194,6 +1194,11 @@ def _guess_coordinates_for_mapping(
     if Xname is None or Yname is None:
         return None, None
 
+    if len(Xname) > 1 or (len(Yname) > 1 and len(ds.data_vars) == 1):
+        first = next(iter(ds.data_vars.values()))
+        Xname = [x for x in Xname if x in first.attrs.get("coordinates", [])]
+        Yname = [y for y in Yname if y in first.attrs.get("coordinates", [])]
+
     if len(Xname) > 1 or len(Yname) > 1:
         raise RuntimeError(
             f"Multiple coordinate options found for grid mapping: {Xname=!r}, {Yname=!r}."
