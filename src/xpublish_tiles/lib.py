@@ -25,6 +25,31 @@ M_PI = 3.14159265358979323846  # from proj
 M_2_PI = 6.28318530717958647693  # from proj
 
 
+def crs_repr(crs: CRS | None) -> str:
+    """Generate a concise representation string for a CRS object.
+
+    Args:
+        crs: pyproj CRS object or None
+
+    Returns:
+        String representation of the CRS
+    """
+    if crs is None:
+        return "None"
+
+    # Try to get EPSG code first, fallback to shorter description
+    try:
+        if hasattr(crs, "to_epsg") and crs.to_epsg():
+            return f"<CRS: EPSG:{crs.to_epsg()}>"
+        else:
+            # Use the name if available, otherwise authority:code
+            crs_name = getattr(crs, "name", str(crs)[:50] + "...")
+            return f"<CRS: {crs_name}>"
+    except Exception:
+        # Fallback to generic representation
+        return "<CRS>"
+
+
 class TileTooBigError(Exception):
     """Raised when a tile request would result in too much data to render."""
 

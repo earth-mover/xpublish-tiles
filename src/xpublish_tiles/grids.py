@@ -17,7 +17,7 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from xarray.core.indexing import IndexSelResult
-from xpublish_tiles.lib import is_4326_like
+from xpublish_tiles.lib import crs_repr, is_4326_like
 from xpublish_tiles.logger import logger
 from xpublish_tiles.utils import time_debug
 
@@ -35,6 +35,12 @@ class GridMetadata:
     crs: CRS
     grid_cls: type["GridSystem"]
 
+    def __repr__(self) -> str:
+        return (
+            f"GridMetadata(X={self.X!r}, Y={self.Y!r}, "
+            f"crs={crs_repr(self.crs)}, grid_cls={self.grid_cls.__name__})"
+        )
+
 
 @dataclass
 class GridMappingInfo:
@@ -43,6 +49,17 @@ class GridMappingInfo:
     grid_mapping: xr.DataArray | None
     crs: CRS | None
     coordinates: tuple[str, ...] | None
+
+    def __repr__(self) -> str:
+        gm_repr = (
+            f"<DataArray: {self.grid_mapping.name}>"
+            if self.grid_mapping is not None
+            else "None"
+        )
+        return (
+            f"GridMappingInfo(grid_mapping={gm_repr}, "
+            f"crs={crs_repr(self.crs)}, coordinates={self.coordinates!r})"
+        )
 
 
 @dataclass(frozen=True)
