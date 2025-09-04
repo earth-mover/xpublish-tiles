@@ -306,9 +306,7 @@ async def test_subset(global_datasets, tile, tms):
     assert len(slicers["latitude"]) == 1  # Y dimension should always have one slice
 
     # Check that coordinates are within expected bounds (exact matching with controlled grid)
-    # Pick alternate using geographic CRS (4326) since we're testing with geo bounds
-    alternate = grid.pick_alternate_grid(CRS.from_epsg(4326))
-    actual = await apply_slicers(ds.foo, grid=grid, alternate=alternate, slicers=slicers)
+    actual = await apply_slicers(ds.foo, grid=grid, alternate=grid, slicers=slicers)
     lat_min, lat_max = actual.latitude.min().item(), actual.latitude.max().item()
     assert lat_min <= bbox_geo.south, f"Latitude too low: {lat_min} < {bbox_geo.south}"
     assert lat_max >= bbox_geo.north, f"Latitude too high: {lat_max} > {bbox_geo.north}"
