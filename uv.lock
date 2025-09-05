@@ -336,14 +336,14 @@ wheels = [
 
 [[package]]
 name = "cf-xarray"
-version = "0.10.7"
+version = "0.10.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "xarray" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b3/b6/a589c565fa21e1da88aa2c5029424ec9300ff40aa7211326c2a7f8107532/cf_xarray-0.10.7.tar.gz", hash = "sha256:fbb6f6db9cb98a75554af916f1c293a041d30e54f60c0cf6c509cf4d55b5af7f", size = 515323, upload-time = "2025-08-13T15:13:26.662Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b3/30/03a8a8ec8ed138997e43d1db2b520aaaf45f206c9305022e47361ab4513c/cf_xarray-0.10.8.tar.gz", hash = "sha256:93d6f43be300fcecad6d951b4cc41ba6eb3866b34fecd1b9ca505d83317b1197", size = 519853, upload-time = "2025-09-04T16:30:37.323Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f5/be/67c78c0d9c49c69f4158c1d796b9bd459b016cd71c6b48c312cc0e38a040/cf_xarray-0.10.7-py3-none-any.whl", hash = "sha256:ccf8151c399dcc236ea11da4f5cccc1a80e7d46bbb8299a3f00ffc21a51e9d40", size = 72960, upload-time = "2025-08-13T15:13:25.277Z" },
+    { url = "https://files.pythonhosted.org/packages/d0/f8/c9311cc0d5d77505a0bc008266011e679359469d3ea687de1d483318df8d/cf_xarray-0.10.8-py3-none-any.whl", hash = "sha256:733f269db4854cfbcd5d0f7c08a2083f38d7a897199a18a42e8a18657d632ec8", size = 76456, upload-time = "2025-09-04T16:30:35.917Z" },
 ]
 
 [[package]]
@@ -3765,7 +3765,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cachetools", specifier = ">=5.5.2" },
-    { name = "cf-xarray", specifier = ">=0.10.6" },
+    { name = "cf-xarray", specifier = ">=0.10.8" },
     { name = "cftime", specifier = ">=1.6.4.post1" },
     { name = "datashader", git = "https://github.com/holoviz/datashader?rev=main" },
     { name = "fastapi" },

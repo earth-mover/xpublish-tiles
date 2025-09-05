@@ -1,16 +1,18 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import pyproj
+import rasterix
 from pyproj.aoi import BBox
 
 import dask.array
 import xarray as xr
+from xpublish_tiles.lib import transformer_from_crs
 from xpublish_tiles.testing.tiles import (
     ETRS89_TILES,
     ETRS89_TILES_EDGE_CASES,
@@ -194,6 +196,7 @@ def raster_grid(
     crs: Any,
     geotransform: str,
     bbox: BBox | None = None,
+    alternate_epsg_crs: tuple[int, ...] = (),
 ) -> xr.Dataset:
     ds = uniform_grid(dims=dims, dtype=dtype, attrs=attrs)
     crs = pyproj.CRS.from_user_input(crs)
@@ -205,7 +208,59 @@ def raster_grid(
     if bbox is not None:
         ds.attrs["bbox"] = bbox
 
-    return ds
+    new_gm = ""
+    if alternate_epsg_crs:
+        new_gm = "spatial_ref:"
+        ds = rasterix.assign_index(ds)
+    for alt in alternate_epsg_crs:
+        altcrs = pyproj.CRS.from_epsg(alt)
+        transformer = transformer_from_crs(crs, alt)
+        xchunked = dask.array.from_array(ds.x.data, chunks=ds.chunksizes["x"])
+        ychunked = dask.array.from_array(ds.y.data, chunks=ds.chunksizes["y"])
+        res = dask.array.map_blocks(
+            lambda x, y, transformer: np.stack(
+                transformer.transform(*np.broadcast_arrays(x, y)), axis=0
+            ).astype(np.float32),
+            xchunked[np.newaxis, :, np.newaxis],
+            ychunked[np.newaxis, np.newaxis, :],
+            chunks=((2,), ds.chunksizes["x"], ds.chunksizes["y"]),
+            transformer=transformer,
+            dtype=np.float32,
+        )
+        # dask bug!
+        xa = dask.array.map_blocks(lambda x: x.squeeze(), res[0, :, :])
+        ya = dask.array.map_blocks(lambda x: x.squeeze(), res[1, :, :])
+        if altcrs.is_geographic:
+            xname, yname = "longitude", "latitude"
+        elif altcrs.is_projected:
+            xname, yname = "projection_x_coordinate", "projection_y_coordinate"
+        else:
+            raise NotImplementedError
+        ds = ds.assign_coords(
+            {
+                # has the side-effect of dropping indexes, which is good
+                f"x_{alt}": (("x", "y"), xa, {"standard_name": xname}),
+                f"y_{alt}": (("x", "y"), ya, {"standard_name": yname}),
+            }
+        )
+        chunks = []
+        for dim in ("x", "y"):
+            for dimension in dims:
+                if dimension.name == dim:
+                    chunks.extend([dimension.chunk_size])
+        ds[f"x_{alt}"].encoding["chunks"] = tuple(chunks)
+        ds[f"y_{alt}"].encoding["chunks"] = tuple(chunks)
+        ds.coords[f"crs_{alt}"] = ((), 0, altcrs.to_cf())
+        new_gm += f" crs_{alt}: x_{alt} y_{alt}"
+    if new_gm:
+        ds.foo.attrs["grid_mapping"] = new_gm
+        # Only drop indexes if we added alternate coordinates
+        if "x" in ds.coords and "y" in ds.coords:
+            ds = ds.drop_vars(("x", "y"))
+        if geotransform:
+            # rasterix removes this!
+            ds.spatial_ref.attrs["GeoTransform"] = geotransform
+    return cast(xr.Dataset, ds)
 
 
 def curvilinear_grid(
@@ -336,6 +391,7 @@ HRRR_CRS_WKT = "".join(
         'XIS["(N)",north,ORDER[2],LENGTHUNIT["metre",1,ID["EPSG",9001]]]]',
     ]
 )
+HRRR_GEOTRANSFORM = "-2699020.142521936 3000 0 -1588806.1525566636 0 3000"
 
 # fmt: off
 GLOBAL_BENCHMARK_TILES = [
@@ -755,6 +811,7 @@ UTM50S_HIRES = Dataset(
         raster_grid,
         crs="epsg:32750",
         geotransform="475329.3985621558 1.0 0.0 7705246.438310209 0.0 -1.0",
+        alternate_epsg_crs=(4326, 3857),
         # bbox=BBox(
         #     west=16.927608, south=-29.170151, east=17.072642, north=-28.829823
         # ),
@@ -900,4 +957,111 @@ POPDS = xr.Dataset(
         "nlon": ("nlon", np.arange(30), {"axis": "X"}),
         "nlat": ("nlat", np.arange(20), {"axis": "Y"}),
     },
+)
+
+
+def multiple_grid_mapping_dataset(
+    *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
+) -> xr.Dataset:
+    """Create a dataset with multiple grid mappings using HRRR as base and reprojecting coordinates."""
+    # Start with HRRR dataset as the base - use full dataset, not a subset
+    ds = HRRR.create()
+
+    # Get the original HRRR projected coordinates
+    hrrr_crs = pyproj.CRS.from_wkt(HRRR_CRS_WKT)
+    x_coords = ds.x.values
+    y_coords = ds.y.values
+    X, Y = np.meshgrid(x_coords, y_coords, indexing="ij")
+
+    ds = ds.drop_vars(["x", "y"])
+    ds.spatial_ref.attrs["GeoTransform"] = HRRR_GEOTRANSFORM
+    # Reproject to geographic coordinates (EPSG:4326)
+    transformer_to_4326 = pyproj.Transformer.from_crs(
+        hrrr_crs, "EPSG:4326", always_xy=True
+    )
+    lon_4326, lat_4326 = transformer_to_4326.transform(X, Y)
+
+    # Reproject to EPSG:27700 (British National Grid)
+    transformer_to_27700 = pyproj.Transformer.from_crs(
+        hrrr_crs, "EPSG:27700", always_xy=True
+    )
+    x_27700, y_27700 = transformer_to_27700.transform(X, Y)
+
+    # Add reprojected coordinates with unique standard names to avoid conflicts
+    ds.coords["latitude"] = (("x", "y"), lat_4326, {"standard_name": "latitude"})
+    ds.coords["longitude"] = (("x", "y"), lon_4326, {"standard_name": "longitude"})
+    ds.coords["x27700"] = (
+        ("x", "y"),
+        x_27700,
+        {"standard_name": "projection_x_coordinate"},
+    )
+    ds.coords["y27700"] = (
+        ("x", "y"),
+        y_27700,
+        {"standard_name": "projection_y_coordinate"},
+    )
+    # 2. EPSG:4326 (WGS84 Geographic)
+    ds.coords["crs_4326"] = (
+        (),
+        0,
+        {
+            "crs_wkt": 'GEOGCRS["WGS 84",ENSEMBLE["World Geodetic System 1984 ensemble",MEMBER["World Geodetic System 1984 (Transit)"],MEMBER["World Geodetic System 1984 (G730)"],MEMBER["World Geodetic System 1984 (G873)"],MEMBER["World Geodetic System 1984 (G1150)"],MEMBER["World Geodetic System 1984 (G1674)"],MEMBER["World Geodetic System 1984 (G1762)"],MEMBER["World Geodetic System 1984 (G2139)"],MEMBER["World Geodetic System 1984 (G2296)"],ELLIPSOID["WGS 84",6378137,298.257223563,LENGTHUNIT["metre",1]],ENSEMBLEACCURACY[2.0]],PRIMEM["Greenwich",0,ANGLEUNIT["degree",0.0174532925199433]],CS[ellipsoidal,2],AXIS["geodetic latitude (Lat)",north,ORDER[1],ANGLEUNIT["degree",0.0174532925199433]],AXIS["geodetic longitude (Lon)",east,ORDER[2],ANGLEUNIT["degree",0.0174532925199433]],USAGE[SCOPE["Horizontal component of 3D system."],AREA["World."],BBOX[-90,-180,90,180]],ID["EPSG",4326]]',
+            "grid_mapping_name": "latitude_longitude",
+        },
+    )
+
+    # 3. EPSG:27700 (OSGB36 / British National Grid)
+    ds.coords["crs_27700"] = (
+        (),
+        0,
+        {
+            "crs_wkt": 'PROJCRS["OSGB36 / British National Grid",BASEGEOGCRS["OSGB36",DATUM["Ordnance Survey of Great Britain 1936",ELLIPSOID["Airy 1830",6377563.396,299.3249646,LENGTHUNIT["metre",1]]],PRIMEM["Greenwich",0,ANGLEUNIT["degree",0.0174532925199433]],ID["EPSG",4277]],CONVERSION["British National Grid",METHOD["Transverse Mercator",ID["EPSG",9807]],PARAMETER["Latitude of natural origin",49,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8801]],PARAMETER["Longitude of natural origin",-2,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8802]],PARAMETER["Scale factor at natural origin",0.9996012717,SCALEUNIT["unity",1],ID["EPSG",8805]],PARAMETER["False easting",400000,LENGTHUNIT["metre",1],ID["EPSG",8806]],PARAMETER["False northing",-100000,LENGTHUNIT["metre",1],ID["EPSG",8807]]],CS[Cartesian,2],AXIS["(E)",east,ORDER[1],LENGTHUNIT["metre",1]],AXIS["(N)",north,ORDER[2],LENGTHUNIT["metre",1]],USAGE[SCOPE["Engineering survey, topographic mapping."],AREA["United Kingdom (UK) - offshore to boundary of UKCS within 49°45\'N to 61°N and 9°W to 2°E; onshore Great Britain (England, Wales and Scotland). Isle of Man onshore."],BBOX[49.75,-9.01,61.01,2.01]],ID["EPSG",27700]]',
+            "grid_mapping_name": "transverse_mercator",
+            "latitude_of_projection_origin": 49.0,
+            "longitude_of_central_meridian": -2.0,
+            "false_easting": 400000.0,
+            "false_northing": -100000.0,
+            "scale_factor_at_central_meridian": 0.9996012717,
+        },
+    )
+
+    # Update the foo variable to reference all grid mappings
+    # Use the same format as cf-xarray's hrrrds
+    ds["foo"].attrs["grid_mapping"] = (
+        "spatial_ref: crs_4326: latitude longitude crs_27700: x27700 y27700"
+    )
+
+    return ds
+
+
+HRRR_MULTIPLE = Dataset(
+    name="hrrr_multiple",
+    dims=(
+        Dim(
+            name="x",
+            size=1799,
+            chunk_size=2000,
+            # data=x0 + np.arange(1799) * 3000,
+        ),
+        Dim(
+            name="y",
+            size=1059,
+            chunk_size=2000,
+            # data=y0 + np.arange(1059) * 3000,
+        ),
+        Dim(
+            name="time",
+            size=1,
+            chunk_size=1,
+            data=np.array(["2018-01-01"], dtype="datetime64[h]"),
+        ),
+        Dim(
+            name="step",
+            size=1,
+            chunk_size=1,
+            data=pd.to_timedelta(np.arange(0, 2), unit="h"),
+        ),
+    ),
+    dtype=np.float32,
+    setup=multiple_grid_mapping_dataset,
 )

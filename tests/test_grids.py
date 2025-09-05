@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING, cast
+
 import cf_xarray as cfxr  # noqa: F401
 import numpy as np
 import numpy.testing as npt
@@ -15,6 +17,7 @@ from xpublish_tiles.grids import (
     Curvilinear,
     CurvilinearCellIndex,
     GridSystem,
+    GridSystem2D,
     LongitudeCellIndex,
     RasterAffine,
     Rectilinear,
@@ -30,6 +33,7 @@ from xpublish_tiles.testing.datasets import (
     FORECAST,
     HRRR,
     HRRR_CRS_WKT,
+    HRRR_MULTIPLE,
     IFS,
     POPDS,
 )
@@ -252,6 +256,39 @@ def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> Non
     assert expected == actual
 
 
+def test_multiple_grid_mappings_detection() -> None:
+    """Test detection of datasets with multiple grid mappings that create alternates."""
+    ds = HRRR_MULTIPLE.create()
+    grid = guess_grid_system(ds, "foo")
+
+    # Should be a RasterAffine grid system (HRRR's native Lambert Conformal Conic projection)
+    assert isinstance(grid, RasterAffine)
+
+    # Should have 2 alternates (since 3 total grid mappings, first becomes primary)
+    assert len(grid.alternates) == 2
+
+    # Alternates are now GridMetadata objects with grid_cls field
+    # We expect at least one with Curvilinear grid_cls (for geographic coordinates)
+    assert any(alt.grid_cls == Curvilinear for alt in grid.alternates)
+
+    # Check that we have the expected CRS systems
+    # Grid should be a GridSystem2D which has crs, X, Y attributes
+    assert isinstance(grid, GridSystem2D)
+    if TYPE_CHECKING:
+        grid = cast(GridSystem2D, grid)
+
+    all_crs = [grid.crs] + [alt.crs for alt in grid.alternates]
+    assert {crs.to_epsg() for crs in all_crs} == {None, 4326, 27700}
+
+    # Check coordinate variables are different for each grid system
+    coord_pairs = [(grid.X, grid.Y)] + [(alt.X, alt.Y) for alt in grid.alternates]
+
+    # Should have geographic coordinates and projected coordinates
+    assert ("longitude", "latitude") in coord_pairs  # Geographic coordinates
+    # Should also have projected coordinates (x, y for various projections)
+    assert ("x", "y") in coord_pairs  # Projected coordinates
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tile,tms", TILES)
 async def test_subset(global_datasets, tile, tms):
@@ -269,7 +306,9 @@ async def test_subset(global_datasets, tile, tms):
     assert len(slicers["latitude"]) == 1  # Y dimension should always have one slice
 
     # Check that coordinates are within expected bounds (exact matching with controlled grid)
-    actual = await apply_slicers(ds.foo, grid=grid, slicers=slicers)
+    actual = await apply_slicers(
+        ds.foo, grid=grid, alternate=grid.to_metadata(), slicers=slicers
+    )
     lat_min, lat_max = actual.latitude.min().item(), actual.latitude.max().item()
     assert lat_min <= bbox_geo.south, f"Latitude too low: {lat_min} < {bbox_geo.south}"
     assert lat_max >= bbox_geo.north, f"Latitude too high: {lat_max} > {bbox_geo.north}"

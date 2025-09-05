@@ -13,7 +13,7 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "cf-xarray>=0.10.6",
+    "cf-xarray>=0.10.8",
     "cftime>=1.6.4.post1",
     "datashader @ git+https://github.com/holoviz/datashader@main",
     "morecantile>=5.4.2",

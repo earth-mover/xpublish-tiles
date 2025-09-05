@@ -169,3 +169,24 @@ Where `4/4/14` represents the tile coordinates in {z}/{y}/{x}
 1. `XPUBLISH_TILES_ASYNC_LOAD: [0, 1]` - controls whether Xarray's async loading is used.
 2. `XPUBLISH_TILES_NUM_THREADS: int` - controls the size of the threadpool
 3. `XPUBLISH_TILES_TRANSFORM_CHUNK_SIZE: int` - when transforming coordinates, do so by submitting (NxN) chunks to the threadpool.
+
+
+## Performance Notes
+
+For context, the rendering pipeline is:
+1. Receive dataset `ds` and `QueryParams` from the plugin.
+2. Grab `GridSystem` for `ds` and requested DataArray. The inference here is complex and is cached internally using the `ds.attrs['_xpublish_id']` and the requested `DataArray.name`. *Be sure to set this attribute to a unique string.*
+3. Based on the grid system, the data are subset to the bounding box using slices. For datasets with a geographic CRS, padding is applied to the slicers if needed to account for the meridian or anti-meridian and depending on the dataset's longitude convention (0→360 or -180→180).
+4. This plugin supports parsing multiple "grid mappings" for a single DataArray. If present, we pick coordinates corresponding to the output CRS. If not, we look to see if there are coordinates corresponding to `epsg:4326`, if not, we use the native coordinates.
+5. Coordinates are transformed to the output CRS, if needed. This is usually a very slow step. For performance,
+   a. We reimplement the `epsg:4326 -> epsg:3857` transformation because it is separable (`x` is fully determined by `longitude`, and `y` is fully determined by latitude). This allows us to preserve the regular or rectilinear nature of the grid if possible.
+   b. If (a) is not possible, we broadcast the input coordinates against each other, then cut up the coordinates in to chunks and process them in a threadpool using `pyproj`.
+4. Xarray's new `load_async` is used to load the data in to memory.
+5. Loaded data is passed to datashader.
+
+
+Performance recommendations:
+1. Make sure `_xpublish_id` is set in `Dataset.attrs`.
+2. If CRS transformations are a bottleneck,
+   1. Assign reprojected coordinates for the desired output CRS using multiple grid mapping variables. This will take reprojection time down to 0.
+   1. See if you can approximate the coordinate system with rectilinear coordinates as much as possible. This triggers a much faster rendering pathway in datashader.
