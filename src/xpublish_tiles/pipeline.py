@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import io
+import math
 import os
 from typing import Any, cast
 
@@ -24,6 +25,7 @@ from xpublish_tiles.lib import (
     transform_coordinates,
     transformer_from_crs,
 )
+from xpublish_tiles.logger import logger
 from xpublish_tiles.types import (
     ContinuousData,
     DataType,
@@ -55,6 +57,10 @@ def round_bbox(bbox: BBox) -> BBox:
     )
 
 
+def sum_tuples(*tuples):
+    return tuple(sum(values) for values in zip(*tuples, strict=False))
+
+
 async def apply_slicers(
     da: xr.DataArray,
     *,
@@ -77,11 +83,24 @@ async def apply_slicers(
         ds.isel({grid.Xdim: lon_slice, grid.Ydim: y_slice})
         for lon_slice in slicers[grid.Xdim]
     ]
-    if (
-        sum(sum(var.size for var in subset.data_vars.values()) for subset in subsets)
-        > MAX_RENDERABLE_SIZE
-    ):
-        raise TileTooBigError("Tile request too big. Please choose a higher zoom level.")
+
+    # if we have crs matching the desired CRS,
+    # then we load that data from disk;
+    # and double the limit to allow slightly larger tiles
+    # = (1 data var + 2 coord vars) * 2
+    factor = 6 if alternate.crs != grid.crs else 1
+    total_shape = tuple(
+        sum_tuples(*[var.shape for var in subset.data_vars.values()])
+        for subset in subsets
+    )
+    logger.debug(total_shape)
+    if math.prod(sum_tuples(*total_shape)) > factor * MAX_RENDERABLE_SIZE:
+        msg = (
+            f"Tile request too big, requires loading data of total shape: {total_shape!r}. "
+            "Please choose a higher zoom level."
+        )
+        logger.error(msg)
+        raise TileTooBigError(msg)
     if (
         np.sum(
             np.stack(
