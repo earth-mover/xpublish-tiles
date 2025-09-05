@@ -203,9 +203,6 @@ def check_rectilinear(
             pix = array[i, j] - origin
             pix *= frac
             pix = np.trunc(pix)
-            if axis == 0:
-                pix -= array[0, j]
-            else:
-                pix -= array[i, 0]
+            pix -= array[0, j] * (1 - axis) + array[i, 0] * axis
             res &= abs(pix) > threshold
     return res
