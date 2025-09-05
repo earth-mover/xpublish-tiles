@@ -200,9 +200,7 @@ def check_rectilinear(
     res = True
     for i in range(array.shape[0]):
         for j in range(array.shape[1]):
-            pix = array[i, j] - origin
-            pix *= frac
-            pix = np.trunc(pix)
+            pix = np.trunc((array[i, j] - origin) * frac)
             pix -= array[0, j] * (1 - axis) + array[i, 0] * axis
             res &= abs(pix) > threshold
     return res
