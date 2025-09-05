@@ -1,4 +1,3 @@
-import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
@@ -13,7 +12,7 @@ from pyproj.aoi import BBox
 
 import dask.array
 import xarray as xr
-from xpublish_tiles.lib import transform_coordinates, transformer_from_crs
+from xpublish_tiles.lib import transformer_from_crs
 from xpublish_tiles.testing.tiles import (
     ETRS89_TILES,
     ETRS89_TILES_EDGE_CASES,
@@ -216,8 +215,21 @@ def raster_grid(
     for alt in alternate_epsg_crs:
         altcrs = pyproj.CRS.from_epsg(alt)
         transformer = transformer_from_crs(crs, alt)
-        # FIXME: use dask instead to save memory
-        xa, ya = asyncio.run(transform_coordinates(ds, "x", "y", transformer))
+        xchunked = dask.array.from_array(ds.x.data, chunks=ds.chunksizes["x"])
+        ychunked = dask.array.from_array(ds.y.data, chunks=ds.chunksizes["y"])
+        res = dask.array.map_blocks(
+            lambda x, y, transformer: np.stack(
+                transformer.transform(*np.broadcast_arrays(x, y)), axis=0
+            ).astype(np.float32),
+            xchunked[np.newaxis, :, np.newaxis],
+            ychunked[np.newaxis, np.newaxis, :],
+            chunks=((2,), ds.chunksizes["x"], ds.chunksizes["y"]),
+            transformer=transformer,
+            dtype=np.float32,
+        )
+        # dask bug!
+        xa = dask.array.map_blocks(lambda x: x.squeeze(), res[0, :, :])
+        ya = dask.array.map_blocks(lambda x: x.squeeze(), res[1, :, :])
         if altcrs.is_geographic:
             xname, yname = "longitude", "latitude"
         elif altcrs.is_projected:
@@ -227,20 +239,12 @@ def raster_grid(
         ds = ds.assign_coords(
             {
                 # has the side-effect of dropping indexes, which is good
-                f"x_{alt}": (
-                    xa.dims,
-                    xa.data.astype(np.float32),
-                    {"standard_name": xname},
-                ),
-                f"y_{alt}": (
-                    ya.dims,
-                    ya.data.astype(np.float32),
-                    {"standard_name": yname},
-                ),
+                f"x_{alt}": (("x", "y"), xa, {"standard_name": xname}),
+                f"y_{alt}": (("x", "y"), ya, {"standard_name": yname}),
             }
         )
         chunks = []
-        for dim in xa.dims:
+        for dim in ("x", "y"):
             for dimension in dims:
                 if dimension.name == dim:
                     chunks.extend([dimension.chunk_size])
