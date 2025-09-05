@@ -134,6 +134,7 @@ class PopulatedRenderContext(RenderContext):
             axis=data[grid.X].get_axis_num(grid.Ydim),
             threshold=1,
         )
+        # logger.debug(f"===> max x pix difference: {xmax!r}")
         if not xcheck:
             return self
 
@@ -145,6 +146,7 @@ class PopulatedRenderContext(RenderContext):
             axis=data[grid.Y].get_axis_num(grid.Xdim),
             threshold=1,
         )
+        # logger.debug(f"===> max y pix difference: {ymax!r}")
         if not ycheck:
             return self
 
@@ -198,9 +200,13 @@ def check_rectilinear(
 ) -> bool:
     frac = canvas_size / span
     res = True
+    # maxpix = -1
     for i in range(array.shape[0]):
+        origy = np.trunc((array[i, 0] - origin) * frac)
         for j in range(array.shape[1]):
+            origx = np.trunc((array[0, j] - origin) * frac)
             pix = np.trunc((array[i, j] - origin) * frac)
-            pix -= array[0, j] * (1 - axis) + array[i, 0] * axis
-            res &= abs(pix) > threshold
+            pix -= origx * (1 - axis) + origy * axis
+            # maxpix = max(maxpix, abs(pix))
+            res &= abs(pix) <= threshold
     return res
