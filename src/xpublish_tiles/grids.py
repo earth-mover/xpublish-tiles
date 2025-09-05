@@ -22,7 +22,11 @@ from xpublish_tiles.logger import logger
 from xpublish_tiles.utils import time_debug
 
 DEFAULT_CRS = CRS.from_epsg(4326)
-DEFAULT_PAD = 1
+# Ideally, we'd want to pad with 1.
+# However, due to floating point roundoff when datashader *infers* the cell edges,
+# we might end up with the last grid cell of a global dataset ending very slightly before
+# the bounds of the Canvas. This then results in transparent pixels
+DEFAULT_PAD = 2
 MAX_COORD_VAR_NBYTES = 1 * 1024 * 1024 * 1024
 
 
