@@ -125,7 +125,7 @@ def tile_and_tms(
 
 
 @pytest.mark.asyncio
-@settings(deadline=None)
+@settings(deadline=None, max_examples=500)
 @given(tile_tms=tile_and_tms(), ds=global_datasets(allow_categorical=False))
 async def test_property_global_render_no_transparent_tile(
     tile_tms: tuple[Tile, TileMatrixSet],
@@ -146,7 +146,7 @@ async def test_property_global_render_no_transparent_tile(
 
 @pytest.mark.asyncio
 @given(tile_tms=tile_and_tms(), ds=global_datasets(allow_categorical=False))
-@settings(deadline=None, report_multiple_bugs=False)
+@settings(deadline=None, max_examples=250)
 async def test_property_rectilinear_vs_curvilinear_exact(
     tile_tms: tuple[Tile, TileMatrixSet],
     ds: xr.Dataset,
