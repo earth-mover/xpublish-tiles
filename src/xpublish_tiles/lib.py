@@ -164,29 +164,39 @@ def transform_chunk(
     transformer: pyproj.Transformer,
     x_out: np.ndarray,
     y_out: np.ndarray,
+    inplace: bool,
 ) -> None:
     """Transform a chunk of coordinates."""
     row_slice, col_slice = slices
     x_chunk = x_grid[row_slice, col_slice]
     y_chunk = y_grid[row_slice, col_slice]
-    x_transformed, y_transformed = transformer.transform(x_chunk, y_chunk)
-    x_out[row_slice, col_slice] = x_transformed
-    y_out[row_slice, col_slice] = y_transformed
+    x_transformed, y_transformed = transformer.transform(
+        x_chunk, y_chunk, inplace=inplace
+    )
+    if not inplace:
+        x_out[row_slice, col_slice] = x_transformed
+        y_out[row_slice, col_slice] = y_transformed
 
 
 def transform_blocked(
     x_grid: np.ndarray,
     y_grid: np.ndarray,
+    *,
     transformer: pyproj.Transformer,
     chunk_size: tuple[int, int] = (250, 250),
+    inplace: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Blocked transformation using thread pool."""
 
     start_time = time.perf_counter()
 
     shape = x_grid.shape
-    x_out = np.empty(shape, dtype=x_grid.dtype)
-    y_out = np.empty(shape, dtype=y_grid.dtype)
+    if inplace:
+        x_out = x_grid
+        y_out = y_grid
+    else:
+        x_out = np.empty(shape, dtype=x_grid.dtype)
+        y_out = np.empty(shape, dtype=y_grid.dtype)
 
     chunk_rows, chunk_cols = chunk_size
 
@@ -199,7 +209,7 @@ def transform_blocked(
     # Use slices_from_chunks to generate slices lazily
     futures = [
         EXECUTOR.submit(
-            transform_chunk, x_grid, y_grid, slices, transformer, x_out, y_out
+            transform_chunk, x_grid, y_grid, slices, transformer, x_out, y_out, inplace
         )
         for slices in slices_from_chunks(chunks)
     ]
@@ -300,18 +310,24 @@ async def transform_coordinates(
         iny.drop_indexes(iny.dims, errors="ignore"),
     )
 
+    newX = bx.data.copy()
+    newY = by.data.copy()
+
     # Choose transformation method based on data size
     if bx.size > math.prod(chunk_size):
         loop = asyncio.get_event_loop()
-        newX, newY = await loop.run_in_executor(
+        await loop.run_in_executor(
             EXECUTOR,
-            transform_blocked,
-            bx.data,
-            by.data,
-            transformer,
-            chunk_size,
+            partial(
+                transform_blocked,
+                transformer=transformer,
+                chunk_size=chunk_size,
+                inplace=True,
+            ),
+            newX,
+            newY,
         )
     else:
-        newX, newY = transformer.transform(bx.data, by.data)
+        transformer.transform(newX, newY, inplace=True)
 
     return bx.copy(data=newX), by.copy(data=newY)

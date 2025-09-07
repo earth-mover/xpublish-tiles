@@ -72,6 +72,7 @@ dev = [
     "ipython>=9.4.0",
     "xpublish-tiles[testing]",
     "coiled>=1.118.3",
+    "memray>=1.18.0",
 ]
 
 [project.entry-points."xpublish.plugin"]
