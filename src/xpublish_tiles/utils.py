@@ -1,8 +1,15 @@
+import contextlib
 import functools
+import importlib.util
+import threading
 import time
 from typing import Any
 
 from xpublish_tiles.logger import logger
+
+# Only use lock if tbb is not available
+HAS_TBB = importlib.util.find_spec("tbb") is not None
+LOCK = contextlib.nullcontext() if HAS_TBB else threading.Lock()
 
 
 def lower_case_keys(d: Any) -> dict[str, Any]:

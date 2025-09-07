@@ -6,8 +6,10 @@ import math
 import operator
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from functools import lru_cache, partial
 from itertools import product
+from typing import Any
 
 import numpy as np
 import pyproj
@@ -23,6 +25,24 @@ from xpublish_tiles.utils import async_time_debug
 WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)  # from proj
 M_PI = 3.14159265358979323846  # from proj
 M_2_PI = 6.28318530717958647693  # from proj
+
+
+@dataclass(frozen=True)
+class PadDimension:
+    """Helper class to encapsulate padding parameters for a dimension."""
+
+    name: str
+    size: int
+    left_pad: int = field(default_factory=lambda: config.get("default_pad"))
+    right_pad: int = field(default_factory=lambda: config.get("default_pad"))
+    wraparound: bool = False
+    prevent_overlap: bool = False
+    fill: bool = False
+
+
+@dataclass
+class Fill:
+    size: int
 
 
 def crs_repr(crs: CRS | None) -> str:
@@ -324,3 +344,126 @@ async def transform_coordinates(
         newX, newY = transformer.transform(bx.data, by.data)
 
     return bx.copy(data=newX), by.copy(data=newY)
+
+
+def _prevent_slice_overlap(indexers: list[slice]) -> list[slice]:
+    """
+    Prevent overlapping slices by adjusting stop positions.
+
+    This mimics the original logic: if a slice's stop position would overlap
+    with a previously added slice's start, adjust the stop to prevent overlap.
+    This is used for anti-meridian longitude selections where slices may be
+    processed in an order that could cause overlaps.
+    """
+    if len(indexers) <= 1:
+        return indexers
+
+    result = []
+    for indexer in indexers:
+        start, stop, step = indexer.start, indexer.stop, indexer.step
+
+        # Apply the same logic as the original inline code:
+        # if len(all_indexers) > 0 and (stop >= all_indexers[-1].start):
+        #     stop = all_indexers[-1].start
+        if len(result) > 0 and stop >= result[-1].start:
+            stop = result[-1].start
+
+        result.append(slice(start, stop, step))
+
+    return result
+
+
+def pad_slicers(
+    slicers: dict[str, list[slice | Fill]],
+    *,
+    dimensions: list[PadDimension] | None = None,
+) -> dict[str, list[slice | Fill]]:
+    """
+    Apply padding to slicers for specified dimensions.
+
+    Parameters
+    ----------
+    slicers : dict[str, list[slice | Fill]]
+        Dictionary mapping dimension names to lists of slices or Fill objects
+    dimensions : list[PadDimension]
+        List of dimension padding information
+
+    Returns
+    -------
+    dict[str, list[slice | Fill]]
+        Dictionary mapping dimension names to lists of padded slices or Fill objects
+    """
+    if not dimensions:
+        return slicers.copy()
+
+    result = {}
+    # Handle each specified dimension
+    for dim in dimensions:
+        if dim.name not in slicers:
+            continue
+
+        dim_slicers = slicers[dim.name]
+        # Convert to proper slice objects with dimension size
+        indexers = [slice(*idxr.indices(dim.size)) for idxr in dim_slicers]  # type: ignore[misc]
+
+        # Prevent overlap if requested (before padding)
+        if dim.prevent_overlap:
+            indexers = _prevent_slice_overlap(indexers)
+
+        # Apply padding
+        first, last = indexers[0], indexers[-1]
+        left_edge = first.start - dim.left_pad
+        right_edge = last.stop + dim.right_pad
+        left_over = left_edge if left_edge < 0 else 0
+        right_over = max(right_edge - dim.size, 0)
+
+        indexers_with_fill: list[slice | Fill]
+        if len(indexers) == 1:
+            indexers_with_fill = [slice(max(0, left_edge), min(dim.size, right_edge))]
+        else:
+            indexers_with_fill = [
+                slice(max(0, left_edge), first.stop),
+                *indexers[1:-1],
+                slice(last.start, min(dim.size, right_edge)),
+            ]
+
+        # Apply wraparound if enabled for this dimension
+        if dim.wraparound:
+            if indexers_with_fill[0].start == 0:
+                # Starts at beginning, add wraparound from end
+                indexers_with_fill = [slice(-dim.left_pad, None), *indexers_with_fill]
+            if indexers_with_fill[-1].stop >= dim.size - 1:
+                # Ends at end, add wraparound from beginning
+                indexers_with_fill = indexers_with_fill + [slice(0, dim.right_pad)]
+        elif dim.fill:
+            if left_over:
+                indexers_with_fill = [Fill(abs(left_over)), *indexers_with_fill]
+            if right_over:
+                indexers_with_fill = [*indexers_with_fill, Fill(abs(right_over))]
+
+        result[dim.name] = indexers_with_fill
+
+    # Pass through any other dimensions unchanged
+    for key, value in slicers.items():
+        if key not in result:
+            result[key] = value
+
+    return result
+
+
+def slicers_to_pad_instruction(slicers, datatype) -> dict[str, Any]:
+    from xpublish_tiles.types import DiscreteData
+
+    pad_kwargs = {}
+    pad_widths = {}
+    for dim in slicers:
+        pad_width = []
+        sl = slicers[dim]
+        pad_width.append(sl[0].size if isinstance(sl[0], Fill) else 0)
+        pad_width.append(sl[-1].size if isinstance(sl[-1], Fill) else 0)
+        if pad_width != [0, 0]:
+            pad_widths[dim] = pad_width
+    if pad_widths:
+        pad_kwargs["pad_width"] = pad_widths
+        pad_kwargs["mode"] = "edge" if isinstance(datatype, DiscreteData) else "constant"
+    return pad_kwargs
