@@ -270,6 +270,11 @@ UTM33S_TILES_EDGE_CASES = [
     pytest.param(
         Tile(x=277, y=448, z=9), WEBMERC_TMS, id="utm33s_antarctica_z9(9/277/448)"
     ),
+    pytest.param(
+        Tile(x=4372, y=4160, z=13),
+        WEBMERC_TMS,
+        id="utm33s_center_swatch_z9(13/4160/4372)",
+    ),
 ]
 
 # UTM Zone 33S tiles - combined

@@ -128,41 +128,46 @@ class PopulatedRenderContext(RenderContext):
         if not config.get("detect_approx_rectilinear"):
             return self
 
+        if data.size < 512 * 512:
+            # too small to really matter
+            return self
+
         if not isinstance(grid, GridSystem2D):
             return self
 
         if data[grid.X].ndim == 1 and data[grid.Y].ndim == 1:
             return self
 
-        subsample_step = config.get("rectilinear_check_subsample_step")
-        xcheck = check_rectilinear(
-            data[grid.X].data[::subsample_step, ::subsample_step],
+        xcheck, xmin, xmax = check_rectilinear(
+            data[grid.X].data,
             origin=bbox.west,
             span=bbox.east - bbox.west,
             canvas_size=width,
             axis=data[grid.X].get_axis_num(grid.Ydim),
             threshold=max(config.get("default_pad") - 1, 1),
         )
-        # logger.debug(f"===> max x pix difference: {xmax!r}")
+        # logger.debug(f"===> max x pix difference: {xpix!r}")
         if not xcheck:
             return self
-        ycheck = check_rectilinear(
-            data[grid.Y].data[::subsample_step, ::subsample_step],
+
+        ycheck, ymin, ymax = check_rectilinear(
+            data[grid.Y].data,
             origin=bbox.west,
             span=bbox.east - bbox.west,
             canvas_size=width,
             axis=data[grid.Y].get_axis_num(grid.Xdim),
             threshold=max(config.get("default_pad") - 1, 1),
         )
-        # logger.debug(f"===> max y pix difference: {ymax!r}")
+        # logger.debug(f"===> max y pix difference: {ypix!r}")
         if not ycheck:
             return self
 
+        newx = data[grid.X].isel({grid.Ydim: 0}).data
+        newy = data[grid.Y].isel({grid.Xdim: 0}).data
+        newx[[0, -1]] = [xmin, xmax] if newx[0] < newx[-1] else [xmax, xmin]
+        newy[[0, -1]] = [ymin, ymax] if newy[0] < newy[-1] else [ymax, ymin]
         data = data.assign_coords(
-            {
-                grid.Xdim: (grid.Xdim, data[grid.X].isel({grid.Ydim: 0}).data),
-                grid.Ydim: (grid.Ydim, data[grid.Y].isel({grid.Xdim: 0}).data),
-            }
+            {grid.Xdim: (grid.Xdim, newx), grid.Ydim: (grid.Ydim, newy)}
         )
         grid = Rectilinear(
             crs=grid.crs,
@@ -209,6 +214,8 @@ def check_rectilinear(
     frac = canvas_size / span
     res = True
     # maxpix = -1
+    amin = array[0, 0]
+    amax = array[0, 0]
     for i in range(array.shape[0]):
         origy = np.trunc((array[i, 0] - origin) * frac)
         for j in range(array.shape[1]):
@@ -217,4 +224,8 @@ def check_rectilinear(
             pix -= origx * (1 - axis) + origy * axis
             # maxpix = max(maxpix, abs(pix))
             res &= abs(pix) <= threshold
-    return res
+            if not res:
+                break
+            amax = max(amax, array[i, j])
+            amin = min(amin, array[i, j])
+    return res, amin, amax
