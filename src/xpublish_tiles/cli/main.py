@@ -77,7 +77,6 @@ def get_dataset_for_name(
 
         try:
             storage = icechunk.local_filesystem_storage(repo_path)
-            repo = icechunk.Repository.open(storage)
 
             config: icechunk.RepositoryConfig | None = None
             if icechunk_cache:
@@ -88,6 +87,7 @@ def get_dataset_for_name(
                         num_bytes_attributes=100_000_000,
                     )
                 )
+            repo = icechunk.Repository.open(storage, config=config)
 
             session = repo.readonly_session(branch=branch)
             ds = xr.open_zarr(

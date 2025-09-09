@@ -8,6 +8,7 @@ from morecantile import Tile, TileMatrixSet
 
 import xarray as xr
 from tests import create_query_params
+from xpublish_tiles import config
 from xpublish_tiles.lib import TileTooBigError, check_transparent_pixels
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.testing.datasets import (
@@ -220,7 +221,8 @@ async def test_property_rectilinear_vs_curvilinear_exact(
         latitude=(("nlon", "nlat"), newlat.T, {"standard_name": "latitude"}),
     )
     ds["foo"].attrs["coordinates"] = "longitude latitude"
-    curvilinear_result = await pipeline(ds, query)
+    with config.set(detect_approx_rectilinear=False):
+        curvilinear_result = await pipeline(ds, query)
     # curvilinear = guess_grid_system(ds, "foo")
 
     # Check that grid indexers are the same

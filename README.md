@@ -165,11 +165,15 @@ Where `4/4/14` represents the tile coordinates in {z}/{y}/{x}
 1. Make sure to limit `NUMBA_NUM_THREADS`; this is used for rendering categorical data with datashader.
 2. The first invocation of a render will block while datashader functions are JIT-compiled. Our attempts to add a precompilation step to remove this have been unsuccessful.
 
-### Environment variables
-1. `XPUBLISH_TILES_ASYNC_LOAD: [0, 1]` - controls whether Xarray's async loading is used.
-2. `XPUBLISH_TILES_NUM_THREADS: int` - controls the size of the threadpool
+### Configuration
+Settings can be configured via environment variables or config files. The async loading setting has been moved to the config system (use `async_load` in config files or `XPUBLISH_TILES_ASYNC_LOAD` environment variable).
+1. `XPUBLISH_TILES_NUM_THREADS: int` - controls the size of the threadpool
+2. `XPUBLISH_TILES_ASYNC_LOAD: bool` - whether to use Xarray's async loading
 3. `XPUBLISH_TILES_TRANSFORM_CHUNK_SIZE: int` - when transforming coordinates, do so by submitting (NxN) chunks to the threadpool.
-
+4. `XPUBLISH_TILES_DETECT_APPROX_RECTILINEAR: bool` - detect whether a curvilinear grid is approximately rectilinear
+5. `XPUBLISH_TILES_RECTILINEAR_CHECK_MIN_SIZE: int` - check for rectilinearity if array.shape > (N, N)
+6. `XPUBLISH_TILES_MAX_RENDERABLE_SIZE: int` - do not attempt to load or render arrays with size greater than this value
+7. `XPUBLISH_TILES_DEFAULT_PAD: int` - how much to pad a selection on either side
 
 ## Performance Notes
 
@@ -182,7 +186,11 @@ For context, the rendering pipeline is:
    a. We reimplement the `epsg:4326 -> epsg:3857` transformation because it is separable (`x` is fully determined by `longitude`, and `y` is fully determined by latitude). This allows us to preserve the regular or rectilinear nature of the grid if possible.
    b. If (a) is not possible, we broadcast the input coordinates against each other, then cut up the coordinates in to chunks and process them in a threadpool using `pyproj`.
 4. Xarray's new `load_async` is used to load the data in to memory.
-5. Loaded data is passed to datashader.
+5. Next we check whether the grid, if curvilinear, may be approximated by a rectilinear grid.
+   a. The Rectilinear mesh codepath is datashader can be 3-10X faster than the Curvilinear codepath, so this approximation is worth it.
+   b. We replicate the logic in datashader that constructs an array that contains output pixel id for each each input pixel -- this is done for each axis.
+   c. If the difference between these arrays, constructed from the curvilinear and rectilinear meshes, differs by one pixel, then we approximate the grid as rectilinear. This threshold is pretty tight, and requires some experimentation to loosen further. If loosening, we will need to pad appropriately.
+   d. Realistically this optimization is triggered on high resolution data at zoom levels where the grid distortion isn't very high.
 
 
 Performance recommendations:
