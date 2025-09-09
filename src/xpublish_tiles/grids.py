@@ -490,7 +490,7 @@ class GridSystem(ABC):
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("Subclasses must implement sel method")
 
-    def pick_alternate_grid(self, crs: CRS) -> GridMetadata:
+    def pick_alternate_grid(self, crs: CRS, *, coarsen_factors) -> GridMetadata:
         """Pick an alternate grid system based on the target CRS.
 
         Parameters
@@ -503,6 +503,11 @@ class GridSystem(ABC):
         GridMetadata
             Matching alternate grid metadata, or this grid's metadata if no suitable alternate found
         """
+        # For large coarsening, it is just faster to
+        # transform the coarsened native coordinates
+        if all(factor > 2 for factor in coarsen_factors.values()):
+            return self.to_metadata()
+
         if crs == self.crs or not self.alternates:
             return self.to_metadata()
 

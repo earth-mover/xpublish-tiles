@@ -4,7 +4,6 @@ import asyncio
 import io
 import math
 import operator
-import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import lru_cache, partial
@@ -213,7 +212,7 @@ def transform_blocked(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Blocked transformation using thread pool."""
 
-    start_time = time.perf_counter()
+    # start_time = time.perf_counter()
 
     shape = x_grid.shape
     x_out = np.empty(shape, dtype=x_grid.dtype)
@@ -238,13 +237,13 @@ def transform_blocked(
     for future in futures:
         future.result()
 
-    total_time = time.perf_counter() - start_time
-    logger.debug(
-        "transform_blocked completed in %.4f seconds (shape=%s, chunks=%d)",
-        total_time,
-        shape,
-        len(futures),
-    )
+    # total_time = time.perf_counter() - start_time
+    # logger.debug(
+    #     "transform_blocked completed in %.4f seconds (shape=%s, chunks=%d)",
+    #     total_time,
+    #     shape,
+    #     len(futures),
+    # )
 
     return x_out, y_out
 

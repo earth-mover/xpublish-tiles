@@ -306,13 +306,11 @@ async def test_subset(global_datasets, tile, tms):
     assert len(slicers["latitude"]) == 1  # Y dimension should always have one slice
 
     # Check that coordinates are within expected bounds (exact matching with controlled grid)
-    # Use a large max_shape to avoid coarsening in tests
     actual = await apply_slicers(
         ds.foo,
         grid=grid,
         alternate=grid.to_metadata(),
         slicers=slicers,
-        max_shape=(10000, 10000),
         datatype=ContinuousData(valid_min=0, valid_max=1),
     )
     lat_min, lat_max = actual.latitude.min().item(), actual.latitude.max().item()

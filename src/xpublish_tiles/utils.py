@@ -45,3 +45,23 @@ def async_time_debug(func):
         return result
 
     return wrapper
+
+
+@contextlib.contextmanager
+def time_operation(message: str = "Operation"):
+    """Context manager for timing operations with custom messages."""
+    start_time = time.perf_counter()
+    yield
+    end_time = time.perf_counter()
+    perf_time = (end_time - start_time) * 1000
+    logger.debug(f"{message}: {perf_time:.2f} ms")
+
+
+@contextlib.asynccontextmanager
+async def async_time_operation(message: str = "Async Operation"):
+    """Async context manager for timing operations with custom messages."""
+    start_time = time.perf_counter()
+    yield
+    end_time = time.perf_counter()
+    perf_time = (end_time - start_time) * 1000
+    logger.debug(f"{message}: {perf_time:.2f} ms")
