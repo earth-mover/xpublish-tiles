@@ -10,7 +10,8 @@ import pyproj
 import pyproj.aoi
 
 import xarray as xr
-from xpublish_tiles.grids import DEFAULT_PAD, GridSystem, GridSystem2D, Rectilinear
+from xpublish_tiles.config import config
+from xpublish_tiles.grids import GridSystem, GridSystem2D, Rectilinear
 from xpublish_tiles.logger import logger
 from xpublish_tiles.utils import async_time_debug
 
@@ -18,8 +19,6 @@ InputCRS = NewType("InputCRS", pyproj.CRS)
 OutputCRS = NewType("OutputCRS", pyproj.CRS)
 InputBBox = NewType("InputBBox", pyproj.aoi.BBox)
 OutputBBox = NewType("OutputBBox", pyproj.aoi.BBox)
-
-RECTILINEAR_CHECK_SUBSAMPLE_STEP = 2
 
 
 class ImageFormat(enum.StrEnum):
@@ -125,33 +124,35 @@ class PopulatedRenderContext(RenderContext):
         grid = self.grid
         bbox = self.bbox
 
+        # Check if approximate rectilinear detection is enabled
+        if not config.get("detect_approx_rectilinear"):
+            return self
+
         if not isinstance(grid, GridSystem2D):
             return self
 
         if data[grid.X].ndim == 1 and data[grid.Y].ndim == 1:
             return self
 
+        subsample_step = config.get("rectilinear_check_subsample_step")
         xcheck = check_rectilinear(
-            data[grid.X].data[::2, ::2],
+            data[grid.X].data[::subsample_step, ::subsample_step],
             origin=bbox.west,
             span=bbox.east - bbox.west,
             canvas_size=width,
             axis=data[grid.X].get_axis_num(grid.Ydim),
-            threshold=max(DEFAULT_PAD - 1, 1),
+            threshold=max(config.get("default_pad") - 1, 1),
         )
         # logger.debug(f"===> max x pix difference: {xmax!r}")
         if not xcheck:
             return self
-
         ycheck = check_rectilinear(
-            data[grid.Y].data[
-                ::RECTILINEAR_CHECK_SUBSAMPLE_STEP, ::RECTILINEAR_CHECK_SUBSAMPLE_STEP
-            ],
+            data[grid.Y].data[::subsample_step, ::subsample_step],
             origin=bbox.west,
             span=bbox.east - bbox.west,
             canvas_size=width,
             axis=data[grid.Y].get_axis_num(grid.Xdim),
-            threshold=max(DEFAULT_PAD - 1, 1),
+            threshold=max(config.get("default_pad") - 1, 1),
         )
         # logger.debug(f"===> max y pix difference: {ymax!r}")
         if not ycheck:

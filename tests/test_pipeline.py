@@ -30,6 +30,7 @@ from xpublish_tiles.testing.datasets import (
 from xpublish_tiles.testing.lib import (
     assert_render_matches_snapshot,
     compare_image_buffers,
+    compare_image_buffers_with_debug,
     visualize_tile,
 )
 from xpublish_tiles.testing.tiles import (
@@ -347,7 +348,17 @@ async def test_hrrr_multiple_vs_hrrr_rendering(tile, tms, pytestconfig):
         visualize_tile(hrrr_multiple_result, tile)
 
     # Compare the rendered images
-    assert compare_image_buffers(hrrr_result, hrrr_multiple_result), (
+    images_similar, ssim_score = compare_image_buffers_with_debug(
+        hrrr_result,
+        hrrr_multiple_result,
+        test_name="hrrr_multiple",
+        tile_info=(tile, tms),
+        debug_visual=pytestconfig.getoption("--debug-visual", default=False),
+        debug_visual_save=pytestconfig.getoption("--debug-visual-save", default=False),
+        mode="perceptual",
+        perceptual_threshold=0.99,
+    )
+    assert images_similar, (
         f"HRRR_MULTIPLE should render identically to HRRR for tile {tile} "
         f"but images differ"
     )

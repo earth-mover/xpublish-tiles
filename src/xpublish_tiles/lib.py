@@ -4,7 +4,6 @@ import asyncio
 import io
 import math
 import operator
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache, partial
@@ -17,6 +16,7 @@ from PIL import Image
 from pyproj import CRS
 
 import xarray as xr
+from xpublish_tiles.config import config
 from xpublish_tiles.logger import logger
 from xpublish_tiles.utils import async_time_debug
 
@@ -56,7 +56,7 @@ class TileTooBigError(Exception):
     pass
 
 
-THREAD_POOL_NUM_THREADS = int(os.environ.get("XPUBLISH_TILES_NUM_THREADS", 16))
+THREAD_POOL_NUM_THREADS = config.get("num_threads")
 logger.info("setting up thread pool with num threads: ", THREAD_POOL_NUM_THREADS)
 EXECUTOR = ThreadPoolExecutor(
     max_workers=THREAD_POOL_NUM_THREADS,
@@ -81,6 +81,7 @@ transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=
 # transformer = pyproj.Transformer.from_crs(3035, 4326, always_xy=True)
 # grid = np.meshgrid(x, y)
 
+
 # %timeit transform_blocked(*grid, chunk_size=(20, 20), transformer=transformer)
 # %timeit transform_blocked(*grid, chunk_size=(100, 100), transformer=transformer)
 # %timeit transform_blocked(*grid, chunk_size=(250, 250), transformer=transformer)
@@ -100,9 +101,10 @@ transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=
 # 155 ms ± 2.75 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
 # 156 ms ± 5.07 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
 # 772 ms ± 27 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
-chunk_size = int(os.environ.get("XPUBLISH_TILES_TRANSFORM_CHUNK_SIZE", 250))
-CHUNKED_TRANSFORM_CHUNK_SIZE = (chunk_size, chunk_size)
-logger.info("transform chunk size: ", CHUNKED_TRANSFORM_CHUNK_SIZE)
+def get_transform_chunk_size():
+    """Get the chunk size for coordinate transformations dynamically."""
+    chunk_size = config.get("transform_chunk_size")
+    return (chunk_size, chunk_size)
 
 
 def is_4326_like(crs: CRS) -> bool:
@@ -259,7 +261,7 @@ async def transform_coordinates(
     transformer : pyproj.Transformer
         The coordinate transformer
     chunk_size : tuple[int, int], optional
-        Chunk size for blocked transformation, by default CHUNKED_TRANSFORM_CHUNK_SIZE
+        Chunk size for blocked transformation, by default from config
 
     Returns
     -------
@@ -267,7 +269,7 @@ async def transform_coordinates(
         Transformed X and Y coordinate arrays
     """
     if chunk_size is None:
-        chunk_size = CHUNKED_TRANSFORM_CHUNK_SIZE
+        chunk_size = get_transform_chunk_size()
 
     inx, iny = subset[grid_x_name], subset[grid_y_name]
 
