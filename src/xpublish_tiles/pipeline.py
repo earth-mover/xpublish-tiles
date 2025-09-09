@@ -10,6 +10,7 @@ import pyproj
 from pyproj.aoi import BBox
 
 import xarray as xr
+from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
     Curvilinear,
     GridMetadata,
@@ -38,9 +39,6 @@ from xpublish_tiles.types import (
     ValidatedArray,
 )
 from xpublish_tiles.utils import async_time_debug, time_debug
-
-# This takes the pipeline ~ 1s
-MAX_RENDERABLE_SIZE = 10_000 * 10_000
 
 
 def round_bbox(bbox: BBox) -> BBox:
@@ -93,7 +91,7 @@ async def apply_slicers(
         sum_tuples(*[var.shape for var in subset.data_vars.values()])
         for subset in subsets
     )
-    if math.prod(sum_tuples(*total_shape)) > factor * MAX_RENDERABLE_SIZE:
+    if math.prod(sum_tuples(*total_shape)) > factor * config.get("max_renderable_size"):
         msg = (
             f"Tile request too big, requires loading data of total shape: {total_shape!r}. "
             "Please choose a higher zoom level."

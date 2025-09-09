@@ -17,16 +17,8 @@ config = donfig.Config(
             # we might end up with the last grid cell of a global dataset ending very slightly before
             # the bounds of the Canvas. This then results in transparent pixels
             "default_pad": 2,
+            "max_renderable_size": 100_000_000,  # 10,000 * 10,000 pixels - this takes the pipeline ~ 1s
         }
     ],
     paths=[],
-    env_var="XPUBLISH_TILES_CONFIG_PATH",
-    env={
-        "xpublish_tiles": {
-            "num_threads": "XPUBLISH_TILES_NUM_THREADS",
-            "transform_chunk_size": "XPUBLISH_TILES_TRANSFORM_CHUNK_SIZE",
-            "detect_approx_rectilinear": "XPUBLISH_TILES_DETECT_APPROX_RECTILINEAR",
-            "default_pad": "XPUBLISH_TILES_DEFAULT_PAD",
-        }
-    },
 )
