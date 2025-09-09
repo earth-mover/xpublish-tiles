@@ -1,8 +1,6 @@
 import asyncio
-import copy
 import io
 import math
-import os
 from typing import Any, cast
 
 import numpy as np
@@ -22,7 +20,6 @@ from xpublish_tiles.grids import (
 from xpublish_tiles.lib import (
     TileTooBigError,
     async_run,
-    check_transparent_pixels,
     transform_coordinates,
     transformer_from_crs,
 )
@@ -114,7 +111,7 @@ async def apply_slicers(
     ).any():
         raise ValueError("Tile request resulted in insufficient data for rendering.")
 
-    if int(os.environ.get("XPUBLISH_TILES_ASYNC_LOAD", "1")):
+    if config.get("async_load"):
         coros = [subset.load_async() for subset in subsets]
         results = await asyncio.gather(*coros)
     else:
@@ -355,8 +352,6 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
         ),
     )
     buffer.seek(0)
-    if int(os.environ.get("XPUBLISH_TILES_DEBUG_CHECKS", "0")):
-        assert check_transparent_pixels(copy.deepcopy(buffer).read()) == 0, query
     return buffer
 
 

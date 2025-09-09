@@ -165,11 +165,15 @@ Where `4/4/14` represents the tile coordinates in {z}/{y}/{x}
 1. Make sure to limit `NUMBA_NUM_THREADS`; this is used for rendering categorical data with datashader.
 2. The first invocation of a render will block while datashader functions are JIT-compiled. Our attempts to add a precompilation step to remove this have been unsuccessful.
 
-### Environment variables
-1. `XPUBLISH_TILES_ASYNC_LOAD: [0, 1]` - controls whether Xarray's async loading is used.
-2. `XPUBLISH_TILES_NUM_THREADS: int` - controls the size of the threadpool
+### Configuration
+Settings can be configured via environment variables or config files. The async loading setting has been moved to the config system (use `async_load` in config files or `XPUBLISH_TILES_ASYNC_LOAD` environment variable).
+1. `XPUBLISH_TILES_NUM_THREADS: int` - controls the size of the threadpool
+2. `XPUBLISH_TILES_ASYNC_LOAD: bool` - whether to use Xarray's async loading
 3. `XPUBLISH_TILES_TRANSFORM_CHUNK_SIZE: int` - when transforming coordinates, do so by submitting (NxN) chunks to the threadpool.
-
+4. `XPUBLISH_TILES_DETECT_APPROX_RECTILINEAR: bool` - detect whether a curvilinear grid is approximately rectilinear
+5. `XPUBLISH_TILES_RECTILINEAR_CHECK_MIN_SIZE: int` - check for rectilinearity if array.shape > (N, N)
+6. `XPUBLISH_TILES_MAX_RENDERABLE_SIZE: int` - do not attempt to load or render arrays with size greater than this value
+7. `XPUBLISH_TILES_DEFAULT_PAD: int` - how much to pad a selection on either side
 
 ## Performance Notes
 
