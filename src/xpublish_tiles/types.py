@@ -174,7 +174,7 @@ class PopulatedRenderContext(RenderContext):
             bbox=grid.bbox,
             X=grid.Xdim,
             Y=grid.Ydim,
-            indexes=(),
+            indexes=(),  # type: ignore[arg-type]
             Z=None,
         )
         logger.debug("✏️ rewriting to rectilinear")
@@ -210,7 +210,7 @@ def check_rectilinear(
     span: float,
     threshold: int,
     axis: int,
-) -> bool:
+) -> tuple[bool, float, float]:
     frac = canvas_size / span
     res = True
     # maxpix = -1
@@ -228,4 +228,4 @@ def check_rectilinear(
                 break
             amax = max(amax, array[i, j])
             amin = min(amin, array[i, j])
-    return res, amin, amax
+    return res, amin, amax  # type: ignore[return-value]

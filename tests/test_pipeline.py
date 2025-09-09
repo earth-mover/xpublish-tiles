@@ -93,7 +93,8 @@ async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot, pytestco
     """Test pipeline with various tiles using their native TMS CRS."""
     ds = global_datasets
     query_params = create_query_params(tile, tms)
-    result = await pipeline(ds, query_params)
+    with config.set(rectilinear_check_min_size=0):
+        result = await pipeline(ds, query_params)
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
     assert_render_matches_snapshot(result, png_snapshot)
