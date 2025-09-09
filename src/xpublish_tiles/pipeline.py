@@ -331,13 +331,12 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = apply_query(ds, variables=query.variables, selectors=query.selectors)
     subsets = await subset_to_bbox(validated, bbox=query.bbox, crs=query.crs)
 
-    async def rewrite_subset(subset):
-        return await subset.maybe_rewrite_to_rectilinear(
-            width=query.width, height=query.height
-        )
-
     tasks = [
-        async_run(lambda s=subset: asyncio.run(rewrite_subset(s)))
+        async_run(
+            lambda s=subset: asyncio.run(
+                s.maybe_rewrite_to_rectilinear(width=query.width, height=query.height)
+            )
+        )
         for subset in subsets.values()
     ]
     results = await asyncio.gather(*tasks)
