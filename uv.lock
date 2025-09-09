@@ -841,8 +841,8 @@ wheels = [
 
 [[package]]
 name = "datashader"
-version = "0.18.2.post1.dev7+g5e0323dc4"
-source = { git = "https://github.com/holoviz/datashader?rev=main#5e0323dc4c1ac2e74ecfbded716b302b87fc1b62" }
+version = "0.18.2.post1.dev12+g377251d12"
+source = { git = "https://github.com/holoviz/datashader?rev=main#377251d124c93352b66c1fb3b5ef4f8a846df396" }
 dependencies = [
     { name = "colorcet" },
     { name = "multipledispatch" },
