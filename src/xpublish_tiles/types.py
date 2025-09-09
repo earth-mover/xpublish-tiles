@@ -128,7 +128,7 @@ class PopulatedRenderContext(RenderContext):
         if not config.get("detect_approx_rectilinear"):
             return self
 
-        if data.size < 512 * 512:
+        if data.size < config.get("rectilinear_check_min_size") ** 2:
             # too small to really matter
             return self
 

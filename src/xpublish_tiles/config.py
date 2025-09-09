@@ -11,6 +11,7 @@ config = donfig.Config(
             "num_threads": 8,
             "transform_chunk_size": 1024,
             "detect_approx_rectilinear": True,
+            "rectilinear_check_min_size": 512,
             # Ideally, we'd want to pad with 1.
             # However, due to floating point roundoff when datashader *infers* the cell edges,
             # we might end up with the last grid cell of a global dataset ending very slightly before

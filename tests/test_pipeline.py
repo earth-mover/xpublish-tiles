@@ -15,6 +15,7 @@ import xarray as xr
 from src.xpublish_tiles.render.raster import nearest_on_uniform_grid_quadmesh
 from tests import create_query_params
 from xarray.testing import assert_equal
+from xpublish_tiles import config
 from xpublish_tiles.pipeline import (
     apply_query,
     bbox_overlap,
@@ -142,7 +143,8 @@ async def test_projected_coordinate_data(
 ):
     ds, tile, tms = projected_dataset_and_tile
     query_params = create_query_params(tile, tms)
-    result = await pipeline(ds, query_params)
+    with config.set(rectilinear_check_min_size=0):
+        result = await pipeline(ds, query_params)
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
     assert_render_matches_snapshot(
