@@ -93,7 +93,6 @@ async def apply_slicers(
         sum_tuples(*[var.shape for var in subset.data_vars.values()])
         for subset in subsets
     )
-    logger.debug(total_shape)
     if math.prod(sum_tuples(*total_shape)) > factor * MAX_RENDERABLE_SIZE:
         msg = (
             f"Tile request too big, requires loading data of total shape: {total_shape!r}. "
@@ -101,6 +100,7 @@ async def apply_slicers(
         )
         logger.error(msg)
         raise TileTooBigError(msg)
+
     if (
         np.sum(
             np.stack(

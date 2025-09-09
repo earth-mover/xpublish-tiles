@@ -686,15 +686,8 @@ class RectilinearSelMixin:
         slicers = {self.X: xsel_result.dim_indexers[self.X], self.Y: yslice}
 
         # Apply padding with PadDimension helpers
-        xdim = PadDimension(
-            name=self.X,
-            size=x_size,
-            pad=config.get("default_pad"),
-            wraparound=x_handle_wraparound,
-        )
-        ydim = PadDimension(
-            name=self.Y, size=y_size, pad=config.get("default_pad"), wraparound=False
-        )
+        xdim = PadDimension(name=self.X, size=x_size, wraparound=x_handle_wraparound)
+        ydim = PadDimension(name=self.Y, size=y_size, wraparound=False)
 
         return pad_slicers(slicers, dimensions=[xdim, ydim])
 
@@ -1028,15 +1021,8 @@ class Curvilinear(GridSystem):
         ysize = index.Y.sizes[self.Ydim]
 
         # Apply padding with PadDimension helpers
-        xdim = PadDimension(
-            name=self.Xdim,
-            size=xsize,
-            pad=config.get("default_pad"),
-            wraparound=handle_wraparound,
-        )
-        ydim = PadDimension(
-            name=self.Ydim, size=ysize, pad=config.get("default_pad"), wraparound=False
-        )
+        xdim = PadDimension(name=self.Xdim, size=xsize, wraparound=handle_wraparound)
+        ydim = PadDimension(name=self.Ydim, size=ysize, wraparound=False)
 
         return pad_slicers(
             {self.Xdim: xslicers, self.Ydim: yslicers},
