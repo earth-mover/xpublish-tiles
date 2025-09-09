@@ -19,8 +19,8 @@ from xpublish_tiles.grids import (
     guess_grid_system,
 )
 from xpublish_tiles.lib import (
-    EXECUTOR,
     TileTooBigError,
+    async_run,
     check_transparent_pixels,
     transform_coordinates,
     transformer_from_crs,
@@ -331,15 +331,13 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = apply_query(ds, variables=query.variables, selectors=query.selectors)
     subsets = await subset_to_bbox(validated, bbox=query.bbox, crs=query.crs)
 
-    loop = asyncio.get_event_loop()
-
     async def rewrite_subset(subset):
         return await subset.maybe_rewrite_to_rectilinear(
             width=query.width, height=query.height
         )
 
     tasks = [
-        loop.run_in_executor(EXECUTOR, lambda s=subset: asyncio.run(rewrite_subset(s)))
+        async_run(lambda s=subset: asyncio.run(rewrite_subset(s)))
         for subset in subsets.values()
     ]
     results = await asyncio.gather(*tasks)
@@ -348,8 +346,7 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     buffer = io.BytesIO()
     renderer = query.get_renderer()
 
-    await loop.run_in_executor(
-        EXECUTOR,
+    await async_run(
         lambda: renderer.render(
             contexts=new_subsets,
             buffer=buffer,

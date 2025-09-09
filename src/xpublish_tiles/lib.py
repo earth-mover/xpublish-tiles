@@ -60,8 +60,17 @@ THREAD_POOL_NUM_THREADS = config.get("num_threads")
 logger.info("setting up thread pool with num threads: ", THREAD_POOL_NUM_THREADS)
 EXECUTOR = ThreadPoolExecutor(
     max_workers=THREAD_POOL_NUM_THREADS,
-    thread_name_prefix="xpublish-tiles-threadpool",
+    thread_name_prefix="xpublish-tiles-pool",
 )
+SEMAPHORE = asyncio.Semaphore(config.get("num_threads"))
+
+
+async def async_run(func, *args, **kwargs):
+    """Run a function in the thread pool executor with semaphore limiting."""
+    loop = asyncio.get_event_loop()
+    async with SEMAPHORE:
+        return await loop.run_in_executor(EXECUTOR, func, *args, **kwargs)
+
 
 # 4326 with order of axes reversed.
 OTHER_4326 = pyproj.CRS.from_user_input("WGS 84 (CRS84)")
@@ -304,9 +313,7 @@ async def transform_coordinates(
 
     # Choose transformation method based on data size
     if bx.size > math.prod(chunk_size):
-        loop = asyncio.get_event_loop()
-        newX, newY = await loop.run_in_executor(
-            EXECUTOR,
+        newX, newY = await async_run(
             transform_blocked,
             bx.data,
             by.data,
