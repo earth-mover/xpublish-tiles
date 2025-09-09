@@ -182,7 +182,11 @@ For context, the rendering pipeline is:
    a. We reimplement the `epsg:4326 -> epsg:3857` transformation because it is separable (`x` is fully determined by `longitude`, and `y` is fully determined by latitude). This allows us to preserve the regular or rectilinear nature of the grid if possible.
    b. If (a) is not possible, we broadcast the input coordinates against each other, then cut up the coordinates in to chunks and process them in a threadpool using `pyproj`.
 4. Xarray's new `load_async` is used to load the data in to memory.
-5. Loaded data is passed to datashader.
+5. Next we check whether the grid, if curvilinear, may be approximated by a rectilinear grid.
+   a. The Rectilinear mesh codepath is datashader can be 3-10X faster than the Curvilinear codepath, so this approximation is worth it.
+   b. We replicate the logic in datashader that constructs an array that contains output pixel id for each each input pixel -- this is done for each axis.
+   c. If the difference between these arrays, constructed from the curvilinear and rectilinear meshes, differs by one pixel, then we approximate the grid as rectilinear. This threshold is pretty tight, and requires some experimentation to loosen further. If loosening, we will need to pad appropriately.
+   d. Realistically this optimization is triggered on high resolution data at zoom levels where the grid distortion isn't very high.
 
 
 Performance recommendations:
