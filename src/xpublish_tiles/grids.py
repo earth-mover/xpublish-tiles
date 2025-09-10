@@ -831,14 +831,12 @@ class Curvilinear(GridSystem):
         # Determine if this curvilinear grid spans the globe in longitude
         if self.crs.is_geographic:
             index = next(iter(self.indexes))
-            if isinstance(index, CurvilinearCellIndex):
-                # Use cell edges instead of cell centers for more accurate global coverage detection
-                min_edge = numbagg.nanmin(index.left)
-                max_edge = numbagg.nanmax(index.right)
-                lon_span = max_edge - min_edge
-                self.lon_spans_globe = lon_span >= 350
-            else:
-                self.lon_spans_globe = False
+            assert isinstance(index, CurvilinearCellIndex)
+            # Use cell edges instead of cell centers for more accurate global coverage detection
+            min_edge = numbagg.nanmin(index.left)
+            max_edge = numbagg.nanmax(index.right)
+            lon_span = max_edge - min_edge
+            self.lon_spans_globe = lon_span >= 350
         else:
             self.lon_spans_globe = False
 

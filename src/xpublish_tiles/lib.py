@@ -406,8 +406,6 @@ def pad_slicers(
         first, last = indexers[0], indexers[-1]
         left_edge = first.start - dim.left_pad
         right_edge = last.stop + dim.right_pad
-        left_over = left_edge if left_edge < 0 else 0
-        right_over = max(right_edge - dim.size, 0)
 
         indexers_with_fill: list[slice | Fill]
         if len(indexers) == 1:
@@ -428,6 +426,9 @@ def pad_slicers(
                 # Ends at end, add wraparound from beginning
                 indexers_with_fill = indexers_with_fill + [slice(0, dim.right_pad)]
         elif dim.fill:
+            # Note: This is unused at the moment since we skip padding for coarsening
+            left_over = left_edge if left_edge < 0 else 0
+            right_over = max(right_edge - dim.size, 0)
             if left_over:
                 indexers_with_fill = [Fill(abs(left_over)), *indexers_with_fill]
             if right_over:
