@@ -12,14 +12,17 @@ from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
     Curvilinear,
     GridMetadata,
-    GridSystem,
+    GridSystem2D,
     RasterAffine,
     Rectilinear,
     guess_grid_system,
 )
 from xpublish_tiles.lib import (
+    Fill,
+    PadDimension,
     TileTooBigError,
     async_run,
+    pad_slicers,
     transform_coordinates,
     transformer_from_crs,
 )
@@ -35,7 +38,13 @@ from xpublish_tiles.types import (
     QueryParams,
     ValidatedArray,
 )
-from xpublish_tiles.utils import async_time_debug, time_debug
+from xpublish_tiles.utils import (
+    LOCK,
+    async_time_debug,
+    async_time_operation,
+    time_debug,
+    time_operation,
+)
 
 
 def round_bbox(bbox: BBox) -> BBox:
@@ -56,39 +65,218 @@ def sum_tuples(*tuples):
     return tuple(sum(values) for values in zip(*tuples, strict=False))
 
 
+def shape_from_slicers(
+    slicers: dict[str, list[slice | Fill]], da: xr.DataArray, grid: GridSystem2D
+) -> tuple[int, int]:
+    """
+    Calculate the total shape from slicers for X and Y dimensions.
+
+    Parameters
+    ----------
+    slicers : dict[str, list[slice | Fill]]
+        Slicers for data selection
+    ds : xr.Dataset
+        Dataset being processed
+    grid : GridSystem
+        Grid system information
+
+    Returns
+    -------
+    tuple[int, int]
+        Total shape (width, height) from all slicers
+    """
+
+    def get_size(sl, dim_size):
+        if isinstance(sl, Fill):
+            return sl.size
+        start = sl.start if sl.start is not None else 0
+        stop = sl.stop if sl.stop is not None else dim_size
+        return stop - start
+
+    # Find the one Y slice that's actually a slice (not Fill)
+    yslice = None
+    for candidate in slicers[grid.Ydim]:
+        if isinstance(candidate, slice):
+            yslice = candidate
+            break
+
+    if yslice is None:
+        # If no slice found, take the first item (should be a Fill or slice)
+        yslice = slicers[grid.Ydim][0]
+
+    return sum_tuples(
+        *(
+            (
+                get_size(sl, da.sizes[grid.Xdim]),
+                get_size(yslice, da.sizes[grid.Ydim]),
+            )
+            for sl in slicers[grid.Xdim]
+        )
+    )
+
+
+def get_coarsen_factors(
+    shape: tuple[int, int],
+    max_shape: tuple[int, int],
+    dims: list[str],
+    slicers: dict[str, list[slice | Fill]],
+    da: xr.DataArray,
+    grid: GridSystem2D,
+) -> tuple[dict[str, int], dict[str, list[slice | Fill]]]:
+    """
+    Calculate coarsening factors and adjust slicers for data to fit within maximum shape constraints.
+
+    Parameters
+    ----------
+    shape : tuple[int, int]
+        Current data shape (width, height)
+    max_shape : tuple[int, int]
+        Maximum allowed shape (width, height)
+    dims : list[str]
+        Dimension names corresponding to shape elements
+    slicers : dict[str, list[slice | Fill]]
+        Original slicers for data selection
+    ds : xr.Dataset
+        Dataset being processed
+    grid : GridSystem
+        Grid system information
+
+    Returns
+    -------
+    tuple[dict[str, int], dict[str, list[slice | Fill]]]
+        Coarsening factors (>= 2) and adjusted slicers with padding
+    """
+
+    def largest_even_le(a, b):
+        quotient = a // b
+        return quotient if quotient % 2 == 0 else quotient - 1
+
+    coarsen_factors = {
+        dim: largest_even_le(size, maxsize)
+        for size, maxsize, dim in zip(shape, max_shape, dims, strict=True)
+    }
+    coarsen_factors = {k: v for k, v in coarsen_factors.items() if v >= 2}
+
+    sizes = dict(zip(dims, shape, strict=False))
+    padders = []
+    for dim, factor in coarsen_factors.items():
+        if factor < 2:
+            continue
+        assert factor % 2 == 0
+        size = sizes[dim]
+        remainder = factor - (size % factor)
+        left_pad = factor // 2
+        right_pad = remainder + factor // 2
+        padders.append(
+            PadDimension(
+                name=dim,
+                size=da.sizes[dim],
+                left_pad=left_pad,
+                right_pad=right_pad,
+                wraparound=grid.lon_spans_globe and dim == grid.Xdim,
+                # for coarsening we always want to increase the size,
+                # even if use of xr.pad is necessary
+                fill=True,
+            )
+        )
+    new_slicers = pad_slicers(slicers, dimensions=padders)
+
+    return coarsen_factors, new_slicers
+
+
+def estimate_coarsen_factors_and_slicers(
+    da: xr.DataArray,
+    *,
+    grid: GridSystem2D,
+    slicers: dict[str, list[slice | Fill]],
+    max_shape: tuple[int, int],
+    datatype: DataType,
+) -> tuple[dict[str, int], dict[str, list[slice | Fill]]]:
+    """
+    Estimate coarsening factors and adjusted slicers for the given data array.
+
+    Parameters
+    ----------
+    da : xr.DataArray
+        Data array to process
+    grid : GridSystem2D
+        Grid system information
+    slicers : dict[str, list[slice | Fill]]
+        Original slicers for data selection
+    max_shape : tuple[int, int]
+        Maximum allowed shape (width, height)
+    datatype : DataType
+        Data type information
+
+    Returns
+    -------
+    tuple[dict[str, int], dict[str, list[slice | Fill]]]
+        Coarsening factors and adjusted slicers
+    """
+    grid = cast(RasterAffine | Rectilinear | Curvilinear, grid)
+    if isinstance(datatype, DiscreteData):
+        # TODO: Implement coarsening for categorical data (DiscreteData)
+        new_slicers = slicers
+        coarsen_factors = {}
+    else:
+        shape = shape_from_slicers(slicers, da, grid)
+        coarsen_factors, new_slicers = get_coarsen_factors(
+            shape=shape,
+            max_shape=max_shape,
+            dims=[grid.Xdim, grid.Ydim],
+            slicers=slicers,
+            da=da,
+            grid=grid,
+        )
+    return coarsen_factors, new_slicers
+
+
 async def apply_slicers(
     da: xr.DataArray,
     *,
-    grid: GridSystem,
+    grid: GridSystem2D,
     alternate: GridMetadata,
-    slicers: dict[str, list[slice]],
+    slicers: dict[str, list[slice | Fill]],
+    coarsen_factors: dict[str, int],
+    datatype: DataType,
 ) -> xr.DataArray:
     grid = cast(RasterAffine | Rectilinear | Curvilinear, grid)
 
-    # Y dimension should always have exactly one slice
-    y_slice = slicers[grid.Ydim][0]
-
+    has_alternate = alternate.crs != grid.crs
     pick = [alternate.X, alternate.Y]
     ds = (
         da.to_dataset()
         # drop any coordinate vars we don't need
         .reset_coords()[[da.name, *pick]]
     )
+
+    # Find the one Y slice that's actually a slice (not Fill)
+    y_slice = None
+    for candidate in slicers[grid.Ydim]:
+        if isinstance(candidate, slice):
+            y_slice = candidate
+            break
+    assert y_slice is not None, "No valid Y slice found after padding"
+
+    # Create subsets only for X slices that are actual slices (not Fill)
     subsets = [
-        ds.isel({grid.Xdim: lon_slice, grid.Ydim: y_slice})
-        for lon_slice in slicers[grid.Xdim]
+        ds.isel({grid.Xdim: x_slice, grid.Ydim: y_slice})
+        for x_slice in slicers[grid.Xdim]
+        if isinstance(x_slice, slice)
     ]
 
     # if we have crs matching the desired CRS,
     # then we load that data from disk;
     # and double the limit to allow slightly larger tiles
     # = (1 data var + 2 coord vars) * 2
-    factor = 6 if alternate.crs != grid.crs else 1
-    total_shape = tuple(
-        sum_tuples(*[var.shape for var in subset.data_vars.values()])
-        for subset in subsets
+    factor = 6 if has_alternate else 1
+    total_shape = sum_tuples(
+        *(
+            sum_tuples(*[var.shape for var in subset.data_vars.values()])
+            for subset in subsets
+        )
     )
-    if math.prod(sum_tuples(*total_shape)) > factor * config.get("max_renderable_size"):
+    if math.prod(total_shape) > factor * config.get("max_renderable_size"):
         msg = (
             f"Tile request too big, requires loading data of total shape: {total_shape!r}. "
             "Please choose a higher zoom level."
@@ -96,29 +284,47 @@ async def apply_slicers(
         logger.error(msg)
         raise TileTooBigError(msg)
 
-    if (
-        np.sum(
-            np.stack(
-                [
-                    np.array([subset.sizes[grid.Xdim], subset.sizes[grid.Ydim]])
-                    for subset in subsets
-                ],
-                axis=0,
-            ),
-            axis=0,
-        )
-        < 2
-    ).any():
+    nvars = sum(len(subset.data_vars) for subset in subsets)
+    # if any subset has shape < (2, 2) raise.
+    if any(total_size < 2 * nvars for total_size in total_shape):
         raise ValueError("Tile request resulted in insufficient data for rendering.")
 
     if config.get("async_load"):
-        coros = [subset.load_async() for subset in subsets]
-        results = await asyncio.gather(*coros)
+        async with async_time_operation("📥 async_load data subsets"):
+            coros = [subset.load_async() for subset in subsets]
+            results = await asyncio.gather(*coros)
     else:
-        results = [subset.load() for subset in subsets]
+        with time_operation("📥 load data subsets"):
+            results = [subset.load() for subset in subsets]
     subset = xr.concat(results, dim=grid.Xdim) if len(results) > 1 else results[0]
     subset_da = subset.set_coords(pick)[da.name]
+
+    if coarsen_factors:
+        # TODO: I am skipping padding to center the image here;
+        # this introduces a bias in spatial location of the plot but let's think about this:
+        # 1. Global datasets are unaffected. we can always pad in lon as much as we want.
+        # 2. the bottom left corner of a regional dataset:
+        #    coarsening will push the left boundary to the right, and the bottom boundary up,
+        #    introducing a few NaNs in the rendered output; but this doesn't matter visually
+        #    if we trigger coarsening only when quite zoomed out
+        # 3. the upper right corner of a regional dataset; similarly we may add NaNs at the boundaries
+        #    of the viewport, but like in (2) this should not matter as long as we trigger the coarsening
+        #    at appropriate zoom levels.
+        # Avoiding padding here also means we avoid the complexity of having to extrapolate out possibly-2D
+        # coordinate variables to avoid introducing NaNs in coordinate variables.
+        # We also specify `boundary="trim"` to avoid a copy, and accept that we will lose one pixel
+        # if pad_instr := slicers_to_pad_instruction(new_slicers):
+        #     subset_da = subset_da.pad(**pad_instr)
+        async with async_time_operation(f"🔲 coarsen by {coarsen_factors!r}"):
+            subset_da = await async_run(coarsen_data, subset_da, coarsen_factors)
+
     return subset_da
+
+
+def coarsen_data(da: xr.DataArray, coarsen_factors: dict[str, int]) -> xr.DataArray:
+    """Apply coarsening to the data array."""
+    with LOCK:
+        return da.coarsen(coarsen_factors, boundary="trim").mean()  # type: ignore[unresolved-attribute]
 
 
 @time_debug
@@ -324,7 +530,11 @@ def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool
 @async_time_debug
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = apply_query(ds, variables=query.variables, selectors=query.selectors)
-    subsets = await subset_to_bbox(validated, bbox=query.bbox, crs=query.crs)
+    pixel_factor = config.get("max_pixel_factor")
+    max_shape = (pixel_factor * query.width, pixel_factor * query.height)
+    subsets = await subset_to_bbox(
+        validated, bbox=query.bbox, crs=query.crs, max_shape=max_shape
+    )
 
     tasks = [
         async_run(
@@ -416,7 +626,11 @@ def apply_query(
 
 @async_time_debug
 async def subset_to_bbox(
-    validated: dict[str, ValidatedArray], *, bbox: OutputBBox, crs: OutputCRS
+    validated: dict[str, ValidatedArray],
+    *,
+    bbox: OutputBBox,
+    crs: OutputCRS,
+    max_shape: tuple[int, int],
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:
     result = {}
     for var_name, array in validated.items():
@@ -434,7 +648,6 @@ async def subset_to_bbox(
         input_to_output = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
         output_to_input = transformer_from_crs(crs_from=crs, crs_to=grid.crs)
 
-        # Check bounds overlap, return NullRenderContext if no overlap
         west, south, east, north = output_to_input.transform_bounds(
             left=bbox.west, right=bbox.east, top=bbox.north, bottom=bbox.south
         )
@@ -447,16 +660,32 @@ async def subset_to_bbox(
         if input_bbox.west > input_bbox.east:
             raise ValueError(f"Invalid Bbox after transformation: {input_bbox!r}")
 
-        # Check bounds overlap, accounting for longitude wrapping in geographic data
         if not bbox_overlap(input_bbox, grid.bbox, grid.crs.is_geographic):
-            # No overlap - return NullRenderContext
             result[var_name] = NullRenderContext()
             continue
 
         slicers = grid.sel(array.da, bbox=input_bbox)
         da = grid.assign_index(array.da)
-        alternate = grid.pick_alternate_grid(crs)
-        subset = await apply_slicers(da, grid=grid, alternate=alternate, slicers=slicers)
+
+        # Estimate coarsen factors and adjusted slicers
+        coarsen_factors, new_slicers = estimate_coarsen_factors_and_slicers(
+            da,
+            grid=grid,
+            slicers=slicers,
+            max_shape=max_shape,
+            datatype=array.datatype,
+        )
+        alternate = grid.pick_alternate_grid(crs, coarsen_factors=coarsen_factors)
+
+        subset = await apply_slicers(
+            da,
+            grid=grid,
+            alternate=alternate,
+            slicers=new_slicers,
+            coarsen_factors=coarsen_factors,
+            datatype=array.datatype,
+        )
+
         has_discontinuity = (
             has_coordinate_discontinuity(
                 subset[grid.X].data, axis=subset[grid.X].get_axis_num(grid.Xdim)

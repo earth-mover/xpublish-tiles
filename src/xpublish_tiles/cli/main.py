@@ -219,7 +219,7 @@ def _run_single_dataset_benchmark_subprocess(dataset_name, args):
 
         # Run subprocess and capture output
         env = os.environ.copy()
-        env["XPUBLISH_TILES_MAX_RENDERABLE_SIZE"] = "400000"
+        env["XPUBLISH_TILES_MAX_RENDERABLE_SIZE"] = "400000000"
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
         # print(result.stdout)
 

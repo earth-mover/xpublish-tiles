@@ -1,7 +1,4 @@
-import contextlib
-import importlib.util
 import io
-import threading
 import time
 from typing import TYPE_CHECKING, cast
 
@@ -26,11 +23,7 @@ from xpublish_tiles.types import (
     PopulatedRenderContext,
     RenderContext,
 )
-from xpublish_tiles.utils import time_debug
-
-# Only use lock if tbb is not available
-HAS_TBB = importlib.util.find_spec("tbb") is not None
-LOCK = contextlib.nullcontext() if HAS_TBB else threading.Lock()
+from xpublish_tiles.utils import LOCK, time_debug
 
 
 @time_debug

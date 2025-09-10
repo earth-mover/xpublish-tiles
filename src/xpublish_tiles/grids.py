@@ -17,8 +17,14 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from xarray.core.indexing import IndexSelResult
-from xpublish_tiles.config import config
-from xpublish_tiles.lib import crs_repr, is_4326_like
+from xpublish_tiles.lib import (
+    Fill,
+    PadDimension,
+    _prevent_slice_overlap,
+    crs_repr,
+    is_4326_like,
+    pad_slicers,
+)
 from xpublish_tiles.logger import logger
 from xpublish_tiles.utils import time_debug
 
@@ -60,17 +66,6 @@ class GridMappingInfo:
             f"GridMappingInfo(grid_mapping={gm_repr}, "
             f"crs={crs_repr(self.crs)}, coordinates={self.coordinates!r})"
         )
-
-
-@dataclass(frozen=True)
-class PadDimension:
-    """Helper class to encapsulate padding parameters for a dimension."""
-
-    name: str
-    size: int
-    pad: int = field(default_factory=lambda: config.get("default_pad"))
-    wraparound: bool = False
-    prevent_overlap: bool = False
 
 
 # Regex patterns for coordinate detection
@@ -404,7 +399,7 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
 
         # Prevent overlap between adjacent slices
         all_indexers = _prevent_slice_overlap(all_indexers)
-        return IndexSelResult({self.dim: tuple(all_indexers)})
+        return IndexSelResult({self.dim: all_indexers})
 
     def __len__(self) -> int:
         """Return the length of the longitude index."""
@@ -439,104 +434,6 @@ def _is_raster_index_global(raster_index, grid_bbox, crs) -> bool:
     # Check if longitude span is nearly 360 degrees
     lon_span = grid_bbox.east - grid_bbox.west
     return lon_span >= 359.0
-
-
-def _prevent_slice_overlap(indexers: list[slice]) -> list[slice]:
-    """
-    Prevent overlapping slices by adjusting stop positions.
-
-    This mimics the original logic: if a slice's stop position would overlap
-    with a previously added slice's start, adjust the stop to prevent overlap.
-    This is used for anti-meridian longitude selections where slices may be
-    processed in an order that could cause overlaps.
-    """
-    if len(indexers) <= 1:
-        return indexers
-
-    result = []
-    for indexer in indexers:
-        start, stop, step = indexer.start, indexer.stop, indexer.step
-
-        # Apply the same logic as the original inline code:
-        # if len(all_indexers) > 0 and (stop >= all_indexers[-1].start):
-        #     stop = all_indexers[-1].start
-        if len(result) > 0 and stop >= result[-1].start:
-            stop = result[-1].start
-
-        result.append(slice(start, stop, step))
-
-    return result
-
-
-def pad_slicers(
-    slicers: dict[str, slice | tuple[slice, ...]], *, dimensions: list[PadDimension]
-) -> dict[str, list[slice]]:
-    """
-    Apply padding to slicers for specified dimensions.
-
-    Parameters
-    ----------
-    slicers : dict[str, slice | tuple[slice, ...]]
-        Dictionary mapping dimension names to slices
-    dimensions : list[PadDimension]
-        List of dimension padding information
-
-    Returns
-    -------
-    dict[str, list[slice]]
-        Dictionary mapping dimension names to lists of padded slices
-    """
-    result = {}
-
-    # Handle each specified dimension
-    for dim in dimensions:
-        if dim.name not in slicers:
-            continue
-
-        dim_slicers = slicers[dim.name]
-        idxrs = (dim_slicers,) if isinstance(dim_slicers, slice) else dim_slicers
-        indexers: list[slice] = [slice(*idxr.indices(dim.size)) for idxr in idxrs]  # type: ignore[arg-type, var-annotated]
-
-        # Prevent overlap if requested (before padding)
-        if dim.prevent_overlap:
-            indexers = _prevent_slice_overlap(indexers)
-
-        # Apply padding
-        first, last = indexers[0], indexers[-1]
-        if len(indexers) == 1:
-            indexers = [
-                slice(max(0, first.start - dim.pad), min(dim.size, first.stop + dim.pad))
-            ]
-        else:
-            indexers = [
-                slice(max(0, first.start - dim.pad), first.stop),
-                *indexers[1:-1],
-                slice(last.start, min(dim.size, last.stop + dim.pad)),
-            ]
-
-        # Apply wraparound if enabled for this dimension
-        if dim.wraparound:
-            if indexers[0].start == 0:
-                # Starts at beginning, add wraparound from end
-                indexers = [slice(-dim.pad, None), *indexers]
-            if indexers[-1].stop >= dim.size - 1:
-                # Ends at end, add wraparound from beginning
-                indexers = indexers + [slice(0, dim.pad)]
-
-        result[dim.name] = indexers
-
-    # Pass through any other dimensions unchanged
-    for key, value in slicers.items():
-        if key not in result:
-            if isinstance(value, slice):
-                result[key] = [value]
-            elif isinstance(value, tuple):
-                result[key] = list(value)
-            else:
-                # This shouldn't happen given our type signature, but handle gracefully
-                result[key] = [value]  # type: ignore[list-item]
-
-    return result
 
 
 @dataclass(eq=False)
@@ -589,11 +486,11 @@ class GridSystem(ABC):
             return False
         return self.equals(other)
 
-    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, list[slice]]:
+    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("Subclasses must implement sel method")
 
-    def pick_alternate_grid(self, crs: CRS) -> GridMetadata:
+    def pick_alternate_grid(self, crs: CRS, *, coarsen_factors) -> GridMetadata:
         """Pick an alternate grid system based on the target CRS.
 
         Parameters
@@ -606,6 +503,11 @@ class GridSystem(ABC):
         GridMetadata
             Matching alternate grid metadata, or this grid's metadata if no suitable alternate found
         """
+        # For large coarsening, it is just faster to
+        # transform the coarsened native coordinates
+        if all(factor > 2 for factor in coarsen_factors.values()):
+            return self.to_metadata()
+
         if crs == self.crs or not self.alternates:
             return self.to_metadata()
 
@@ -645,8 +547,7 @@ class RectilinearSelMixin:
         y_is_increasing: bool,
         x_size: int,
         y_size: int,
-        x_handle_wraparound: bool,
-    ) -> dict[str, list[slice]]:
+    ) -> dict[str, list[slice | Fill]]:
         """
         This method handles coordinate selection for rectilinear grids, automatically
         converting between different longitude conventions (0→360 vs -180→180).
@@ -682,11 +583,20 @@ class RectilinearSelMixin:
         # Handle X dimension selection
         xsel_result = xindex.sel({self.X: slice(bbox.west, bbox.east)})
 
-        # Prepare slicers for padding
-        slicers = {self.X: xsel_result.dim_indexers[self.X], self.Y: yslice}
+        # Prepare slicers for padding (ensure lists of slices for consistency)
+        # X dimension: LongitudeCellIndex can return multiple slices for antimeridian crossing
+        x_raw = xsel_result.dim_indexers[self.X]
+
+        # Handle single slice from PandasIndex
+        x_indexers = x_raw if isinstance(x_raw, list) else [x_raw]
+
+        # Y dimension: always a single slice from PandasIndex
+        y_indexers = [yslice]
+
+        slicers = {self.X: x_indexers, self.Y: y_indexers}
 
         # Apply padding with PadDimension helpers
-        xdim = PadDimension(name=self.X, size=x_size, wraparound=x_handle_wraparound)
+        xdim = PadDimension(name=self.X, size=x_size, wraparound=self.lon_spans_globe)
         ydim = PadDimension(name=self.Y, size=y_size, wraparound=False)
 
         return pad_slicers(slicers, dimensions=[xdim, ydim])
@@ -704,10 +614,15 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
     Ydim: str = field(init=False)
     indexes: tuple[rasterix.RasterIndex]
     Z: str | None = None
+    lon_spans_globe: bool = field(init=False)
 
     def __post_init__(self) -> None:
         self.Xdim = self.X
         self.Ydim = self.Y
+        # Determine if this raster spans the globe in longitude
+        self.lon_spans_globe = self.crs.is_geographic and _is_raster_index_global(
+            self.indexes[0], self.bbox, self.crs
+        )
 
     @classmethod
     def from_dataset(
@@ -744,14 +659,9 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
         (index,) = self.indexes
         return da.assign_coords(xr.Coordinates.from_xindex(index))
 
-    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, list[slice]]:
+    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
         (index,) = self.indexes
         affine = index.transform()
-
-        # Determine if this is a global raster
-        x_handle_wraparound = self.crs.is_geographic and _is_raster_index_global(
-            index, self.bbox, self.crs
-        )
 
         return super().sel(
             da=da,
@@ -759,7 +669,6 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
             y_is_increasing=affine.e > 0,
             x_size=index._xy_shape[0],
             y_size=index._xy_shape[1],
-            x_handle_wraparound=x_handle_wraparound,
         )
 
     def equals(self, other: Self) -> bool:
@@ -786,10 +695,20 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
     Ydim: str = field(init=False)
     indexes: tuple[xr.indexes.PandasIndex | LongitudeCellIndex, xr.indexes.PandasIndex]
     Z: str | None = None
+    lon_spans_globe: bool = field(init=False)
 
     def __post_init__(self) -> None:
         self.Xdim = self.X
         self.Ydim = self.Y
+        # Determine if this grid spans the globe in longitude
+        if (
+            self.indexes
+            and self.crs.is_geographic
+            and isinstance(self.indexes[0], LongitudeCellIndex)
+        ):
+            self.lon_spans_globe = self.indexes[0].is_global
+        else:
+            self.lon_spans_globe = False
 
     @property
     def dims(self) -> set[str]:
@@ -850,7 +769,7 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
             indexes=(x_index, y_index),
         )
 
-    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, list[slice]]:
+    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
         """
         Select a subset of the data array using a bounding box.
         """
@@ -866,13 +785,11 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
             assert isinstance(
                 x_index, LongitudeCellIndex
             ), f"Expected LongitudeCellIndex for geographic CRS, got {type(x_index)}"
-            x_handle_wraparound = x_index.is_global
         else:
             # Non-geographic CRS should have regular PandasIndex
             assert isinstance(
                 x_index, xr.indexes.PandasIndex
             ), f"Expected PandasIndex for non-geographic CRS, got {type(x_index)}"
-            x_handle_wraparound = False  # No wraparound for projected coordinates
 
         # Both index types have len() method
         x_size = len(x_index.index)
@@ -885,7 +802,6 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
             y_is_increasing=y_index_cast.index.is_monotonic_increasing,
             x_size=x_size,
             y_size=y_size,
-            x_handle_wraparound=x_handle_wraparound,
         )
 
     def equals(self, other: Self) -> bool:
@@ -909,6 +825,20 @@ class Curvilinear(GridSystem):
     Ydim: str
     indexes: tuple[xr.Index, ...]
     Z: str | None = None
+    lon_spans_globe: bool = field(init=False)
+
+    def __post_init__(self) -> None:
+        # Determine if this curvilinear grid spans the globe in longitude
+        if self.crs.is_geographic:
+            index = next(iter(self.indexes))
+            assert isinstance(index, CurvilinearCellIndex)
+            # Use cell edges instead of cell centers for more accurate global coverage detection
+            min_edge = numbagg.nanmin(index.left)
+            max_edge = numbagg.nanmax(index.right)
+            lon_span = max_edge - min_edge
+            self.lon_spans_globe = lon_span >= 350
+        else:
+            self.lon_spans_globe = False
 
     def _guess_dims(
         ds: xr.Dataset, *, X: xr.DataArray, Y: xr.DataArray
@@ -992,7 +922,7 @@ class Curvilinear(GridSystem):
         else:
             return False
 
-    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, list[slice]]:
+    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
         """
         Select a subset of the data array using a bounding box.
 
@@ -1006,15 +936,18 @@ class Curvilinear(GridSystem):
             index, CurvilinearCellIndex
         ), f"Expected CurvilinearCellIndex, got {type(index)}"
 
-        X = index.X
-        handle_wraparound = self.crs.is_geographic and (
-            (numbagg.nanmax(X.data) - numbagg.nanmin(X.data)) >= 350
-        )
+        # Use the pre-computed lon_spans_globe attribute
+        handle_wraparound = self.lon_spans_globe
         sel_result = index.sel({self.Xdim: bbox})
 
-        # Get slicers for both dimensions
-        xslicers = sel_result.dim_indexers[self.Xdim]
-        yslicers = sel_result.dim_indexers[self.Ydim]
+        # Get slicers for both dimensions (ensure they are lists of slices)
+        # X dimension: CurvilinearCellIndex returns list[slice] for antimeridian crossing
+        x_raw = sel_result.dim_indexers[self.Xdim]
+        xslicers = x_raw if isinstance(x_raw, list) else list(x_raw)
+
+        # Y dimension: CurvilinearCellIndex always returns a single slice
+        y_raw = sel_result.dim_indexers[self.Ydim]
+        yslicers = [y_raw]  # Always a single slice
 
         # Get sizes for both dimensions
         xsize = index.X.sizes[self.Xdim]
