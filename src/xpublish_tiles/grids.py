@@ -1075,7 +1075,9 @@ def _guess_grid_mappings_and_crs(
             crs = grid_mapping_obj.crs
             # Get the coordinates specified in the grid mapping
             coords = grid_mapping_obj.coordinates or None
-            coordinates = coords if coords and len(coords) == 2 else None
+            coordinates = (
+                coords if coords and len(coords) == 2 and coords != ([], []) else None
+            )
             result.append(GridMappingInfo(grid_mapping_var, crs, coordinates))
         return result
 

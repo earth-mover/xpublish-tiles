@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import os
 import subprocess
 import threading
 import time
@@ -23,6 +24,22 @@ from xpublish_tiles.testing.datasets import (
 )
 from xpublish_tiles.xpublish.tiles.plugin import TilesPlugin
 from xpublish_tiles.xpublish.wms.plugin import WMSPlugin
+
+
+def create_onecrs_dataset(base_dataset_name: str, dataset_id: str) -> xr.Dataset:
+    """Create a single-CRS version of a dataset by dropping alternate CRS coordinates."""
+    ds = DATASET_LOOKUP[base_dataset_name].create().assign_attrs(_xpublish_id=dataset_id)
+    # Drop alternate CRS coordinates and their corresponding CRS variables
+    coords_to_drop = [
+        coord
+        for coord in ds.coords
+        if coord in ["x_3857", "y_3857", "x_4326", "y_4326", "crs_3857", "crs_4326"]
+    ]
+    if coords_to_drop:
+        ds = ds.drop_vars(coords_to_drop)
+    # Set grid_mapping to just spatial_ref
+    ds["foo"].attrs["grid_mapping"] = "spatial_ref"
+    return ds
 
 
 def get_dataset_for_name(
@@ -52,6 +69,10 @@ def get_dataset_for_name(
             if "::" in local_path
             else ("/tmp/tiles-icechunk/", local_path)
         )
+
+        # Handle synthetic datasets
+        if dataset_name == "utm50s_hires_onecrs":
+            return create_onecrs_dataset("utm50s_hires", name)
 
         try:
             storage = icechunk.local_filesystem_storage(repo_path)
@@ -130,16 +151,12 @@ def _setup_benchmark_server(ds, port):
         ds, plugins={"tiles": TilesPlugin(), "wms": WMSPlugin()}
     )
     rest.app.add_middleware(CORSMiddleware, allow_origins=["*"])
-
-    uvicorn_logger = logging.getLogger("uvicorn")
-    uvicorn_logger.setLevel(logging.CRITICAL)
-
     config = uvicorn.Config(
         rest.app,
         host="0.0.0.0",
         port=port,
-        log_level="critical",
-        access_log=False,
+        log_level="info",
+        access_log=True,
     )
     server = uvicorn.Server(config)
 
@@ -147,12 +164,11 @@ def _setup_benchmark_server(ds, port):
     server_thread.start()
     time.sleep(1)  # Give server a moment to start
 
-    return server, server_thread, uvicorn_logger
+    return server, server_thread
 
 
-def _teardown_benchmark_server(server, server_thread, uvicorn_logger):
+def _teardown_benchmark_server(server, server_thread):
     """Properly shutdown the benchmark server."""
-    uvicorn_logger.setLevel(logging.INFO)
     server.should_exit = True
     server_thread.join(timeout=5)
 
@@ -202,8 +218,10 @@ def _run_single_dataset_benchmark_subprocess(dataset_name, args):
         print(f"  Running: {' '.join(cmd)}")
 
         # Run subprocess and capture output
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-        print(result.stdout)
+        env = os.environ.copy()
+        env["XPUBLISH_TILES_MAX_RENDERABLE_SIZE"] = "400000"
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
+        # print(result.stdout)
 
         if result.returncode != 0:
             print(f"  ERROR: Subprocess failed with return code {result.returncode}")
@@ -249,7 +267,7 @@ def _run_single_dataset_benchmark(dataset_name, args, ds=None):
             return None
 
         if args.where == "local":
-            server, server_thread, uvicorn_logger = _setup_benchmark_server(ds, args.port)
+            server, server_thread = _setup_benchmark_server(ds, args.port)
 
             try:
                 result = run_benchmark(
@@ -263,12 +281,12 @@ def _run_single_dataset_benchmark(dataset_name, args, ds=None):
                     needs_colorscale=needs_colorscale,
                     return_results=True,
                 )
-                _teardown_benchmark_server(server, server_thread, uvicorn_logger)
+                _teardown_benchmark_server(server, server_thread)
                 return result
 
             except Exception as e:
                 print(f"  ERROR: Benchmark failed for {dataset_name}: {e}")
-                _teardown_benchmark_server(server, server_thread, uvicorn_logger)
+                _teardown_benchmark_server(server, server_thread)
                 return None
         else:
             return run_benchmark(
@@ -297,7 +315,9 @@ def run_bench_suite(args):
         "para_hires",
         "eu3035_hires",
         "utm50s_hires",
+        "utm50s_hires_onecrs",
         "global_6km",
+        # This dataset needs to be updated
         # "sentinel",
     ]
 
@@ -345,8 +365,9 @@ def run_bench_suite(args):
             f"🔴 {failed_count}" if failed_count > 0 else f"🟢 {failed_count}"
         )
 
+        dataset = r["dataset"].replace("utm50s_hires_onecrs", "utm50s_1crs")
         print(
-            f"{r['dataset']:>23} {r['total_tiles']:>8} {r['successful']:>8} {failed_display:>7} "
+            f"{dataset:>23} {r['total_tiles']:>8} {r['successful']:>8} {failed_display:>7} "
             f"{r['total_wall_time']:>10.3f} {r['avg_request_time']:>10.3f} {r['requests_per_second']:>10.2f}"
         )
         total_wall_time += r["total_wall_time"]
@@ -367,6 +388,9 @@ def get_dataset_object_for_name(name: str):
         _, dataset_name = (
             local_path.rsplit("::", 1) if "::" in local_path else (None, local_path)
         )
+        # Handle synthetic datasets
+        if dataset_name == "utm50s_hires_onecrs":
+            return DATASET_LOOKUP.get("utm50s_hires")
         return DATASET_LOOKUP.get(dataset_name)
     return DATASET_LOOKUP.get(name)
 
