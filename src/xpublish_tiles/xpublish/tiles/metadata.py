@@ -153,7 +153,7 @@ def extract_dataset_extents(
             if dim_extent.type == DimensionType.TEMPORAL:
                 # For temporal dimensions, try to calculate time resolution
                 extent_dict["resolution"] = _calculate_temporal_resolution(values)
-            elif isinstance(values.data[0].item(), float):
+            elif isinstance(values.data[0].item(), int | float):
                 # For numeric dimensions, calculate step size
                 data = values.data
                 diffs = [abs(data[i + 1] - data[i]).item() for i in range(len(data) - 1)]
