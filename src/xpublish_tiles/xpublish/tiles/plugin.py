@@ -172,7 +172,7 @@ class TilesPlugin(Plugin):
 
                         layer = Layer(
                             id=var_name,
-                            title=var_data.attrs.get("long_name", var_name),
+                            title=str(var_data.attrs.get("long_name", var_name)),
                             description=var_data.attrs.get("description", ""),
                             dataType=DataType.COVERAGE,
                             boundingBox=var_bounding_box,

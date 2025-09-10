@@ -2,10 +2,16 @@ import functools
 from typing import Any, Optional, cast
 
 import morecantile.models
+import numpy as np
 
 import xarray as xr
 from xarray import Dataset
-from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear, guess_grid_system
+from xpublish_tiles.grids import (
+    Curvilinear,
+    RasterAffine,
+    Rectilinear,
+    guess_grid_system,
+)
 from xpublish_tiles.logger import logger
 from xpublish_tiles.pipeline import transformer_from_crs
 from xpublish_tiles.render import RenderRegistry
@@ -153,7 +159,13 @@ def extract_dataset_extents(
             if dim_extent.type == DimensionType.TEMPORAL:
                 # For temporal dimensions, try to calculate time resolution
                 extent_dict["resolution"] = _calculate_temporal_resolution(values)
-            elif isinstance(values.data[0].item(), int | float):
+            elif np.issubdtype(values.data.dtype, np.integer) or np.issubdtype(
+                values.data.dtype, np.floating
+            ):
+                # If the type is an unsigned integer, we need to cast to an int to avoid overflow
+                if np.issubdtype(values.data.dtype, np.unsignedinteger):
+                    values = values.astype(np.int64)
+
                 # For numeric dimensions, calculate step size
                 data = values.data
                 diffs = [abs(data[i + 1] - data[i]).item() for i in range(len(data) - 1)]
