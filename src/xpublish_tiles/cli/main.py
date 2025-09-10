@@ -25,6 +25,22 @@ from xpublish_tiles.xpublish.tiles.plugin import TilesPlugin
 from xpublish_tiles.xpublish.wms.plugin import WMSPlugin
 
 
+def create_onecrs_dataset(base_dataset_name: str, dataset_id: str) -> xr.Dataset:
+    """Create a single-CRS version of a dataset by dropping alternate CRS coordinates."""
+    ds = DATASET_LOOKUP[base_dataset_name].create().assign_attrs(_xpublish_id=dataset_id)
+    # Drop alternate CRS coordinates and their corresponding CRS variables
+    coords_to_drop = [
+        coord
+        for coord in ds.coords
+        if coord in ["x_3857", "y_3857", "x_4326", "y_4326", "crs_3857", "crs_4326"]
+    ]
+    if coords_to_drop:
+        ds = ds.drop_vars(coords_to_drop)
+    # Set grid_mapping to just spatial_ref
+    ds["foo"].attrs["grid_mapping"] = "spatial_ref"
+    return ds
+
+
 def get_dataset_for_name(
     name: str, branch: str = "main", group: str = "", icechunk_cache: bool = False
 ) -> xr.Dataset:
@@ -52,6 +68,10 @@ def get_dataset_for_name(
             if "::" in local_path
             else ("/tmp/tiles-icechunk/", local_path)
         )
+
+        # Handle synthetic datasets
+        if dataset_name == "utm50s_hires_onecrs":
+            return create_onecrs_dataset("utm50s_hires", name)
 
         try:
             storage = icechunk.local_filesystem_storage(repo_path)
@@ -198,7 +218,7 @@ def _run_single_dataset_benchmark_subprocess(dataset_name, args):
 
         # Run subprocess and capture output
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-        print(result.stdout)
+        # print(result.stdout)
 
         if result.returncode != 0:
             print(f"  ERROR: Subprocess failed with return code {result.returncode}")
@@ -292,8 +312,9 @@ def run_bench_suite(args):
         "para_hires",
         "eu3035_hires",
         "utm50s_hires",
+        "utm50s_hires_onecrs",
         "global_6km",
-        # "sentinel",
+        "sentinel",
     ]
 
     print(
@@ -340,8 +361,9 @@ def run_bench_suite(args):
             f"🔴 {failed_count}" if failed_count > 0 else f"🟢 {failed_count}"
         )
 
+        dataset = r["dataset"].replace("utm50s_hires_onecrs", "utm50s_1crs")
         print(
-            f"{r['dataset']:>23} {r['total_tiles']:>8} {r['successful']:>8} {failed_display:>7} "
+            f"{dataset:>23} {r['total_tiles']:>8} {r['successful']:>8} {failed_display:>7} "
             f"{r['total_wall_time']:>10.3f} {r['avg_request_time']:>10.3f} {r['requests_per_second']:>10.2f}"
         )
         total_wall_time += r["total_wall_time"]
@@ -362,6 +384,9 @@ def get_dataset_object_for_name(name: str):
         _, dataset_name = (
             local_path.rsplit("::", 1) if "::" in local_path else (None, local_path)
         )
+        # Handle synthetic datasets
+        if dataset_name == "utm50s_hires_onecrs":
+            return DATASET_LOOKUP.get("utm50s_hires")
         return DATASET_LOOKUP.get(dataset_name)
     return DATASET_LOOKUP.get(name)
 

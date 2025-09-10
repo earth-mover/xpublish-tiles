@@ -106,7 +106,7 @@ def run_benchmark(
             start_time = time.perf_counter()
             try:
                 async with session.get(
-                    tile_url, timeout=aiohttp.ClientTimeout(total=30)
+                    tile_url, timeout=aiohttp.ClientTimeout(total=90)
                 ) as response:
                     duration = time.perf_counter() - start_time
                     if response.status != 200:
