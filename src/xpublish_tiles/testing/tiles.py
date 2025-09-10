@@ -93,6 +93,7 @@ ETRS89_TILES_REGULAR = [
     pytest.param(Tile(x=1, y=2, z=2), ETRS89_TMS, id="etrs89_south_europe(2/1/2)"),
     # Higher zoom cases within Europe
     pytest.param(Tile(x=2, y=2, z=3), ETRS89_TMS, id="etrs89_central_zoom3(3/2/2)"),
+    pytest.param(Tile(x=5, y=2, z=3), ETRS89_TMS, id="etrs89_central_zoom3(3/2/5)"),
 ]
 
 # ETRS89 tiles - edge cases for integration tests (max 5)
@@ -102,6 +103,8 @@ ETRS89_TILES_EDGE_CASES = [
     pytest.param(Tile(x=6, y=6, z=4), ETRS89_TMS, id="etrs89_southeast_zoom4(4/6/6)"),
     # Small bbox test for ETRS89
     pytest.param(Tile(x=8, y=8, z=5), ETRS89_TMS, id="etrs89_small_bbox(5/8/8)"),
+    pytest.param(Tile(x=15, y=12, z=5), WEBMERC_TMS, id="webmerc_corner_zoom5(15/12/5)"),
+    pytest.param(Tile(x=1, y=5, z=3), WEBMERC_TMS, id="webmerc_corner_zoom3(3/1/5)"),
 ]
 
 # ETRS89 tiles (some may not be supported) - combined
@@ -269,6 +272,11 @@ UTM33S_TILES_EDGE_CASES = [
     pytest.param(Tile(x=277, y=256, z=9), WEBMERC_TMS, id="utm33s_equator_z9(9/277/256)"),
     pytest.param(
         Tile(x=277, y=448, z=9), WEBMERC_TMS, id="utm33s_antarctica_z9(9/277/448)"
+    ),
+    pytest.param(
+        Tile(x=4372, y=4160, z=13),
+        WEBMERC_TMS,
+        id="utm33s_center_swatch_z9(13/4160/4372)",
     ),
 ]
 

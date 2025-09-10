@@ -9,6 +9,7 @@ import xarray as xr
 from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
     EU3035,
+    EU3035_HIRES,
     HRRR,
     UTM33S,
     create_global_dataset,
@@ -114,7 +115,7 @@ def global_datasets(request):
 # Create the product of datasets and their appropriate tiles
 def _get_projected_dataset_tile_params():
     params = []
-    for dataset_class in [UTM33S, EU3035, HRRR]:
+    for dataset_class in [UTM33S, EU3035, EU3035_HIRES, HRRR]:
         # Use the tiles directly from the dataset class
         for tile_param in dataset_class.tiles:
             tile, tms = tile_param.values

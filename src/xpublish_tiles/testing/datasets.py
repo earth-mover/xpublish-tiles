@@ -723,8 +723,8 @@ HRRR = Dataset(
 EU3035 = Dataset(
     name="eu3035",
     dims=(
-        Dim(name="x", size=3000, chunk_size=1000, data=None),
-        Dim(name="y", size=3000, chunk_size=1000, data=None),
+        Dim(name="x", size=3011, chunk_size=1000, data=None),
+        Dim(name="y", size=3011, chunk_size=1000, data=None),
     ),
     dtype=np.float32,
     setup=partial(
@@ -818,7 +818,7 @@ UTM50S_HIRES = Dataset(
     ),
     # edge_case_tiles=UTM33S_TILES_EDGE_CASES,
     # tiles=UTM33S_TILES,
-    benchmark_tiles=[UTM50S_HIRES_BENCHMARK_TILES[0]] * 40,
+    benchmark_tiles=UTM50S_HIRES_BENCHMARK_TILES,
 )
 
 

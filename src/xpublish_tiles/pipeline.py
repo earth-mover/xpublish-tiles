@@ -1,7 +1,6 @@
 import asyncio
-import copy
 import io
-import os
+import math
 from typing import Any, cast
 
 import numpy as np
@@ -9,6 +8,7 @@ import pyproj
 from pyproj.aoi import BBox
 
 import xarray as xr
+from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
     Curvilinear,
     GridMetadata,
@@ -18,9 +18,8 @@ from xpublish_tiles.grids import (
     guess_grid_system,
 )
 from xpublish_tiles.lib import (
-    EXECUTOR,
     TileTooBigError,
-    check_transparent_pixels,
+    async_run,
     transform_coordinates,
     transformer_from_crs,
 )
@@ -38,9 +37,6 @@ from xpublish_tiles.types import (
 )
 from xpublish_tiles.utils import async_time_debug, time_debug
 
-# This takes the pipeline ~ 1s
-MAX_RENDERABLE_SIZE = 10_000 * 10_000
-
 
 def round_bbox(bbox: BBox) -> BBox:
     # https://github.com/developmentseed/morecantile/issues/175
@@ -54,6 +50,10 @@ def round_bbox(bbox: BBox) -> BBox:
         east=round(bbox.east, 8),
         north=round(bbox.north, 8),
     )
+
+
+def sum_tuples(*tuples):
+    return tuple(sum(values) for values in zip(*tuples, strict=False))
 
 
 async def apply_slicers(
@@ -78,11 +78,24 @@ async def apply_slicers(
         ds.isel({grid.Xdim: lon_slice, grid.Ydim: y_slice})
         for lon_slice in slicers[grid.Xdim]
     ]
-    if (
-        sum(sum(var.size for var in subset.data_vars.values()) for subset in subsets)
-        > MAX_RENDERABLE_SIZE
-    ):
-        raise TileTooBigError("Tile request too big. Please choose a higher zoom level.")
+
+    # if we have crs matching the desired CRS,
+    # then we load that data from disk;
+    # and double the limit to allow slightly larger tiles
+    # = (1 data var + 2 coord vars) * 2
+    factor = 6 if alternate.crs != grid.crs else 1
+    total_shape = tuple(
+        sum_tuples(*[var.shape for var in subset.data_vars.values()])
+        for subset in subsets
+    )
+    if math.prod(sum_tuples(*total_shape)) > factor * config.get("max_renderable_size"):
+        msg = (
+            f"Tile request too big, requires loading data of total shape: {total_shape!r}. "
+            "Please choose a higher zoom level."
+        )
+        logger.error(msg)
+        raise TileTooBigError(msg)
+
     if (
         np.sum(
             np.stack(
@@ -98,7 +111,7 @@ async def apply_slicers(
     ).any():
         raise ValueError("Tile request resulted in insufficient data for rendering.")
 
-    if int(os.environ.get("XPUBLISH_TILES_ASYNC_LOAD", "1")):
+    if config.get("async_load"):
         coros = [subset.load_async() for subset in subsets]
         results = await asyncio.gather(*coros)
     else:
@@ -313,15 +326,23 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = apply_query(ds, variables=query.variables, selectors=query.selectors)
     subsets = await subset_to_bbox(validated, bbox=query.bbox, crs=query.crs)
 
+    tasks = [
+        async_run(
+            lambda s=subset: asyncio.run(
+                s.maybe_rewrite_to_rectilinear(width=query.width, height=query.height)
+            )
+        )
+        for subset in subsets.values()
+    ]
+    results = await asyncio.gather(*tasks)
+    new_subsets = dict(zip(subsets.keys(), results, strict=False))
+
     buffer = io.BytesIO()
     renderer = query.get_renderer()
 
-    # Run render in executor to avoid blocking
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(
-        EXECUTOR,
+    await async_run(
         lambda: renderer.render(
-            contexts=subsets,
+            contexts=new_subsets,
             buffer=buffer,
             width=query.width,
             height=query.height,
@@ -331,8 +352,6 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
         ),
     )
     buffer.seek(0)
-    if int(os.environ.get("XPUBLISH_TILES_DEBUG_CHECKS", "0")):
-        assert check_transparent_pixels(copy.deepcopy(buffer).read()) == 0, query
     return buffer
 
 

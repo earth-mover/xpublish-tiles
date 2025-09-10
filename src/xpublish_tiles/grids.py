@@ -17,16 +17,12 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from xarray.core.indexing import IndexSelResult
+from xpublish_tiles.config import config
 from xpublish_tiles.lib import crs_repr, is_4326_like
 from xpublish_tiles.logger import logger
 from xpublish_tiles.utils import time_debug
 
 DEFAULT_CRS = CRS.from_epsg(4326)
-# Ideally, we'd want to pad with 1.
-# However, due to floating point roundoff when datashader *infers* the cell edges,
-# we might end up with the last grid cell of a global dataset ending very slightly before
-# the bounds of the Canvas. This then results in transparent pixels
-DEFAULT_PAD = 2
 MAX_COORD_VAR_NBYTES = 1 * 1024 * 1024 * 1024
 
 
@@ -72,7 +68,7 @@ class PadDimension:
 
     name: str
     size: int
-    pad: int = DEFAULT_PAD
+    pad: int = field(default_factory=lambda: config.get("default_pad"))
     wraparound: bool = False
     prevent_overlap: bool = False
 
@@ -690,10 +686,8 @@ class RectilinearSelMixin:
         slicers = {self.X: xsel_result.dim_indexers[self.X], self.Y: yslice}
 
         # Apply padding with PadDimension helpers
-        xdim = PadDimension(
-            name=self.X, size=x_size, pad=DEFAULT_PAD, wraparound=x_handle_wraparound
-        )
-        ydim = PadDimension(name=self.Y, size=y_size, pad=DEFAULT_PAD, wraparound=False)
+        xdim = PadDimension(name=self.X, size=x_size, wraparound=x_handle_wraparound)
+        ydim = PadDimension(name=self.Y, size=y_size, wraparound=False)
 
         return pad_slicers(slicers, dimensions=[xdim, ydim])
 
@@ -1027,10 +1021,8 @@ class Curvilinear(GridSystem):
         ysize = index.Y.sizes[self.Ydim]
 
         # Apply padding with PadDimension helpers
-        xdim = PadDimension(
-            name=self.Xdim, size=xsize, pad=DEFAULT_PAD, wraparound=handle_wraparound
-        )
-        ydim = PadDimension(name=self.Ydim, size=ysize, pad=DEFAULT_PAD, wraparound=False)
+        xdim = PadDimension(name=self.Xdim, size=xsize, wraparound=handle_wraparound)
+        ydim = PadDimension(name=self.Ydim, size=ysize, wraparound=False)
 
         return pad_slicers(
             {self.Xdim: xslicers, self.Ydim: yslicers},

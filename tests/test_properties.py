@@ -2,15 +2,22 @@ import hypothesis.strategies as st
 import morecantile
 import numpy as np
 import pytest
-from hypothesis import given, settings
+from hypothesis import assume, given, settings
 from hypothesis.strategies import DrawFn
 from morecantile import Tile, TileMatrixSet
 
 import xarray as xr
 from tests import create_query_params
-from xpublish_tiles.lib import check_transparent_pixels
+from xpublish_tiles import config
+from xpublish_tiles.lib import TileTooBigError, check_transparent_pixels
 from xpublish_tiles.pipeline import pipeline
-from xpublish_tiles.testing.datasets import Dim, uniform_grid
+from xpublish_tiles.testing.datasets import (
+    EU3035_HIRES,
+    HRRR,
+    HRRR_MULTIPLE,
+    Dim,
+    uniform_grid,
+)
 from xpublish_tiles.testing.lib import (
     compare_image_buffers_with_debug,
     visualize_tile,
@@ -100,7 +107,9 @@ def tiles(
     """Strategy that returns morecantile.Tile objects based on a TileMatrixSet."""
     tms_name: str = draw(tile_matrix_sets)
     tms: TileMatrixSet = morecantile.tms.get(tms_name)
-    zoom = draw(st.integers(min_value=0, max_value=len(tms.tileMatrices) - 1))
+    # Sample uniformly from available zoom levels
+    zoom_levels = list(range(len(tms.tileMatrices)))
+    zoom = draw(st.sampled_from(zoom_levels))
     minmax = tms.minmax(zoom)
     x = draw(st.integers(min_value=minmax["x"]["min"], max_value=minmax["x"]["max"]))
     y = draw(st.integers(min_value=minmax["y"]["min"], max_value=minmax["y"]["max"]))
@@ -112,15 +121,58 @@ def tile_and_tms(
     draw: DrawFn,
     *,
     tile_matrix_sets: st.SearchStrategy[str] = tile_matrix_sets(),  # noqa: B008
+    bbox=None,
 ) -> tuple[Tile, TileMatrixSet]:
-    """Strategy that returns a tile and its corresponding TileMatrixSet."""
+    """Strategy that returns a tile and its corresponding TileMatrixSet.
+
+    Args:
+        tile_matrix_sets: Strategy for selecting TileMatrixSet names
+        bbox: Optional bounding box to constrain tiles to overlap with this area
+    """
     tms_name: str = draw(tile_matrix_sets)
     tms: TileMatrixSet = morecantile.tms.get(tms_name)
-    zoom = draw(st.integers(min_value=0, max_value=len(tms.tileMatrices) - 1))
-    minmax = tms.minmax(zoom)
-    x = draw(st.integers(min_value=minmax["x"]["min"], max_value=minmax["x"]["max"]))
-    y = draw(st.integers(min_value=minmax["y"]["min"], max_value=minmax["y"]["max"]))
-    tile = Tile(x=x, y=y, z=zoom)
+    # Sample uniformly from available zoom levels
+    zoom_levels = list(range(len(tms.tileMatrices)))
+    zoom = draw(st.sampled_from(zoom_levels))
+
+    if bbox is not None:
+        # Get the tiles at the four corners of the bounding box to define the range
+        # This is much more efficient than listing all tiles at high zoom levels
+        try:
+            # Get tiles for the four corners
+            sw_tile = tms.tile(bbox.west, bbox.south, zoom)  # Southwest corner
+            se_tile = tms.tile(bbox.east, bbox.south, zoom)  # Southeast corner
+            nw_tile = tms.tile(bbox.west, bbox.north, zoom)  # Northwest corner
+            ne_tile = tms.tile(bbox.east, bbox.north, zoom)  # Northeast corner
+
+            # Determine the x and y ranges from the corner tiles
+            min_x = min(sw_tile.x, se_tile.x, nw_tile.x, ne_tile.x)
+            max_x = max(sw_tile.x, se_tile.x, nw_tile.x, ne_tile.x)
+            min_y = min(sw_tile.y, se_tile.y, nw_tile.y, ne_tile.y)
+            max_y = max(sw_tile.y, se_tile.y, nw_tile.y, ne_tile.y)
+
+            # Choose a random tile within the range
+            x = draw(st.integers(min_value=min_x, max_value=max_x))
+            y = draw(st.integers(min_value=min_y, max_value=max_y))
+            tile = Tile(x=x, y=y, z=zoom)
+        except Exception:
+            # If we can't get tiles for the bbox (e.g., bbox outside TMS bounds),
+            # fall back to any valid tile
+            minmax = tms.minmax(zoom)
+            x = draw(
+                st.integers(min_value=minmax["x"]["min"], max_value=minmax["x"]["max"])
+            )
+            y = draw(
+                st.integers(min_value=minmax["y"]["min"], max_value=minmax["y"]["max"])
+            )
+            tile = Tile(x=x, y=y, z=zoom)
+    else:
+        # Original behavior - any valid tile for this zoom level
+        minmax = tms.minmax(zoom)
+        x = draw(st.integers(min_value=minmax["x"]["min"], max_value=minmax["x"]["max"]))
+        y = draw(st.integers(min_value=minmax["y"]["min"], max_value=minmax["y"]["max"]))
+        tile = Tile(x=x, y=y, z=zoom)
+
     return tile, tms
 
 
@@ -169,7 +221,8 @@ async def test_property_rectilinear_vs_curvilinear_exact(
         latitude=(("nlon", "nlat"), newlat.T, {"standard_name": "latitude"}),
     )
     ds["foo"].attrs["coordinates"] = "longitude latitude"
-    curvilinear_result = await pipeline(ds, query)
+    with config.set(detect_approx_rectilinear=False):
+        curvilinear_result = await pipeline(ds, query)
     # curvilinear = guess_grid_system(ds, "foo")
 
     # Check that grid indexers are the same
@@ -197,3 +250,37 @@ async def test_property_rectilinear_vs_curvilinear_exact(
         perceptual_threshold=0.9,  # 90% similarity threshold
     )
     assert images_similar, f"Rectilinear and curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+
+
+@pytest.mark.asyncio
+@given(dataset=st.sampled_from([HRRR_MULTIPLE, EU3035_HIRES, HRRR]), data=st.data())
+@settings(deadline=None, max_examples=250)
+async def test_projected_coordinate_succeeds(dataset, data, pytestconfig):
+    """Test that projected coordinate datasets can successfully render tiles within their bbox."""
+    ds = dataset.create()
+
+    # Use the strategy to generate a tile and TMS that overlaps with dataset bbox
+    bbox = ds.attrs["bbox"]
+    tile, tms = data.draw(tile_and_tms(bbox=bbox))
+
+    # Create query parameters and render the tile
+    query_params = create_query_params(tile, tms)
+
+    try:
+        result = await pipeline(ds, query_params)
+        # Basic validation - ensure we got a result
+        assert result is not None
+        result_bytes = result.getvalue()
+        assert len(result_bytes) > 0
+
+        # Verify it's a valid PNG
+        # PNG files start with an 8-byte signature
+        png_signature = b"\x89PNG\r\n\x1a\n"
+        assert (
+            result_bytes[:8] == png_signature
+        ), f"Result does not have valid PNG signature, got {result_bytes[:8]!r}"
+
+        if pytestconfig.getoption("--visualize"):
+            visualize_tile(result, tile)
+    except TileTooBigError:
+        assume(False)
