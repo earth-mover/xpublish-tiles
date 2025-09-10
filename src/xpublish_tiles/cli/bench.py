@@ -39,11 +39,11 @@ def run_benchmark(
     # Use current time as seed for different order each run
     random.seed(int(time.time() * 1000000))
     shuffled_tiles = benchmark_tiles.copy()
-    random.shuffle(shuffled_tiles)
+    # random.shuffle(shuffled_tiles)
 
     print(f"Starting benchmark requests for {dataset_name} using endpoint")
     print(f"Warmup tiles: {warmup_tiles}")
-    print(f"Benchmark tiles: {len(shuffled_tiles)} tiles (randomized order)")
+    print(f"Benchmark tiles: {len(shuffled_tiles)} tiles")
 
     # Wait for server to start with warmup
     if where == "local":
