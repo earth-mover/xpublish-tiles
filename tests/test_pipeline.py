@@ -189,12 +189,31 @@ def test_apply_query_selectors():
         selectors={"L": 0, "forecast_reference_time": "1960-02-01 00:00:00"},
     )
     assert_equal(
-        result["sst"].da, FORECAST.sst.sel(L=0, S="1960-02-01 00:00:00").isel(M=-1, S=-1)
+        result["sst"].da,
+        FORECAST.sst.sel(L=0, S="1960-02-01 00:00:00").isel(M=-1, S=-1),
     )
 
     curvilinear_ds = CURVILINEAR.create()
     result = apply_query(curvilinear_ds, variables=["foo"], selectors={})
     assert_equal(result["foo"].da, curvilinear_ds.foo.sel(s_rho=0, method="nearest"))
+
+
+def test_apply_query_with_string_selectors():
+    ds = xr.Dataset(
+        data_vars={
+            "foo": (("band", "band2", "x", "y"), np.arange(1080).reshape(3, 3, 30, 4))
+        },
+        coords={
+            "x": (["x"], np.arange(30), {"axis": "X", "standard_name": "longitude"}),
+            "y": (["y"], np.arange(4), {"axis": "Y", "standard_name": "latitude"}),
+            "band": (["band"], [1, 2, 3], {"standard_name": "wavelength"}),
+            "band2": (["band2"], ["1", "2", "3"], {"standard_name": "wavelength"}),
+        },
+    )
+
+    selectors = {"band": "1", "band2": 2}
+    result = apply_query(ds, variables=["foo"], selectors=selectors)
+    assert_equal(result["foo"].da, ds.foo.sel(band=1, band2="2"))
 
 
 def test_datashader_nearest_regridding():

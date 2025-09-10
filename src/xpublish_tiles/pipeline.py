@@ -24,6 +24,7 @@ from xpublish_tiles.lib import (
     transform_coordinates,
     transformer_from_crs,
 )
+from xpublish_tiles.logger import logger
 from xpublish_tiles.types import (
     ContinuousData,
     DataType,
@@ -361,6 +362,15 @@ def apply_query(
     """
     validated: dict[str, ValidatedArray] = {}
     if selectors:
+        for name, value in selectors.items():
+            # If the value is not the same type as the variable, try to cast it
+            try:
+                selectors[name] = ds[name].dtype.type(value)
+            except ValueError as e:
+                logger.warning(
+                    f"Failed to cast selector {name}={value} to type {ds[name].dtype}"
+                )
+                raise e
         ds = ds.cf.sel(**selectors)
     for name in variables:
         grid = guess_grid_system(ds, name)
