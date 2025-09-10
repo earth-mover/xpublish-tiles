@@ -159,9 +159,13 @@ def extract_dataset_extents(
             if dim_extent.type == DimensionType.TEMPORAL:
                 # For temporal dimensions, try to calculate time resolution
                 extent_dict["resolution"] = _calculate_temporal_resolution(values)
-            elif np.issubdtype(
-                values.data[0].item().dtype, np.signedinteger
-            ) or np.issubdtype(values.data[0].item().dtype, np.floating):
+            elif np.issubdtype(values.data.dtype, np.integer) or np.issubdtype(
+                values.data.dtype, np.floating
+            ):
+                # If the type is an unsigned integer, we need to cast to an int to avoid overflow
+                if np.issubdtype(values.data.dtype, np.unsignedinteger):
+                    values = values.astype(np.int64)
+
                 # For numeric dimensions, calculate step size
                 data = values.data
                 diffs = [abs(data[i + 1] - data[i]).item() for i in range(len(data) - 1)]
