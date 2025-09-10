@@ -386,7 +386,7 @@ def apply_query(
             try:
                 selectors[name] = ds[name].dtype.type(value)
             except ValueError as e:
-                logger.warning(
+                logger.error(
                     f"Failed to cast selector {name}={value} to type {ds[name].dtype}"
                 )
                 raise e
