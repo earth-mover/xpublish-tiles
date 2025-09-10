@@ -382,6 +382,12 @@ def apply_query(
     validated: dict[str, ValidatedArray] = {}
     if selectors:
         for name, value in selectors.items():
+            if name not in ds:
+                logger.warning(
+                    f"Selector {name}={value} not found in dataset, skipping..."
+                )
+                continue
+
             # If the value is not the same type as the variable, try to cast it
             try:
                 selectors[name] = ds[name].dtype.type(value)
