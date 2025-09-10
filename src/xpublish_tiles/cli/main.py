@@ -130,16 +130,12 @@ def _setup_benchmark_server(ds, port):
         ds, plugins={"tiles": TilesPlugin(), "wms": WMSPlugin()}
     )
     rest.app.add_middleware(CORSMiddleware, allow_origins=["*"])
-
-    uvicorn_logger = logging.getLogger("uvicorn")
-    uvicorn_logger.setLevel(logging.CRITICAL)
-
     config = uvicorn.Config(
         rest.app,
         host="0.0.0.0",
         port=port,
-        log_level="critical",
-        access_log=False,
+        log_level="info",
+        access_log=True,
     )
     server = uvicorn.Server(config)
 
@@ -147,12 +143,11 @@ def _setup_benchmark_server(ds, port):
     server_thread.start()
     time.sleep(1)  # Give server a moment to start
 
-    return server, server_thread, uvicorn_logger
+    return server, server_thread
 
 
-def _teardown_benchmark_server(server, server_thread, uvicorn_logger):
+def _teardown_benchmark_server(server, server_thread):
     """Properly shutdown the benchmark server."""
-    uvicorn_logger.setLevel(logging.INFO)
     server.should_exit = True
     server_thread.join(timeout=5)
 
@@ -249,7 +244,7 @@ def _run_single_dataset_benchmark(dataset_name, args, ds=None):
             return None
 
         if args.where == "local":
-            server, server_thread, uvicorn_logger = _setup_benchmark_server(ds, args.port)
+            server, server_thread = _setup_benchmark_server(ds, args.port)
 
             try:
                 result = run_benchmark(
@@ -263,12 +258,12 @@ def _run_single_dataset_benchmark(dataset_name, args, ds=None):
                     needs_colorscale=needs_colorscale,
                     return_results=True,
                 )
-                _teardown_benchmark_server(server, server_thread, uvicorn_logger)
+                _teardown_benchmark_server(server, server_thread)
                 return result
 
             except Exception as e:
                 print(f"  ERROR: Benchmark failed for {dataset_name}: {e}")
-                _teardown_benchmark_server(server, server_thread, uvicorn_logger)
+                _teardown_benchmark_server(server, server_thread)
                 return None
         else:
             return run_benchmark(
