@@ -395,6 +395,7 @@ HRRR_GEOTRANSFORM = "-2699020.142521936 3000 0 -1588806.1525566636 0 3000"
 
 # fmt: off
 GLOBAL_BENCHMARK_TILES = [
+    "2/2/1", "2/3/3", "2/2/2", "2/3/2", "2/3/1", "2/2/3", "2/1/2", "2/1/1", "2/4/2",
     "3/2/1", "3/3/3", "3/2/2", "3/3/2", "3/3/1", "3/2/3", "3/1/2", "3/1/1", "3/4/2",
     "3/4/1", "3/1/3", "3/4/3", "3/2/0", "3/3/0", "3/2/4", "3/3/4", "3/1/0", "3/0/2",
     "3/4/0", "3/1/4", "3/5/2", "3/0/1", "3/4/4", "3/0/3", "3/5/3", "3/2/5", "3/0/0",
@@ -1065,3 +1066,22 @@ HRRR_MULTIPLE = Dataset(
     dtype=np.float32,
     setup=multiple_grid_mapping_dataset,
 )
+
+
+# Lookup dictionary for all available datasets
+DATASET_LOOKUP = {
+    "hrrr": HRRR,
+    "para": PARA,
+    "para_hires": PARA_HIRES,
+    "eu3035": EU3035,
+    "eu3035_hires": EU3035_HIRES,
+    "ifs": IFS,
+    "era5": ERA5,
+    "sentinel": SENTINEL2_NOCOORDS,
+    "global-6km": GLOBAL_6KM,
+    "utm33s": UTM33S,
+    "utm33s_hires": UTM33S_HIRES,
+    "utm50s_hires": UTM50S_HIRES,
+    "curvilinear": CURVILINEAR,
+    "hrrr_multiple": HRRR_MULTIPLE,
+}
