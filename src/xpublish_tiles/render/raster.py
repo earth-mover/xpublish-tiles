@@ -70,7 +70,6 @@ def nearest_on_uniform_grid_quadmesh(
     """
     This is a trick; for upsampling, datashader will do nearest neighbor resampling.
     """
-    tic = time.time()
     X, Y = da[Xdim], da[Ydim]
     dx = abs(X.diff(Xdim).median().data)
     dy = abs(Y.diff(Ydim).median().data)
@@ -86,9 +85,6 @@ def nearest_on_uniform_grid_quadmesh(
         y_range=(ymin - dy / 2, ymax + dy / 2),
     )
     res = cvs.quadmesh(da, x=Xdim, y=Ydim, agg=dsh.reductions.first(cast(str, da.name)))
-    print(
-        f"Tiles : interpolating categorical from {da.shape} to {newshape}: {time.time() - tic} "
-    )
     return res
 
 

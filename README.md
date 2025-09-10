@@ -67,6 +67,7 @@ uv run xpublish-tiles [OPTIONS]
 - `--group GROUP`: Group to use for Arraylake datasets (default: '')
 - `--cache`: Enable icechunk cache for Arraylake and local icechunk datasets (default: enabled)
 - `--spy`: Run benchmark requests with the specified dataset for performance testing
+- `--bench-suite`: Run benchmarks for all local datasets and tabulate results (requires `uv run pytest --setup` to create local datasets first)
 - `--concurrency INT`: Number of concurrent requests for benchmarking (default: 12)
 - `--where CHOICE`: Where to run benchmark requests (choices: local, local-booth, prod; default: local)
   - `local`: Start server on localhost and run benchmarks against it
@@ -111,6 +112,9 @@ xpublish-tiles --dataset local://para_hires --spy
 # Run benchmark with custom concurrency and against production
 xpublish-tiles --dataset para --spy --concurrency 20 --where prod
 
+# Run benchmark suite for all local datasets (creates tabulated results)
+xpublish-tiles --bench-suite
+
 # Enable debug logging
 xpublish-tiles --dataset hrrr --log-level debug
 ```
@@ -128,7 +132,32 @@ xpublish-tiles --dataset para --spy --where local-booth
 
 # Run benchmark against production server with custom concurrency
 xpublish-tiles --dataset para --spy --where prod --concurrency 8
+
+# Run benchmark suite for all local datasets
+xpublish-tiles --bench-suite
 ```
+
+### Benchmark Suite
+
+The `--bench-suite` option runs performance tests on all available local datasets and creates a tabulated summary of results. This is useful for comparing performance across different dataset types and configurations.
+
+**Prerequisites**: You must first create the local test datasets:
+```sh
+uv run pytest --setup
+```
+
+The benchmark suite will test the following local datasets:
+- `ifs`: Integrated Forecasting System dataset
+- `hrrr`: High-Resolution Rapid Refresh dataset
+- `para_hires`: High-resolution parameterized dataset
+- `eu3035_hires`: High-resolution European dataset
+- `utm50s_hires`: High-resolution UTM Zone 50S dataset
+- `sentinel`: Sentinel-2 dataset
+- `global-6km`: Global dataset at 6km resolution
+
+The output includes a performance table showing tiles processed, success/failure rates, wall time, average request time, and requests per second for each dataset.
+
+### Individual Benchmarking
 
 The `--spy` flag enables benchmarking mode. The benchmarking behavior depends on the `--where` option:
 

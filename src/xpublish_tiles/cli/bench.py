@@ -18,8 +18,12 @@ def run_benchmark(
     where: str = "local",
     variable_name: str = "foo",
     needs_colorscale: bool = False,
+    return_results: bool = False,
 ):
-    """Run benchmarking requests for the given dataset."""
+    """Run benchmarking requests for the given dataset.
+
+    If return_results is True, returns a dict with benchmark results instead of exiting.
+    """
 
     if bench_type != "requests":
         print(f"Unknown benchmark type: {bench_type}")
@@ -180,5 +184,20 @@ def run_benchmark(
     print(f"Requests/second: {requests_per_second:.2f}")
     print("Benchmark completed!")
 
-    # Exit the process since this is a benchmarking run
-    os._exit(0)
+    if return_results:
+        # Return results for bench-suite mode or internal benchmarking
+        result = {
+            "dataset": dataset_name,
+            "total_tiles": len(shuffled_tiles),
+            "successful": successful,
+            "failed": failed,
+            "total_wall_time": total_time,
+            "avg_request_time": avg_duration,
+            "min_request_time": min_duration,
+            "max_request_time": max_duration,
+            "requests_per_second": requests_per_second,
+        }
+        return result
+    else:
+        # Exit the process since this is a benchmarking run
+        os._exit(0)
