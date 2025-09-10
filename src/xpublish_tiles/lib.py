@@ -356,19 +356,12 @@ def _prevent_slice_overlap(indexers: list[slice]) -> list[slice]:
     """
     if len(indexers) <= 1:
         return indexers
-
     result = []
     for indexer in indexers:
         start, stop, step = indexer.start, indexer.stop, indexer.step
-
-        # Apply the same logic as the original inline code:
-        # if len(all_indexers) > 0 and (stop >= all_indexers[-1].start):
-        #     stop = all_indexers[-1].start
         if len(result) > 0 and stop >= result[-1].start:
             stop = result[-1].start
-
         result.append(slice(start, stop, step))
-
     return result
 
 

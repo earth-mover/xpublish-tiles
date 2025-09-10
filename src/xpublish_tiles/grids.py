@@ -586,10 +586,9 @@ class RectilinearSelMixin:
         # Prepare slicers for padding (ensure lists of slices for consistency)
         # X dimension: LongitudeCellIndex can return multiple slices for antimeridian crossing
         x_raw = xsel_result.dim_indexers[self.X]
-        if isinstance(x_raw, list):
-            x_indexers = x_raw  # LongitudeCellIndex returns list[slice]
-        else:
-            x_indexers = [x_raw]  # Single slice from PandasIndex
+
+        # Handle single slice from PandasIndex
+        x_indexers = x_raw if isinstance(x_raw, list) else [x_raw]
 
         # Y dimension: always a single slice from PandasIndex
         y_indexers = [yslice]
@@ -946,10 +945,7 @@ class Curvilinear(GridSystem):
         # Get slicers for both dimensions (ensure they are lists of slices)
         # X dimension: CurvilinearCellIndex returns list[slice] for antimeridian crossing
         x_raw = sel_result.dim_indexers[self.Xdim]
-        if isinstance(x_raw, list):
-            xslicers = x_raw  # CurvilinearCellIndex returns list[slice]
-        else:
-            xslicers = [x_raw]  # Single slice fallback
+        xslicers = x_raw if isinstance(x_raw, list) else list(x_raw)
 
         # Y dimension: CurvilinearCellIndex always returns a single slice
         y_raw = sel_result.dim_indexers[self.Ydim]

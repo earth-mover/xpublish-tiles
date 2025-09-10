@@ -214,15 +214,12 @@ def estimate_coarsen_factors_and_slicers(
         Coarsening factors and adjusted slicers
     """
     grid = cast(RasterAffine | Rectilinear | Curvilinear, grid)
-
-    # Skip padding for categorical data (DiscreteData)
     if isinstance(datatype, DiscreteData):
+        # TODO: Implement coarsening for categorical data (DiscreteData)
         new_slicers = slicers
         coarsen_factors = {}
     else:
-        # Now pad to account for coarsening
         shape = shape_from_slicers(slicers, da, grid)
-
         coarsen_factors, new_slicers = get_coarsen_factors(
             shape=shape,
             max_shape=max_shape,
@@ -231,7 +228,6 @@ def estimate_coarsen_factors_and_slicers(
             da=da,
             grid=grid,
         )
-
     return coarsen_factors, new_slicers
 
 
@@ -328,7 +324,7 @@ async def apply_slicers(
 def coarsen_data(da: xr.DataArray, coarsen_factors: dict[str, int]) -> xr.DataArray:
     """Apply coarsening to the data array."""
     with LOCK:
-        return da.coarsen(coarsen_factors, boundary="trim").mean()
+        return da.coarsen(coarsen_factors, boundary="trim").mean()  # type: ignore[unresolved-attribute]
 
 
 @time_debug
