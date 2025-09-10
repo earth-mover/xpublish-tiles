@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import os
 import subprocess
 import threading
 import time
@@ -217,7 +218,9 @@ def _run_single_dataset_benchmark_subprocess(dataset_name, args):
         print(f"  Running: {' '.join(cmd)}")
 
         # Run subprocess and capture output
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        env = os.environ.copy()
+        env["XPUBLISH_TILES_MAX_RENDERABLE_SIZE"] = "400000"
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
         # print(result.stdout)
 
         if result.returncode != 0:
