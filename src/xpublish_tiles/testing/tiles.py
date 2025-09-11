@@ -104,7 +104,7 @@ ETRS89_TILES_EDGE_CASES = [
     # Small bbox test for ETRS89
     pytest.param(Tile(x=8, y=8, z=5), ETRS89_TMS, id="etrs89_small_bbox(5/8/8)"),
     pytest.param(Tile(x=15, y=12, z=5), WEBMERC_TMS, id="webmerc_corner_zoom5(15/12/5)"),
-    pytest.param(Tile(x=1, y=5, z=3), WEBMERC_TMS, id="webmerc_corner_zoom3(3/1/5)"),
+    pytest.param(Tile(x=5, y=1, z=3), WEBMERC_TMS, id="webmerc_corner_zoom3(3/5/1)"),
 ]
 
 # ETRS89 tiles (some may not be supported) - combined
