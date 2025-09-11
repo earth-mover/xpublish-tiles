@@ -763,9 +763,7 @@ EU3035 = Dataset(
         raster_grid,
         crs="epsg:3035",
         geotransform="2635780.0 1200.0 0.0 5416000.0 0.0 -1200.0",
-        bbox=BBox(
-            west=-31.39, south=36.96, east=55.51, north=67.12
-        ),  # Geographic extent of projected grid
+        bbox=BBox(west=-31.390736, south=36.811846, east=55.739207, north=67.120178),
     ),
     edge_case_tiles=ETRS89_TILES_EDGE_CASES,
     tiles=ETRS89_TILES,
@@ -783,9 +781,7 @@ EU3035_HIRES = Dataset(
         raster_grid,
         crs="epsg:3035",
         geotransform="2635780.0 120.0 0.0 5416000.0 0.0 -120.0",
-        bbox=BBox(
-            west=-16.0, south=32.0, east=40.0, north=84.0
-        ),  # Approximate EU coverage
+        bbox=BBox(west=-31.390736, south=33.552979, east=52.841144, north=67.120178),
     ),
     edge_case_tiles=ETRS89_TILES_EDGE_CASES,
     tiles=ETRS89_TILES,

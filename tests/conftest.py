@@ -2,7 +2,6 @@ import logging
 from itertools import product
 
 import pytest
-from pyproj.aoi import BBox
 
 import icechunk
 import xarray as xr
@@ -128,21 +127,6 @@ def _get_projected_dataset_tile_params():
 def projected_dataset_and_tile(request):
     dataset_class, tile, tms = request.param
     ds = dataset_class.create()
-
-    # Validate that tile overlaps with dataset bounding box
-    dataset_bbox = ds.attrs["bbox"]
-    tile_bounds = tms.bounds(tile)
-    tile_bbox = BBox(
-        west=tile_bounds.left,
-        south=tile_bounds.bottom,
-        east=tile_bounds.right,
-        north=tile_bounds.top,
-    )
-
-    # Check if dataset bbox intersects with tile bounds
-    if not dataset_bbox.intersects(tile_bbox):
-        pytest.skip(f"Tile {tile} does not overlap with dataset bbox {dataset_bbox}")
-
     return (ds, tile, tms)
 
 
