@@ -726,3 +726,40 @@ def test_tilejson_bounds_dateline_crossing_0_360():
     if bounds is not None:
         assert bounds[0] == -180.0
         assert bounds[2] == 180.0
+
+
+def test_tilejson_bounds_with_decreasing_lat_lon():
+    """Bounds should normalize correctly when lat and lon coords decrease."""
+    data = xr.Dataset(
+        {
+            "temperature": xr.DataArray(
+                np.random.randn(90, 180),
+                dims=["lat", "lon"],
+                coords={
+                    "lat": (
+                        ["lat"],
+                        np.linspace(90, -90, 90),
+                        {"axis": "Y", "standard_name": "latitude"},
+                    ),
+                    "lon": (
+                        ["lon"],
+                        np.linspace(360, 0, 180),
+                        {"axis": "X", "standard_name": "longitude"},
+                    ),
+                },
+            )
+        }
+    )
+
+    rest = xpublish.Rest({"dec": data}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    resp = client.get(
+        "/datasets/dec/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=temperature&style=raster/viridis&width=256&height=256&f=png"
+    )
+    assert resp.status_code == 200
+    tj = resp.json()
+    bounds = tj.get("bounds")
+    if bounds is not None:
+        assert bounds == [-180.0, -90.0, 180.0, 90.0]
