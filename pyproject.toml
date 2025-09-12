@@ -134,6 +134,7 @@ ignore = [
   "RUF003",  # comment contains ambiguous no-break space unicode character
   "RUF005",  # consider unpacking operator instead of concatenation
   "RUF012",  # mutable class attributes
+  "B008",    # do not perform function calls in argument defaults
 ]
 
 [tool.ruff.lint.isort]
