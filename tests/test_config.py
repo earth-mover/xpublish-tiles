@@ -1,5 +1,8 @@
 """Test configuration management with donfig."""
 
+import numpy as np
+
+import xarray as xr
 from xpublish_tiles.config import config
 from xpublish_tiles.lib import get_transform_chunk_size
 
@@ -29,14 +32,18 @@ def test_config_with_context_manager():
     assert config.get("transform_chunk_size") == 1024
 
 
-def test_dynamic_config_in_lib():
+def test_get_transform_chunk_size():
     """Test that the dynamic config functions work correctly."""
     # Test defaults
-    assert get_transform_chunk_size() == (1024, 1024)
+    da = xr.DataArray(np.ones((1024, 1024)), dims=("x", "y"))
+    assert get_transform_chunk_size(da, "x", "y") == (1024, 1024)
 
     # Test with context manager
     with config.set(transform_chunk_size=256):
-        assert get_transform_chunk_size() == (256, 256)
+        assert get_transform_chunk_size(da, "x", "y") == (64, 1024)
+
+    da = xr.DataArray(np.ones((2048, 2048)), dims=("x", "y"))
+    assert get_transform_chunk_size(da, "x", "y") == (512, 2048)
 
 
 def test_detect_approx_rectilinear_config():

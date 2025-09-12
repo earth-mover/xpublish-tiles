@@ -4,7 +4,7 @@ import asyncio
 import io
 import math
 import operator
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from functools import lru_cache, partial
 from itertools import product
@@ -129,10 +129,11 @@ transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=
 # 155 ms ± 2.75 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
 # 156 ms ± 5.07 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
 # 772 ms ± 27 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
-def get_transform_chunk_size():
+def get_transform_chunk_size(da: xr.DataArray, xname: str, yname: str):
     """Get the chunk size for coordinate transformations dynamically."""
     chunk_size = config.get("transform_chunk_size")
-    return (chunk_size, chunk_size)
+    # This way the chunks are C-contiguous and we avoid a memory copy inside pyproj \m/
+    return (chunk_size * chunk_size // da.shape[-1], da.shape[-1])
 
 
 def is_4326_like(crs: CRS) -> bool:
@@ -194,29 +195,37 @@ def transform_chunk(
     transformer: pyproj.Transformer,
     x_out: np.ndarray,
     y_out: np.ndarray,
+    inplace: bool = False,
 ) -> None:
     """Transform a chunk of coordinates."""
     row_slice, col_slice = slices
     x_chunk = x_grid[row_slice, col_slice]
     y_chunk = y_grid[row_slice, col_slice]
-    x_transformed, y_transformed = transformer.transform(x_chunk, y_chunk)
-    x_out[row_slice, col_slice] = x_transformed
-    y_out[row_slice, col_slice] = y_transformed
+    assert x_chunk.flags["C_CONTIGUOUS"]
+    assert y_chunk.flags["C_CONTIGUOUS"]
+    x_transformed, y_transformed = transformer.transform(
+        x_chunk, y_chunk, inplace=inplace
+    )
+    if not inplace:
+        x_out[row_slice, col_slice] = x_transformed
+        y_out[row_slice, col_slice] = y_transformed
 
 
 def transform_blocked(
     x_grid: np.ndarray,
     y_grid: np.ndarray,
     transformer: pyproj.Transformer,
-    chunk_size: tuple[int, int] = (250, 250),
+    chunk_size: tuple[int, int],
+    inplace: bool,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Blocked transformation using thread pool."""
 
-    # start_time = time.perf_counter()
-
     shape = x_grid.shape
-    x_out = np.empty(shape, dtype=x_grid.dtype)
-    y_out = np.empty(shape, dtype=y_grid.dtype)
+    if inplace:
+        x_out, y_out = x_grid, y_grid
+    else:
+        x_out = np.empty(shape, dtype=x_grid.dtype)
+        y_out = np.empty(shape, dtype=y_grid.dtype)
 
     chunk_rows, chunk_cols = chunk_size
 
@@ -225,26 +234,21 @@ def transform_blocked(
     col_chunks = [min(chunk_cols, shape[1] - j) for j in range(0, shape[1], chunk_cols)]
 
     chunks = (row_chunks, col_chunks)
-
-    # Use slices_from_chunks to generate slices lazily
-    futures = [
-        EXECUTOR.submit(
-            transform_chunk, x_grid, y_grid, slices, transformer, x_out, y_out
-        )
-        for slices in slices_from_chunks(chunks)
-    ]
-
-    for future in futures:
-        future.result()
-
-    # total_time = time.perf_counter() - start_time
-    # logger.debug(
-    #     "transform_blocked completed in %.4f seconds (shape=%s, chunks=%d)",
-    #     total_time,
-    #     shape,
-    #     len(futures),
-    # )
-
+    wait(
+        [
+            EXECUTOR.submit(
+                transform_chunk,
+                x_grid,
+                y_grid,
+                slices,
+                transformer,
+                x_out,
+                y_out,
+                inplace,
+            )
+            for slices in slices_from_chunks(chunks)
+        ]
+    )
     return x_out, y_out
 
 
@@ -268,7 +272,6 @@ async def transform_coordinates(
     grid_x_name: str,
     grid_y_name: str,
     transformer: pyproj.Transformer,
-    chunk_size: tuple[int, int] | None = None,
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Transform coordinates from input CRS to output CRS.
@@ -296,8 +299,6 @@ async def transform_coordinates(
     tuple[xr.DataArray, xr.DataArray]
         Transformed X and Y coordinate arrays
     """
-    if chunk_size is None:
-        chunk_size = get_transform_chunk_size()
 
     inx, iny = subset[grid_x_name], subset[grid_y_name]
 
@@ -330,17 +331,21 @@ async def transform_coordinates(
         iny.drop_indexes(iny.dims, errors="ignore"),
     )
 
+    chunk_size = get_transform_chunk_size(subset, grid_x_name, grid_y_name)
     # Choose transformation method based on data size
     if bx.size > math.prod(chunk_size):
         newX, newY = await async_run(
             transform_blocked,
-            bx.data,
-            by.data,
+            bx.data.copy(order="C"),
+            by.data.copy(order="C"),
             transformer,
             chunk_size,
+            True,  # inplace
         )
     else:
-        newX, newY = transformer.transform(bx.data, by.data)
+        newX, newY = transformer.transform(
+            bx.data.copy(order="C"), by.data.copy(order="C")
+        )
 
     return bx.copy(data=newX), by.copy(data=newY)
 
