@@ -1,6 +1,7 @@
 import asyncio
 import io
 import math
+from collections.abc import Hashable
 from typing import Any, cast
 
 import numpy as np
@@ -236,6 +237,7 @@ async def apply_slicers(
     *,
     grid: GridSystem2D,
     alternate: GridMetadata,
+    applied_selectors: dict[str, Any],
     slicers: dict[str, list[slice | Fill]],
     coarsen_factors: dict[str, int],
     datatype: DataType,
@@ -298,6 +300,7 @@ async def apply_slicers(
             results = [subset.load() for subset in subsets]
     subset = xr.concat(results, dim=grid.Xdim) if len(results) > 1 else results[0]
     subset_da = subset.set_coords(pick)[da.name]
+    logger.debug(f"loaded data of shape {subset_da.shape}")
 
     if coarsen_factors:
         # TODO: I am skipping padding to center the image here;
@@ -590,36 +593,50 @@ def apply_query(
     This method does all automagic detection necessary for the rest of the pipeline to work.
     """
     validated: dict[str, ValidatedArray] = {}
+    applied_selectors: dict[Hashable, Any] = {}
     if selectors:
-        for name, value in selectors.items():
-            if name not in ds:
+        for in_name, value in selectors.items():
+            try:
+                da = ds.cf[in_name]
+            except KeyError:
                 logger.warning(
-                    f"Selector {name}={value} not found in dataset, skipping..."
+                    f"Selector {in_name}={value} not found in dataset, skipping..."
                 )
                 continue
 
             # If the value is not the same type as the variable, try to cast it
             try:
-                selectors[name] = ds[name].dtype.type(value)
+                value = da.dtype.type(value)
             except ValueError as e:
                 logger.error(
-                    f"Failed to cast selector {name}={value} to type {ds[name].dtype}"
+                    f"Failed to cast selector {in_name}={value} to type {ds[in_name].dtype}"
                 )
                 raise e
-        ds = ds.cf.sel(**selectors)
+            # assuming 1D here
+            applied_selectors.update(
+                ds.xindexes[da.name].sel({da.name: value}).dim_indexers
+            )
+
+        ds = ds.isel(**applied_selectors)
     for name in variables:
         grid = guess_grid_system(ds, name)
         array = ds[name]
+        new_selectors = {}
         if grid.Z in array.dims:
-            array = array.sel({grid.Z: 0}, method="nearest")
-        if extra_dims := (set(array.dims) - grid.dims):
+            new_selectors.update(
+                array.xindexes[grid.Z].sel({grid.Z: 0}, method="nearest").dim_indexers
+            )
+        if extra_dims := (set(array.dims) - grid.dims - set(new_selectors)):
             # Note: this will handle squeezing of label-based selection
             # along datetime coordinates
-            array = array.isel({dim: -1 for dim in extra_dims})
+            new_selectors.update({dim: -1 for dim in extra_dims})
+        if new_selectors:
+            array = array.isel(new_selectors)
         validated[name] = ValidatedArray(
             da=array,
             grid=grid,
             datatype=_infer_datatype(array),
+            applied_selectors=applied_selectors | new_selectors,
         )
     return validated
 
@@ -681,10 +698,14 @@ async def subset_to_bbox(
             da,
             grid=grid,
             alternate=alternate,
+            applied_selectors=array.applied_selectors,
             slicers=new_slicers,
             coarsen_factors=coarsen_factors,
             datatype=array.datatype,
         )
+        if subset.size == 0:
+            result[var_name] = NullRenderContext()
+            continue
 
         has_discontinuity = (
             has_coordinate_discontinuity(

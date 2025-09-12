@@ -311,6 +311,7 @@ async def test_subset(global_datasets, tile, tms):
         grid=grid,
         alternate=grid.to_metadata(),
         slicers=slicers,
+        applied_selectors={},
         coarsen_factors={},
         datatype=ContinuousData(valid_min=0, valid_max=1),
     )

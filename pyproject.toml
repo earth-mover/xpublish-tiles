@@ -38,7 +38,7 @@ requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [tool.uv.sources]
-datashader = { git = "https://github.com/holoviz/datashader.git", rev = "main" }
+datashader = { path = "../datashader", editable = true }
 
 [tool.hatch]
 version.source = "vcs"

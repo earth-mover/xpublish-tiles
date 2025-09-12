@@ -1,6 +1,6 @@
 import enum
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Hashable, Sequence
 from dataclasses import dataclass
 from typing import Any, NewType, Self
 
@@ -94,6 +94,7 @@ class ValidatedArray:
     da: xr.DataArray
     datatype: DataType
     grid: GridSystem
+    applied_selectors: dict[Hashable, Any]
 
 
 @dataclass
