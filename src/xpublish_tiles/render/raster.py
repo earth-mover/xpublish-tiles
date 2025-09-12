@@ -1,5 +1,4 @@
 import io
-import time
 from typing import TYPE_CHECKING, cast
 
 import datashader as dsh  # type: ignore
@@ -13,7 +12,7 @@ from scipy.interpolate import NearestNDInterpolator
 
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear
-from xpublish_tiles.logger import logger
+from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import Renderer, register_renderer, render_error_image
 from xpublish_tiles.types import (
     ContinuousData,
@@ -23,10 +22,9 @@ from xpublish_tiles.types import (
     PopulatedRenderContext,
     RenderContext,
 )
-from xpublish_tiles.utils import LOCK, time_debug
+from xpublish_tiles.utils import LOCK
 
 
-@time_debug
 def nearest_on_uniform_grid_scipy(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.DataArray:
     """This is quite slow. 10s for a 2000x3000 array"""
     X, Y = da[Xdim], da[Ydim]
@@ -34,14 +32,15 @@ def nearest_on_uniform_grid_scipy(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.
     dy = abs(Y.diff(Ydim).median().data)
     newX = np.arange(numbagg.nanmin(X.data), numbagg.nanmax(X.data) + dx, dx)
     newY = np.arange(numbagg.nanmin(Y.data), numbagg.nanmax(Y.data) + dy, dy)
-    tic = time.time()
+
     interpolator = NearestNDInterpolator(
         np.stack([X.data.ravel(), Y.data.ravel()], axis=-1),
         da.data.ravel(),
     )
-    logger.debug(f"constructing interpolator: {time.time() - tic} seconds")
+
+    logger = get_context_logger()
     logger.debug(f"interpolating from {da.shape} to {newY.size}x{newX.size}")
-    tic = time.time()
+
     new = xr.DataArray(
         interpolator(*np.meshgrid(newX, newY)),
         dims=(Ydim, Xdim),
@@ -52,11 +51,9 @@ def nearest_on_uniform_grid_scipy(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.
         # coords=dict(x=("x", newX - dx/2), y=("y", newY - dy/2)),
         coords=dict(x=("x", newX), y=("y", newY)),
     )
-    logger.debug(f"interpolating: {time.time() - tic} seconds")
     return new
 
 
-@time_debug
 def nearest_on_uniform_grid_quadmesh(
     da: xr.DataArray, Xdim: str, Ydim: str
 ) -> xr.DataArray:
@@ -95,7 +92,6 @@ class DatashaderRasterRenderer(Renderer):
             totype = totype[:-1] + "4"
         return data.astype(totype, copy=False)
 
-    @time_debug
     def render(
         self,
         *,
@@ -106,7 +102,10 @@ class DatashaderRasterRenderer(Renderer):
         variant: str,
         colorscalerange: tuple[float, float] | None = None,
         format: ImageFormat = ImageFormat.PNG,
+        context_logger=None,
     ):
+        # Use the passed context logger or fallback to get_context_logger
+        logger = context_logger if context_logger is not None else get_context_logger()
         # Handle "default" alias
         if variant == "default":
             variant = self.default_variant()
@@ -114,6 +113,7 @@ class DatashaderRasterRenderer(Renderer):
         self.validate(contexts)
         (context,) = contexts.values()
         if isinstance(context, NullRenderContext):
+            logger.debug("☐ No data")
             im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
             im.save(buffer, format=str(format))
             return
@@ -142,22 +142,32 @@ class DatashaderRasterRenderer(Renderer):
                 # the mode aggregation.
                 # https://github.com/holoviz/datashader/issues/1435
                 # Lock is only used when tbb is not available (e.g., on macOS)
+                data = self.maybe_cast_data(context.da)
+
                 with LOCK:
-                    data = self.maybe_cast_data(context.da)
-                    data = nearest_on_uniform_grid_quadmesh(data, grid.X, grid.Y)
-                    mesh = cvs.raster(
-                        data,
-                        interpolate="nearest",
-                        agg=dsh.reductions.mode(cast(str, data.name)),
-                    )
+                    with log_duration(
+                        "nearest neighbour regridding (discrete)", "⊞", logger
+                    ):
+                        data = nearest_on_uniform_grid_quadmesh(data, grid.X, grid.Y)
+                    with log_duration(
+                        "datashader raster render (discrete)", "🎨", logger
+                    ):
+                        mesh = cvs.raster(
+                            data,
+                            interpolate="nearest",
+                            agg=dsh.reductions.mode(cast(str, data.name)),
+                        )
             else:
                 data = self.maybe_cast_data(context.da)
-                # Lock is only used when tbb is not available (e.g., on macOS)
-                # AND if we use the rectilinear or raster code path
-                with LOCK:
-                    mesh = cvs.quadmesh(
-                        data.transpose(grid.Ydim, grid.Xdim), x=grid.X, y=grid.Y
-                    )
+                with log_duration(
+                    "datashader quadmesh render (continuous)", "🎨", logger
+                ):
+                    # Lock is only used when tbb is not available (e.g., on macOS)
+                    # AND if we use the rectilinear or raster code path
+                    with LOCK:
+                        mesh = cvs.quadmesh(
+                            data.transpose(grid.Ydim, grid.Xdim), x=grid.X, y=grid.Y
+                        )
         else:
             raise NotImplementedError(
                 f"Grid type {type(context.grid)} not supported by DatashaderRasterRenderer"
