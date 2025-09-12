@@ -648,3 +648,118 @@ def test_tilejson_missing_variables():
     # Check that validation error mentions missing variables field
     detail = response.json()["detail"]
     assert any(error.get("loc") == ["query", "variables"] for error in detail)
+
+
+def test_tilejson_bounds_normalized_from_0_360_global():
+    """TileJSON bounds should normalize 0..360 longitudes to [-180, 180]."""
+    import numpy as np
+
+    data = xr.Dataset(
+        {
+            "temperature": xr.DataArray(
+                np.random.randn(90, 180),
+                dims=["lat", "lon"],
+                coords={
+                    "lat": (
+                        ["lat"],
+                        np.linspace(-90, 90, 90),
+                        {"axis": "Y", "standard_name": "latitude"},
+                    ),
+                    "lon": (
+                        ["lon"],
+                        np.linspace(0, 360, 180),
+                        {"axis": "X", "standard_name": "longitude"},
+                    ),
+                },
+            )
+        }
+    )
+
+    rest = xpublish.Rest({"globe": data}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    resp = client.get(
+        "/datasets/globe/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=temperature&style=raster/viridis&width=256&height=256&f=png"
+    )
+    assert resp.status_code == 200
+    tj = resp.json()
+    assert tj["bounds"][0] == -180.0
+    assert tj["bounds"][2] == 180.0
+
+
+def test_tilejson_bounds_dateline_crossing_0_360():
+    """For dateline-crossing 0..360 datasets, use full world longitudes in TileJSON."""
+    import numpy as np
+
+    data = xr.Dataset(
+        {
+            "temperature": xr.DataArray(
+                np.random.randn(10, 20),
+                dims=["lat", "lon"],
+                coords={
+                    "lat": (
+                        ["lat"],
+                        np.linspace(-10, 10, 10),
+                        {"axis": "Y", "standard_name": "latitude"},
+                    ),
+                    "lon": (
+                        ["lon"],
+                        np.linspace(350, 10, 20),
+                        {"axis": "X", "standard_name": "longitude"},
+                    ),
+                },
+            )
+        }
+    )
+
+    rest = xpublish.Rest({"cross": data}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    resp = client.get(
+        "/datasets/cross/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=temperature&style=raster/viridis&width=256&height=256&f=png"
+    )
+    assert resp.status_code == 200
+    tj = resp.json()
+    bounds = tj.get("bounds")
+    if bounds is not None:
+        assert bounds[0] == -180.0
+        assert bounds[2] == 180.0
+
+
+def test_tilejson_bounds_with_decreasing_lat_lon():
+    """Bounds should normalize correctly when lat and lon coords decrease."""
+    data = xr.Dataset(
+        {
+            "temperature": xr.DataArray(
+                np.random.randn(90, 180),
+                dims=["lat", "lon"],
+                coords={
+                    "lat": (
+                        ["lat"],
+                        np.linspace(90, -90, 90),
+                        {"axis": "Y", "standard_name": "latitude"},
+                    ),
+                    "lon": (
+                        ["lon"],
+                        np.linspace(360, 0, 180),
+                        {"axis": "X", "standard_name": "longitude"},
+                    ),
+                },
+            )
+        }
+    )
+
+    rest = xpublish.Rest({"dec": data}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    resp = client.get(
+        "/datasets/dec/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=temperature&style=raster/viridis&width=256&height=256&f=png"
+    )
+    assert resp.status_code == 200
+    tj = resp.json()
+    bounds = tj.get("bounds")
+    if bounds is not None:
+        assert bounds == [-180.0, -90.0, 180.0, 90.0]
