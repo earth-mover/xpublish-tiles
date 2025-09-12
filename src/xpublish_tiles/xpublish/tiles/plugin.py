@@ -14,7 +14,7 @@ from xpublish_tiles.logger import logger
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.render import RenderRegistry
 from xpublish_tiles.types import QueryParams
-from xpublish_tiles.utils import async_time_debug
+from xpublish_tiles.utils import async_time_debug, normalize_tilejson_bounds
 from xpublish_tiles.xpublish.tiles.metadata import (
     create_tileset_metadata,
     extract_dataset_extents,
@@ -304,12 +304,14 @@ class TilesPlugin(Plugin):
             # Compute bounds list if available
             bounds_list = None
             if bounds is not None:
-                bounds_list = [
-                    bounds.lowerLeft[0],
-                    bounds.lowerLeft[1],
-                    bounds.upperRight[0],
-                    bounds.upperRight[1],
-                ]
+                bounds_list = normalize_tilejson_bounds(
+                    [
+                        bounds.lowerLeft[0],
+                        bounds.lowerLeft[1],
+                        bounds.upperRight[0],
+                        bounds.upperRight[1],
+                    ]
+                )
 
             # Determine min/max zoom from TMS definition
             tms = TILE_MATRIX_SETS[tileMatrixSetId]()
