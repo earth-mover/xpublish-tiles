@@ -1,5 +1,6 @@
 import asyncio
 import io
+import itertools
 import math
 from collections.abc import Hashable
 from typing import Any, cast
@@ -232,6 +233,55 @@ def estimate_coarsen_factors_and_slicers(
     return coarsen_factors, new_slicers
 
 
+async def check_if_any_chunk_exists(
+    da: xr.DataArray,
+    slicers: dict,
+    grid: GridSystem2D,
+    *,
+    applied_selectors: dict[Hashable, Any],
+    concurrency_limit: int = 100,
+) -> bool:
+    """Check if any chunks exist in the zarr store for the given slices."""
+    try:
+        zarray = da.variable._data.array.array.array._array
+        dims = zarray.metadata.dimension_names
+        chunks = zarray.chunks
+        sizes = dict(zip(dims, zarray.shape, strict=False))
+        chunksizes = dict(zip(dims, chunks, strict=False))
+        all_slicers = slicers | applied_selectors
+        ranges = []
+        for dim in dims:
+            if not (dim_slicers := all_slicers.get(dim)):
+                continue
+            c = chunksizes[dim]
+            if isinstance(dim_slicers, int):
+                if dim_slicers == -1:
+                    dim_slicers = sizes[dim] - 1
+                dim_slicers = [slice(dim_slicers, dim_slicers + 1)]
+            ranges.append(
+                itertools.chain(
+                    *(range(sl.start // c, sl.stop // c + 1) for sl in dim_slicers)
+                )
+            )
+        chunk_paths = tuple(
+            ("c/" + "/".join(map(str, coord))) for coord in itertools.product(*ranges)
+        )
+        store = zarray.store
+
+        semaphore = asyncio.Semaphore(concurrency_limit)
+
+        async def check_exists(path):
+            async with semaphore:
+                return await store.exists(path)
+
+        exists_results = await asyncio.gather(
+            *(check_exists(zarray.path + "/" + c) for c in chunk_paths)
+        )
+        return any(exists_results)
+    except Exception:
+        return True
+
+
 async def apply_slicers(
     da: xr.DataArray,
     *,
@@ -291,6 +341,12 @@ async def apply_slicers(
     if any(total_size < 2 * nvars for total_size in total_shape):
         raise ValueError("Tile request resulted in insufficient data for rendering.")
 
+    if not await check_if_any_chunk_exists(
+        da, slicers, applied_selectors=applied_selectors, grid=grid
+    ):
+        logger.debug("Skipping all empty chunks")
+        return xr.DataArray([])
+
     if config.get("async_load"):
         async with async_time_operation("📥 async_load data subsets"):
             coros = [subset.load_async() for subset in subsets]
@@ -298,8 +354,11 @@ async def apply_slicers(
     else:
         with time_operation("📥 load data subsets"):
             results = [subset.load() for subset in subsets]
+
     subset = xr.concat(results, dim=grid.Xdim) if len(results) > 1 else results[0]
     subset_da = subset.set_coords(pick)[da.name]
+    # FIXME: delete!
+    assert subset_da.count().item() > 0
     logger.debug(f"loaded data of shape {subset_da.shape}")
 
     if coarsen_factors:
