@@ -43,7 +43,7 @@ class WMSPlugin(Plugin):
         async def get_wms(
             request: Request,
             wms_query: Annotated[WMSQuery, Query()],
-            dataset: xr.Dataset = Depends(deps.dataset),  # noqa: B008
+            dataset: xr.Dataset = Depends(deps.dataset),
         ):
             query_params = lower_case_keys(request.query_params)
             query_keys = list(query_params.keys())

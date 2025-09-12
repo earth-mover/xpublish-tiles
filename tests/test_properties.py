@@ -102,7 +102,7 @@ def tile_matrix_sets(draw: DrawFn) -> str:
 @st.composite
 def tiles(
     draw: DrawFn,
-    tile_matrix_sets: st.SearchStrategy[str] = tile_matrix_sets(),  # noqa: B008
+    tile_matrix_sets: st.SearchStrategy[str] = tile_matrix_sets(),
 ) -> Tile:
     """Strategy that returns morecantile.Tile objects based on a TileMatrixSet."""
     tms_name: str = draw(tile_matrix_sets)
@@ -120,7 +120,7 @@ def tiles(
 def tile_and_tms(
     draw: DrawFn,
     *,
-    tile_matrix_sets: st.SearchStrategy[str] = tile_matrix_sets(),  # noqa: B008
+    tile_matrix_sets: st.SearchStrategy[str] = tile_matrix_sets(),
     bbox=None,
 ) -> tuple[Tile, TileMatrixSet]:
     """Strategy that returns a tile and its corresponding TileMatrixSet.

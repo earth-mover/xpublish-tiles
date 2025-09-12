@@ -98,7 +98,9 @@ class TilesPlugin(Plugin):
         )
 
         @router.get("/", response_model=TilesetsList, response_model_exclude_none=True)
-        async def get_dataset_tiles_list(dataset: Dataset = Depends(deps.dataset)):  # noqa: B008
+        async def get_dataset_tiles_list(
+            dataset: Dataset = Depends(deps.dataset),
+        ):
             """List of available tilesets for this dataset"""
             # Get dataset variables that can be tiled
             tilesets = []
@@ -235,7 +237,7 @@ class TilesPlugin(Plugin):
         )
         async def get_dataset_tileset_metadata(
             tileMatrixSetId: str,
-            dataset: Dataset = Depends(deps.dataset),  # noqa: B008
+            dataset: Dataset = Depends(deps.dataset),
         ):
             """Get tileset metadata for this dataset"""
             try:
@@ -252,7 +254,7 @@ class TilesPlugin(Plugin):
             request: Request,
             tileMatrixSetId: str,
             query: Annotated[TileQuery, Query()],
-            dataset: Dataset = Depends(deps.dataset),  # noqa: B008
+            dataset: Dataset = Depends(deps.dataset),
         ):
             """Get TileJSON specification for this dataset and tile matrix set"""
             # Validate that the tile matrix set exists
@@ -275,11 +277,19 @@ class TilesPlugin(Plugin):
                 dataset, query.variables[0], "EPSG:4326"
             )
 
+            logger.info(f"base_url: {request.base_url}")
+            logger.info(f"url: {request.url.path}")
+            logger.info(f"root_path: {request.scope.get('root_path')}")
+
             # Build tile URL template relative to this endpoint
             base_url = str(request.base_url).rstrip("/")
+            root_path = request.scope.get("root_path", "")
+
             # dataset path prefix already includes /datasets/{id} by xpublish; request.url.path points to /datasets/{id}/tiles/{tms}/tilejson.json
-            # Construct sibling tiles path replacing trailing segment
-            tiles_path = request.url.path.rsplit("/", 1)[0]  # drop 'tilejson.json'
+            # Construct sibling tiles path replacing tailing segment
+            tiles_path = request.url.path.replace(root_path, "", 1).rsplit("/", 1)[
+                0
+            ]  # drop 'tilejson.json'
 
             style = query.style[0] if query.style else "raster"
             variant = query.style[1] if query.style else "default"
@@ -333,7 +343,7 @@ class TilesPlugin(Plugin):
             tileRow: int,
             tileCol: int,
             query: Annotated[TileQuery, Query()],
-            dataset: Dataset = Depends(deps.dataset),  # noqa: B008
+            dataset: Dataset = Depends(deps.dataset),
         ):
             """Get individual tile from this dataset"""
             try:
