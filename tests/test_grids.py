@@ -790,117 +790,52 @@ def _create_test_dataset(grid_type: str, tms, target_zoom: int, array_size: int)
 class TestGridZoomMethods:
     """Test get_min_zoom and get_max_zoom methods."""
 
-    def test_get_min_zoom_small_array(self):
+    @pytest.mark.parametrize(
+        "shape, expected",
+        (
+            ((10, 20), 0),
+            ((30000, 15000), 2),
+        ),
+    )
+    def test_get_min_zoom(self, shape, expected):
         """Test get_min_zoom with small array that should be safe at zoom 0."""
 
         # Create a small grid that won't trigger size limits
-        x = np.linspace(-180, 180, 20)
-        y = np.linspace(-90, 90, 10)
-        data = np.random.rand(10, 20)
-
+        ny, nx = shape
+        x = np.linspace(-180, 180, nx)
+        y = np.linspace(-90, 90, ny)
+        data = np.random.rand(*shape)
         ds = xr.Dataset({"temp": (["lat", "lon"], data)}, coords={"lat": y, "lon": x})
-
         grid = Rectilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
         da = ds["temp"]
-
         tms = morecantile.tms.get("WebMercatorQuad")
-
         min_zoom = grid.get_min_zoom(tms, da)
-
-        # Small array should be fine at zoom 0
-        assert min_zoom == 0
-
-    def test_get_min_zoom_large_array(self):
-        """Test get_min_zoom with large array that should require higher zoom."""
-
-        # Create a large grid that will trigger size limits at zoom 0
-        x = np.linspace(-180, 180, 30000)
-        y = np.linspace(-90, 90, 15000)
-        # Create array metadata without loading actual data (too big for tests)
-        data = np.zeros((15000, 30000))  # 450M elements > 400M limit
-
-        ds = xr.Dataset({"temp": (["lat", "lon"], data)}, coords={"lat": y, "lon": x})
-
-        grid = Rectilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
-        da = ds["temp"]
-
-        tms = morecantile.tms.get("WebMercatorQuad")
-
-        min_zoom = grid.get_min_zoom(tms, da)
-
-        # Large array should require higher zoom level
-        assert min_zoom > 0
-
-    def test_get_min_zoom_different_grid_types(self):
-        """Test get_min_zoom works with different grid types."""
-
-        tms = morecantile.tms.get("WebMercatorQuad")
-
-        # Test with RasterAffine
-        nx, ny = 100, 50
-        x = np.arange(nx) * 0.25
-        y = np.arange(ny) * 0.5
-        raster_ds = xr.Dataset(
-            {
-                "data": xr.DataArray(np.zeros((ny, nx)), dims=["y", "x"]),
-                "x": xr.DataArray(x, dims="x"),
-                "y": xr.DataArray(y, dims="y"),
-            }
-        )
-        raster_ds = rasterix.assign_index(raster_ds, x_dim="x", y_dim="y")
-        raster_grid = RasterAffine.from_dataset(raster_ds, CRS.from_epsg(4326), "x", "y")
-        da = raster_ds["data"]
-        min_zoom_raster = raster_grid.get_min_zoom(tms, da)
-        assert isinstance(min_zoom_raster, int)
-        assert min_zoom_raster >= 0
-
-        # Test with Curvilinear
-        curv_ds = CURVILINEAR.create()
-        curv_grid = Curvilinear.from_dataset(curv_ds, CRS.from_epsg(4326), "lon", "lat")
-        da = curv_ds["foo"]
-        min_zoom_curv = curv_grid.get_min_zoom(tms, da)
-        assert isinstance(min_zoom_curv, int)
-        assert min_zoom_curv >= 0
+        assert min_zoom == expected
 
     def test_get_max_zoom_basic(self):
         """Test get_max_zoom returns reasonable values."""
-
-        # Create a simple grid
         x = np.linspace(-180, 180, 360)
         y = np.linspace(-90, 90, 180)
         data = np.random.rand(180, 360)
-
         ds = xr.Dataset({"temp": (["lat", "lon"], data)}, coords={"lat": y, "lon": x})
-
         grid = Rectilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
-
         tms = morecantile.tms.get("WebMercatorQuad")
         max_zoom = grid.get_max_zoom(tms)
-
-        # Should return a reasonable zoom level
         assert isinstance(max_zoom, int)
         assert 0 <= max_zoom <= tms.maxzoom
 
     @pytest.mark.parametrize("tms_id", morecantile.tms.list())
     def test_min_max_zoom_relationship(self, tms_id):
         """Test that min_zoom <= max_zoom for all supported TMS."""
-
-        # Create a grid
         x = np.linspace(-180, 180, 100)
         y = np.linspace(-90, 90, 50)
         data = np.random.rand(50, 100)
-
         ds = xr.Dataset({"temp": (["lat", "lon"], data)}, coords={"lat": y, "lon": x})
-
         grid = Rectilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
         da = ds["temp"]
-
         tms = morecantile.tms.get(tms_id)
-
         min_zoom = grid.get_min_zoom(tms, da)
         max_zoom = grid.get_max_zoom(tms)
-
-        # min_zoom should be <= max_zoom (logical constraint)
         assert (
             min_zoom <= max_zoom
         ), f"min_zoom ({min_zoom}) > max_zoom ({max_zoom}) for TMS {tms_id}"
@@ -915,10 +850,7 @@ class TestGridZoomMethods:
         """Property test: max_zoom should match dataset resolution for rectilinear, curvilinear, and raster affine grids."""
         tms = morecantile.tms.get(tms_id)
         target_zoom = data.draw(st.integers(min_value=tms.minzoom, max_value=tms.maxzoom))
-        assume(tms.minzoom <= target_zoom <= tms.maxzoom)
-
         ds, grid = _create_test_dataset(grid_type, tms, target_zoom, 100)
-
         calculated_zoom = grid.get_max_zoom(tms)
         assert (
             calculated_zoom == target_zoom
@@ -952,7 +884,6 @@ class TestGridZoomMethods:
         # Create a dataset that exactly matches this tile with high resolution
         # Use different sizes based on grid type performance characteristics
         pixels_per_tile = 1001
-        max_size = 1000000  # 1000x1000 limit
 
         # Calculate spacing based on tile bounds and pixel count
         lon_spacing = (tile_bbox.right - tile_bbox.left) / pixels_per_tile
@@ -1010,7 +941,7 @@ class TestGridZoomMethods:
 
         da = ds["temp"]
 
-        with config.set({"max_renderable_size": max_size}):
+        with config.set({"max_renderable_size": (pixels_per_tile - 1) ** 2}):
             actual = grid.get_min_zoom(tms, da)
 
         # Since our dataset exceeds the max_renderable_size covering one tile at target_zoom,
