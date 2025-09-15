@@ -598,11 +598,13 @@ class TestGridMinimumSpacing:
 
         # Verify calculations by checking the intervals directly
         x_index = grid.indexes[0]
-        x_widths = x_index.index.right.values - x_index.index.left.values
+        x_interval_index = cast(pd.IntervalIndex, x_index.index)
+        x_widths = x_interval_index.right.values - x_interval_index.left.values
         assert grid.dXmin == pytest.approx(float(np.min(x_widths)))
 
         y_index = grid.indexes[1]
-        y_widths = y_index.index.right.values - y_index.index.left.values
+        y_interval_index = cast(pd.IntervalIndex, y_index.index)
+        y_widths = y_interval_index.right.values - y_interval_index.left.values
         assert grid.dYmin == pytest.approx(float(np.min(y_widths)))
 
     def test_raster_affine_spacing(self):
