@@ -27,9 +27,8 @@ from xpublish_tiles.xpublish.tiles.plugin import TilesPlugin
 from xpublish_tiles.xpublish.wms.plugin import WMSPlugin
 
 
-def create_onecrs_dataset(base_dataset_name: str, dataset_id: str) -> xr.Dataset:
+def create_onecrs_dataset(ds: xr.Dataset) -> xr.Dataset:
     """Create a single-CRS version of a dataset by dropping alternate CRS coordinates."""
-    ds = DATASET_LOOKUP[base_dataset_name].create().assign_attrs(_xpublish_id=dataset_id)
     # Drop alternate CRS coordinates and their corresponding CRS variables
     coords_to_drop = [
         coord
@@ -71,10 +70,6 @@ def get_dataset_for_name(
             else ("/tmp/tiles-icechunk/", local_path)
         )
 
-        # Handle synthetic datasets
-        if dataset_name == "utm50s_hires_onecrs":
-            return create_onecrs_dataset("utm50s_hires", name)
-
         try:
             storage = icechunk.local_filesystem_storage(repo_path)
 
@@ -92,7 +87,9 @@ def get_dataset_for_name(
             session = repo.readonly_session(branch=branch)
             ds = xr.open_zarr(
                 session.store,
-                group=dataset_name,
+                group="utm50s_hires"
+                if dataset_name == "utm50s_hires_onecrs"
+                else dataset_name,
                 zarr_format=3,
                 consolidated=False,
                 chunks=None,
@@ -100,6 +97,9 @@ def get_dataset_for_name(
             # Add _xpublish_id for caching
             xpublish_id = f"local:{dataset_name}:{branch}"
             ds.attrs["_xpublish_id"] = xpublish_id
+            # Handle synthetic datasets
+            if dataset_name == "utm50s_hires_onecrs":
+                ds = create_onecrs_dataset(ds)
         except Exception as e:
             raise ValueError(
                 f"Error loading local dataset '{dataset_name}' from {repo_path}: {e}"
