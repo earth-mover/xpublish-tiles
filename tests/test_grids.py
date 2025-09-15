@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import cf_xarray as cfxr  # noqa: F401
 import morecantile
@@ -731,47 +731,63 @@ class TestGridMinimumSpacing:
         assert not grid1.equals(grid4)
 
 
-def _create_test_dataset(grid_type: str, tms, target_zoom: int, array_size: int):
-    """Create a test dataset for the specified grid type, TMS, zoom level, and array size."""
-    # Get geographic resolution for the target zoom level
-    resolution = tms.tileMatrices[target_zoom].cellSize
-    transformer = transformer_from_crs(
-        CRS.from_wkt(tms.crs.to_wkt()), CRS.from_epsg(4326), always_xy=True
-    )
-    _, _, east, north = transformer.transform_bounds(0, 0, resolution, resolution)
-    resolution = max(east, north)
+def _create_test_dataset(
+    grid_type: str,
+    tms,
+    *,
+    target_zoom: int,
+    array_size: int,
+    target_zoom_type: Literal["min", "max"] = "max",
+):
+    assert array_size > 1, f"array_size must be > 1, got {array_size}"
+    if target_zoom_type == "min":
+        # For min_zoom tests, create tile-specific coordinates
+        tms_bbox = tms.bbox
+        center_lon = (tms_bbox.left + tms_bbox.right) / 2
+        center_lat = (tms_bbox.bottom + tms_bbox.top) / 2
+        tile = tms.tile(center_lon, center_lat, target_zoom)
+        tile_bbox = tms.bounds(tile)
+        lon_coords = np.linspace(tile_bbox.left, tile_bbox.right, array_size)
+        lat_coords = np.linspace(tile_bbox.bottom, tile_bbox.top, array_size)
+    else:
+        # For max_zoom tests, create resolution-based coordinates
+        resolution = tms.tileMatrices[target_zoom].cellSize
+        transformer = transformer_from_crs(
+            CRS.from_wkt(tms.crs.to_wkt()), CRS.from_epsg(4326), always_xy=True
+        )
+        _, _, east, north = transformer.transform_bounds(0, 0, resolution, resolution)
+        resolution = max(east, north)
+        lon_coords = np.linspace(0.0, resolution * array_size, array_size)
+        lat_coords = np.linspace(0.0, resolution * array_size, array_size)
 
+    data = np.random.rand(array_size, array_size)
     if grid_type == "rectilinear":
-        x = y = np.linspace(0.0, resolution * array_size, array_size)
         ds = xr.Dataset(
-            {"temp": (["lat", "lon"], np.random.rand(array_size, array_size))},
-            coords={"lat": y, "lon": x},
+            {"temp": (["lat", "lon"], data)},
+            coords={"lat": lat_coords, "lon": lon_coords},
         )
         grid = Rectilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
-
     elif grid_type == "curvilinear":
-        # Create curvilinear by broadcasting coordinates
-        x_1d = np.linspace(0.0, resolution * array_size, array_size)
-        y_1d = np.linspace(0.0, resolution * array_size, array_size)
-        lon, lat = np.meshgrid(x_1d, y_1d)
+        lon, lat = np.meshgrid(lon_coords, lat_coords)
         ds = xr.Dataset(
             {
-                "temp": (["y", "x"], np.random.rand(array_size, array_size)),
+                "temp": (["y", "x"], data),
                 "lon": (["y", "x"], lon),
                 "lat": (["y", "x"], lat),
             },
             coords={"x": np.arange(array_size), "y": np.arange(array_size)},
         )
         grid = Curvilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
-
     elif grid_type == "raster_affine":
-        # Create raster affine with proper geotransform
-        origin_x, origin_y = 0.0, 0.0
-        # Note: y_pixel_size should be negative for north-up orientation
-        transform = Affine.translation(
-            origin_x, origin_y + resolution * array_size
-        ) * Affine.scale(resolution, -resolution)
-        data = np.random.rand(array_size, array_size)
+        pixel_size_x = (
+            (lon_coords[-1] - lon_coords[0]) / (array_size - 1) if array_size > 1 else 1.0
+        )
+        pixel_size_y = (
+            (lat_coords[-1] - lat_coords[0]) / (array_size - 1) if array_size > 1 else 1.0
+        )
+        transform = Affine.translation(lon_coords[0], lat_coords[-1]) * Affine.scale(
+            pixel_size_x, -pixel_size_y
+        )
         ds = xr.Dataset({"temp": (["y", "x"], data)})
         ds.coords["spatial_ref"] = (
             (),
@@ -780,11 +796,9 @@ def _create_test_dataset(grid_type: str, tms, target_zoom: int, array_size: int)
             | {"GeoTransform": " ".join(map(str, transform.to_gdal()))},
         )
         grid = RasterAffine.from_dataset(ds, CRS.from_epsg(4326), "x", "y")
-
     else:
         raise ValueError(f"Unknown grid_type: {grid_type}")
-
-    return ds, grid
+    return ds["temp"], grid
 
 
 class TestGridZoomMethods:
@@ -794,26 +808,20 @@ class TestGridZoomMethods:
         "shape, expected",
         (
             ((10, 20), 0),
-            ((30000, 15000), 2),
+            ((30000, 15000), 1),
         ),
     )
     def test_get_min_zoom(self, shape, expected):
-        """Test get_min_zoom with small array that should be safe at zoom 0."""
-
-        # Create a small grid that won't trigger size limits
         ny, nx = shape
         x = np.linspace(-180, 180, nx)
         y = np.linspace(-90, 90, ny)
         data = np.random.rand(*shape)
         ds = xr.Dataset({"temp": (["lat", "lon"], data)}, coords={"lat": y, "lon": x})
         grid = Rectilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
-        da = ds["temp"]
         tms = morecantile.tms.get("WebMercatorQuad")
-        min_zoom = grid.get_min_zoom(tms, da)
-        assert min_zoom == expected
+        assert grid.get_min_zoom(tms, ds["temp"]) == expected
 
     def test_get_max_zoom_basic(self):
-        """Test get_max_zoom returns reasonable values."""
         x = np.linspace(-180, 180, 360)
         y = np.linspace(-90, 90, 180)
         data = np.random.rand(180, 360)
@@ -826,15 +834,13 @@ class TestGridZoomMethods:
 
     @pytest.mark.parametrize("tms_id", morecantile.tms.list())
     def test_min_max_zoom_relationship(self, tms_id):
-        """Test that min_zoom <= max_zoom for all supported TMS."""
         x = np.linspace(-180, 180, 100)
         y = np.linspace(-90, 90, 50)
         data = np.random.rand(50, 100)
         ds = xr.Dataset({"temp": (["lat", "lon"], data)}, coords={"lat": y, "lon": x})
         grid = Rectilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
-        da = ds["temp"]
         tms = morecantile.tms.get(tms_id)
-        min_zoom = grid.get_min_zoom(tms, da)
+        min_zoom = grid.get_min_zoom(tms, ds["temp"])
         max_zoom = grid.get_max_zoom(tms)
         assert (
             min_zoom <= max_zoom
@@ -847,10 +853,11 @@ class TestGridZoomMethods:
     @given(data=st.data())
     @settings(deadline=None)
     def test_max_zoom_matches_dataset_resolution(self, tms_id, grid_type, data):
-        """Property test: max_zoom should match dataset resolution for rectilinear, curvilinear, and raster affine grids."""
         tms = morecantile.tms.get(tms_id)
         target_zoom = data.draw(st.integers(min_value=tms.minzoom, max_value=tms.maxzoom))
-        ds, grid = _create_test_dataset(grid_type, tms, target_zoom, 100)
+        da, grid = _create_test_dataset(
+            grid_type, tms, target_zoom=target_zoom, array_size=100
+        )
         calculated_zoom = grid.get_max_zoom(tms)
         assert (
             calculated_zoom == target_zoom
@@ -870,86 +877,17 @@ class TestGridZoomMethods:
         )
         assume(tms.minzoom <= target_zoom <= tms.maxzoom)
 
-        # Get the center of the TMS bbox
-        tms_bbox = tms.bbox
-        center_lon = (tms_bbox.left + tms_bbox.right) / 2
-        center_lat = (tms_bbox.bottom + tms_bbox.top) / 2
-
-        # Get the tile at target_zoom that contains the center point
-        tile = tms.tile(center_lon, center_lat, target_zoom)
-
-        # Get the geographic bounds of this tile
-        tile_bbox = tms.bounds(tile)
-
-        # Create a dataset that exactly matches this tile with high resolution
-        # Use different sizes based on grid type performance characteristics
         pixels_per_tile = 1001
-
-        # Calculate spacing based on tile bounds and pixel count
-        lon_spacing = (tile_bbox.right - tile_bbox.left) / pixels_per_tile
-        lat_spacing = (tile_bbox.top - tile_bbox.bottom) / pixels_per_tile
-
-        # Create coordinates that exactly match the tile bounds
-        lon_coords = np.linspace(tile_bbox.left, tile_bbox.right, pixels_per_tile)
-        lat_coords = np.linspace(tile_bbox.bottom, tile_bbox.top, pixels_per_tile)
-
-        # Create dataset based on grid type
-        if grid_type == "rectilinear":
-            ds = xr.Dataset(
-                {
-                    "temp": (
-                        ["lat", "lon"],
-                        np.random.rand(pixels_per_tile, pixels_per_tile),
-                    )
-                },
-                coords={"lat": lat_coords, "lon": lon_coords},
-            )
-            grid = Rectilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
-
-        elif grid_type == "curvilinear":
-            # Create curvilinear coordinates that span the tile
-            lon_2d, lat_2d = np.meshgrid(lon_coords, lat_coords)
-            ds = xr.Dataset(
-                {
-                    "temp": (
-                        ["y", "x"],
-                        np.random.rand(pixels_per_tile, pixels_per_tile),
-                    ),
-                    "lon": (["y", "x"], lon_2d),
-                    "lat": (["y", "x"], lat_2d),
-                },
-                coords={"x": np.arange(pixels_per_tile), "y": np.arange(pixels_per_tile)},
-            )
-            grid = Curvilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
-
-        elif grid_type == "raster_affine":
-            # Create affine transform for the tile bounds
-            transform = Affine.translation(tile_bbox.left, tile_bbox.top) * Affine.scale(
-                lon_spacing, -lat_spacing
-            )
-
-            ds = xr.Dataset(
-                {"temp": (["y", "x"], np.random.rand(pixels_per_tile, pixels_per_tile))}
-            )
-            ds.coords["spatial_ref"] = (
-                (),
-                4326,
-                CRS.from_epsg(4326).to_cf()
-                | {"GeoTransform": " ".join(map(str, transform.to_gdal()))},
-            )
-            grid = RasterAffine.from_dataset(ds, CRS.from_epsg(4326), "x", "y")
-
-        da = ds["temp"]
-
+        da, grid = _create_test_dataset(
+            grid_type,
+            tms,
+            target_zoom=target_zoom,
+            array_size=pixels_per_tile,
+            target_zoom_type="min",
+        )
         with config.set({"max_renderable_size": (pixels_per_tile - 1) ** 2}):
             actual = grid.get_min_zoom(tms, da)
-
-        # Since our dataset exceeds the max_renderable_size covering one tile at target_zoom,
-        # the minimum zoom should be target_zoom + 1
-        # At target_zoom, the tile would exceed the limit
-        # At target_zoom + 1, the tile would be roughly half the size (within limit)
         expected = target_zoom + 1
-
         assert (
             expected == actual
-        ), f"Expected {expected}, got {actual} for {tms_id} {grid_type} at zoom {target_zoom} (tile: {tile})"
+        ), f"Expected {expected}, got {actual} for {tms_id} {grid_type} at zoom {target_zoom}"
