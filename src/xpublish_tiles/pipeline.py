@@ -26,7 +26,7 @@ from xpublish_tiles.lib import (
     transform_coordinates,
     transformer_from_crs,
 )
-from xpublish_tiles.logger import logger
+from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.types import (
     ContinuousData,
     DataType,
@@ -40,10 +40,6 @@ from xpublish_tiles.types import (
 )
 from xpublish_tiles.utils import (
     LOCK,
-    async_time_debug,
-    async_time_operation,
-    time_debug,
-    time_operation,
 )
 
 
@@ -240,6 +236,7 @@ async def apply_slicers(
     coarsen_factors: dict[str, int],
     datatype: DataType,
 ) -> xr.DataArray:
+    logger = get_context_logger()
     grid = cast(RasterAffine | Rectilinear | Curvilinear, grid)
 
     has_alternate = alternate.crs != grid.crs
@@ -281,20 +278,26 @@ async def apply_slicers(
             f"Tile request too big, requires loading data of total shape: {total_shape!r}. "
             "Please choose a higher zoom level."
         )
-        logger.error(msg)
+        logger = get_context_logger()
+        logger.error(
+            "Tile request too big",
+            total_shape=total_shape,
+            max_renderable_size=config.get("max_renderable_size"),
+        )
         raise TileTooBigError(msg)
 
     nvars = sum(len(subset.data_vars) for subset in subsets)
     # if any subset has shape < (2, 2) raise.
     if any(total_size < 2 * nvars for total_size in total_shape):
+        logger.error("Tile request resulted in insufficient data for rendering.")
         raise ValueError("Tile request resulted in insufficient data for rendering.")
 
     if config.get("async_load"):
-        async with async_time_operation("📥 async_load data subsets"):
+        with log_duration("async_load data subsets", "📥"):
             coros = [subset.load_async() for subset in subsets]
             results = await asyncio.gather(*coros)
     else:
-        with time_operation("📥 load data subsets"):
+        with log_duration("load data subsets", "📥"):
             results = [subset.load() for subset in subsets]
     subset = xr.concat(results, dim=grid.Xdim) if len(results) > 1 else results[0]
     subset_da = subset.set_coords(pick)[da.name]
@@ -315,7 +318,7 @@ async def apply_slicers(
         # We also specify `boundary="trim"` to avoid a copy, and accept that we will lose one pixel
         # if pad_instr := slicers_to_pad_instruction(new_slicers):
         #     subset_da = subset_da.pad(**pad_instr)
-        async with async_time_operation(f"🔲 coarsen by {coarsen_factors!r}"):
+        with log_duration(f"coarsen by {coarsen_factors!r}", "🔲"):
             subset_da = await async_run(coarsen_data, subset_da, coarsen_factors)
 
     return subset_da
@@ -327,7 +330,6 @@ def coarsen_data(da: xr.DataArray, coarsen_factors: dict[str, int]) -> xr.DataAr
         return da.coarsen(coarsen_factors, boundary="trim").mean()  # type: ignore[unresolved-attribute]
 
 
-@time_debug
 def has_coordinate_discontinuity(coordinates: np.ndarray, *, axis: int) -> bool:
     """
     Detect coordinate discontinuities in geographic longitude coordinates.
@@ -378,7 +380,6 @@ def has_coordinate_discontinuity(coordinates: np.ndarray, *, axis: int) -> bool:
     return False
 
 
-@time_debug
 def fix_coordinate_discontinuities(
     coordinates: np.ndarray, transformer: pyproj.Transformer, *, axis: int, bbox: BBox
 ) -> np.ndarray:
@@ -444,7 +445,6 @@ def fix_coordinate_discontinuities(
     return result
 
 
-@time_debug
 def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool:
     """Check if bboxes overlap, handling longitude wrapping for geographic data."""
     # Standard intersection check
@@ -527,7 +527,6 @@ def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool
     return False
 
 
-@async_time_debug
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = apply_query(ds, variables=query.variables, selectors=query.selectors)
     pixel_factor = config.get("max_pixel_factor")
@@ -536,10 +535,15 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
         validated, bbox=query.bbox, crs=query.crs, max_shape=max_shape
     )
 
+    # Capture the context logger before entering thread pool
+    context_logger = get_context_logger()
+
     tasks = [
         async_run(
             lambda s=subset: asyncio.run(
-                s.maybe_rewrite_to_rectilinear(width=query.width, height=query.height)
+                s.maybe_rewrite_to_rectilinear(
+                    width=query.width, height=query.height, logger=context_logger
+                )
             )
         )
         for subset in subsets.values()
@@ -550,6 +554,9 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     buffer = io.BytesIO()
     renderer = query.get_renderer()
 
+    # Capture the context logger before entering the thread pool
+    context_logger = get_context_logger()
+
     await async_run(
         lambda: renderer.render(
             contexts=new_subsets,
@@ -559,6 +566,7 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
             variant=query.variant,
             colorscalerange=query.colorscalerange,
             format=query.format,
+            context_logger=context_logger,
         ),
     )
     buffer.seek(0)
@@ -582,7 +590,6 @@ def _infer_datatype(array: xr.DataArray) -> DataType:
     )
 
 
-@time_debug
 def apply_query(
     ds: xr.Dataset, *, variables: list[str], selectors: dict[str, Any]
 ) -> dict[str, ValidatedArray]:
@@ -593,8 +600,9 @@ def apply_query(
     if selectors:
         for name, value in selectors.items():
             if name not in ds:
+                logger = get_context_logger()
                 logger.warning(
-                    f"Selector {name}={value} not found in dataset, skipping..."
+                    "Selector not found in dataset, skipping", selector=name, value=value
                 )
                 continue
 
@@ -602,8 +610,12 @@ def apply_query(
             try:
                 selectors[name] = ds[name].dtype.type(value)
             except ValueError as e:
-                logger.error(
-                    f"Failed to cast selector {name}={value} to type {ds[name].dtype}"
+                logger = get_context_logger()
+                logger.warning(
+                    "Failed to cast selector",
+                    selector=name,
+                    value=value,
+                    expected_type=ds[name].dtype,
                 )
                 raise e
         ds = ds.cf.sel(**selectors)
@@ -624,7 +636,6 @@ def apply_query(
     return validated
 
 
-@async_time_debug
 async def subset_to_bbox(
     validated: dict[str, ValidatedArray],
     *,

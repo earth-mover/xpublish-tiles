@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import xarray as xr
 from xpublish_tiles.cli.bench import run_benchmark
+from xpublish_tiles.logger import setup_logging
 from xpublish_tiles.testing.datasets import (
     DATASET_LOOKUP,
     GLOBAL_BENCHMARK_TILES,
@@ -468,25 +469,7 @@ def main():
 
     # Configure logging based on CLI argument
     log_level = getattr(logging, args.log_level.upper())
-
-    # Configure xpublish_tiles logger with handler
-    logger = logging.getLogger("xpublish_tiles")
-    logger.setLevel(log_level)
-
-    # Add console handler if not already present
-    if not logger.handlers:
-        handler = logging.StreamHandler()
-        handler.setLevel(log_level)
-        formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-
-    # Always disable numba, datashader, and PIL debug logs
-    logging.getLogger("numba").setLevel(logging.WARNING)
-    logging.getLogger("datashader").setLevel(logging.WARNING)
-    logging.getLogger("PIL").setLevel(logging.WARNING)
+    setup_logging(log_level)
 
     # Check if we're running bench-suite mode
     if args.bench_suite:
@@ -497,6 +480,7 @@ def main():
     dataset_name = args.dataset
     benchmarking = args.bench or args.spy
 
+    # Load dataset and setup server
     ds = get_dataset_for_name(dataset_name, args.branch, args.group, args.cache)
 
     xr.set_options(keep_attrs=True)

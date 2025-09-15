@@ -12,8 +12,7 @@ import pyproj.aoi
 import xarray as xr
 from xpublish_tiles.config import config
 from xpublish_tiles.grids import GridSystem, GridSystem2D, Rectilinear
-from xpublish_tiles.logger import logger
-from xpublish_tiles.utils import async_time_debug
+from xpublish_tiles.logger import get_context_logger
 
 InputCRS = NewType("InputCRS", pyproj.CRS)
 OutputCRS = NewType("OutputCRS", pyproj.CRS)
@@ -105,7 +104,9 @@ class RenderContext(ABC):
 
 @dataclass
 class NullRenderContext(RenderContext):
-    async def maybe_rewrite_to_rectilinear(self, *, width: int, height: int) -> Self:
+    async def maybe_rewrite_to_rectilinear(
+        self, *, width: int, height: int, logger=None
+    ) -> Self:
         return self
 
 
@@ -118,8 +119,9 @@ class PopulatedRenderContext(RenderContext):
     grid: GridSystem
     bbox: OutputBBox
 
-    @async_time_debug
-    async def maybe_rewrite_to_rectilinear(self, *, width: int, height: int) -> Self:
+    async def maybe_rewrite_to_rectilinear(
+        self, *, width: int, height: int, logger=None
+    ) -> Self:
         data = self.da
         grid = self.grid
         bbox = self.bbox
@@ -177,6 +179,7 @@ class PopulatedRenderContext(RenderContext):
             indexes=(),  # type: ignore[arg-type]
             Z=None,
         )
+        logger = logger or get_context_logger()
         logger.debug("✏️ rewriting to rectilinear")
         return type(self)(da=data, datatype=self.datatype, grid=self.grid, bbox=self.bbox)
 

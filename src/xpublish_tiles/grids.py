@@ -25,7 +25,7 @@ from xpublish_tiles.lib import (
     is_4326_like,
     pad_slicers,
 )
-from xpublish_tiles.logger import logger
+from xpublish_tiles.logger import get_context_logger
 from xpublish_tiles.utils import time_debug
 
 DEFAULT_CRS = CRS.from_epsg(4326)
@@ -514,12 +514,14 @@ class GridSystem(ABC):
         # Check if any alternate grid has a matching CRS
         for alt in self.alternates:
             if alt.crs == crs:
+                logger = get_context_logger()
                 logger.debug(f"picking alternate grid system: {alt!r}")
                 return alt
 
         # Check if any alternate grid is 4326-like
         for alt in self.alternates:
             if is_4326_like(alt.crs):
+                logger = get_context_logger()
                 logger.debug(f"picking alternate grid system: {alt!r}")
                 return alt
 

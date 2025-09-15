@@ -1,20 +1,29 @@
 """OGC Tiles API XPublish Plugin"""
 
 import io
+import logging
+import time
 from enum import Enum
 from typing import Annotated
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import Dataset
 from xpublish_tiles.lib import TileTooBigError
-from xpublish_tiles.logger import logger
+from xpublish_tiles.logger import (
+    CleanConsoleRenderer,
+    LogAccumulator,
+    get_logger,
+    logger,
+    set_context_logger,
+)
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.render import RenderRegistry
 from xpublish_tiles.types import QueryParams
-from xpublish_tiles.utils import async_time_debug, normalize_tilejson_bounds
+from xpublish_tiles.utils import normalize_tilejson_bounds
 from xpublish_tiles.xpublish.tiles.metadata import (
     create_tileset_metadata,
     extract_dataset_extents,
@@ -337,7 +346,6 @@ class TilesPlugin(Plugin):
             )
 
         @router.get("/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}")
-        @async_time_debug
         async def get_dataset_tile(
             request: Request,
             tileMatrixSetId: str,
@@ -348,48 +356,101 @@ class TilesPlugin(Plugin):
             dataset: Dataset = Depends(deps.dataset),
         ):
             """Get individual tile from this dataset"""
-            try:
-                bbox, crs = extract_tile_bbox_and_crs(
-                    tileMatrixSetId, tileMatrix, tileRow, tileCol
-                )
-            except ValueError as e:
-                raise HTTPException(status_code=404, detail=str(e)) from e
+            # Create log accumulator and configure structlog first
+            accumulator = LogAccumulator()
 
-            # Extract dimension selectors from query parameters
-            selectors = {}
-            for param_name, param_value in request.query_params.items():
-                # Skip the standard tile query parameters
-                if param_name not in TILES_FILTERED_QUERY_PARAMS:
-                    # Check if this parameter corresponds to a dataset dimension
-                    if param_name in dataset.dims:
-                        selectors[param_name] = param_value
-
-            style = query.style[0] if query.style else "raster"
-            variant = query.style[1] if query.style else "default"
-
-            render_params = QueryParams(
-                variables=query.variables,
-                style=style,
-                colorscalerange=query.colorscalerange,
-                variant=variant,
-                crs=crs,
-                bbox=bbox,
-                width=query.width,
-                height=query.height,
-                format=query.f,
-                selectors=selectors,
+            # Configure structlog to use accumulator for this context
+            structlog.configure(
+                processors=[
+                    structlog.stdlib.filter_by_level,
+                    structlog.stdlib.add_logger_name,
+                    structlog.stdlib.add_log_level,
+                    structlog.processors.TimeStamper(fmt="iso"),
+                    accumulator,  # Place accumulator last in the chain
+                ],
+                context_class=dict,
+                logger_factory=structlog.stdlib.LoggerFactory(),
+                cache_logger_on_first_use=False,
             )
+
+            # Now create bound logger after configuration
+            bound_logger = get_logger().bind(
+                tile=f"{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}",
+                variables=query.variables,
+                dataset_id=getattr(dataset, "_xpublish_id", "unknown"),
+            )
+
+            # Set the context logger so all functions can access it
+            set_context_logger(bound_logger)
+
             try:
-                buffer = await pipeline(dataset, render_params)
-                status_code = 200  # only used as a sentinel value
-                detail = "OK"
-            except TileTooBigError:
-                status_code = 413
-                detail = f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} request too big. Please choose a higher zoom level."
-            except KeyError as ke:
-                logger.error(f"KeyError: {ke}")
-                status_code = 422
-                detail = f"Invalid variable name(s): {query.variables!r}."
+                try:
+                    bbox, crs = extract_tile_bbox_and_crs(
+                        tileMatrixSetId, tileMatrix, tileRow, tileCol
+                    )
+                except ValueError as e:
+                    raise HTTPException(status_code=404, detail=str(e)) from e
+
+                # Extract dimension selectors from query parameters
+                selectors = {}
+                for param_name, param_value in request.query_params.items():
+                    # Skip the standard tile query parameters
+                    if param_name not in TILES_FILTERED_QUERY_PARAMS:
+                        # Check if this parameter corresponds to a dataset dimension
+                        if param_name in dataset.dims:
+                            selectors[param_name] = param_value
+
+                style = query.style[0] if query.style else "raster"
+                variant = query.style[1] if query.style else "default"
+
+                render_params = QueryParams(
+                    variables=query.variables,
+                    style=style,
+                    colorscalerange=query.colorscalerange,
+                    variant=variant,
+                    crs=crs,
+                    bbox=bbox,
+                    width=query.width,
+                    height=query.height,
+                    format=query.f,
+                    selectors=selectors,
+                )
+                # Track total tile processing time
+                tile_start_time = time.perf_counter()
+                tile_total_ms = -1
+                try:
+                    buffer = await pipeline(dataset, render_params)
+                    tile_total_ms = (time.perf_counter() - tile_start_time) * 1000
+                    status_code = 200  # only used as a sentinel value
+                    detail = "OK"
+                except TileTooBigError:
+                    tile_total_ms = (time.perf_counter() - tile_start_time) * 1000
+                    status_code = 413
+                    detail = f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} request too big. Please choose a higher zoom level."
+                except KeyError as ke:
+                    tile_total_ms = (time.perf_counter() - tile_start_time) * 1000
+                    bound_logger.error("KeyError", error=str(ke))
+                    status_code = 422
+                    detail = f"Invalid variable name(s): {query.variables!r}."
+            finally:
+                # Print all log lines per tile if logger level allows
+                if accumulator.logs and bound_logger.isEnabledFor(logging.DEBUG):
+                    # Import our custom clean renderer
+
+                    console_renderer = CleanConsoleRenderer()
+
+                    dataset_id = getattr(dataset, "_xpublish_id", "unknown")
+
+                    print(
+                        f"🔧 {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} {query.variables} {dataset_id} (total: {tile_total_ms:.0f}ms)"
+                    )
+
+                    for log_entry in accumulator.logs:
+                        # Render each log entry using our clean console renderer
+                        rendered = console_renderer(None, None, log_entry)
+                        print(f"   {rendered}")
+
+                    print()  # Empty line after each tile
 
             if status_code != 200:
                 if not query.render_errors:
