@@ -8,6 +8,7 @@ from typing import Self, cast
 
 import cachetools
 import cf_xarray  # noqa: F401
+import morecantile
 import numbagg
 import numpy as np
 import pandas as pd
@@ -24,6 +25,7 @@ from xpublish_tiles.lib import (
     crs_repr,
     is_4326_like,
     pad_slicers,
+    transformer_from_crs,
 )
 from xpublish_tiles.logger import get_context_logger
 from xpublish_tiles.utils import time_debug
@@ -226,6 +228,8 @@ class CurvilinearCellIndex(xr.Index):
     right: np.ndarray
     bottom: np.ndarray
     top: np.ndarray
+    _dXmin: float
+    _dYmin: float
 
     def __init__(self, *, X: xr.DataArray, Y: xr.DataArray, Xdim: str, Ydim: str):
         if Y.nbytes > MAX_COORD_VAR_NBYTES or X.nbytes > MAX_COORD_VAR_NBYTES:
@@ -248,6 +252,26 @@ class CurvilinearCellIndex(xr.Index):
             self.y_is_increasing = False
             self.top, self.bottom = self.bottom, self.top
         self.xaxis, self.yaxis = xaxis, yaxis
+
+        # Calculate and store minimum spacing
+        x_diffs = np.abs(dX)
+        y_diffs = np.abs(dY)
+
+        x_positive = x_diffs[x_diffs > 0]
+        y_positive = y_diffs[y_diffs > 0]
+
+        self._dXmin = float(numbagg.nanmin(x_positive)) if x_positive.size > 0 else None
+        self._dYmin = float(numbagg.nanmin(y_positive)) if y_positive.size > 0 else None
+
+    def get_min_spacing(self) -> tuple[float, float]:
+        """Get minimum spacing in X and Y directions.
+
+        Returns
+        -------
+        tuple[float | None, float | None]
+            (dXmin, dYmin) - minimum spacing in X and Y directions
+        """
+        return self._dXmin, self._dYmin
 
     def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
         X, Y = self.X.data, self.Y.data
@@ -301,6 +325,8 @@ class CurvilinearCellIndex(xr.Index):
 
 
 class LongitudeCellIndex(xr.indexes.PandasIndex):
+    _dXmin: float | None
+
     def __init__(self, interval_index: pd.IntervalIndex, dim: str):
         """
         Initialize LongitudeCellIndex with an IntervalIndex.
@@ -322,6 +348,10 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         coord_centers = self.cell_centers
         self._uses_0_360 = coord_centers.min() >= 0 and coord_centers.max() > 180
 
+        # Calculate and store minimum cell width
+        widths = self.index.right.values - self.index.left.values
+        self._dXmin = float(np.min(widths)) if len(widths) > 0 else None
+
     @property
     def cell_bounds(self) -> np.ndarray:
         """Get the cell bounds as an array."""
@@ -341,6 +371,16 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
     def uses_0_360(self) -> bool:
         """Check if this longitude index uses 0→360 coordinate system (vs -180→180)."""
         return self._uses_0_360
+
+    def get_min_spacing(self) -> float | None:
+        """Get minimum cell width (right - left).
+
+        Returns
+        -------
+        float | None
+            Minimum cell width
+        """
+        return self._dXmin
 
     def _determine_global_coverage(self) -> bool:
         """
@@ -453,6 +493,8 @@ class GridSystem(ABC):
     indexes: tuple[xr.Index, ...]
     Z: str | None = None
     alternates: tuple[GridMetadata, ...] = field(default_factory=tuple)
+    dXmin: float | None = None
+    dYmin: float | None = None
 
     @property
     @abstractmethod
@@ -477,6 +519,10 @@ class GridSystem(ABC):
         ):
             return False
         if any(a != b for a, b in zip(self.alternates, other.alternates, strict=False)):
+            return False
+        if self.dXmin != other.dXmin:
+            return False
+        if self.dYmin != other.dYmin:
             return False
         return True
 
@@ -536,6 +582,58 @@ class GridSystem(ABC):
             Metadata representation of this grid system
         """
         return GridMetadata(X=self.X, Y=self.Y, crs=self.crs, grid_cls=type(self))
+
+    def get_max_zoom(self, tms: morecantile.TileMatrixSet) -> int:
+        """Calculate maximum zoom level based on grid spacing and TMS.
+
+        Takes the lower left corner of the grid bounding box, adds the minimum
+        grid spacing (dXmin, dYmin), transforms the resulting box to the TMS CRS,
+        and calculates the appropriate zoom level using tms.zoom_for_res().
+
+        Parameters
+        ----------
+        tms : morecantile.TileMatrixSet
+            The tile matrix set to calculate zoom for
+
+        Returns
+        -------
+        int
+            Maximum appropriate zoom level for this grid
+        """
+
+        # Create a small box at the lower left corner of the grid bbox
+        # using the minimum grid spacing
+        ll_box = BBox(
+            west=self.bbox.west,
+            south=self.bbox.south,
+            east=self.bbox.west + self.dXmin,
+            north=self.bbox.south + self.dYmin,
+        )
+
+        # Transform the box to the TMS CRS
+        transformer = transformer_from_crs(self.crs, tms.rasterio_crs)
+
+        # Transform the corners of the box
+        west_coords = [ll_box.west, ll_box.east, ll_box.west, ll_box.east]
+        south_coords = [ll_box.south, ll_box.south, ll_box.north, ll_box.north]
+
+        transformed_x, transformed_y = transformer.transform(west_coords, south_coords)
+
+        # Calculate the spacing in the transformed coordinates
+        x_transformed = np.array(transformed_x)
+        y_transformed = np.array(transformed_y)
+
+        # Get the actual spacing in the TMS CRS
+        dx_transformed = np.max(x_transformed) - np.min(x_transformed)
+        dy_transformed = np.max(y_transformed) - np.min(y_transformed)
+
+        # Use the smaller spacing for zoom calculation (more conservative)
+        min_spacing = min(dx_transformed, dy_transformed)
+
+        # Get zoom level for this resolution
+        zoom = tms.zoom_for_res(min_spacing)
+
+        return zoom
 
 
 class RectilinearSelMixin:
@@ -617,6 +715,8 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
     indexes: tuple[rasterix.RasterIndex]
     Z: str | None = None
     lon_spans_globe: bool = field(init=False)
+    dXmin: float = field(init=False)
+    dYmin: float = field(init=False)
 
     def __post_init__(self) -> None:
         self.Xdim = self.X
@@ -625,6 +725,11 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
         self.lon_spans_globe = self.crs.is_geographic and _is_raster_index_global(
             self.indexes[0], self.bbox, self.crs
         )
+        # Calculate minimum grid spacing from affine transform
+        (index,) = self.indexes
+        affine = index.transform()
+        self.dXmin = abs(affine.a)  # X pixel size
+        self.dYmin = abs(affine.e)  # Y pixel size
 
     @classmethod
     def from_dataset(
@@ -698,6 +803,8 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
     indexes: tuple[xr.indexes.PandasIndex | LongitudeCellIndex, xr.indexes.PandasIndex]
     Z: str | None = None
     lon_spans_globe: bool = field(init=False)
+    dXmin: float = field(init=False)
+    dYmin: float = field(init=False)
 
     def __post_init__(self) -> None:
         self.Xdim = self.X
@@ -711,6 +818,22 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
             self.lon_spans_globe = self.indexes[0].is_global
         else:
             self.lon_spans_globe = False
+
+        # Calculate minimum grid spacing from indexes
+        if self.indexes:
+            x_index = self.indexes[0]
+            if isinstance(x_index, LongitudeCellIndex):
+                self.dXmin = x_index.get_min_spacing()
+            else:
+                assert isinstance(x_index, xr.indexes.PandasIndex)
+                widths = x_index.index.right.values - x_index.index.left.values
+                self.dXmin = float(np.min(widths)) if len(widths) > 0 else None
+
+        if len(self.indexes) > 1:
+            y_index = self.indexes[1]
+            assert isinstance(y_index, xr.indexes.PandasIndex)
+            widths = y_index.index.right.values - y_index.index.left.values
+            self.dYmin = float(np.min(widths)) if len(widths) > 0 else None
 
     @property
     def dims(self) -> set[str]:
@@ -828,12 +951,15 @@ class Curvilinear(GridSystem):
     indexes: tuple[xr.Index, ...]
     Z: str | None = None
     lon_spans_globe: bool = field(init=False)
+    dXmin: float = field(init=False)
+    dYmin: float = field(init=False)
 
     def __post_init__(self) -> None:
         # Determine if this curvilinear grid spans the globe in longitude
+        index = next(iter(self.indexes))
+        assert isinstance(index, CurvilinearCellIndex)
+
         if self.crs.is_geographic:
-            index = next(iter(self.indexes))
-            assert isinstance(index, CurvilinearCellIndex)
             # Use cell edges instead of cell centers for more accurate global coverage detection
             min_edge = numbagg.nanmin(index.left)
             max_edge = numbagg.nanmax(index.right)
@@ -841,6 +967,9 @@ class Curvilinear(GridSystem):
             self.lon_spans_globe = lon_span >= 350
         else:
             self.lon_spans_globe = False
+
+        # Calculate minimum grid spacing using index method
+        self.dXmin, self.dYmin = index.get_min_spacing()
 
     def _guess_dims(
         ds: xr.Dataset, *, X: xr.DataArray, Y: xr.DataArray
