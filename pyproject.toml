@@ -30,6 +30,7 @@ dependencies = [
     "toolz>=1.0.0",
     "cachetools>=5.5.2",
     "tbb>=2022.2.0 ; sys_platform == 'linux'",
+    "structlog>=24.4.0",
 ]
 dynamic = ["version"]
 

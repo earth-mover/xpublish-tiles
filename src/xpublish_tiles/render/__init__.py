@@ -84,6 +84,7 @@ class Renderer(ABC):
         variant: str,
         colorscalerange: tuple[Number, Number] | None = None,
         format: ImageFormat = ImageFormat.PNG,
+        context_logger=None,
     ):
         pass
 
