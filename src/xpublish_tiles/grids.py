@@ -611,7 +611,8 @@ class GridSystem(ABC):
         )
 
         # Transform the box to the TMS CRS
-        transformer = transformer_from_crs(self.crs, tms.rasterio_crs)
+        tms_crs = CRS.from_wkt(tms.crs.to_wkt())
+        transformer = transformer_from_crs(self.crs, tms_crs)
 
         # Transform the corners of the box
         west_coords = [ll_box.west, ll_box.east, ll_box.west, ll_box.east]
@@ -634,6 +635,62 @@ class GridSystem(ABC):
         zoom = tms.zoom_for_res(min_spacing)
 
         return zoom
+
+    def get_min_zoom(self, tms: morecantile.TileMatrixSet, da: xr.DataArray) -> int:
+        """Calculate minimum zoom level that avoids TileTooBigError.
+
+        This method finds the zoom level below which no tile would trigger
+        the TileTooBigError check in apply_slicers.
+
+        Parameters
+        ----------
+        tms : morecantile.TileMatrixSet
+            The tile matrix set to calculate zoom for
+        da : xr.DataArray
+            Data array (only metadata used, no data loaded)
+        datatype : DataType
+            Data type information
+
+        Returns
+        -------
+        int
+            Minimum safe zoom level for this grid and data
+        """
+        from xpublish_tiles.pipeline import check_data_is_renderable_size
+
+        # Find the center of the grid bbox
+        center_lon = (self.bbox.west + self.bbox.east) / 2
+        center_lat = (self.bbox.south + self.bbox.north) / 2
+
+        # Convert TMS CRS to pyproj CRS (same pattern as tile_matrix.py)
+        tms_crs = CRS.from_wkt(tms.crs.to_wkt())
+
+        # Use pick_alternate_grid to get the appropriate alternate grid metadata
+        alternate = self.pick_alternate_grid(tms_crs, coarsen_factors={})
+
+        # Start from zoom 0 and find the first zoom that doesn't trigger errors
+        for zoom in range(tms.minzoom, tms.maxzoom + 1):
+            # Find the tile that contains the center point at this zoom level
+            tile = tms.tile(center_lon, center_lat, zoom)
+            tile_bounds = tms.bounds(tile)
+
+            # Convert morecantile BoundingBox to pyproj BBox
+            tile_bbox = BBox(
+                west=tile_bounds.left,
+                south=tile_bounds.bottom,
+                east=tile_bounds.right,
+                north=tile_bounds.top,
+            )
+
+            # Create slicers for this tile
+            slicers = self.sel(da, bbox=tile_bbox)
+
+            # Check if this tile is renderable
+            if check_data_is_renderable_size(slicers, da, self, alternate):
+                return zoom
+
+        # If all zoom levels have tiles that are too big, return the maximum zoom
+        return tms.maxzoom
 
 
 class RectilinearSelMixin:

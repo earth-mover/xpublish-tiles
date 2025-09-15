@@ -6,12 +6,14 @@ import time
 from enum import Enum
 from typing import Annotated
 
+import morecantile
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import Dataset
+from xpublish_tiles.grids import guess_grid_system
 from xpublish_tiles.lib import TileTooBigError
 from xpublish_tiles.logger import (
     CleanConsoleRenderer,
@@ -322,14 +324,28 @@ class TilesPlugin(Plugin):
                     ]
                 )
 
-            # Determine min/max zoom from TMS definition
-            tms = TILE_MATRIX_SETS[tileMatrixSetId]()
-            minzoom = 0
-            maxzoom = (
-                max(int(m.id) for m in tms.tileMatrices if str(m.id).isdigit())
-                if tms.tileMatrices
-                else None
-            )
+            # Determine min/max zoom from dataset characteristics
+            # Get the original morecantile TMS for minzoom/maxzoom properties
+            tms = morecantile.tms.get(tileMatrixSetId)
+
+            # Calculate optimal zoom levels based on grid and data characteristics
+            try:
+                # Get the first variable's grid system
+                var_name = query.variables[0]
+                da = dataset[var_name]
+                grid = guess_grid_system(dataset, var_name)
+
+                # Calculate min/max zoom based on data characteristics
+                minzoom = grid.get_min_zoom(tms, da)
+                maxzoom = min(grid.get_max_zoom(tms), tms.maxzoom)
+
+            except Exception as e:
+                # Fallback to default values if grid analysis fails
+                logger.error(
+                    f"Failed to calculate optimal zoom levels for variable {var_name}: {e}"
+                )
+                minzoom = tms.minzoom
+                maxzoom = tms.maxzoom
 
             # Compose TileJSON
             return TileJSON(
