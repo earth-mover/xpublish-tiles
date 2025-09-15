@@ -420,36 +420,33 @@ class TilesPlugin(Plugin):
                 tile_total_ms = -1
                 try:
                     buffer = await pipeline(dataset, render_params)
-                    tile_total_ms = (time.perf_counter() - tile_start_time) * 1000
-                    status_code = 200  # only used as a sentinel value
+                    status_code = 200
                     detail = "OK"
                 except TileTooBigError:
-                    tile_total_ms = (time.perf_counter() - tile_start_time) * 1000
                     status_code = 413
                     detail = f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} request too big. Please choose a higher zoom level."
+                    bound_logger.error("TileTooBigError", detail)
                 except KeyError as ke:
-                    tile_total_ms = (time.perf_counter() - tile_start_time) * 1000
                     bound_logger.error("KeyError", error=str(ke))
                     status_code = 422
                     detail = f"Invalid variable name(s): {query.variables!r}."
+                except Exception as e:
+                    status_code = 500
+                    bound_logger.error("Exception", error=str(e))
+                    detail = e
+                tile_total_ms = (time.perf_counter() - tile_start_time) * 1000
             finally:
                 # Print all log lines per tile if logger level allows
                 if accumulator.logs and bound_logger.isEnabledFor(logging.DEBUG):
-                    # Import our custom clean renderer
-
                     console_renderer = CleanConsoleRenderer()
-
                     dataset_id = getattr(dataset, "_xpublish_id", "unknown")
-
                     print(
                         f"🔧 {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} {query.variables} {dataset_id} (total: {tile_total_ms:.0f}ms)"
                     )
-
                     for log_entry in accumulator.logs:
                         # Render each log entry using our clean console renderer
                         rendered = console_renderer(None, None, log_entry)
                         print(f"   {rendered}")
-
                     print()  # Empty line after each tile
 
             if status_code != 200:
