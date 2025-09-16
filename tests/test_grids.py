@@ -767,6 +767,11 @@ class TestGridZoomMethods:
     @given(data=st.data())
     @settings(deadline=None)
     def test_max_zoom_matches_dataset_resolution(self, tms_id, grid_type, data):
+        """
+        Property test:
+        Construct a synthetic dataset whose spacing exactly matches tile spacing for zoom level Z.
+        Inferred zoom level should be Z.
+        """
         tms = morecantile.tms.get(tms_id)
         target_zoom = data.draw(st.integers(min_value=tms.minzoom, max_value=tms.maxzoom))
         da, grid = _create_test_dataset(
@@ -784,7 +789,11 @@ class TestGridZoomMethods:
     @given(data=st.data())
     @settings(deadline=None)
     def test_min_zoom_matches_renderable_size_limit(self, tms_id, grid_type, data):
-        """Property test: min_zoom should match exact tile size limits."""
+        """
+        Property test:
+        Construct a synthetic dataset that is just slightly too big for a chosen zoom level Z.
+        Inferred zoom level should be Z+1
+        """
         tms = morecantile.tms.get(tms_id)
         target_zoom = data.draw(
             st.integers(min_value=max(tms.minzoom, 2), max_value=min(tms.maxzoom, 8))
