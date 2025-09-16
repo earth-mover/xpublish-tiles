@@ -442,7 +442,7 @@ class TilesPlugin(Plugin):
                 except TileTooBigError:
                     status_code = 413
                     detail = f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} request too big. Please choose a higher zoom level."
-                    bound_logger.error("TileTooBigError", detail)
+                    bound_logger.error("TileTooBigError", message=detail)
                 except KeyError as ke:
                     bound_logger.error("KeyError", error=str(ke))
                     status_code = 422
