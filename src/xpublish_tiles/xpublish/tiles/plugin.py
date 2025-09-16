@@ -24,6 +24,7 @@ from xpublish_tiles.logger import (
 )
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.render import RenderRegistry
+from xpublish_tiles.tiles_lib import get_max_zoom, get_min_zoom
 from xpublish_tiles.types import QueryParams
 from xpublish_tiles.utils import normalize_tilejson_bounds
 from xpublish_tiles.xpublish.tiles.metadata import (
@@ -336,8 +337,8 @@ class TilesPlugin(Plugin):
                 grid = guess_grid_system(dataset, var_name)
 
                 # Calculate min/max zoom based on data characteristics
-                minzoom = grid.get_min_zoom(tms, da)
-                maxzoom = min(grid.get_max_zoom(tms), tms.maxzoom)
+                minzoom = get_min_zoom(grid, tms, da)
+                maxzoom = min(get_max_zoom(grid, tms), tms.maxzoom)
 
             except Exception as e:
                 # Fallback to default values if grid analysis fails

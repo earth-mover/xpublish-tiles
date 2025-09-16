@@ -46,6 +46,7 @@ from xpublish_tiles.testing.datasets import (
     Dataset,
 )
 from xpublish_tiles.testing.tiles import TILES
+from xpublish_tiles.tiles_lib import get_max_zoom, get_min_zoom
 from xpublish_tiles.types import ContinuousData
 
 
@@ -282,10 +283,10 @@ def test_unit_minmax_zoom_level(dataset: Dataset, minzoom, maxzoom):
     ds = dataset.create()
     grid = guess_grid_system(ds, "foo")
     tms = morecantile.tms.get("WebMercatorQuad")
-    assert grid.get_min_zoom(tms, ds["foo"]) == minzoom
+    assert get_min_zoom(grid, tms, ds["foo"]) == minzoom
     if minzoom == 0:
         assert ds.foo.size < config.get("max_renderable_size")
-    assert grid.get_max_zoom(tms) == maxzoom
+    assert get_max_zoom(grid, tms) == maxzoom
 
 
 def test_multiple_grid_mappings_detection() -> None:
@@ -761,7 +762,7 @@ class TestGridZoomMethods:
         ds = xr.Dataset({"temp": (["lat", "lon"], data)}, coords={"lat": y, "lon": x})
         grid = Rectilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
         tms = morecantile.tms.get("WebMercatorQuad")
-        assert grid.get_min_zoom(tms, ds["temp"]) == expected
+        assert get_min_zoom(grid, tms, ds["temp"]) == expected
 
     def test_get_max_zoom_basic(self):
         x = np.linspace(-180, 180, 360)
@@ -770,7 +771,7 @@ class TestGridZoomMethods:
         ds = xr.Dataset({"temp": (["lat", "lon"], data)}, coords={"lat": y, "lon": x})
         grid = Rectilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
         tms = morecantile.tms.get("WebMercatorQuad")
-        max_zoom = grid.get_max_zoom(tms)
+        max_zoom = get_max_zoom(grid, tms)
         assert isinstance(max_zoom, int)
         assert 0 <= max_zoom <= tms.maxzoom
 
@@ -782,8 +783,8 @@ class TestGridZoomMethods:
         ds = xr.Dataset({"temp": (["lat", "lon"], data)}, coords={"lat": y, "lon": x})
         grid = Rectilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
         tms = morecantile.tms.get(tms_id)
-        min_zoom = grid.get_min_zoom(tms, ds["temp"])
-        max_zoom = grid.get_max_zoom(tms)
+        min_zoom = get_min_zoom(grid, tms, ds["temp"])
+        max_zoom = get_max_zoom(grid, tms)
         assert (
             min_zoom <= max_zoom
         ), f"min_zoom ({min_zoom}) > max_zoom ({max_zoom}) for TMS {tms_id}"
@@ -805,7 +806,7 @@ class TestGridZoomMethods:
         da, grid = _create_test_dataset(
             grid_type, tms, target_zoom=target_zoom, array_size=100
         )
-        calculated_zoom = grid.get_max_zoom(tms)
+        calculated_zoom = get_max_zoom(grid, tms)
         assert (
             calculated_zoom == target_zoom
         ), f"Expected {target_zoom}, got {calculated_zoom} for {tms_id} {grid_type}"
@@ -837,7 +838,7 @@ class TestGridZoomMethods:
             target_zoom_type="min",
         )
         with config.set({"max_renderable_size": (pixels_per_tile - 1) ** 2}):
-            actual = grid.get_min_zoom(tms, da)
+            actual = get_min_zoom(grid, tms, da)
         expected = target_zoom + 1
         assert (
             expected == actual

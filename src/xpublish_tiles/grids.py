@@ -8,7 +8,6 @@ from typing import Self, cast
 
 import cachetools
 import cf_xarray  # noqa: F401
-import morecantile
 import numbagg
 import numpy as np
 import pandas as pd
@@ -25,7 +24,6 @@ from xpublish_tiles.lib import (
     crs_repr,
     is_4326_like,
     pad_slicers,
-    transformer_from_crs,
 )
 from xpublish_tiles.logger import get_context_logger
 from xpublish_tiles.utils import time_debug
@@ -617,154 +615,6 @@ class GridSystem(ABC):
             Metadata representation of this grid system
         """
         return GridMetadata(X=self.X, Y=self.Y, crs=self.crs, grid_cls=type(self))
-
-    def get_max_zoom(self, tms: morecantile.TileMatrixSet) -> int:
-        """Calculate maximum zoom level based on grid spacing and TMS.
-
-        Takes the lower left corner of the grid bounding box, adds the minimum
-        grid spacing (dXmin, dYmin), transforms the resulting box to the TMS CRS,
-        and calculates the appropriate zoom level using tms.zoom_for_res().
-
-        Parameters
-        ----------
-        tms : morecantile.TileMatrixSet
-            The tile matrix set to calculate zoom for
-
-        Returns
-        -------
-        int
-            Maximum appropriate zoom level for this grid
-        """
-
-        # Create a small box at the lower left corner of the grid bbox
-        # using the minimum grid spacing
-        ll_box = BBox(
-            west=self.bbox.west,
-            south=self.bbox.south,
-            east=self.bbox.west + self.dXmin,
-            north=self.bbox.south + self.dYmin,
-        )
-
-        # Transform the box to the TMS CRS
-        tms_crs = CRS.from_wkt(tms.crs.to_wkt())
-        transformer = transformer_from_crs(self.crs, tms_crs)
-
-        # Transform the corners of the box
-        west_coords = [ll_box.west, ll_box.east, ll_box.west, ll_box.east]
-        south_coords = [ll_box.south, ll_box.south, ll_box.north, ll_box.north]
-
-        x_transformed, y_transformed = transformer.transform(west_coords, south_coords)
-        # Get the actual spacing in the TMS CRS
-        dx_transformed = np.max(x_transformed) - np.min(x_transformed)
-        dy_transformed = np.max(y_transformed) - np.min(y_transformed)
-
-        # Use the smaller spacing for zoom calculation
-        min_spacing = min(dx_transformed, dy_transformed)
-        zoom = tms.zoom_for_res(min_spacing, zoom_level_strategy="upper")
-        return zoom
-
-    def get_min_zoom(self, tms: morecantile.TileMatrixSet, da: xr.DataArray) -> int:
-        """Calculate minimum zoom level that avoids TileTooBigError.
-
-        This method finds the zoom level below which no tile would trigger
-        the TileTooBigError check in apply_slicers.
-
-        Parameters
-        ----------
-        tms : morecantile.TileMatrixSet
-            The tile matrix set to calculate zoom for
-        da : xr.DataArray
-            Data array (only metadata used, no data loaded).
-            Required since we use `Grid.sel`.
-        datatype : DataType
-            Data type information
-
-        Returns
-        -------
-        int
-            Minimum safe zoom level for this grid and data
-        """
-        from xpublish_tiles.pipeline import check_data_is_renderable_size
-
-        # Convert TMS CRS to pyproj CRS (same pattern as tile_matrix.py)
-        tms_crs = CRS.from_wkt(tms.crs.to_wkt())
-
-        # Get TMS bounds in geographic coordinates for clipping
-        # Later we use tms.tile() which expects lon, lat, so we need to work in WGS84
-        tms_to_wgs84 = transformer_from_crs(tms_crs, 4326)
-        tms_xy_bounds = tms.xy_bbox
-        geo_left, geo_bottom, geo_right, geo_top = tms_to_wgs84.transform_bounds(
-            tms_xy_bounds.left,
-            tms_xy_bounds.bottom,
-            tms_xy_bounds.right,
-            tms_xy_bounds.top,
-        )
-        tms_geo_bounds = morecantile.BoundingBox(
-            left=geo_left, bottom=geo_bottom, right=geo_right, top=geo_top
-        )
-
-        # Transform grid bbox to WGS84 for test point generation
-        grid_to_wgs84 = transformer_from_crs(self.crs, 4326)
-
-        # Transform grid bbox corners to WGS84
-        bbox_lons = [self.bbox.west, self.bbox.east, self.bbox.west, self.bbox.east]
-        bbox_lats = [self.bbox.south, self.bbox.south, self.bbox.north, self.bbox.north]
-        wgs84_lons, wgs84_lats = grid_to_wgs84.transform(bbox_lons, bbox_lats)
-
-        # Get the extent in WGS84
-        wgs84_west, wgs84_east = min(wgs84_lons), max(wgs84_lons)
-        wgs84_south, wgs84_north = min(wgs84_lats), max(wgs84_lats)
-
-        # Clip to TMS bounds to avoid warnings for points outside valid range
-        west = max(wgs84_west, tms_geo_bounds.left)
-        east = min(wgs84_east, tms_geo_bounds.right)
-        south = max(wgs84_south, tms_geo_bounds.bottom)
-        north = min(wgs84_north, tms_geo_bounds.top)
-
-        test_points = [
-            (west, south),  # SW corner
-            (east, south),  # SE corner
-            (west, north),  # NW corner
-            (east, north),  # NE corner
-            ((west + east) / 2, (south + north) / 2),  # Center
-        ]
-
-        # Use pick_alternate_grid to get the appropriate alternate grid metadata
-        alternate = self.pick_alternate_grid(tms_crs, coarsen_factors={})
-
-        # Create transformer for TMS CRS to Grid CRS (for tile bounds transformation)
-        transformer = transformer_from_crs(tms_crs, self.crs)
-
-        # Start from zoom 0 and find the first zoom where ALL test tiles are renderable
-        for zoom in range(tms.minzoom, tms.maxzoom + 1):
-            all_tiles_renderable = True
-
-            for lon, lat in test_points:
-                # Find the tile that contains this test point at this zoom level
-                # tms.tile expects lon,lat in WGS84
-                tile = tms.tile(lon, lat, zoom)
-                bounds = tms.xy_bounds(tile)
-                left, bottom, right, top = transformer.transform_bounds(
-                    bounds.left, bounds.bottom, bounds.right, bounds.top
-                )
-
-                # Convert morecantile BoundingBox to pyproj BBox
-                tile_bbox = BBox(west=left, south=bottom, east=right, north=top)
-
-                # Create slicers for this tile
-                slicers = self.sel(da, bbox=tile_bbox)
-
-                # Check if this tile is renderable
-                if not check_data_is_renderable_size(slicers, da, self, alternate):
-                    all_tiles_renderable = False
-                    break  # This zoom level fails, try next zoom
-
-            # If all test tiles are renderable at this zoom, we found our min zoom
-            if all_tiles_renderable:
-                return zoom
-
-        # If all zoom levels have tiles that are too big, return the maximum zoom
-        return tms.minzoom
 
 
 class RectilinearSelMixin:
