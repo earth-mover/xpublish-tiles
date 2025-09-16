@@ -453,7 +453,7 @@ def test_cf_axis_detection():
     assert level_dim.units == "hPa"
 
 
-def test_helper_functions():
+def test_helper_functions(air_dataset):
     """Test the helper functions for extracting bounds and generating limits"""
     from xpublish_tiles.xpublish.tiles.tile_matrix import (
         get_all_tile_matrix_set_ids,
@@ -466,13 +466,12 @@ def test_helper_functions():
     assert "WebMercatorQuad" in tms_ids
     assert len(tms_ids) >= 1
 
-    # Test tile matrix limits generation
-    limits = get_tile_matrix_limits("WebMercatorQuad", range(3))  # Just 0-2
+    # Test tile matrix limits generation with dataset
+    limits = get_tile_matrix_limits("WebMercatorQuad", air_dataset, range(3))  # Just 0-2
     assert len(limits) == 3
     assert limits[0].tileMatrix == "0"
-    assert limits[0].maxTileRow == 0  # 2^0 - 1 = 0
-    assert limits[1].maxTileRow == 1  # 2^1 - 1 = 1
-    assert limits[2].maxTileRow == 3  # 2^2 - 1 = 3
+    assert limits[1].tileMatrix == "1"
+    assert limits[2].tileMatrix == "2"
 
 
 def test_no_bbox_overlap_transparent_png():

@@ -163,34 +163,58 @@ def extract_tile_bbox_and_crs(
 
 
 def get_tile_matrix_limits(
-    tms_id: str, zoom_levels: Optional[range] = None
+    tms_id: str, dataset: xr.Dataset, zoom_levels: Optional[range] = None
 ) -> list[TileMatrixSetLimit]:
-    """Generate tile matrix limits for the specified zoom levels.
-
-    TODO: Calculate actual limits based on dataset bounds instead of full world coverage.
+    """Generate tile matrix limits for the specified zoom levels based on dataset bounds.
 
     Args:
         tms_id: Tile matrix set identifier
-        zoom_levels: Range of zoom levels to generate limits for (default: 0-18)
+        dataset: xarray Dataset to extract bounds from
+        zoom_levels: Range of zoom levels to generate limits for. If None, will be calculated
+                    from the Grid's min/max zoom levels.
 
     Returns:
         List of TileMatrixSetLimit objects
     """
+    first_data_var = next(iter(dataset.data_vars))
+    grid = guess_grid_system(dataset, first_data_var)
+    tms = morecantile.tms.get(tms_id)
+
     if zoom_levels is None:
-        zoom_levels = range(19)  # 0-18
+        min_zoom = grid.get_min_zoom(tms, dataset[first_data_var])
+        max_zoom = grid.get_max_zoom(tms)
+        zoom_levels = range(min_zoom, max_zoom + 1)
+
+    transformer = pyproj.Transformer.from_crs(
+        grid.crs, pyproj.CRS.from_wkt(tms.crs.to_wkt()), always_xy=True
+    )
+    tms_bbox = transformer.transform_bounds(
+        grid.bbox.west,
+        grid.bbox.south,
+        grid.bbox.east,
+        grid.bbox.north,
+    )
 
     limits = []
     for z in zoom_levels:
-        max_tiles = int(2**z - 1)
+        west, south, east, north = tms_bbox
+        tiles = [
+            tms.tile(west, south, z),
+            tms.tile(east, north, z),
+            tms.tile(west, north, z),
+            tms.tile(east, south, z),
+        ]
+
         limits.append(
             TileMatrixSetLimit(
                 tileMatrix=str(z),
-                minTileRow=0,
-                maxTileRow=max_tiles,
-                minTileCol=0,
-                maxTileCol=max_tiles,
+                minTileRow=min(tile.y for tile in tiles),
+                maxTileRow=max(tile.y for tile in tiles),
+                minTileCol=min(tile.x for tile in tiles),
+                maxTileCol=max(tile.x for tile in tiles),
             )
         )
+
     return limits
 
 

@@ -204,7 +204,7 @@ class TilesPlugin(Plugin):
                         layers.append(layer)
 
                     # Define tile matrix limits
-                    tileMatrixSetLimits = get_tile_matrix_limits(tms_id)
+                    tileMatrixSetLimits = get_tile_matrix_limits(tms_id, dataset)
 
                     tileset = TilesetSummary(
                         title=f"{title} - {tms_id}",
