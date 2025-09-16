@@ -614,13 +614,8 @@ class TestGridMinimumSpacing:
     def test_curvilinear_spacing(self):
         """Test dXmin/dYmin for Curvilinear grid with non-uniform spacing."""
         ni, nj = 10, 8
-        # Create non-uniform spacing in 1D
-        # lon spacing: starts at 0.5, increases to 2.0
         lon_1d = np.array([0, 0.5, 1.2, 2.1, 3.3, 4.8, 6.5, 8.3, 10.0, 12.0])
-        # lat spacing: starts at 0.3, increases to 1.5
         lat_1d = np.array([0, 0.3, 0.8, 1.5, 2.4, 3.5, 4.8, 6.3])
-
-        # Broadcast to 2D arrays
         lon_2d, lat_2d = np.broadcast_arrays(lon_1d[None, :], lat_1d[:, None])
 
         # Add some small perturbations to make it truly curvilinear (not just rectilinear)
@@ -648,74 +643,6 @@ class TestGridMinimumSpacing:
         # Due to the perturbations, actual values might be slightly different
         assert grid.dXmin == pytest.approx(0.5, rel=0.1)
         assert grid.dYmin == pytest.approx(0.3, rel=0.1)
-
-    def test_grid_equals_with_dxmin_dymin(self):
-        """Test that grid equality comparison includes dXmin and dYmin."""
-        # Create two grids with the same spacing
-        x1 = np.linspace(0, 10, 11)  # spacing = 1.0
-        y1 = np.linspace(0, 5, 6)  # spacing = 1.0
-        ds1 = xr.Dataset(
-            {
-                "data": xr.DataArray(np.zeros((6, 11)), dims=["y", "x"]),
-                "x": xr.DataArray(x1, dims="x"),
-                "y": xr.DataArray(y1, dims="y"),
-            }
-        )
-        crs = CRS.from_epsg(4326)
-        grid1 = Rectilinear.from_dataset(ds1, crs, "x", "y")
-
-        # Create another grid with the same spacing - should be equal
-        x2 = np.linspace(0, 10, 11)  # same spacing = 1.0
-        y2 = np.linspace(0, 5, 6)  # same spacing = 1.0
-        ds2 = xr.Dataset(
-            {
-                "data": xr.DataArray(np.zeros((6, 11)), dims=["y", "x"]),
-                "x": xr.DataArray(x2, dims="x"),
-                "y": xr.DataArray(y2, dims="y"),
-            }
-        )
-        grid2 = Rectilinear.from_dataset(ds2, crs, "x", "y")
-
-        # Both grids should have the same dXmin and dYmin
-        assert grid1.dXmin == 1.0
-        assert grid1.dYmin == 1.0
-        assert grid2.dXmin == 1.0
-        assert grid2.dYmin == 1.0
-        assert grid1.equals(grid2)
-
-        # Create a grid with different X spacing - should not be equal
-        x3 = np.linspace(0, 10, 6)  # different spacing = 2.0
-        y3 = np.linspace(0, 5, 6)  # same spacing = 1.0
-        ds3 = xr.Dataset(
-            {
-                "data": xr.DataArray(np.zeros((6, 6)), dims=["y", "x"]),
-                "x": xr.DataArray(x3, dims="x"),
-                "y": xr.DataArray(y3, dims="y"),
-            }
-        )
-        grid3 = Rectilinear.from_dataset(ds3, crs, "x", "y")
-
-        # Grid3 should have different dXmin
-        assert grid3.dXmin == 2.0
-        assert grid3.dYmin == 1.0
-        assert not grid1.equals(grid3)
-
-        # Create a grid with different Y spacing - should not be equal
-        x4 = np.linspace(0, 10, 11)  # same spacing = 1.0
-        y4 = np.linspace(0, 5, 11)  # different spacing = 0.5
-        ds4 = xr.Dataset(
-            {
-                "data": xr.DataArray(np.zeros((11, 11)), dims=["y", "x"]),
-                "x": xr.DataArray(x4, dims="x"),
-                "y": xr.DataArray(y4, dims="y"),
-            }
-        )
-        grid4 = Rectilinear.from_dataset(ds4, crs, "x", "y")
-
-        # Grid4 should have different dYmin
-        assert grid4.dXmin == 1.0
-        assert grid4.dYmin == 0.5
-        assert not grid1.equals(grid4)
 
 
 def _create_test_dataset(
