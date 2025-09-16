@@ -61,6 +61,48 @@ def sum_tuples(*tuples):
     return tuple(sum(values) for values in zip(*tuples, strict=False))
 
 
+def check_data_is_renderable_size(
+    slicers: dict[str, list[slice | Fill]],
+    da: xr.DataArray,
+    grid: GridSystem2D,
+    alternate: GridMetadata,
+) -> bool:
+    """
+    Check if given slicers produce data of renderable size without loading data.
+
+    This replicates the logic from apply_slicers that checks for tile size limits.
+
+    Parameters
+    ----------
+    slicers : dict[str, list[slice | Fill]]
+        Slicers for data selection
+    da : xr.DataArray
+        Data array (only metadata used, no data loaded)
+    grid : GridSystem2D
+        Grid system information
+    alternate : GridMetadata
+        Alternate grid metadata
+
+    Returns
+    -------
+    bool
+        True if data is within renderable size limits, False if too big
+    """
+    has_alternate = alternate.crs != grid.crs
+    # Factor calculation matches apply_slicers logic:
+    # if we have crs matching the desired CRS,
+    # then we load that data from disk;
+    # and double the limit to allow slightly larger tiles
+    # = (1 data var + 2 coord vars) * 2
+    factor = 6 if has_alternate else 1
+
+    # Calculate total shape using the same logic as apply_slicers
+    total_shape = shape_from_slicers(slicers, da, grid)
+
+    # Check if it's within the limit
+    return math.prod(total_shape) <= factor * config.get("max_renderable_size")
+
+
 def shape_from_slicers(
     slicers: dict[str, list[slice | Fill]], da: xr.DataArray, grid: GridSystem2D
 ) -> tuple[int, int]:

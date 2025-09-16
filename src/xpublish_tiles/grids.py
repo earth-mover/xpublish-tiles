@@ -184,6 +184,38 @@ def _convert_longitude_slice(lon_slice: slice, *, uses_0_360) -> tuple[slice, ..
         return (slice(start, stop),)
 
 
+def _padded_diff(arr: np.ndarray, axis: int = -1) -> np.ndarray:
+    """
+    Compute differences along an axis and pad to match original array shape.
+    This replaces np.gradient for computing spacing between points.
+
+    Similar to np.gradient but uses forward differences instead of centered differences.
+    The result represents the spacing to the next point, with the last value repeated.
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input array
+    axis : int
+        Axis along which to compute differences. Default is -1 (last axis).
+
+    Returns
+    -------
+    np.ndarray
+        Array of same shape as input with padded differences.
+        Uses forward differences with the last value repeated.
+    """
+    # Compute forward differences
+    diff = np.diff(arr, axis=axis)
+
+    # Create padding width specification
+    pad_width = [(0, 0)] * arr.ndim
+    pad_width[axis] = (0, 1)
+
+    # Pad by repeating the last slice along the axis
+    return np.pad(diff, pad_width, mode="edge")
+
+
 def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
     """
     Compute interval bounds from cell centers, handling non-uniform spacing.
@@ -203,13 +235,16 @@ def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
     if size < 2:
         raise ValueError("lat/lon vector with size < 2!")
 
-    # Calculate differences between adjacent centers
-    halfwidth = np.gradient(centers) / 2
-
-    # Initialize bounds array
+    # Compute bounds as midpoints between centers
     bounds = np.empty(len(centers) + 1)
-    bounds[:-1] = centers - halfwidth
-    bounds[-1] = centers[-1] + halfwidth[-1]
+
+    # Interior bounds: midpoints between adjacent centers
+    bounds[1:-1] = (centers[:-1] + centers[1:]) / 2
+
+    # First and last bounds: extrapolate using the spacing
+    bounds[0] = centers[0] - (centers[1] - centers[0]) / 2
+    bounds[-1] = centers[-1] + (centers[-1] - centers[-2]) / 2
+
     return bounds
 
 
@@ -226,6 +261,8 @@ class CurvilinearCellIndex(xr.Index):
     right: np.ndarray
     bottom: np.ndarray
     top: np.ndarray
+    _dXmin: float
+    _dYmin: float
 
     def __init__(self, *, X: xr.DataArray, Y: xr.DataArray, Xdim: str, Ydim: str):
         if Y.nbytes > MAX_COORD_VAR_NBYTES or X.nbytes > MAX_COORD_VAR_NBYTES:
@@ -240,7 +277,7 @@ class CurvilinearCellIndex(xr.Index):
         X, Y = self.X.data, self.Y.data
         xaxis = self.X.get_axis_num(self.Xdim)
         yaxis = self.Y.get_axis_num(self.Ydim)
-        dX, dY = np.gradient(X, axis=xaxis), np.gradient(Y, axis=yaxis)
+        dX, dY = _padded_diff(X, axis=xaxis), _padded_diff(Y, axis=yaxis)
         self.left, self.right = X - dX / 2, X + dX / 2
         self.bottom, self.top = Y - dY / 2, Y + dY / 2
         self.y_is_increasing = True
@@ -248,6 +285,26 @@ class CurvilinearCellIndex(xr.Index):
             self.y_is_increasing = False
             self.top, self.bottom = self.bottom, self.top
         self.xaxis, self.yaxis = xaxis, yaxis
+
+        # Calculate and store minimum spacing
+        x_diffs = np.abs(dX)
+        y_diffs = np.abs(dY)
+
+        x_positive = x_diffs[x_diffs > 0]
+        y_positive = y_diffs[y_diffs > 0]
+
+        self._dXmin = float(numbagg.nanmin(x_positive)) if x_positive.size > 0 else None
+        self._dYmin = float(numbagg.nanmin(y_positive)) if y_positive.size > 0 else None
+
+    def get_min_spacing(self) -> tuple[float, float]:
+        """Get minimum spacing in X and Y directions.
+
+        Returns
+        -------
+        tuple[float | None, float | None]
+            (dXmin, dYmin) - minimum spacing in X and Y directions
+        """
+        return self._dXmin, self._dYmin
 
     def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
         X, Y = self.X.data, self.Y.data
@@ -301,6 +358,8 @@ class CurvilinearCellIndex(xr.Index):
 
 
 class LongitudeCellIndex(xr.indexes.PandasIndex):
+    _dXmin: float | None
+
     def __init__(self, interval_index: pd.IntervalIndex, dim: str):
         """
         Initialize LongitudeCellIndex with an IntervalIndex.
@@ -322,6 +381,10 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         coord_centers = self.cell_centers
         self._uses_0_360 = coord_centers.min() >= 0 and coord_centers.max() > 180
 
+        # Calculate and store minimum cell width
+        widths = self.index.right.values - self.index.left.values
+        self._dXmin = float(np.min(widths)) if len(widths) > 0 else None
+
     @property
     def cell_bounds(self) -> np.ndarray:
         """Get the cell bounds as an array."""
@@ -341,6 +404,16 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
     def uses_0_360(self) -> bool:
         """Check if this longitude index uses 0→360 coordinate system (vs -180→180)."""
         return self._uses_0_360
+
+    def get_min_spacing(self) -> float | None:
+        """Get minimum cell width (right - left).
+
+        Returns
+        -------
+        float | None
+            Minimum cell width
+        """
+        return self._dXmin
 
     def _determine_global_coverage(self) -> bool:
         """
@@ -453,6 +526,8 @@ class GridSystem(ABC):
     indexes: tuple[xr.Index, ...]
     Z: str | None = None
     alternates: tuple[GridMetadata, ...] = field(default_factory=tuple)
+    dXmin: float | None = None
+    dYmin: float | None = None
 
     @property
     @abstractmethod
@@ -477,6 +552,10 @@ class GridSystem(ABC):
         ):
             return False
         if any(a != b for a, b in zip(self.alternates, other.alternates, strict=False)):
+            return False
+        if self.dXmin != other.dXmin:
+            return False
+        if self.dYmin != other.dYmin:
             return False
         return True
 
@@ -617,6 +696,8 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
     indexes: tuple[rasterix.RasterIndex]
     Z: str | None = None
     lon_spans_globe: bool = field(init=False)
+    dXmin: float = field(init=False)
+    dYmin: float = field(init=False)
 
     def __post_init__(self) -> None:
         self.Xdim = self.X
@@ -625,6 +706,11 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
         self.lon_spans_globe = self.crs.is_geographic and _is_raster_index_global(
             self.indexes[0], self.bbox, self.crs
         )
+        # Calculate minimum grid spacing from affine transform
+        (index,) = self.indexes
+        affine = index.transform()
+        self.dXmin = abs(affine.a)  # X pixel size
+        self.dYmin = abs(affine.e)  # Y pixel size
 
     @classmethod
     def from_dataset(
@@ -698,6 +784,8 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
     indexes: tuple[xr.indexes.PandasIndex | LongitudeCellIndex, xr.indexes.PandasIndex]
     Z: str | None = None
     lon_spans_globe: bool = field(init=False)
+    dXmin: float = field(init=False)
+    dYmin: float = field(init=False)
 
     def __post_init__(self) -> None:
         self.Xdim = self.X
@@ -711,6 +799,22 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
             self.lon_spans_globe = self.indexes[0].is_global
         else:
             self.lon_spans_globe = False
+
+        # Calculate minimum grid spacing from indexes
+        if self.indexes:
+            x_index = self.indexes[0]
+            if isinstance(x_index, LongitudeCellIndex):
+                self.dXmin = x_index.get_min_spacing()
+            else:
+                assert isinstance(x_index, xr.indexes.PandasIndex)
+                widths = x_index.index.right.values - x_index.index.left.values
+                self.dXmin = float(np.min(widths)) if len(widths) > 0 else None
+
+        if len(self.indexes) > 1:
+            y_index = self.indexes[1]
+            assert isinstance(y_index, xr.indexes.PandasIndex)
+            widths = y_index.index.right.values - y_index.index.left.values
+            self.dYmin = float(np.min(widths)) if len(widths) > 0 else None
 
     @property
     def dims(self) -> set[str]:
@@ -828,12 +932,15 @@ class Curvilinear(GridSystem):
     indexes: tuple[xr.Index, ...]
     Z: str | None = None
     lon_spans_globe: bool = field(init=False)
+    dXmin: float = field(init=False)
+    dYmin: float = field(init=False)
 
     def __post_init__(self) -> None:
         # Determine if this curvilinear grid spans the globe in longitude
+        index = next(iter(self.indexes))
+        assert isinstance(index, CurvilinearCellIndex)
+
         if self.crs.is_geographic:
-            index = next(iter(self.indexes))
-            assert isinstance(index, CurvilinearCellIndex)
             # Use cell edges instead of cell centers for more accurate global coverage detection
             min_edge = numbagg.nanmin(index.left)
             max_edge = numbagg.nanmax(index.right)
@@ -841,6 +948,9 @@ class Curvilinear(GridSystem):
             self.lon_spans_globe = lon_span >= 350
         else:
             self.lon_spans_globe = False
+
+        # Calculate minimum grid spacing using index method
+        self.dXmin, self.dYmin = index.get_min_spacing()
 
     def _guess_dims(
         ds: xr.Dataset, *, X: xr.DataArray, Y: xr.DataArray
