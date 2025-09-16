@@ -33,17 +33,20 @@ from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
     ERA5,
     EU3035,
+    EU3035_HIRES,
     FORECAST,
     HRRR,
     HRRR_CRS_WKT,
     HRRR_MULTIPLE,
     IFS,
+    PARA_HIRES,
     POPDS,
+    UTM33S_HIRES,
+    UTM50S_HIRES,
+    Dataset,
 )
 from xpublish_tiles.testing.tiles import TILES
 from xpublish_tiles.types import ContinuousData
-
-# FIXME: add tests for datasets with latitude, longitude but no attrs
 
 
 @pytest.mark.parametrize(
@@ -258,6 +261,31 @@ from xpublish_tiles.types import ContinuousData
 def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> None:
     actual = guess_grid_system(ds, array_name)
     assert expected == actual
+
+
+@pytest.mark.parametrize(
+    "dataset, minzoom, maxzoom",
+    (
+        pytest.param(IFS, 0, 3, id="ifs"),
+        pytest.param(HRRR, 0, 6, id="hrrr"),
+        # data spacing: 120m; Zoom level 10: 152m spacing @ eq
+        pytest.param(EU3035_HIRES, 4, 10, id="eu3035_hires"),
+        # data spacing: 30m; Zoom level 13: 38m spacing @ eq
+        pytest.param(PARA_HIRES, 7, 13, id="para_hires"),
+        # data spacing: 0.5m; Zoom level 19: 0.3m spacing @ eq
+        pytest.param(UTM33S_HIRES, 12, 19, id="utm33s_hires"),
+        # data spacing: 1m; Zoom level 18: 0.6m spacing @ eq
+        pytest.param(UTM50S_HIRES, 11, 18, id="utm50s_hires"),
+    ),
+)
+def test_unit_minmax_zoom_level(dataset: Dataset, minzoom, maxzoom):
+    ds = dataset.create()
+    grid = guess_grid_system(ds, "foo")
+    tms = morecantile.tms.get("WebMercatorQuad")
+    assert grid.get_min_zoom(tms, ds["foo"]) == minzoom
+    if minzoom == 0:
+        assert ds.foo.size < config.get("max_renderable_size")
+    assert grid.get_max_zoom(tms) == maxzoom
 
 
 def test_multiple_grid_mappings_detection() -> None:
@@ -722,7 +750,7 @@ class TestGridZoomMethods:
         "shape, expected",
         (
             ((10, 20), 0),
-            ((30000, 15000), 1),
+            ((30000, 15000), 2),
         ),
     )
     def test_get_min_zoom(self, shape, expected):
