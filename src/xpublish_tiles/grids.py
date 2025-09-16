@@ -186,6 +186,38 @@ def _convert_longitude_slice(lon_slice: slice, *, uses_0_360) -> tuple[slice, ..
         return (slice(start, stop),)
 
 
+def _padded_diff(arr: np.ndarray, axis: int = -1) -> np.ndarray:
+    """
+    Compute differences along an axis and pad to match original array shape.
+    This replaces np.gradient for computing spacing between points.
+
+    Similar to np.gradient but uses forward differences instead of centered differences.
+    The result represents the spacing to the next point, with the last value repeated.
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input array
+    axis : int
+        Axis along which to compute differences. Default is -1 (last axis).
+
+    Returns
+    -------
+    np.ndarray
+        Array of same shape as input with padded differences.
+        Uses forward differences with the last value repeated.
+    """
+    # Compute forward differences
+    diff = np.diff(arr, axis=axis)
+
+    # Create padding width specification
+    pad_width = [(0, 0)] * arr.ndim
+    pad_width[axis] = (0, 1)
+
+    # Pad by repeating the last slice along the axis
+    return np.pad(diff, pad_width, mode="edge")
+
+
 def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
     """
     Compute interval bounds from cell centers, handling non-uniform spacing.
@@ -205,13 +237,16 @@ def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
     if size < 2:
         raise ValueError("lat/lon vector with size < 2!")
 
-    # Calculate differences between adjacent centers
-    halfwidth = np.gradient(centers) / 2
-
-    # Initialize bounds array
+    # Compute bounds as midpoints between centers
     bounds = np.empty(len(centers) + 1)
-    bounds[:-1] = centers - halfwidth
-    bounds[-1] = centers[-1] + halfwidth[-1]
+
+    # Interior bounds: midpoints between adjacent centers
+    bounds[1:-1] = (centers[:-1] + centers[1:]) / 2
+
+    # First and last bounds: extrapolate using the spacing
+    bounds[0] = centers[0] - (centers[1] - centers[0]) / 2
+    bounds[-1] = centers[-1] + (centers[-1] - centers[-2]) / 2
+
     return bounds
 
 
@@ -244,7 +279,7 @@ class CurvilinearCellIndex(xr.Index):
         X, Y = self.X.data, self.Y.data
         xaxis = self.X.get_axis_num(self.Xdim)
         yaxis = self.Y.get_axis_num(self.Ydim)
-        dX, dY = np.gradient(X, axis=xaxis), np.gradient(Y, axis=yaxis)
+        dX, dY = _padded_diff(X, axis=xaxis), _padded_diff(Y, axis=yaxis)
         self.left, self.right = X - dX / 2, X + dX / 2
         self.bottom, self.top = Y - dY / 2, Y + dY / 2
         self.y_is_increasing = True

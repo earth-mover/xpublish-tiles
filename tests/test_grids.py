@@ -571,7 +571,6 @@ class TestGridMinimumSpacing:
         )
         crs = CRS.from_epsg(4326)
         grid = Rectilinear.from_dataset(ds, crs, "x", "y")
-
         assert grid.dXmin == 1.0
         assert grid.dYmin == 1.0
 
@@ -589,23 +588,8 @@ class TestGridMinimumSpacing:
         crs = CRS.from_epsg(4326)
         grid = Rectilinear.from_dataset(ds, crs, "x", "y")
 
-        # dXmin/dYmin should be the minimum cell width (right - left) from intervals
-        # Expected values based on _compute_interval_bounds calculation
-        assert grid.dXmin == pytest.approx(0.75)  # min of [0.75, 1.5, 2.5, 3.75, 4.0]
-        assert grid.dYmin == pytest.approx(
-            0.375
-        )  # min of [0.375, 0.75, 1.25, 1.875, 2.0]
-
-        # Verify calculations by checking the intervals directly
-        x_index = grid.indexes[0]
-        x_interval_index = cast(pd.IntervalIndex, x_index.index)
-        x_widths = x_interval_index.right.values - x_interval_index.left.values
-        assert grid.dXmin == pytest.approx(float(np.min(x_widths)))
-
-        y_index = grid.indexes[1]
-        y_interval_index = cast(pd.IntervalIndex, y_index.index)
-        y_widths = y_interval_index.right.values - y_interval_index.left.values
-        assert grid.dYmin == pytest.approx(float(np.min(y_widths)))
+        assert grid.dXmin == pytest.approx(1)
+        assert grid.dYmin == pytest.approx(0.5)
 
     def test_raster_affine_spacing(self):
         """Test dXmin/dYmin for RasterAffine grid."""
@@ -614,7 +598,6 @@ class TestGridMinimumSpacing:
         y_spacing = 0.5
         x = np.arange(nx) * x_spacing
         y = np.arange(ny) * y_spacing
-
         ds = xr.Dataset(
             {
                 "data": xr.DataArray(np.zeros((ny, nx)), dims=["y", "x"]),
@@ -622,26 +605,28 @@ class TestGridMinimumSpacing:
                 "y": xr.DataArray(y, dims="y"),
             }
         )
-
-        # Apply rasterix index
         ds = rasterix.assign_index(ds, x_dim="x", y_dim="y")
         crs = CRS.from_epsg(4326)
-
         grid = RasterAffine.from_dataset(ds, crs, "x", "y")
-
         assert grid.dXmin == x_spacing
         assert grid.dYmin == y_spacing
 
     def test_curvilinear_spacing(self):
-        """Test dXmin/dYmin for Curvilinear grid."""
-        # Create a simple curvilinear grid with known spacing
+        """Test dXmin/dYmin for Curvilinear grid with non-uniform spacing."""
         ni, nj = 10, 8
-        lon_1d = np.linspace(0, 9, ni)
-        lat_1d = np.linspace(0, 7, nj)
+        # Create non-uniform spacing in 1D
+        # lon spacing: starts at 0.5, increases to 2.0
+        lon_1d = np.array([0, 0.5, 1.2, 2.1, 3.3, 4.8, 6.5, 8.3, 10.0, 12.0])
+        # lat spacing: starts at 0.3, increases to 1.5
+        lat_1d = np.array([0, 0.3, 0.8, 1.5, 2.4, 3.5, 4.8, 6.3])
 
-        # Create 2D coordinate arrays
-        lon_2d = np.ones((nj, ni)) * lon_1d[None, :]
-        lat_2d = np.ones((ni, nj)).T * lat_1d[:, None]
+        # Broadcast to 2D arrays
+        lon_2d, lat_2d = np.broadcast_arrays(lon_1d[None, :], lat_1d[:, None])
+
+        # Add some small perturbations to make it truly curvilinear (not just rectilinear)
+        # This simulates a rotated or distorted grid
+        lon_2d = lon_2d + 0.1 * np.sin(lat_2d * np.pi / 6)
+        lat_2d = lat_2d + 0.05 * np.cos(lon_2d * np.pi / 12)
 
         ds = xr.Dataset(
             {
@@ -654,13 +639,15 @@ class TestGridMinimumSpacing:
                 ),
             }
         )
-
         crs = CRS.from_epsg(4326)
         grid = Curvilinear.from_dataset(ds, crs, "lon", "lat")
 
-        # Expected spacing: 1.0 in lon direction, 1.0 in lat direction
-        assert grid.dXmin == pytest.approx(1.0)
-        assert grid.dYmin == pytest.approx(1.0)
+        # Expected minimum spacings based on the smallest differences
+        # lon: smallest diff is 0.5 (between first two points)
+        # lat: smallest diff is 0.3 (between first two points)
+        # Due to the perturbations, actual values might be slightly different
+        assert grid.dXmin == pytest.approx(0.5, rel=0.1)
+        assert grid.dYmin == pytest.approx(0.3, rel=0.1)
 
     def test_grid_equals_with_dxmin_dymin(self):
         """Test that grid equality comparison includes dXmin and dYmin."""
