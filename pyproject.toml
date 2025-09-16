@@ -98,6 +98,12 @@ testpaths = ["tests", "integration_tests"]
 log_cli_level = "INFO"
 xfail_strict = true
 addopts = ["-ra", "--strict-config", "--strict-markers", "--dist=loadgroup"]
+filterwarnings = [
+    "ignore::morecantile.errors.PointOutsideTMSBounds",
+    "ignore::DeprecationWarning:distutils",
+    "ignore::DeprecationWarning:pyct.cmd",
+    "ignore::pydantic.warnings.PydanticDeprecatedSince20",
+]
 
 [tool.ruff]
 line-length = 90
