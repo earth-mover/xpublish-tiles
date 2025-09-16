@@ -48,11 +48,7 @@ body { margin: 0; padding: 0; }
             'type': 'raster',
             // use the tiles option to specify a WMS tile source URL
             // https://docs.mapbox.com/style-spec/reference/sources/
-            'tiles': [
-                // CHANGE THIS URL TO DEMO URL and LAYERS/time/other dimensions
-                'http://localhost:8080/tiles/WebMercatorQuad/{z}/{y}/{x}?variables=foo&style=raster/viridis&width=256&height=256&valid_time=2025-04-03T06:00:00'
-            ],
-            'tileSize': 256
+            'url': 'http://localhost:8080/tiles/WebMercatorQuad/tilejson.json?variables=foo&width=512&height=512&style=raster/viridis',
         });
         map.addLayer(
             {
