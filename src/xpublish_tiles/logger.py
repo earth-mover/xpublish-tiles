@@ -67,19 +67,19 @@ class CleanConsoleRenderer:
 
         # Get the timestamp
         timestamp = event_dict.get("timestamp", "")
-        timestamp_str = f"   \x1b[2m{timestamp}\x1b[0m " if timestamp else ""
+        timestamp_str = f"   {timestamp} " if timestamp else ""
 
         # Create context fields (excluding standard structlog fields)
         context_parts = []
         for key, value in event_dict.items():
             if key not in ("event", "timestamp", "level", "logger", "exc_info"):
-                context_parts.append(f"\x1b[36m{key}\x1b[0m=\x1b[35m{value}\x1b[0m")
+                context_parts.append(f"{key}={value}")
 
         context_str = " ".join(context_parts)
         if context_str:
             context_str = " " + context_str
 
-        return f"{timestamp_str}\x1b[1m{event}\x1b[0m{context_str}"
+        return f"{timestamp_str}{event}{context_str}"
 
 
 # Create a formatter for structlog that works with standard logging
