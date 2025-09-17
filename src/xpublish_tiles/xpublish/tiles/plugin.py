@@ -308,6 +308,10 @@ class TilesPlugin(Plugin):
 
             # XYZ template
             url_template = f"{base_url}{tiles_path}/{{z}}/{{y}}/{{x}}?variables={','.join(query.variables)}&style={style}/{variant}&width={query.width}&height={query.height}&f={query.f}"
+            # Append optional color scale range
+            if query.colorscalerange:
+                url_template = f"{url_template}&colorscalerange={query.colorscalerange[0]:g},{query.colorscalerange[1]:g}"
+
             # Append selectors
             if selectors:
                 selector_qs = "&".join(f"{k}={v}" for k, v in selectors.items())
