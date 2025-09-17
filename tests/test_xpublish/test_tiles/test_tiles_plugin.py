@@ -570,7 +570,7 @@ def test_tilejson_endpoint():
     # Test TileJSON endpoint with dimension selectors
     response = client.get(
         "/datasets/temp/tiles/WebMercatorQuad/tilejson.json"
-        "?variables=temperature&style=raster/plasma&width=512&height=512&time=2020-02-01"
+        "?variables=temperature&style=raster/plasma&width=512&height=512&time=2020-02-01&colorscalerange=-3,3"
     )
     assert response.status_code == 200
 
@@ -583,6 +583,7 @@ def test_tilejson_endpoint():
 
     # Check tile URL template format
     tile_url = tilejson["tiles"][0]
+    print(tile_url)
     assert "{z}" in tile_url
     assert "{y}" in tile_url
     assert "{x}" in tile_url
@@ -591,6 +592,8 @@ def test_tilejson_endpoint():
     assert "width=512" in tile_url
     assert "height=512" in tile_url
     assert "time=2020-02-01" in tile_url  # Dimension selector preserved
+    assert "colorscalerange=-3,3" in tile_url  # Additional param preserved
+    assert "render_errors=false" in tile_url  # Default param included
 
     # Check optional fields
     assert tilejson["scheme"] == "xyz"
