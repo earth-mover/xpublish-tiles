@@ -654,8 +654,6 @@ def test_tilejson_missing_variables():
 
 def test_tilejson_bounds_normalized_from_0_360_global():
     """TileJSON bounds should normalize 0..360 longitudes to [-180, 180]."""
-    import numpy as np
-
     data = xr.Dataset(
         {
             "temperature": xr.DataArray(
@@ -692,8 +690,6 @@ def test_tilejson_bounds_normalized_from_0_360_global():
 
 def test_tilejson_bounds_dateline_crossing_0_360():
     """For dateline-crossing 0..360 datasets, use full world longitudes in TileJSON."""
-    import numpy as np
-
     data = xr.Dataset(
         {
             "temperature": xr.DataArray(
@@ -702,12 +698,12 @@ def test_tilejson_bounds_dateline_crossing_0_360():
                 coords={
                     "lat": (
                         ["lat"],
-                        np.linspace(-10, 10, 10),
+                        np.linspace(10, -10, 10),
                         {"axis": "Y", "standard_name": "latitude"},
                     ),
                     "lon": (
                         ["lon"],
-                        np.linspace(350, 10, 20),
+                        np.linspace(10, 350, 20),
                         {"axis": "X", "standard_name": "longitude"},
                     ),
                 },
@@ -745,7 +741,7 @@ def test_tilejson_bounds_with_decreasing_lat_lon():
                     ),
                     "lon": (
                         ["lon"],
-                        np.linspace(360, 0, 180),
+                        np.linspace(0, 360, 180, endpoint=False),
                         {"axis": "X", "standard_name": "longitude"},
                     ),
                 },
