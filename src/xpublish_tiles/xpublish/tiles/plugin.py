@@ -334,23 +334,14 @@ class TilesPlugin(Plugin):
             tms = morecantile.tms.get(tileMatrixSetId)
 
             # Calculate optimal zoom levels based on grid and data characteristics
-            try:
-                # Get the first variable's grid system
-                var_name = query.variables[0]
-                da = dataset[var_name]
-                grid = guess_grid_system(dataset, var_name)
+            # Get the first variable's grid system
+            var_name = query.variables[0]
+            grid = guess_grid_system(dataset, var_name)
+            da = dataset.cf[var_name]
 
-                # Calculate min/max zoom based on data characteristics
-                minzoom = get_min_zoom(grid, tms, da)
-                maxzoom = min(get_max_zoom(grid, tms), tms.maxzoom)
-
-            except Exception as e:
-                # Fallback to default values if grid analysis fails
-                logger.error(
-                    f"Failed to calculate optimal zoom levels for variable {var_name}: {e}"
-                )
-                minzoom = tms.minzoom
-                maxzoom = tms.maxzoom
+            # Calculate min/max zoom based on data characteristics
+            minzoom = get_min_zoom(grid, tms, da)
+            maxzoom = min(get_max_zoom(grid, tms), tms.maxzoom)
 
             # Compose TileJSON
             return TileJSON(
