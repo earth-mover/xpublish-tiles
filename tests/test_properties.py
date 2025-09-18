@@ -197,11 +197,14 @@ async def test_property_global_render_no_transparent_tile(
 
 
 @pytest.mark.asyncio
-@given(tile_tms=tile_and_tms(), ds=global_datasets(allow_categorical=False))
+@given(
+    data=st.data(), tile_tms=tile_and_tms(), ds=global_datasets(allow_categorical=False)
+)
 @settings(deadline=None, max_examples=250)
 async def test_property_rectilinear_vs_curvilinear_exact(
     tile_tms: tuple[Tile, TileMatrixSet],
     ds: xr.Dataset,
+    data: st.DataObject,
     pytestconfig,
 ):
     """
@@ -250,6 +253,24 @@ async def test_property_rectilinear_vs_curvilinear_exact(
         perceptual_threshold=0.9,  # 90% similarity threshold
     )
     assert images_similar, f"Rectilinear and curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+
+    transposed = ds.assign_coords(
+        longitude=ds.longitude.transpose() if data.draw(st.booleans()) else ds.longitude,
+        latitude=ds.latitude.transpose() if data.draw(st.booleans()) else ds.latitude,
+    )
+    with config.set(detect_approx_rectilinear=False):
+        transposed_result = await pipeline(transposed, query)
+    images_similar, ssim_score = compare_image_buffers_with_debug(
+        buffer1=rectilinear_result,  # expected
+        buffer2=transposed_result,  # actual
+        test_name=test_name,
+        tile_info=(tile, tms),
+        debug_visual=pytestconfig.getoption("--debug-visual", default=False),
+        debug_visual_save=pytestconfig.getoption("--debug-visual-save", default=False),
+        mode="perceptual",
+        perceptual_threshold=0.9,  # 90% similarity threshold
+    )
+    assert images_similar, f"Rectilinear and *transposed* curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
 
 
 @pytest.mark.asyncio
