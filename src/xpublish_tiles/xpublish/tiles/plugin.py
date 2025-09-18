@@ -24,7 +24,7 @@ from xpublish_tiles.logger import (
 )
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.render import RenderRegistry
-from xpublish_tiles.tiles_lib import get_max_zoom, get_min_zoom
+from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import QueryParams
 from xpublish_tiles.utils import normalize_tilejson_bounds
 from xpublish_tiles.xpublish.tiles.metadata import (
@@ -341,7 +341,7 @@ class TilesPlugin(Plugin):
 
             # Calculate min/max zoom based on data characteristics
             minzoom = get_min_zoom(grid, tms, da)
-            maxzoom = min(get_max_zoom(grid, tms), tms.maxzoom)
+            maxzoom = tms.maxzoom
 
             # Compose TileJSON
             return TileJSON(
