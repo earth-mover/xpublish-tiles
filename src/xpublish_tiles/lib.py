@@ -129,11 +129,11 @@ transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=
 # 155 ms ± 2.75 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
 # 156 ms ± 5.07 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
 # 772 ms ± 27 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
-def get_transform_chunk_size(da: xr.DataArray, xname: str, yname: str):
+def get_transform_chunk_size(da: xr.DataArray):
     """Get the chunk size for coordinate transformations dynamically."""
     chunk_size = config.get("transform_chunk_size")
     # This way the chunks are C-contiguous and we avoid a memory copy inside pyproj \m/
-    return (chunk_size * chunk_size // da.shape[-1], da.shape[-1])
+    return (max(chunk_size * chunk_size // da.shape[-1], 1), da.shape[-1])
 
 
 def is_4326_like(crs: CRS) -> bool:
@@ -331,7 +331,7 @@ async def transform_coordinates(
         iny.drop_indexes(iny.dims, errors="ignore"),
     )
 
-    chunk_size = get_transform_chunk_size(subset, grid_x_name, grid_y_name)
+    chunk_size = get_transform_chunk_size(bx)
     # Choose transformation method based on data size
     if bx.size > math.prod(chunk_size):
         newX, newY = await async_run(
@@ -343,9 +343,7 @@ async def transform_coordinates(
             True,  # inplace
         )
     else:
-        newX, newY = transformer.transform(
-            bx.data.copy(order="C"), by.data.copy(order="C")
-        )
+        newX, newY = transformer.transform(bx.data, by.data)
 
     return bx.copy(data=newX), by.copy(data=newY)
 
