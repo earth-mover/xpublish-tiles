@@ -360,7 +360,7 @@ async def apply_slicers(
         # We also specify `boundary="trim"` to avoid a copy, and accept that we will lose one pixel
         # if pad_instr := slicers_to_pad_instruction(new_slicers):
         #     subset_da = subset_da.pad(**pad_instr)
-        with log_duration(f"coarsen by {coarsen_factors!r}", "🔲"):
+        with log_duration(f"coarsen {subset_da.shape} by {coarsen_factors!r}", "🔲"):
             subset_da = await async_run(coarsen_data, subset_da, coarsen_factors)
 
     return subset_da
@@ -592,9 +592,6 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     buffer = io.BytesIO()
     renderer = query.get_renderer()
 
-    # Capture the context logger before entering the thread pool
-    context_logger = get_context_logger()
-
     await async_run(
         lambda: renderer.render(
             contexts=new_subsets,
@@ -742,9 +739,10 @@ async def subset_to_bbox(
             if grid.crs.is_geographic
             else False
         )
-        newX, newY = await transform_coordinates(
-            subset, alternate.X, alternate.Y, transformer_from_crs(alternate.crs, crs)
-        )
+        with log_duration("transform_coordinates", "🔄"):
+            newX, newY = await transform_coordinates(
+                subset, alternate.X, alternate.Y, transformer_from_crs(alternate.crs, crs)
+            )
 
         # Fix coordinate discontinuities in transformed coordinates if detected
         if has_discontinuity:
