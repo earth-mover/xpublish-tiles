@@ -360,7 +360,7 @@ async def apply_slicers(
         # We also specify `boundary="trim"` to avoid a copy, and accept that we will lose one pixel
         # if pad_instr := slicers_to_pad_instruction(new_slicers):
         #     subset_da = subset_da.pad(**pad_instr)
-        with log_duration(f"coarsen by {coarsen_factors!r}", "🔲"):
+        with log_duration(f"coarsen {subset_da.shape} by {coarsen_factors!r}", "🔲"):
             subset_da = await async_run(coarsen_data, subset_da, coarsen_factors)
 
     return subset_da

@@ -146,11 +146,13 @@ class DatashaderRasterRenderer(Renderer):
 
                 with LOCK:
                     with log_duration(
-                        "nearest neighbour regridding (discrete)", "⊞", logger
+                        f"nearest neighbour regridding (discrete) {data.shape}",
+                        "⊞",
+                        logger,
                     ):
                         data = nearest_on_uniform_grid_quadmesh(data, grid.X, grid.Y)
                     with log_duration(
-                        "datashader raster render (discrete)", "🎨", logger
+                        f"datashader raster render (discrete) {data.shape}", "🎨", logger
                     ):
                         mesh = cvs.raster(
                             data,
@@ -160,7 +162,7 @@ class DatashaderRasterRenderer(Renderer):
             else:
                 data = self.maybe_cast_data(context.da)
                 with log_duration(
-                    "datashader quadmesh render (continuous)", "🎨", logger
+                    f"datashader quadmesh render (continuous) {data.shape}", "🎨", logger
                 ):
                     # Lock is only used when tbb is not available (e.g., on macOS)
                     # AND if we use the rectilinear or raster code path
