@@ -742,9 +742,10 @@ async def subset_to_bbox(
             if grid.crs.is_geographic
             else False
         )
-        newX, newY = await transform_coordinates(
-            subset, alternate.X, alternate.Y, transformer_from_crs(alternate.crs, crs)
-        )
+        with log_duration("transform_coordinates", "🔄"):
+            newX, newY = await transform_coordinates(
+                subset, alternate.X, alternate.Y, transformer_from_crs(alternate.crs, crs)
+            )
 
         # Fix coordinate discontinuities in transformed coordinates if detected
         if has_discontinuity:
