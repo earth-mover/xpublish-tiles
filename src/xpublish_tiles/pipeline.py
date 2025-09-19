@@ -450,10 +450,6 @@ def fix_coordinate_discontinuities(
     >>> gaps = np.diff(fixed)
     >>> assert np.all(np.abs(gaps) < 20), f"Large gap remains: {gaps}"
     """
-    # Only handle X coordinates (longitude) for now
-    if axis != 0:
-        return coordinates
-
     # Calculate coordinate space width using ±180° transform
     # This is unavoidable since AreaOfUse for a CRS is always in lat/lon
     x_bounds, _ = transformer.transform([-180.0, 180.0], [0.0, 0.0])
@@ -755,7 +751,7 @@ async def subset_to_bbox(
             fixed = fix_coordinate_discontinuities(
                 newX.data,
                 input_to_output,
-                axis=subset[grid.X].get_axis_num(grid.Xdim),
+                axis=newX.get_axis_num(grid.Xdim),
                 bbox=bbox,
             )
             newX = newX.copy(data=fixed)

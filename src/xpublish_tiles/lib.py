@@ -330,6 +330,7 @@ async def transform_coordinates(
         inx.drop_indexes(inx.dims, errors="ignore"),
         iny.drop_indexes(iny.dims, errors="ignore"),
     )
+    assert bx.dims == by.dims
 
     chunk_size = get_transform_chunk_size(bx)
     # Choose transformation method based on data size
