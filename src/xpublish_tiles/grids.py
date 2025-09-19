@@ -584,24 +584,24 @@ class GridSystem(ABC):
         """
         # For large coarsening, it is just faster to
         # transform the coarsened native coordinates
-        if all(factor > 2 for factor in coarsen_factors.values()):
+        if crs == self.crs or not self.alternates:
             return self.to_metadata()
 
-        if crs == self.crs or not self.alternates:
+        logger = get_context_logger()
+        if all(factor > 2 for factor in coarsen_factors.values()):
+            logger.debug("🚫 large coarsening, skipping alternate coordinates")
             return self.to_metadata()
 
         # Check if any alternate grid has a matching CRS
         for alt in self.alternates:
             if alt.crs == crs:
-                logger = get_context_logger()
-                logger.debug(f"picking alternate grid system: {alt!r}")
+                logger.debug(f"🔀 picking alternate grid system: {alt!r}")
                 return alt
 
         # Check if any alternate grid is 4326-like
         for alt in self.alternates:
             if is_4326_like(alt.crs):
-                logger = get_context_logger()
-                logger.debug(f"picking alternate grid system: {alt!r}")
+                logger.debug(f"🔀 picking alternate grid system: {alt!r}")
                 return alt
 
         return self.to_metadata()

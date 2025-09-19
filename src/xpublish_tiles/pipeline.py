@@ -592,9 +592,6 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     buffer = io.BytesIO()
     renderer = query.get_renderer()
 
-    # Capture the context logger before entering the thread pool
-    context_logger = get_context_logger()
-
     await async_run(
         lambda: renderer.render(
             contexts=new_subsets,
