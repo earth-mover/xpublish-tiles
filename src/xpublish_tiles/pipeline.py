@@ -13,9 +13,13 @@ from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
     Curvilinear,
     GridMetadata,
+    GridSystem,
+    GridSystem1D,
     GridSystem2D,
     RasterAffine,
     Rectilinear,
+    Triangular,
+    UgridIndexer,
     guess_grid_system,
 )
 from xpublish_tiles.lib import (
@@ -61,7 +65,7 @@ def sum_tuples(*tuples):
 
 
 def check_data_is_renderable_size(
-    slicers: dict[str, list[slice | Fill]],
+    slicers: dict[str, list[slice | Fill | UgridIndexer]],
     da: xr.DataArray,
     grid: GridSystem2D,
     alternate: GridMetadata,
@@ -73,7 +77,7 @@ def check_data_is_renderable_size(
 
     Parameters
     ----------
-    slicers : dict[str, list[slice | Fill]]
+    slicers : dict[str, list[slice | Fill | UgridIndexer]]
         Slicers for data selection
     da : xr.DataArray
         Data array (only metadata used, no data loaded)
@@ -103,7 +107,9 @@ def check_data_is_renderable_size(
 
 
 def shape_from_slicers(
-    slicers: dict[str, list[slice | Fill]], da: xr.DataArray, grid: GridSystem2D
+    slicers: dict[str, list[slice | Fill | UgridIndexer]],
+    da: xr.DataArray,
+    grid: GridSystem2D,
 ) -> tuple[int, int]:
     """
     Calculate the total shape from slicers for X and Y dimensions.
@@ -126,9 +132,14 @@ def shape_from_slicers(
     def get_size(sl, dim_size):
         if isinstance(sl, Fill):
             return sl.size
-        start = sl.start if sl.start is not None else 0
-        stop = sl.stop if sl.stop is not None else dim_size
-        return stop - start
+        elif isinstance(sl, UgridIndexer):
+            return sl.vertices.size
+        elif isinstance(sl, slice):
+            start = sl.start if sl.start is not None else 0
+            stop = sl.stop if sl.stop is not None else dim_size
+            return stop - start
+        else:
+            raise TypeError(f"Unknown indexer type: {type(sl)!r}")
 
     # Find the one Y slice that's actually a slice (not Fill)
     yslice = None
@@ -156,10 +167,10 @@ def get_coarsen_factors(
     shape: tuple[int, int],
     max_shape: tuple[int, int],
     dims: list[str],
-    slicers: dict[str, list[slice | Fill]],
+    slicers: dict[str, list[slice | Fill | UgridIndexer]],
     da: xr.DataArray,
-    grid: GridSystem2D,
-) -> tuple[dict[str, int], dict[str, list[slice | Fill]]]:
+    grid: GridSystem,
+) -> tuple[dict[str, int], dict[str, list[slice | Fill | UgridIndexer]]]:
     """
     Calculate coarsening factors and adjust slicers for data to fit within maximum shape constraints.
 
@@ -171,7 +182,7 @@ def get_coarsen_factors(
         Maximum allowed shape (width, height)
     dims : list[str]
         Dimension names corresponding to shape elements
-    slicers : dict[str, list[slice | Fill]]
+    slicers : dict[str, list[slice | Fill | UgridIndexer]]
         Original slicers for data selection
     ds : xr.Dataset
         Dataset being processed
@@ -180,9 +191,15 @@ def get_coarsen_factors(
 
     Returns
     -------
-    tuple[dict[str, int], dict[str, list[slice | Fill]]]
+    tuple[dict[str, int], dict[str, list[slice | Fill | UgridIndexer]]]
         Coarsening factors (>= 2) and adjusted slicers with padding
     """
+
+    if not isinstance(grid, GridSystem2D):
+        return {}, slicers
+
+    # After the isinstance check, we know grid is GridSystem2D
+    grid = cast(GridSystem2D, grid)
 
     def largest_even_le(a, b):
         quotient = a // b
@@ -225,10 +242,10 @@ def estimate_coarsen_factors_and_slicers(
     da: xr.DataArray,
     *,
     grid: GridSystem2D,
-    slicers: dict[str, list[slice | Fill]],
+    slicers: dict[str, list[slice | Fill | UgridIndexer]],
     max_shape: tuple[int, int],
     datatype: DataType,
-) -> tuple[dict[str, int], dict[str, list[slice | Fill]]]:
+) -> tuple[dict[str, int], dict[str, list[slice | Fill | UgridIndexer]]]:
     """
     Estimate coarsening factors and adjusted slicers for the given data array.
 
@@ -238,7 +255,7 @@ def estimate_coarsen_factors_and_slicers(
         Data array to process
     grid : GridSystem2D
         Grid system information
-    slicers : dict[str, list[slice | Fill]]
+    slicers : dict[str, list[slice | Fill | UgridIndexer]]
         Original slicers for data selection
     max_shape : tuple[int, int]
         Maximum allowed shape (width, height)
@@ -247,10 +264,9 @@ def estimate_coarsen_factors_and_slicers(
 
     Returns
     -------
-    tuple[dict[str, int], dict[str, list[slice | Fill]]]
+    tuple[dict[str, int], dict[str, list[slice | Fill | UgridIndexer]]]
         Coarsening factors and adjusted slicers
     """
-    grid = cast(RasterAffine | Rectilinear | Curvilinear, grid)
     if isinstance(datatype, DiscreteData):
         # TODO: Implement coarsening for categorical data (DiscreteData)
         new_slicers = slicers
@@ -271,13 +287,12 @@ def estimate_coarsen_factors_and_slicers(
 async def apply_slicers(
     da: xr.DataArray,
     *,
-    grid: GridSystem2D,
+    grid: GridSystem,
     alternate: GridMetadata,
-    slicers: dict[str, list[slice | Fill]],
+    slicers: dict[str, list[slice | Fill | UgridIndexer]],
     datatype: DataType,
 ) -> xr.DataArray:
     logger = get_context_logger()
-    grid = cast(RasterAffine | Rectilinear | Curvilinear, grid)
 
     has_alternate = alternate.crs != grid.crs
     pick = [alternate.X, alternate.Y]
@@ -287,20 +302,29 @@ async def apply_slicers(
         .reset_coords()[[da.name, *pick]]
     )
 
-    # Find the one Y slice that's actually a slice (not Fill)
-    y_slice = None
-    for candidate in slicers[grid.Ydim]:
-        if isinstance(candidate, slice):
-            y_slice = candidate
-            break
-    assert y_slice is not None, "No valid Y slice found after padding"
+    if isinstance(grid, GridSystem2D):
+        # Find the one Y slice that's actually a slice (not Fill)
+        y_slice = None
+        for candidate in slicers[grid.Ydim]:
+            if isinstance(candidate, slice):
+                y_slice = candidate
+                break
+        assert y_slice is not None, "No valid Y slice found after padding"
 
-    # Create subsets only for X slices that are actual slices (not Fill)
-    subsets = [
-        ds.isel({grid.Xdim: x_slice, grid.Ydim: y_slice})
-        for x_slice in slicers[grid.Xdim]
-        if isinstance(x_slice, slice)
-    ]
+        # Create subsets only for X slices that are actual slices (not Fill)
+        subsets = [
+            ds.isel({grid.Xdim: x_slice, grid.Ydim: y_slice})
+            for x_slice in slicers[grid.Xdim]
+            if isinstance(x_slice, slice)
+        ]
+    elif isinstance(grid, GridSystem1D):
+        subsets = [
+            ds.isel({grid.Xdim: sl.vertices})
+            for sl in slicers[grid.Xdim]
+            if isinstance(sl, UgridIndexer)
+        ]
+    else:
+        raise TypeError(f"Unknown grid system type: {type(grid)!r}")
 
     # if we have crs matching the desired CRS,
     # then we load that data from disk;
@@ -727,7 +751,7 @@ async def subset_to_bbox(
         if min(array.da.shape) < 2:
             raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
 
-        if not isinstance(grid, RasterAffine | Rectilinear | Curvilinear):
+        if not isinstance(grid, RasterAffine | Rectilinear | Curvilinear | Triangular):
             raise NotImplementedError(f"{grid=!r} not supported yet.")
         # Cast to help type checker understand narrowed type
         grid = cast(RasterAffine | Rectilinear | Curvilinear, grid)
@@ -750,7 +774,10 @@ async def subset_to_bbox(
             result[var_name] = NullRenderContext()
             continue
 
-        slicers = grid.sel(array.da, bbox=input_bbox)
+        slicers = cast(
+            dict[str, list[slice | Fill | UgridIndexer]],
+            grid.sel(array.da, bbox=input_bbox),
+        )
         da = grid.assign_index(array.da)
 
         # Estimate coarsen factors and adjusted slicers
@@ -775,7 +802,7 @@ async def subset_to_bbox(
             has_coordinate_discontinuity(
                 subset[grid.X].data, axis=subset[grid.X].get_axis_num(grid.Xdim)
             )
-            if grid.crs.is_geographic
+            if grid.crs.is_geographic and isinstance(grid, GridSystem2D)
             else False
         )
 
@@ -803,5 +830,8 @@ async def subset_to_bbox(
             grid=grid,
             datatype=array.datatype,
             bbox=bbox,
+            ugrid_indexer=next(iter(slicers[grid.Xdim]))
+            if isinstance(grid, Triangular)
+            else None,
         )
     return result

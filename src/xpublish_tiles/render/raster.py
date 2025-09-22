@@ -8,11 +8,12 @@ import matplotlib as mpl  # type: ignore
 import matplotlib.colors as mcolors  # type: ignore
 import numbagg
 import numpy as np
+import pandas as pd
 from PIL import Image
 from scipy.interpolate import NearestNDInterpolator
 
 import xarray as xr
-from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear
+from xpublish_tiles.grids import Curvilinear, GridSystem2D, Triangular
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import Renderer, register_renderer, render_error_image
 from xpublish_tiles.types import (
@@ -151,10 +152,11 @@ class DatashaderRasterRenderer(Renderer):
             x_range=(bbox.west, bbox.east),
             y_range=(bbox.south, bbox.north),
         )
+        data = self.maybe_cast_data(context.da)
 
-        if isinstance(context.grid, RasterAffine | Rectilinear | Curvilinear):
+        if isinstance(context.grid, GridSystem2D):
             # Use the actual coordinate names from the grid system
-            grid = cast(RasterAffine | Rectilinear | Curvilinear, context.grid)
+            grid = cast(GridSystem2D, context.grid)
             if isinstance(context.datatype, DiscreteData):
                 if isinstance(grid, Curvilinear):
                     # FIXME: we'll need to track Xdim, Ydim explicitly no dims: tuple[str]
@@ -165,8 +167,6 @@ class DatashaderRasterRenderer(Renderer):
                 # the mode aggregation.
                 # https://github.com/holoviz/datashader/issues/1435
                 # Lock is only used when tbb is not available (e.g., on macOS)
-                data = self.maybe_cast_data(context.da)
-
                 with LOCK:
                     with log_duration(
                         f"nearest neighbour regridding (discrete) {data.shape}",
@@ -193,6 +193,17 @@ class DatashaderRasterRenderer(Renderer):
                         mesh = cvs.quadmesh(
                             data.transpose(grid.Ydim, grid.Xdim), x=grid.X, y=grid.Y
                         )
+        elif isinstance(context.grid, Triangular):
+            with log_duration(f"render (continuous) {data.shape} trimesh", "🔺", logger):
+                assert context.ugrid_indexer is not None
+                # dropping gets us a cheap RangeIndex in the DataFrame
+                df = data.drop_vars(context.grid.Xdim).to_dataframe()
+                mesh = cvs.trimesh(
+                    df[[context.grid.X, context.grid.Y, data.name]],
+                    pd.DataFrame(
+                        context.ugrid_indexer.connectivity, columns=["v0", "v1", "v2"]
+                    ),
+                )
         else:
             raise NotImplementedError(
                 f"Grid type {type(context.grid)} not supported by DatashaderRasterRenderer"
