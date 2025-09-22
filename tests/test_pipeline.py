@@ -26,6 +26,7 @@ from xpublish_tiles.testing.datasets import (
     FORECAST,
     HRRR,
     PARA,
+    REDGAUSS,
     create_global_dataset,
 )
 from xpublish_tiles.testing.lib import (
@@ -402,3 +403,13 @@ async def test_hrrr_multiple_vs_hrrr_rendering(tile, tms, pytestconfig):
         f"HRRR_MULTIPLE should render identically to HRRR for tile {tile} "
         f"but images differ"
     )
+
+
+async def test_reduced_gaussian(pytestconfig):
+    ds = REDGAUSS.create()
+    tile = morecantile.Tile(x=8, y=8, z=4)
+    query = create_query_params(tms=WEBMERC_TMS, tile=tile)
+    render = await pipeline(ds, query)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(render, tile)
+    # assert_render_matches_snapshot(render, png_snapshot)

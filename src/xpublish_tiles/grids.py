@@ -4,7 +4,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Hashable
 from dataclasses import dataclass, field
-from typing import Self, cast
+from typing import Any, Self, cast
 
 import cachetools
 import cf_xarray  # noqa: F401
@@ -12,6 +12,7 @@ import numbagg
 import numpy as np
 import pandas as pd
 import rasterix
+from numba_celltree import CellTree2d
 from pyproj import CRS
 from pyproj.aoi import BBox
 
@@ -246,6 +247,43 @@ def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
     bounds[-1] = centers[-1] + (centers[-1] - centers[-2]) / 2
 
     return bounds
+
+
+class CellTreeIndex(xr.Index):
+    def __init__(
+        self,
+        vertices: pd.DataFrame,
+        faces: pd.DataFrame,
+        *,
+        fill_value: Any,
+        X: str,
+        Y: str,
+    ):
+        # normalize to -180 to 180 here
+        self.tree = CellTree2d(vertices.values, faces.values, fill_value=fill_value)
+        self.X = X
+        self.Y = Y
+
+    def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
+        xidxr = labels.get(self.X)
+        yidxr = labels.get(self.Y)
+
+        assert isinstance(xidxr, slice)
+        assert isinstance(yidxr, slice)
+
+        _, face_indices = self.tree.locate_boxes(
+            np.array([[xidxr.start, xidxr.stop, yidxr.start, yidxr.stop]])
+        )
+        vertex_indices, inverse = np.unique(
+            self.tree.faces[face_indices], return_inverse=True
+        )
+        return IndexSelResult(
+            dim_indexers={
+                "vertices": vertex_indices,
+                "faces": face_indices,
+                "connectivity": inverse,
+            }
+        )
 
 
 class CurvilinearCellIndex(xr.Index):
@@ -529,6 +567,11 @@ class GridSystem(ABC):
     dXmin: float | None = None
     dYmin: float | None = None
 
+    @classmethod
+    @abstractmethod
+    def from_dataset(cls, ds: xr.Dataset, crs: CRS, Xname: str, Yname: str) -> Self:
+        pass
+
     @property
     @abstractmethod
     def dims(self) -> set[str]:
@@ -565,6 +608,7 @@ class GridSystem(ABC):
             return False
         return self.equals(other)
 
+    @abstractmethod
     def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("Subclasses must implement sel method")
@@ -1075,6 +1119,95 @@ class Curvilinear(GridSystem):
         )
 
 
+@dataclass(init=False, kw_only=True, eq=False)
+class Triangular(GridSystem):
+    crs: CRS
+    bbox: BBox
+
+    X: str
+    Y: str
+    Z: str | None = None
+    dim: str
+    lon_spans_globe: bool
+    indexes: tuple[xr.Index]
+
+    vertices: pd.DataFrame
+    faces: pd.DataFrame
+
+    def __init__(
+        self,
+        *,
+        vertices: pd.DataFrame,
+        faces: pd.DataFrame,
+        crs: CRS,
+        dim: str,
+        Xname: str,
+        Yname: str,
+        fill_value: Any,
+    ):
+        self.crs = crs
+        self.X, self.Y = Xname, Yname
+        self.dim = dim
+        self.lon_spans_globe = False
+        xmin, xmax = vertices[Xname].min().item(), vertices[Xname].max().item()
+        ymin, ymax = vertices[Yname].min().item(), vertices[Yname].max().item()
+        self.bbox = BBox(west=xmin, east=xmax, south=ymin, north=ymax)
+        if crs.is_geographic and ((xmax - xmin) > 358):
+            self.lon_spans_globe = True
+
+        self.vertices = vertices
+        self.faces = faces
+        self.indexes = (
+            CellTreeIndex(
+                self.vertices, self.faces, fill_value=fill_value, X=Xname, Y=Yname
+            ),
+        )
+
+    @property
+    def Xdim(self) -> str:
+        return self.dim
+
+    @property
+    def Ydim(self) -> str:
+        return self.dim
+
+    @property
+    def dims(self) -> set[str]:
+        return {self.dim}
+
+    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
+        index = next(iter(self.indexes))
+        result = index.sel(
+            {self.X: slice(bbox.west, bbox.east), self.Y: slice(bbox.south, bbox.north)}
+        )
+        return {self.dim: result.dim_indexers}
+
+    @classmethod
+    def from_dataset(
+        cls,
+        ds: xr.Dataset,
+        crs: CRS,
+        Xname: str,
+        Yname: str,
+    ) -> Self:
+        # FIXME: detect UGRID here
+        from scipy.spatial import Delaunay
+
+        vertices = ds[[Xname, Yname]].to_dataframe()
+        (dim,) = ds[Xname].dims
+        triang = Delaunay(vertices.values)
+        faces = pd.DataFrame(triang.simplices, columns=["v0", "v1", "v2"])
+        return cls(
+            vertices=vertices,
+            faces=faces,
+            crs=crs,
+            Xname=Xname,
+            Yname=Yname,
+            dim=dim,
+            fill_value=-1,
+        )
+
+
 @dataclass(kw_only=True, eq=False)
 class DGGS(GridSystem):
     cells: str
@@ -1086,7 +1219,7 @@ class DGGS(GridSystem):
         """Return the set of dimension names for this grid system."""
         return {self.cells}
 
-    def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
+    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("sel not implemented for DGGS grids")
 
@@ -1304,7 +1437,10 @@ def _detect_grid_metadata(
         if X.ndim == 1 and Y.ndim == 1:
             if is_rotated_pole(mapping.crs):
                 raise NotImplementedError("Rotated pole grids are not supported yet.")
-            grid_cls = Rectilinear
+            if X.dims == Y.dims:
+                grid_cls = Triangular
+            else:
+                grid_cls = Rectilinear
         elif X.ndim == 2 and Y.ndim == 2:
             grid_cls = Curvilinear
 

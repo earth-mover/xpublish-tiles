@@ -1095,6 +1095,24 @@ HRRR_MULTIPLE = Dataset(
 )
 
 
+def read_reduced_gaussian(*args, **kwargs):
+    return xr.open_dataset("redgauss.nc").rename(geopotential="foo")
+
+
+REDGAUSS = Dataset(
+    name="reduced_gaussian",
+    dims=(
+        Dim(
+            name="point",
+            size=542080,
+            chunk_size=542080,
+        ),
+    ),
+    setup=read_reduced_gaussian,
+    dtype=np.float32,
+    tiles=GLOBAL_BENCHMARK_TILES,
+)
+
 # Lookup dictionary for all available datasets
 DATASET_LOOKUP = {
     "hrrr": HRRR,

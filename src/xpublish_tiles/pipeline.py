@@ -12,9 +12,11 @@ from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
     Curvilinear,
     GridMetadata,
+    GridSystem,
     GridSystem2D,
     RasterAffine,
     Rectilinear,
+    Triangular,
     guess_grid_system,
 )
 from xpublish_tiles.lib import (
@@ -159,7 +161,7 @@ def get_coarsen_factors(
     dims: list[str],
     slicers: dict[str, list[slice | Fill]],
     da: xr.DataArray,
-    grid: GridSystem2D,
+    grid: GridSystem,
 ) -> tuple[dict[str, int], dict[str, list[slice | Fill]]]:
     """
     Calculate coarsening factors and adjust slicers for data to fit within maximum shape constraints.
@@ -184,6 +186,9 @@ def get_coarsen_factors(
     tuple[dict[str, int], dict[str, list[slice | Fill]]]
         Coarsening factors (>= 2) and adjusted slicers with padding
     """
+
+    if not isinstance(grid, GridSystem2D):
+        return {}, slicers
 
     def largest_even_le(a, b):
         quotient = a // b
@@ -687,7 +692,7 @@ async def subset_to_bbox(
         if min(array.da.shape) < 2:
             raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
 
-        if not isinstance(grid, RasterAffine | Rectilinear | Curvilinear):
+        if not isinstance(grid, RasterAffine | Rectilinear | Curvilinear | Triangular):
             raise NotImplementedError(f"{grid=!r} not supported yet.")
         # Cast to help type checker understand narrowed type
         grid = cast(RasterAffine | Rectilinear | Curvilinear, grid)
