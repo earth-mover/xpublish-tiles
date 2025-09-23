@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 
+import io
+
 import cf_xarray  # noqa: F401 - Enable cf accessor
 import morecantile
 import numpy as np
@@ -24,6 +26,7 @@ from xpublish_tiles.pipeline import (
 from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
     FORECAST,
+    GLOBAL_NANS,
     HRRR,
     PARA,
     create_global_dataset,
@@ -191,6 +194,25 @@ async def test_categorical_data(tile, tms, png_snapshot, pytestconfig):
     assert_render_matches_snapshot(
         result, png_snapshot, tile=tile, tms=tms, dataset_bbox=ds.attrs["bbox"]
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tile,tms", GLOBAL_NANS.tiles)
+async def test_global_nans_data(tile, tms, png_snapshot, pytestconfig):
+    """Test pipeline with global dataset containing diagonal NaN patterns."""
+    ds = GLOBAL_NANS.create()
+    query_params = create_query_params(tile, tms)
+    with config.set(rectilinear_check_min_size=0):
+        result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+
+    # Skip transparency validation for NaN data - just check the snapshot directly
+    assert isinstance(result, io.BytesIO)
+    result.seek(0)
+    content = result.read()
+    assert len(content) > 0
+    assert content == png_snapshot
 
 
 def test_apply_query_selectors():

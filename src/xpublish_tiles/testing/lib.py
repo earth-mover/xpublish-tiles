@@ -244,6 +244,10 @@ Y: {xy_bounds[1]:.0f} to {xy_bounds[3]:.0f}
     # Calculate difference statistics
     expected_transparent = np.sum(expected_array[:, :, 3] == 0)
     actual_transparent = np.sum(actual_array[:, :, 3] == 0)
+    transparency_change = actual_transparent - expected_transparent
+    transparency_change_pct = (
+        transparency_change / (expected_array.shape[0] * expected_array.shape[1])
+    ) * 100
 
     diff_pixels = np.sum(np.any(expected_array != actual_array, axis=2))
     total_pixels = expected_array.shape[0] * expected_array.shape[1]
@@ -257,13 +261,13 @@ Y: {xy_bounds[1]:.0f} to {xy_bounds[3]:.0f}
     mean_diff = rgb_diff[rgb_diff > 0].mean() if np.any(rgb_diff > 0) else 0
 
     # Create 2x3 grid: 3 image panels on top, debug info panel below
-    fig = plt.figure(figsize=(18, 8))
+    fig = plt.figure(figsize=(18, 10))
 
     # Add main title with test name
     plt.suptitle(test_name, fontsize=12, y=0.98)
 
-    # Create gridspec for custom layout with less space for text panel
-    gs = fig.add_gridspec(2, 3, height_ratios=[4, 1], hspace=0.05, wspace=0.02)
+    # Create gridspec for custom layout with more space for text panel
+    gs = fig.add_gridspec(3, 3, height_ratios=[4, 1, 1.2], hspace=0.05, wspace=0.02)
 
     # Top row: 3 image panels
     ax1 = fig.add_subplot(gs[0, 0])
@@ -286,8 +290,41 @@ Y: {xy_bounds[1]:.0f} to {xy_bounds[3]:.0f}
     ax3.set_title("Differences", fontsize=11)
     ax3.axis("off")
 
+    # Middle row: Transparency visualization
+    ax_transparency = fig.add_subplot(gs[1, :])
+    ax_transparency.axis("off")
+
+    # Create transparency status banner
+    if transparency_change == 0:
+        transparency_status = "✓ No transparency change"
+        transparency_color = "green"
+    elif abs(transparency_change) < 100:
+        transparency_status = f"⚠ Minor transparency change: {transparency_change:+,} pixels ({transparency_change_pct:+.2f}%)"
+        transparency_color = "orange"
+    else:
+        transparency_status = f"⚠️ TRANSPARENCY CHANGED: {transparency_change:+,} pixels ({transparency_change_pct:+.2f}%)"
+        transparency_color = "red"
+
+    ax_transparency.text(
+        0.5,
+        0.5,
+        transparency_status,
+        transform=ax_transparency.transAxes,
+        fontsize=14,
+        fontweight="bold",
+        color=transparency_color,
+        horizontalalignment="center",
+        verticalalignment="center",
+        bbox=dict(
+            boxstyle="round,pad=0.5",
+            facecolor="white",
+            edgecolor=transparency_color,
+            linewidth=2,
+        ),
+    )
+
     # Bottom panel: Debug information text
-    ax_text = fig.add_subplot(gs[1, :])
+    ax_text = fig.add_subplot(gs[2, :])
     ax_text.axis("off")
 
     # Format debug text more compactly
@@ -316,18 +353,18 @@ Y: {xy_bounds[1]:.0f} to {xy_bounds[3]:.0f}
 
     diff_text = f"""{tile_info_str}
 {bounds_str}
-Diff: {diff_pixels:,}/{total_pixels:,} pixels ({diff_pct:.2f}%) | RGB Δ: max={max_diff:.0f}, mean={mean_diff:.1f} | Transparency: {actual_transparent - expected_transparent:+,} px{ssim_text} | {diff_status}"""
+Diff: {diff_pixels:,}/{total_pixels:,} pixels ({diff_pct:.2f}%) | RGB Δ: max={max_diff:.0f}, mean={mean_diff:.1f}{ssim_text} | {diff_status}"""
 
-    # Add text to the bottom panel with minimal padding
+    # Add text to the bottom panel with larger font size
     ax_text.text(
         0.02,
         0.85,
         diff_text,
         transform=ax_text.transAxes,
         fontfamily="monospace",
-        fontsize=9,
+        fontsize=11,
         verticalalignment="top",
-        bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.9),
+        bbox=dict(boxstyle="round,pad=0.4", facecolor="lightgray", alpha=0.9),
     )
 
     plt.subplots_adjust(left=0.01, right=0.99, top=0.96, bottom=0.02)

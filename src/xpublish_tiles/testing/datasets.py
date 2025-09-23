@@ -920,6 +920,63 @@ FORECAST = xr.decode_cf(
     )
 )
 
+
+def global_nans_grid(
+    *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
+) -> xr.Dataset:
+    """Create a global dataset with diagonal NaN patterns mimicking data that only exists over continents."""
+    # Start with uniform grid
+    ds = uniform_grid(dims=dims, dtype=dtype, attrs=attrs)
+
+    # Get the data array
+    data = ds.foo.values
+
+    # Create diagonal NaN pattern
+    # The pattern creates diagonal bands of NaNs across the grid
+    # This mimics continental/ocean boundaries with diagonal features
+    for i in range(data.shape[0]):
+        for j in range(data.shape[1]):
+            # Create diagonal bands that vary in width
+            # Multiple diagonal patterns at different angles
+            band1 = (i + j) % 40 < 12  # Main diagonal bands
+            band2 = (i - j + data.shape[1]) % 35 < 8  # Counter diagonal
+            band3 = (2 * i + j) % 50 < 10  # Steeper diagonal
+            band4 = (i + 2 * j) % 45 < 10  # Shallower diagonal
+
+            # Combine patterns to create complex NaN regions
+            if band1 or band2 or band3 or band4:
+                data[i, j] = np.nan
+
+    # Replace the data in the dataset
+    ds.foo.values = data
+
+    return ds
+
+
+GLOBAL_NANS = Dataset(
+    name="global_nans",
+    dims=(
+        Dim(
+            name="latitude",
+            size=320,
+            chunk_size=320,
+            data=np.linspace(-90, 90, 320),
+            attrs={"standard_name": "latitude"},
+        ),
+        Dim(
+            name="longitude",
+            size=480,
+            chunk_size=480,
+            data=np.linspace(-180, 180, 480),
+            attrs={"standard_name": "longitude"},
+        ),
+    ),
+    dtype=np.float32,
+    setup=global_nans_grid,
+    edge_case_tiles=WGS84_TILES_EDGE_CASES,
+    tiles=WGS84_TILES,
+)
+
 CURVILINEAR = Dataset(
     name="curvilinear",
     dims=(
@@ -1111,4 +1168,5 @@ DATASET_LOOKUP = {
     "utm50s_hires": UTM50S_HIRES,
     "curvilinear": CURVILINEAR,
     "hrrr_multiple": HRRR_MULTIPLE,
+    "global_nans": GLOBAL_NANS,
 }
