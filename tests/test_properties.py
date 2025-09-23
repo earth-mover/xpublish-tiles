@@ -197,20 +197,25 @@ async def test_property_global_render_no_transparent_tile(
 
 
 @pytest.mark.asyncio
-@given(tile_tms=tile_and_tms(), ds=global_datasets(allow_categorical=False))
+@given(
+    data=st.data(), tile_tms=tile_and_tms(), ds=global_datasets(allow_categorical=False)
+)
 @settings(deadline=None, max_examples=250)
 async def test_property_rectilinear_vs_curvilinear_exact(
     tile_tms: tuple[Tile, TileMatrixSet],
     ds: xr.Dataset,
+    data: st.DataObject,
     pytestconfig,
 ):
     """
-    REsult from rectilinear grid & curvilinear grid constructed from
+    Result from rectilinear grid & curvilinear grid constructed from
     broadcasting out rectilinear grid must be identical
     """
     tile, tms = tile_tms
+    test_name = f"rectilinear_vs_curvilinear_tile_{tile.z}_{tile.x}_{tile.y}"
     query = create_query_params(tile, tms)
-    rectilinear_result = await pipeline(ds, query)
+    with config.set(transform_chunk_size=256):
+        rectilinear_result = await pipeline(ds, query)
     # rectilinear = guess_grid_system(ds, "foo")
     # rect_ds = ds
 
@@ -221,7 +226,7 @@ async def test_property_rectilinear_vs_curvilinear_exact(
         latitude=(("nlon", "nlat"), newlat.T, {"standard_name": "latitude"}),
     )
     ds["foo"].attrs["coordinates"] = "longitude latitude"
-    with config.set(detect_approx_rectilinear=False):
+    with config.set(transform_chunk_size=256, detect_approx_rectilinear=False):
         curvilinear_result = await pipeline(ds, query)
     # curvilinear = guess_grid_system(ds, "foo")
 
@@ -238,7 +243,6 @@ async def test_property_rectilinear_vs_curvilinear_exact(
     # )
 
     # Compare images with optional debug visualization using perceptual comparison
-    test_name = f"rectilinear_vs_curvilinear_tile_{tile.z}_{tile.x}_{tile.y}"
     images_similar, ssim_score = compare_image_buffers_with_debug(
         buffer1=rectilinear_result,  # expected
         buffer2=curvilinear_result,  # actual
@@ -250,6 +254,25 @@ async def test_property_rectilinear_vs_curvilinear_exact(
         perceptual_threshold=0.9,  # 90% similarity threshold
     )
     assert images_similar, f"Rectilinear and curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+
+    lon, lat = ds.longitude, ds.latitude
+    transposed = ds.assign_coords(
+        longitude=lon.transpose() if data.draw(st.booleans()) else ds.longitude,
+        latitude=lat.transpose() if data.draw(st.booleans()) else ds.latitude,
+    )
+    with config.set(transform_chunk_size=256, detect_approx_rectilinear=False):
+        transposed_result = await pipeline(transposed, query)
+    images_similar, ssim_score = compare_image_buffers_with_debug(
+        buffer1=rectilinear_result,  # expected
+        buffer2=transposed_result,  # actual
+        test_name=test_name,
+        tile_info=(tile, tms),
+        debug_visual=pytestconfig.getoption("--debug-visual", default=False),
+        debug_visual_save=pytestconfig.getoption("--debug-visual-save", default=False),
+        mode="perceptual",
+        perceptual_threshold=0.9,  # 90% similarity threshold
+    )
+    assert images_similar, f"Rectilinear and *transposed* curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
 
 
 @pytest.mark.asyncio

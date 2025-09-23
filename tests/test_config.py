@@ -36,14 +36,14 @@ def test_get_transform_chunk_size():
     """Test that the dynamic config functions work correctly."""
     # Test defaults
     da = xr.DataArray(np.ones((1024, 1024)), dims=("x", "y"))
-    assert get_transform_chunk_size(da, "x", "y") == (1024, 1024)
+    assert get_transform_chunk_size(da) == (1024, 1024)
 
     # Test with context manager
     with config.set(transform_chunk_size=256):
-        assert get_transform_chunk_size(da, "x", "y") == (64, 1024)
+        assert get_transform_chunk_size(da) == (64, 1024)
 
     da = xr.DataArray(np.ones((2048, 2048)), dims=("x", "y"))
-    assert get_transform_chunk_size(da, "x", "y") == (512, 2048)
+    assert get_transform_chunk_size(da) == (512, 2048)
 
 
 def test_detect_approx_rectilinear_config():

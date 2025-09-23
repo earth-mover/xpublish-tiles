@@ -165,6 +165,24 @@ async def test_curvilinear_data(curvilinear_dataset_and_tile, png_snapshot, pyte
         visualize_tile(result, tile)
     assert_render_matches_snapshot(result, png_snapshot, tile=tile, tms=tms)
 
+    transposed = ds.assign_coords(lat=ds.lat.transpose(), lon=ds.lon.transpose())
+    with config.set(transform_chunk_size=ds.foo.shape[-1] + 10):
+        transposed_result = await pipeline(transposed, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+
+    # Can't use a snapshot twice in a test sadly
+    result.seek(0)
+    transposed_result.seek(0)
+    images_match, _ = compare_image_buffers_with_debug(
+        result,  # Expected (original)
+        transposed_result,  # Actual (transposed)
+        test_name=f"test_curvilinear_data_transposed_vs_original[{tile.z}/{tile.x}/{tile.y}]",
+        tile_info=(tile, tms),
+        debug_visual=pytestconfig.getoption("--debug-visual"),
+        debug_visual_save=pytestconfig.getoption("--debug-visual-save"),
+    )
+
 
 @pytest.mark.parametrize("tile,tms", PARA_TILES)
 async def test_categorical_data(tile, tms, png_snapshot, pytestconfig):
