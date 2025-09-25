@@ -69,10 +69,11 @@ uv run xpublish-tiles [OPTIONS]
 - `--spy`: Run benchmark requests with the specified dataset for performance testing
 - `--bench-suite`: Run benchmarks for all local datasets and tabulate results (requires `uv run pytest --setup` to create local datasets first)
 - `--concurrency INT`: Number of concurrent requests for benchmarking (default: 12)
-- `--where CHOICE`: Where to run benchmark requests (choices: local, local-booth, prod; default: local)
+- `--where CHOICE`: Where to run benchmark requests (choices: local, local-booth, arraylake-prod, arraylake-dev; default: local)
   - `local`: Start server on localhost and run benchmarks against it
   - `local-booth`: Run benchmarks against existing localhost server (no server startup)
-  - `prod`: Run benchmarks against production server
+  - `arraylake-prod`: Run benchmarks against Arraylake production server (earthmover.io)
+  - `arraylake-dev`: Run benchmarks against Arraylake development server (earthmover.dev)
 - `--log-level LEVEL`: Set the logging level for xpublish_tiles (choices: debug, info, warning, error; default: warning)
 
 > [!TIP]
@@ -109,8 +110,8 @@ xpublish-tiles --dataset earthmover-public/aifs-outputs --branch main --group 20
 # Run benchmark with a specific dataset
 xpublish-tiles --dataset local://para_hires --spy
 
-# Run benchmark with custom concurrency and against production
-xpublish-tiles --dataset para --spy --concurrency 20 --where prod
+# Run benchmark with custom concurrency and against Arraylake production
+xpublish-tiles --dataset para --spy --concurrency 20 --where arraylake-prod
 
 # Run benchmark suite for all local datasets (creates tabulated results)
 xpublish-tiles --bench-suite
@@ -130,8 +131,8 @@ xpublish-tiles --dataset local://para_hires --spy
 # Run benchmark against existing localhost server
 xpublish-tiles --dataset para --spy --where local-booth
 
-# Run benchmark against production server with custom concurrency
-xpublish-tiles --dataset para --spy --where prod --concurrency 8
+# Run benchmark against Arraylake production server with custom concurrency
+xpublish-tiles --dataset para --spy --where arraylake-prod --concurrency 8
 
 # Run benchmark suite for all local datasets
 xpublish-tiles --bench-suite
@@ -163,7 +164,8 @@ The `--spy` flag enables benchmarking mode. The benchmarking behavior depends on
 
 - **`--where local`** (default): Starts the tile server and automatically runs benchmark requests against it
 - **`--where local-booth`**: Runs benchmarks against an existing localhost server (doesn't start a new server)
-- **`--where prod`**: Runs benchmarks against a production server
+- **`--where arraylake-prod`**: Runs benchmarks against Arraylake production server (earthmover.io)
+- **`--where arraylake-dev`**: Runs benchmarks against Arraylake development server (earthmover.dev)
 
 The benchmarking process:
 - Warms up the server with initial tile requests
