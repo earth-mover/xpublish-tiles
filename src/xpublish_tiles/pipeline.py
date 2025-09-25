@@ -4,6 +4,7 @@ import math
 from typing import Any, cast
 
 import numpy as np
+import pandas as pd
 import pyproj
 from pyproj.aoi import BBox
 
@@ -646,13 +647,39 @@ def apply_query(
                 selectors[name] = ds[name].dtype.type(value)
             except ValueError as e:
                 logger = get_context_logger()
-                logger.warning(
-                    "Failed to cast selector",
-                    selector=name,
-                    value=value,
-                    expected_type=ds[name].dtype,
-                )
-                raise e
+
+                if ds[name].dtype.kind == "m":
+                    # Custom casting for timedelta64 if it fails
+                    try:
+                        selectors[name] = pd.to_timedelta(value).to_timedelta64()
+                    except ValueError as tde:
+                        logger.warning(
+                            "Failed to cast selector to timedelta64",
+                            selector=name,
+                            value=value,
+                            expected_type=ds[name].dtype,
+                        )
+                        raise tde
+                elif ds[name].dtype.kind == "M":
+                    # Custom casting for datetime64 if it fails
+                    try:
+                        selectors[name] = pd.to_datetime(value).to_datetime64()
+                    except ValueError as tde:
+                        logger.warning(
+                            "Failed to cast selector to datetime64",
+                            selector=name,
+                            value=value,
+                            expected_type=ds[name].dtype,
+                        )
+                        raise tde
+                else:
+                    logger.warning(
+                        "Failed to cast selector",
+                        selector=name,
+                        value=value,
+                        expected_type=ds[name].dtype,
+                    )
+                    raise e
         ds = ds.cf.sel(**selectors)
     for name in variables:
         grid = guess_grid_system(ds, name)

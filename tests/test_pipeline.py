@@ -245,19 +245,32 @@ def test_apply_query_selectors():
 def test_apply_query_with_string_selectors():
     ds = xr.Dataset(
         data_vars={
-            "foo": (("band", "band2", "x", "y"), np.arange(1080).reshape(3, 3, 30, 4))
+            "foo": (
+                ("band", "band2", "offset", "x", "y"),
+                np.arange(3240).reshape(3, 3, 3, 30, 4),
+            )
         },
         coords={
             "x": (["x"], np.arange(30), {"axis": "X", "standard_name": "longitude"}),
             "y": (["y"], np.arange(4), {"axis": "Y", "standard_name": "latitude"}),
+            "offset": (
+                ["offset"],
+                np.array(
+                    [
+                        np.timedelta64(i, "ns")
+                        for i in [0, 3_600_000_000_000, 3_600_000_000_000 * 2]
+                    ]
+                ),
+                {"standard_name": "offset"},
+            ),
             "band": (["band"], [1, 2, 3], {"standard_name": "wavelength"}),
             "band2": (["band2"], ["1", "2", "3"], {"standard_name": "wavelength"}),
         },
     )
 
-    selectors = {"band": "1", "band2": 2}
+    selectors = {"band": "1", "band2": 2, "offset": "1 hours"}
     result = apply_query(ds, variables=["foo"], selectors=selectors)
-    assert_equal(result["foo"].da, ds.foo.sel(band=1, band2="2"))
+    assert_equal(result["foo"].da, ds.foo.sel(band=1, band2="2", offset="1 hours"))
 
 
 def test_datashader_nearest_regridding():
