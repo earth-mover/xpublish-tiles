@@ -63,11 +63,12 @@ uv run xpublish-tiles [OPTIONS]
   - `sentinel`: Sentinel-2 dataset (without coordinates)
   - `global-6km`: Global dataset at 6km resolution
   - `xarray://<tutorial_name>`: Load any xarray tutorial dataset (e.g., `xarray://rasm`)
-  - `local://<dataset_name>`: Load dataset from local icechunk repository at `/tmp/tiles-icechunk/` (datasets created with `uv run pytest --setup`)
-  - `local:///path/to/repo::<dataset_name>`: Load dataset from custom icechunk repository path
+  - `zarr:///path/to/zarr/store`: Load standard Zarr store (use `--group` for nested groups)
+  - `icechunk:///path/to/repo`: Load Icechunk repository (use `--group` for groups, `--branch` for branches)
+  - `local://<dataset_name>`: Convenience alias for `icechunk:///tmp/tiles-icechunk --group <dataset_name>` (datasets created with `uv run pytest --setup`)
   - For Arraylake datasets: specify the dataset name in {arraylake_org}/{arraylake_dataset} format (requires Arraylake credentials)
-- `--branch BRANCH`: Branch to use for Arraylake or icechunk datasets (default: main)
-- `--group GROUP`: Group to use for Arraylake datasets (default: '')
+- `--branch BRANCH`: Branch to use for Arraylake, Icechunk, or local datasets (default: main)
+- `--group GROUP`: Group to use for Arraylake, Zarr, or Icechunk datasets (default: '')
 - `--cache`: Enable icechunk cache for Arraylake and local icechunk datasets (default: enabled)
 - `--spy`: Run benchmark requests with the specified dataset for performance testing
 - `--bench-suite`: Run benchmarks for all local datasets and tabulate results (requires `uv run pytest --setup` to create local datasets first)
@@ -104,8 +105,17 @@ xpublish-tiles --dataset xarray://ersstv5
 xpublish-tiles --dataset local://ifs
 xpublish-tiles --dataset local://para_hires
 
-# Serve local icechunk data from custom path
-xpublish-tiles --dataset local:///path/to/my/repo::my_dataset
+# Serve icechunk data from custom path
+xpublish-tiles --dataset icechunk:///path/to/my/repo --group my_dataset
+
+# Serve standard Zarr store
+xpublish-tiles --dataset zarr:///path/to/data.zarr
+
+# Serve Zarr store with a specific group
+xpublish-tiles --dataset zarr:///path/to/data.zarr --group subgroup
+
+# Serve Icechunk repository
+xpublish-tiles --dataset icechunk:///path/to/icechunk/repo --group my_dataset
 
 # Serve Arraylake dataset with specific branch and group
 xpublish-tiles --dataset earthmover-public/aifs-outputs --branch main --group 2025-04-01/12z

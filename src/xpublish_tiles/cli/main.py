@@ -56,18 +56,42 @@ def get_dataset_for_name(
         tutorial_name = name.removeprefix("xarray://")
         # these are mostly netCDF files and async loading does not work
         ds = xr.tutorial.load_dataset(tutorial_name).assign_attrs(_xpublish_id=name)
-    elif name.startswith("local://"):
-        import icechunk
+    elif name.startswith("zarr://"):
+        # Standard Zarr store - format: zarr:///path/to/zarr/store with optional --group
+        zarr_path = name.removeprefix("zarr://")
+        try:
+            ds = xr.open_zarr(
+                zarr_path, group=group or None, consolidated=None, chunks=None
+            )
+            # Add _xpublish_id for caching
+            xpublish_id = f"{name}:{group}" if group else name
+            ds.attrs["_xpublish_id"] = xpublish_id
+        except Exception as e:
+            raise ValueError(f"Error loading Zarr dataset from '{zarr_path}': {e}") from e
+    elif name.startswith(("local://", "icechunk://")):
+        # Handle both local:// and icechunk:// schemes
+        is_local = name.startswith("local://")
 
-        local_path = name.removeprefix("local://")
+        if is_local:
+            # local:// is a shorthand for icechunk:///tmp/tiles-icechunk with a group
+            dataset_name = name.removeprefix("local://")
+            repo_path = "/tmp/tiles-icechunk/"
 
-        repo_path, dataset_name = (
-            local_path.rsplit("::", 1)
-            if "::" in local_path
-            else ("/tmp/tiles-icechunk/", local_path)
-        )
+            # Handle synthetic dataset special case
+            actual_group = (
+                "utm50s_hires" if dataset_name == "utm50s_hires_onecrs" else dataset_name
+            )
+            # Use provided group if specified, otherwise use the derived group
+            effective_group = actual_group if not group else group
+        else:
+            # icechunk:// - format: icechunk:///path/to/repo with optional --group
+            repo_path = name.removeprefix("icechunk://")
+            effective_group = group or None
+            dataset_name = None  # Not applicable for direct icechunk://
 
         try:
+            import icechunk
+
             storage = icechunk.local_filesystem_storage(repo_path)
 
             config: icechunk.RepositoryConfig | None = None
@@ -84,23 +108,30 @@ def get_dataset_for_name(
             session = repo.readonly_session(branch=branch)
             ds = xr.open_zarr(
                 session.store,
-                group="utm50s_hires"
-                if dataset_name == "utm50s_hires_onecrs"
-                else dataset_name,
+                group=effective_group,
                 zarr_format=3,
                 consolidated=False,
                 chunks=None,
             )
+
             # Add _xpublish_id for caching
-            xpublish_id = f"local:{dataset_name}:{branch}"
-            ds.attrs["_xpublish_id"] = xpublish_id
-            # Handle synthetic datasets
-            if dataset_name == "utm50s_hires_onecrs":
+            ds.attrs["_xpublish_id"] = (
+                f"icechunk:{repo_path}:{effective_group or ''}:{branch}"
+            )
+
+            # Handle synthetic datasets (local:// only)
+            if is_local and dataset_name == "utm50s_hires_onecrs":
                 ds = create_onecrs_dataset(ds)
+
         except Exception as e:
-            raise ValueError(
-                f"Error loading local dataset '{dataset_name}' from {repo_path}: {e}"
-            ) from e
+            if is_local:
+                raise ValueError(
+                    f"Error loading local dataset '{dataset_name}' from {repo_path}: {e}"
+                ) from e
+            else:
+                raise ValueError(
+                    f"Error loading Icechunk dataset from {repo_path}: {e}"
+                ) from e
     else:
         try:
             from arraylake import Client
@@ -393,14 +424,14 @@ def run_bench_suite(args):
 def get_dataset_object_for_name(name: str):
     """Get the Dataset object for benchmark tiles."""
     if name.startswith("local://"):
-        local_path = name.removeprefix("local://")
-        _, dataset_name = (
-            local_path.rsplit("::", 1) if "::" in local_path else (None, local_path)
-        )
+        dataset_name = name.removeprefix("local://")
         # Handle synthetic datasets
         if dataset_name == "utm50s_hires_onecrs":
             return DATASET_LOOKUP.get("utm50s_hires")
         return DATASET_LOOKUP.get(dataset_name)
+    elif name.startswith(("zarr://", "icechunk://")):
+        # For zarr:// and icechunk:// URIs, we don't have predefined benchmark tiles
+        return None
     return DATASET_LOOKUP.get(name)
 
 
@@ -418,7 +449,7 @@ def main():
         "--dataset",
         type=str,
         default="global",
-        help="Dataset to serve (default: global). Options: global, air, hrrr, para, eu3035, ifs, curvilinear, sentinel, global-6km, xarray://<tutorial_name> (loads xarray tutorial dataset), local://<group_name> (loads group from /tmp/tiles-icechunk/), local:///custom/path::<group_name> (loads group from custom icechunk repo), or an arraylake dataset name",
+        help="Dataset to serve (default: global). Options: global, air, hrrr, para, eu3035, ifs, curvilinear, sentinel, global-6km, xarray://<tutorial_name> (loads xarray tutorial dataset), zarr:///path/to/zarr/store (loads standard Zarr store, use --group for groups), icechunk:///path/to/repo (loads Icechunk repository, use --group for groups), local://<dataset_name> (shorthand for icechunk:///tmp/tiles-icechunk --group <dataset_name>), or an arraylake dataset name",
     )
     parser.add_argument(
         "--branch",
@@ -430,7 +461,7 @@ def main():
         "--group",
         type=str,
         default="",
-        help="Group to use for Arraylake (default: '').",
+        help="Group to use for Arraylake, Zarr, or Icechunk datasets (default: '').",
     )
     parser.add_argument(
         "--cache",
