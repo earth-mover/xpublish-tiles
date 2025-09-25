@@ -2,7 +2,7 @@
 
 ![PyPI - Version](https://img.shields.io/pypi/v/xpublish-tiles)
 
-Web mapping plugins for Xpublish
+Web mapping plugins for [Xpublish](https://github.com/xpublish-community/xpublish)
 
 ## Project Overview
 This project contains a set of web mapping plugins for Xpublish - a framework for serving xarray datasets via HTTP APIs.
@@ -10,6 +10,9 @@ This project contains a set of web mapping plugins for Xpublish - a framework fo
 The goal of this project is to transform xarray datasets to raster, vector and other types of tiles, which can then be served via HTTP APIs. To do this, the package implements a set of xpublish plugins:
 * `xpublish_tiles.xpublish.tiles.TilesPlugin`: An [OGC Tiles](https://www.ogc.org/standards/ogcapi-tiles/) conformant plugin for serving raster, vector and other types of tiles.
 * `xpublish_tiles.xpublish.wms.WMSPlugin`: An [OGC Web Map Service](https://www.ogc.org/standards/wms/) conformant plugin for serving raster, vector and other types of tiles.
+
+> [!NOTE]
+> The `TilesPlugin` is feature complete, but the `WMSPlugin` is still in active development.
 
 ## Development
 
@@ -229,3 +232,7 @@ Performance recommendations:
 2. If CRS transformations are a bottleneck,
    1. Assign reprojected coordinates for the desired output CRS using multiple grid mapping variables. This will take reprojection time down to 0.
    1. See if you can approximate the coordinate system with rectilinear coordinates as much as possible. This triggers a much faster rendering pathway in datashader.
+
+## License
+
+This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details
