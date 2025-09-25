@@ -50,8 +50,12 @@ def run_benchmark(
         server_url = f"http://localhost:{port}"
     elif where == "local-booth":
         server_url = f"http://localhost:{port}/services/tiles/earthmover-integration/tiles-icechunk/main/{dataset_name}"
-    else:  # prod
+    elif where == "arraylake-prod":
+        server_url = f"https://compute.earthmover.io/v1/services/tiles/earthmover-integration/tiles-icechunk/main/{dataset_name}"
+    elif where == "arraylake-dev":
         server_url = f"https://compute.earthmover.dev/v1/services/tiles/earthmover-integration/tiles-icechunk/main/{dataset_name}"
+    else:
+        raise ValueError(f"Unknown --where option: {where}")
     max_retries = 10
     for _i in range(max_retries):
         try:

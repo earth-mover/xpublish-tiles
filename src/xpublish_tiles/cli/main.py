@@ -57,10 +57,7 @@ def get_dataset_for_name(
         # these are mostly netCDF files and async loading does not work
         ds = xr.tutorial.load_dataset(tutorial_name).assign_attrs(_xpublish_id=name)
     elif name.startswith("local://"):
-        try:
-            import icechunk
-        except ImportError as ie:
-            raise ImportError("icechunk is not installed") from ie
+        import icechunk
 
         local_path = name.removeprefix("local://")
 
@@ -174,16 +171,19 @@ def _teardown_benchmark_server(server, server_thread):
     server_thread.join(timeout=5)
 
 
-def _get_dataset_benchmark_info(ds, dataset_name):
+def _get_dataset_benchmark_info(
+    ds: xr.Dataset | None, dataset_name: str
+) -> tuple[str, bool, list]:
     """Get first variable and colorscale requirements for a dataset."""
-    if not ds.data_vars:
-        return None, None, None
-
-    first_var = next(iter(ds.data_vars))
+    first_var = "foo" if ds is None else next(iter(ds.data_vars))
     needs_colorscale = (
-        "valid_min" not in ds[first_var].attrs or "valid_max" not in ds[first_var].attrs
+        False
+        if ds is None
+        else (
+            "valid_min" not in ds[first_var].attrs
+            or "valid_max" not in ds[first_var].attrs
+        )
     )
-
     dataset_obj = get_dataset_object_for_name(dataset_name)
     if dataset_obj and dataset_obj.benchmark_tiles:
         benchmark_tiles = dataset_obj.benchmark_tiles
@@ -204,10 +204,17 @@ def _run_single_dataset_benchmark_subprocess(dataset_name, args):
     """
     try:
         # Build command to run benchmark in subprocess using --spy mode
+        # Use local:// prefix only for local benchmarks, not for prod
+        dataset_arg = (
+            f"local://{dataset_name}"
+            if args.where in ["local", "local-booth"]
+            else dataset_name
+        )
+
         # fmt: off
         cmd = [
             "uv", "run", "xpublish-tiles",
-            "--dataset", f"local://{dataset_name}",
+            "--dataset", dataset_arg,
             "--port", str(args.port),
             "--concurrency", str(args.concurrency),
             "--where", args.where,
@@ -251,13 +258,11 @@ def _run_single_dataset_benchmark(dataset_name, args, ds=None):
     """Run benchmark for a single dataset. Returns benchmark result or None if failed."""
     try:
         if ds is None:
-            ds_name = (
-                dataset_name
-                if dataset_name in ["global", "air"]
-                else f"local://{dataset_name}"
-            )
-            ds = get_dataset_for_name(ds_name, args.branch, args.group, args.cache)
-
+            # For arraylake modes, don't use local:// prefix
+            if args.where not in ["arraylake-prod", "arraylake-dev"]:
+                ds = get_dataset_for_name(
+                    dataset_name, args.branch, args.group, args.cache
+                )
         first_var, needs_colorscale, benchmark_tiles = _get_dataset_benchmark_info(
             ds, dataset_name
         )
@@ -332,6 +337,9 @@ def run_bench_suite(args):
     results = []
 
     for dataset_name in available_datasets:
+        if "utm50s_hires_onecrs" in dataset_name and "arraylake" in args.where:
+            print("skipping utm50s_hires_onecrs on AL for now.")
+            continue
         print(f"\n=== Benchmarking {dataset_name} ===")
         result = _run_single_dataset_benchmark_subprocess(dataset_name, args)
         if result:
@@ -454,9 +462,9 @@ def main():
     parser.add_argument(
         "--where",
         type=str,
-        choices=["local", "local-booth", "prod"],
+        choices=["local", "local-booth", "arraylake-prod", "arraylake-dev"],
         default="local",
-        help="Where to run benchmark requests: 'local' for localhost (starts server), 'local-booth' for localhost (no server), or 'prod' for production (default: local)",
+        help="Where to run benchmark requests: 'local' for localhost (starts server), 'local-booth' for localhost (no server), 'arraylake-prod' for production (earthmover.io), or 'arraylake-dev' for development (earthmover.dev) (default: local)",
     )
     parser.add_argument(
         "--log-level",
@@ -481,10 +489,10 @@ def main():
     benchmarking = args.bench or args.spy
 
     # Load dataset and setup server
-    ds = get_dataset_for_name(dataset_name, args.branch, args.group, args.cache)
 
     xr.set_options(keep_attrs=True)
     if args.where == "local":
+        ds = get_dataset_for_name(dataset_name, args.branch, args.group, args.cache)
         rest = xpublish.SingleDatasetRest(
             ds,
             plugins={"tiles": TilesPlugin(), "wms": WMSPlugin()},
@@ -494,7 +502,7 @@ def main():
     if benchmarking:
         if args.spy:
             # For spy mode, run single dataset benchmark and output JSON
-            result = _run_single_dataset_benchmark(dataset_name, args, ds)
+            result = _run_single_dataset_benchmark(dataset_name, args)
             if result:
                 failed_count = result.get("failed", 0)
                 if failed_count > 0:
@@ -540,7 +548,7 @@ def main():
 
             if args.where == "local":
                 rest.serve(host="0.0.0.0", port=args.port)
-            elif args.where in ["local-booth", "prod"]:
+            elif args.where in ["local-booth", "arraylake-prod", "arraylake-dev"]:
                 bench_thread.join()
     elif args.where == "local":
         rest.serve(host="0.0.0.0", port=args.port)
