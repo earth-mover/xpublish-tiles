@@ -1,11 +1,11 @@
 """Common benchmarking functionality shared between xpublish-tiles and titiler benchmarks."""
 
 import asyncio
-from dataclasses import dataclass
 import os
 import random
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Optional
 
 import aiohttp
@@ -14,12 +14,11 @@ import aiohttp
 @dataclass
 class BenchmarkResult:
     """Represents the result of a single tile request."""
-    
+
     tile: str
     status: Optional[int]
     duration: float
     error: Optional[str] = None
-
 
 
 async def run_concurrent_tile_requests(
@@ -55,9 +54,9 @@ async def run_concurrent_tile_requests(
             # Convert dict result to BenchmarkResult object
             return BenchmarkResult(
                 tile=result_dict["tile"],
-                status=result_dict["status"], 
+                status=result_dict["status"],
                 duration=result_dict["duration"],
-                error=result_dict["error"]
+                error=result_dict["error"],
             )
 
     async def fetch_all_tiles():
