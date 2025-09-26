@@ -1,6 +1,7 @@
 """Common benchmarking functionality shared between xpublish-tiles and titiler benchmarks."""
 
 import asyncio
+from dataclasses import dataclass
 import os
 import random
 import time
@@ -10,20 +11,15 @@ from typing import Any, Optional
 import aiohttp
 
 
+@dataclass
 class BenchmarkResult:
     """Represents the result of a single tile request."""
+    
+    tile: str
+    status: Optional[int]
+    duration: float
+    error: Optional[str] = None
 
-    def __init__(
-        self,
-        tile: str,
-        status: Optional[int],
-        duration: float,
-        error: Optional[str] = None,
-    ):
-        self.tile = tile
-        self.status = status
-        self.duration = duration
-        self.error = error
 
 
 async def run_concurrent_tile_requests(
@@ -55,7 +51,14 @@ async def run_concurrent_tile_requests(
 
     async def fetch_tile_with_semaphore(session: aiohttp.ClientSession, tile: str):
         async with semaphore:
-            return await fetch_tile_func(session, tile)
+            result_dict = await fetch_tile_func(session, tile)
+            # Convert dict result to BenchmarkResult object
+            return BenchmarkResult(
+                tile=result_dict["tile"],
+                status=result_dict["status"], 
+                duration=result_dict["duration"],
+                error=result_dict["error"]
+            )
 
     async def fetch_all_tiles():
         async with aiohttp.ClientSession() as session:
@@ -66,7 +69,7 @@ async def run_concurrent_tile_requests(
     return await fetch_all_tiles()
 
 
-def calculate_benchmark_stats(results: list[dict], total_time: float) -> dict:
+def calculate_benchmark_stats(results: list[BenchmarkResult], total_time: float) -> dict:
     """Calculate benchmark statistics from request results.
 
     Args:
@@ -81,12 +84,12 @@ def calculate_benchmark_stats(results: list[dict], total_time: float) -> dict:
     durations = []
 
     for result in results:
-        if result.get("error") and result.get("status") is None:
+        if result.error and result.status is None:
             failed += 1
-        elif result.get("status") != 200:
+        elif result.status != 200:
             failed += 1
         else:
-            durations.append(result["duration"])
+            durations.append(result.duration)
             successful += 1
 
     # Calculate statistics
@@ -109,9 +112,9 @@ def calculate_benchmark_stats(results: list[dict], total_time: float) -> dict:
 
 
 def print_benchmark_results(
-    results: list[dict],
+    results: list[BenchmarkResult],
     total_time: float,
-    dataset_name: str,
+    dataset_name: Optional[str],
     implementation: str = "",
 ):
     """Print detailed benchmark results to console.
@@ -128,14 +131,14 @@ def print_benchmark_results(
 
     # Print detailed results for failed requests
     for result in results:
-        if result.get("error") and result.get("status") is None:
+        if result.error and result.status is None:
             print(
-                f"  Tile {result['tile']}: ERROR - {result['error']} ({result['duration']:.3f}s)"
+                f"  Tile {result.tile}: ERROR - {result.error} ({result.duration:.3f}s)"
             )
-        elif result.get("status") != 200:
-            error_msg = result.get("error", "No error details")
+        elif result.status != 200:
+            error_msg = result.error or "No error details"
             print(
-                f"  Tile {result['tile']}: {result['status']} - {error_msg} ({result['duration']:.3f}s)"
+                f"  Tile {result.tile}: {result.status} - {error_msg} ({result.duration:.3f}s)"
             )
 
     # Print summary statistics
@@ -182,7 +185,7 @@ def wait_for_server_ready(
 
 def finalize_benchmark_results(
     stats: dict,
-    dataset_name: str,
+    dataset_name: Optional[str],
     return_results: bool = False,
     implementation_suffix: str = "",
 ) -> Optional[dict]:
