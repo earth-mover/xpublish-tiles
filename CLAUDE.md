@@ -17,6 +17,7 @@ The WMS and Tiles specifications are available in in the `docs` directory for re
 - **Environment sync**: `uv sync --dev`
 - **Type check**: `uv run ty check src/ tests/` (only checks src/ and tests/ directories)
 - **Run unit tests**: `uv run pytest tests` (defaults to --where=local)
+- **Run tests with coverage**: `uv run pytest tests --cov=src/xpublish_tiles --cov-report=term-missing`
 - **Run pre-commit checks**: `pre-commit run --all-files`
 
 ### Dependency Groups
