@@ -129,6 +129,9 @@ xpublish-tiles --dataset para --spy --concurrency 20 --where arraylake-prod
 # Run benchmark suite for all local datasets (creates tabulated results)
 xpublish-tiles --bench-suite
 
+# Run benchmark suite for all local datasets and compare with titiler
+xpublish-tiles --bench-suite --titiler
+
 # Enable debug logging
 xpublish-tiles --dataset hrrr --log-level debug
 ```
