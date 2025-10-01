@@ -1,4 +1,5 @@
 import io
+import json
 
 import numpy as np
 import pandas as pd
@@ -761,3 +762,49 @@ def test_tilejson_bounds_with_decreasing_lat_lon():
     bounds = tj.get("bounds")
     if bounds is not None:
         assert bounds == [-180.0, -90.0, 180.0, 90.0]
+
+
+def test_colormap_tile_endpoint(xpublish_client):
+    """Test that tiles can be generated with custom colormap."""
+    from urllib.parse import quote
+
+    colormap = {"0": "#ff0000", "255": "#0000ff"}  # Red to blue
+    colormap_json = json.dumps(colormap)
+    colormap_encoded = quote(colormap_json)
+
+    # Note: We don't specify style parameter, letting it use default behavior with colormap
+    url = (
+        f"/datasets/air/tiles/WebMercatorQuad/0/0/0"
+        f"?variables=air&width=256&height=256&colormap={colormap_encoded}"
+    )
+    response = xpublish_client.get(url)
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+
+    # Verify it's a valid PNG image
+    image_data = io.BytesIO(response.content)
+    img = Image.open(image_data)
+    assert img.format == "PNG"
+    assert img.size == (256, 256)
+
+
+def test_colormap_with_style_parameter_succeeds(xpublish_client):
+    """Test that specifying both colormap and style works - colormap overrides style."""
+    from urllib.parse import quote
+
+    colormap = {"0": "#ff0000", "255": "#0000ff"}
+    colormap_json = json.dumps(colormap)
+    colormap_encoded = quote(colormap_json)
+
+    response = xpublish_client.get(
+        f"/datasets/air/tiles/WebMercatorQuad/0/0/0"
+        f"?variables=air&width=256&height=256&colormap={colormap_encoded}&style=raster/viridis"
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+
+    # Verify it's a valid PNG image
+    image_data = io.BytesIO(response.content)
+    img = Image.open(image_data)
+    assert img.format == "PNG"
+    assert img.size == (256, 256)

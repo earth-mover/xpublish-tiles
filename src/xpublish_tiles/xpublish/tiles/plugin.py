@@ -426,6 +426,7 @@ class TilesPlugin(Plugin):
                     height=query.height,
                     format=query.f,
                     selectors=selectors,
+                    colormap=query.colormap,
                 )
                 # Track total tile processing time
                 tile_start_time = time.perf_counter()

@@ -603,6 +603,7 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
             colorscalerange=query.colorscalerange,
             format=query.format,
             context_logger=context_logger,
+            colormap=query.colormap,
         ),
     )
     buffer.seek(0)
