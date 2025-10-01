@@ -24,5 +24,11 @@ jobs:
       - name: Run Type Checker
         run: uv run ty check src/ tests/
 
-      - name: Run tests
-        run: uv run pytest tests --durations=10 -nauto
+      - name: Run tests with coverage
+        run: uv run pytest tests --cov=src/xpublish_tiles --cov-report=xml --cov-report=term-missing --durations=10 -nauto
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
