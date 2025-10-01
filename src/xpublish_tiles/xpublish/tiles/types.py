@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from xpublish_tiles.types import ImageFormat
 from xpublish_tiles.validators import (
+    validate_colormap,
     validate_colorscalerange,
     validate_image_format,
     validate_style,
@@ -1296,6 +1297,15 @@ class TileQuery(BaseModel):
             },
         ),
     ]
+    colormap: Annotated[
+        dict[str, str] | None,
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "Custom colormap as JSON-encoded dictionary with numeric keys (0-255) and hex color values (#RRGGBB). When provided, overrides any colormap from the style parameter.",
+            },
+        ),
+    ]
 
     @field_validator("style", mode="before")
     @classmethod
@@ -1321,6 +1331,16 @@ class TileQuery(BaseModel):
         if not v:
             raise ValueError("At least one variable must be specified")
         return v
+
+    @field_validator("colormap", mode="before")
+    @classmethod
+    def validate_colormap(cls, v: str | dict | None) -> dict[str, str] | None:
+        return validate_colormap(v)
+
+    def model_post_init(self, __context) -> None:
+        """Validate colormap usage constraints."""
+        # Colormap is allowed with any style - colormap will override the style's colormap
+        pass
 
 
 class TileJSON(BaseModel):
@@ -1493,4 +1513,6 @@ TILES_FILTERED_QUERY_PARAMS: list[str] = [
     "variables",
     "width",
     "height",
+    "colormap",
+    "render_errors",
 ]

@@ -22,6 +22,8 @@ class QuiverRenderer(Renderer):
         variant: str,
         colorscalerange=None,
         format=None,
+        context_logger=None,
+        colormap: dict[str, str] | None = None,
     ) -> None:
         # Handle "default" alias
         if variant == "default":

@@ -5,6 +5,7 @@ import datashader as dsh  # type: ignore
 import datashader.reductions  # type: ignore
 import datashader.transfer_functions as tf  # type: ignore
 import matplotlib as mpl  # type: ignore
+import matplotlib.colors as mcolors  # type: ignore
 import numbagg
 import numpy as np
 from PIL import Image
@@ -83,6 +84,27 @@ class DatashaderRasterRenderer(Renderer):
     def validate(self, context: dict[str, "RenderContext"]):
         assert len(context) == 1
 
+    def _create_colormap_from_dict(
+        self, colormap_dict: dict[str, str]
+    ) -> mcolors.Colormap:
+        """Create a matplotlib colormap from a dictionary of index->color mappings."""
+        # Sort by numeric keys to ensure proper order
+        sorted_items = sorted(colormap_dict.items(), key=lambda x: int(x[0]))
+
+        # Extract positions (normalized 0-1) and colors
+        positions = []
+        colors = []
+
+        for key, color in sorted_items:
+            position = int(key) / 255.0  # Normalize to 0-1 range
+            positions.append(position)
+            colors.append(color)
+
+        # Create a LinearSegmentedColormap
+        return mcolors.LinearSegmentedColormap.from_list(
+            "custom", list(zip(positions, colors, strict=False)), N=256
+        )
+
     def maybe_cast_data(self, data) -> xr.DataArray:  # type: ignore[name-defined]
         dtype = data.dtype
         totype = str(dtype.str)
@@ -103,6 +125,7 @@ class DatashaderRasterRenderer(Renderer):
         colorscalerange: tuple[float, float] | None = None,
         format: ImageFormat = ImageFormat.PNG,
         context_logger=None,
+        colormap: dict[str, str] | None = None,
     ):
         # Use the passed context logger or fallback to get_context_logger
         logger = context_logger if context_logger is not None else get_context_logger()
@@ -185,10 +208,17 @@ class DatashaderRasterRenderer(Renderer):
                     raise ValueError(
                         "`colorscalerange` must be specified when array does not have valid_min and valid_max attributes specified."
                     )
+
+            # Use custom colormap if provided, otherwise use variant
+            if colormap is not None:
+                cmap = self._create_colormap_from_dict(colormap)
+            else:
+                cmap = mpl.colormaps.get_cmap(variant)
+
             with np.errstate(invalid="ignore"):
                 shaded = tf.shade(
                     mesh,
-                    cmap=mpl.colormaps.get_cmap(variant),
+                    cmap=cmap,
                     how="linear",
                     span=colorscalerange,
                 )
