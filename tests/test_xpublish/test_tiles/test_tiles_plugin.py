@@ -777,7 +777,6 @@ def test_colormap_tile_endpoint(xpublish_client):
         f"/datasets/air/tiles/WebMercatorQuad/0/0/0"
         f"?variables=air&width=256&height=256&colormap={colormap_encoded}"
     )
-    print(url)
     response = xpublish_client.get(url)
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
