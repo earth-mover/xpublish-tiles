@@ -291,4 +291,4 @@ class TestValidateColormap:
 
     def test_non_dict_json_input(self):
         with pytest.raises(ValueError, match="colormap must be a dictionary"):
-            validate_colormap('["not", "a", "dict"]')
+            validate_colormap(["not", "a", "dict"])  # type: ignore  # this doesn't validate with the type checker
