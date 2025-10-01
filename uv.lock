@@ -3816,18 +3816,22 @@ wheels = [
 name = "xpublish-tiles"
 source = { editable = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "cachetools" },
     { name = "cf-xarray" },
     { name = "cftime" },
     { name = "datashader" },
     { name = "donfig" },
     { name = "fastapi" },
+    { name = "matplotlib" },
     { name = "morecantile" },
     { name = "numba" },
     { name = "numbagg" },
+    { name = "pillow" },
     { name = "pydantic-xml" },
     { name = "pyproj" },
     { name = "rasterix" },
+    { name = "requests" },
     { name = "structlog" },
     { name = "tbb", marker = "sys_platform == 'linux'" },
     { name = "toolz" },
@@ -3839,7 +3843,6 @@ dependencies = [
 [package.optional-dependencies]
 testing = [
     { name = "hypothesis" },
-    { name = "matplotlib" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -3867,6 +3870,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.12.15" },
     { name = "cachetools", specifier = ">=5.5.2" },
     { name = "cf-xarray", specifier = ">=0.10.8" },
     { name = "cftime", specifier = ">=1.6.4.post1" },
@@ -3874,10 +3878,11 @@ requires-dist = [
     { name = "donfig", specifier = ">=0.8.0" },
     { name = "fastapi" },
     { name = "hypothesis", marker = "extra == 'testing'", specifier = ">=6.136.6" },
-    { name = "matplotlib", marker = "extra == 'testing'", specifier = ">=3.10.3" },
+    { name = "matplotlib", specifier = ">=3.10.5" },
     { name = "morecantile", specifier = ">=5.4.2" },
     { name = "numba", specifier = ">=0.60.0" },
     { name = "numbagg", specifier = ">=0.9.0" },
+    { name = "pillow", specifier = ">=11.3.0" },
     { name = "pydantic-xml", specifier = ">=2.17.3" },
     { name = "pyproj", specifier = ">=3.7.1" },
     { name = "pytest", marker = "extra == 'testing'", specifier = ">=8.4.1" },
@@ -3886,6 +3891,7 @@ requires-dist = [
     { name = "pytest-randomly", marker = "extra == 'testing'", specifier = ">=3.16.0" },
     { name = "pytest-xdist", marker = "extra == 'testing'", specifier = ">=3.6.1" },
     { name = "rasterix", specifier = ">=0.1a4" },
+    { name = "requests", specifier = ">=2.32.5" },
     { name = "scikit-image", marker = "extra == 'testing'", specifier = ">=0.25.2" },
     { name = "structlog", specifier = ">=24.4.0" },
     { name = "syrupy", marker = "extra == 'testing'", specifier = ">=4.9.1" },
