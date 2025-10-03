@@ -31,9 +31,8 @@ def create_onecrs_dataset(ds: xr.Dataset) -> xr.Dataset:
     """Create a single-CRS version of a dataset by dropping alternate CRS coordinates."""
     # Drop alternate CRS coordinates and their corresponding CRS variables
     coords_to_drop = [
-        coord
-        for coord in ds.coords
-        if coord in ["x_3857", "y_3857", "x_4326", "y_4326", "crs_3857", "crs_4326"]
+        coord for coord in ds.coords if coord in
+        ["x_3857", "y_3857", "x_4326", "y_4326", "crs_3857", "crs_4326"]
     ]
     if coords_to_drop:
         ds = ds.drop_vars(coords_to_drop)
@@ -42,32 +41,37 @@ def create_onecrs_dataset(ds: xr.Dataset) -> xr.Dataset:
     return ds
 
 
-def get_dataset_for_name(
-    name: str, branch: str = "main", group: str = "", icechunk_cache: bool = False
-) -> xr.Dataset:
+def get_dataset_for_name(name: str,
+                         branch: str = "main",
+                         group: str = "",
+                         icechunk_cache: bool = False) -> xr.Dataset:
     if name == "global":
         ds = create_global_dataset().assign_attrs(_xpublish_id=name)
     elif name == "air":
-        ds = xr.tutorial.open_dataset("air_temperature").assign_attrs(_xpublish_id=name)
+        ds = xr.tutorial.open_dataset("air_temperature").assign_attrs(
+            _xpublish_id=name)
     elif name in DATASET_LOOKUP:
         ds = DATASET_LOOKUP[name].create().assign_attrs(_xpublish_id=name)
     elif name.startswith("xarray://"):
         # xarray tutorial dataset - format: xarray://dataset_name
         tutorial_name = name.removeprefix("xarray://")
         # these are mostly netCDF files and async loading does not work
-        ds = xr.tutorial.load_dataset(tutorial_name).assign_attrs(_xpublish_id=name)
+        ds = xr.tutorial.load_dataset(tutorial_name).assign_attrs(
+            _xpublish_id=name)
     elif name.startswith("zarr://"):
         # Standard Zarr store - format: zarr:///path/to/zarr/store with optional --group
         zarr_path = name.removeprefix("zarr://")
         try:
-            ds = xr.open_zarr(
-                zarr_path, group=group or None, consolidated=None, chunks=None
-            )
+            ds = xr.open_zarr(zarr_path,
+                              group=group or None,
+                              consolidated=None,
+                              chunks=None)
             # Add _xpublish_id for caching
             xpublish_id = f"{name}:{group}" if group else name
             ds.attrs["_xpublish_id"] = xpublish_id
         except Exception as e:
-            raise ValueError(f"Error loading Zarr dataset from '{zarr_path}': {e}") from e
+            raise ValueError(
+                f"Error loading Zarr dataset from '{zarr_path}': {e}") from e
     elif name.startswith(("local://", "icechunk://")):
         # Handle both local:// and icechunk:// schemes
         is_local = name.startswith("local://")
@@ -78,9 +82,8 @@ def get_dataset_for_name(
             repo_path = "/tmp/tiles-icechunk/"
 
             # Handle synthetic dataset special case
-            actual_group = (
-                "utm50s_hires" if dataset_name == "utm50s_hires_onecrs" else dataset_name
-            )
+            actual_group = ("utm50s_hires" if dataset_name
+                            == "utm50s_hires_onecrs" else dataset_name)
             # Use provided group if specified, otherwise use the derived group
             effective_group = actual_group if not group else group
         else:
@@ -92,7 +95,13 @@ def get_dataset_for_name(
         try:
             import icechunk
 
-            storage = icechunk.local_filesystem_storage(repo_path)
+            if 's3://' in repo_path:
+                storage = icechunk.s3_storage(
+                    bucket=repo_path.removeprefix('s3://').split('/')[0],
+                    prefix='/'.join(
+                        repo_path.removeprefix('s3://').split('/')[1:]))
+            else:
+                storage = icechunk.local_filesystem_storage(repo_path)
 
             config: icechunk.RepositoryConfig | None = None
             if icechunk_cache:
@@ -101,8 +110,7 @@ def get_dataset_for_name(
                         num_bytes_chunks=1073741824,
                         num_chunk_refs=1073741824,
                         num_bytes_attributes=100_000_000,
-                    )
-                )
+                    ))
             repo = icechunk.Repository.open(storage, config=config)
 
             session = repo.readonly_session(branch=branch)
@@ -116,8 +124,7 @@ def get_dataset_for_name(
 
             # Add _xpublish_id for caching
             ds.attrs["_xpublish_id"] = (
-                f"icechunk:{repo_path}:{effective_group or ''}:{branch}"
-            )
+                f"icechunk:{repo_path}:{effective_group or ''}:{branch}")
 
             # Handle synthetic datasets (local:// only)
             if is_local and dataset_name == "utm50s_hires_onecrs":
@@ -145,11 +152,11 @@ def get_dataset_for_name(
                         num_bytes_chunks=1073741824,
                         num_chunk_refs=1073741824,
                         num_bytes_attributes=100_000_000,
-                    )
-                )
+                    ))
 
             client = Client()
-            repo = cast(icechunk.Repository, client.get_repo(name, config=config))
+            repo = cast(icechunk.Repository,
+                        client.get_repo(name, config=config))
             session = repo.readonly_session(branch=branch)
             ds = xr.open_zarr(
                 session.store,
@@ -176,9 +183,11 @@ def get_dataset_for_name(
 
 def _setup_benchmark_server(ds, port):
     """Setup and start a benchmark server in a separate thread."""
-    rest = xpublish.SingleDatasetRest(
-        ds, plugins={"tiles": TilesPlugin(), "wms": WMSPlugin()}
-    )
+    rest = xpublish.SingleDatasetRest(ds,
+                                      plugins={
+                                          "tiles": TilesPlugin(),
+                                          "wms": WMSPlugin()
+                                      })
     rest.app.add_middleware(CORSMiddleware, allow_origins=["*"])
     config = uvicorn.Config(
         rest.app,
@@ -202,24 +211,20 @@ def _teardown_benchmark_server(server, server_thread):
     server_thread.join(timeout=5)
 
 
-def _get_dataset_benchmark_info(
-    ds: xr.Dataset | None, dataset_name: str
-) -> tuple[str, bool, list]:
+def _get_dataset_benchmark_info(ds: xr.Dataset | None,
+                                dataset_name: str) -> tuple[str, bool, list]:
     """Get first variable and colorscale requirements for a dataset."""
     first_var = "foo" if ds is None else next(iter(ds.data_vars))
-    needs_colorscale = (
-        False
-        if ds is None
-        else (
-            "valid_min" not in ds[first_var].attrs
-            or "valid_max" not in ds[first_var].attrs
-        )
-    )
+    needs_colorscale = (False if ds is None else
+                        ("valid_min" not in ds[first_var].attrs
+                         or "valid_max" not in ds[first_var].attrs))
     dataset_obj = get_dataset_object_for_name(dataset_name)
     if dataset_obj and dataset_obj.benchmark_tiles:
         benchmark_tiles = dataset_obj.benchmark_tiles
     else:
-        warnings.warn("Unknown dataset; using global tiles", RuntimeWarning, stacklevel=2)
+        warnings.warn("Unknown dataset; using global tiles",
+                      RuntimeWarning,
+                      stacklevel=2)
         benchmark_tiles = GLOBAL_BENCHMARK_TILES
 
     return first_var, needs_colorscale, benchmark_tiles
@@ -236,11 +241,8 @@ def _run_single_dataset_benchmark_subprocess(dataset_name, args):
     try:
         # Build command to run benchmark in subprocess using --spy mode
         # Use local:// prefix only for local benchmarks, not for prod
-        dataset_arg = (
-            f"local://{dataset_name}"
-            if args.where in ["local", "local-booth"]
-            else dataset_name
-        )
+        dataset_arg = (f"local://{dataset_name}" if args.where
+                       in ["local", "local-booth"] else dataset_name)
 
         # fmt: off
         cmd = [
@@ -259,11 +261,17 @@ def _run_single_dataset_benchmark_subprocess(dataset_name, args):
         # Run subprocess and capture output
         env = os.environ.copy()
         env["XPUBLISH_TILES_MAX_RENDERABLE_SIZE"] = "400000000"
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
+        result = subprocess.run(cmd,
+                                capture_output=True,
+                                text=True,
+                                timeout=120,
+                                env=env)
         # print(result.stdout)
 
         if result.returncode != 0:
-            print(f"  ERROR: Subprocess failed with return code {result.returncode}")
+            print(
+                f"  ERROR: Subprocess failed with return code {result.returncode}"
+            )
             if result.stderr:
                 print(f"  STDERR: {result.stderr[:500]}")
             return None
@@ -271,7 +279,7 @@ def _run_single_dataset_benchmark_subprocess(dataset_name, args):
         # Parse the JSON result from stdout
         for line in result.stdout.split("\n"):
             if line.startswith("BENCHMARK_RESULT_JSON:"):
-                json_str = line[len("BENCHMARK_RESULT_JSON:") :].strip()
+                json_str = line[len("BENCHMARK_RESULT_JSON:"):].strip()
                 return json.loads(json_str)
 
         print("  ERROR: No benchmark result found in output")
@@ -281,7 +289,9 @@ def _run_single_dataset_benchmark_subprocess(dataset_name, args):
         print("  ERROR: Benchmark timed out after 5 minutes")
         return None
     except Exception as e:
-        print(f"  ERROR: Failed to run benchmark subprocess for {dataset_name}: {e}")
+        print(
+            f"  ERROR: Failed to run benchmark subprocess for {dataset_name}: {e}"
+        )
         return None
 
 
@@ -291,12 +301,10 @@ def _run_single_dataset_benchmark(dataset_name, args, ds=None):
         if ds is None:
             # For arraylake modes, don't use local:// prefix
             if args.where not in ["arraylake-prod", "arraylake-dev"]:
-                ds = get_dataset_for_name(
-                    dataset_name, args.branch, args.group, args.cache
-                )
+                ds = get_dataset_for_name(dataset_name, args.branch,
+                                          args.group, args.cache)
         first_var, needs_colorscale, benchmark_tiles = _get_dataset_benchmark_info(
-            ds, dataset_name
-        )
+            ds, dataset_name)
         if first_var is None:
             print(
                 f"  WARNING: No data variables found in dataset '{dataset_name}', skipping..."
@@ -401,9 +409,8 @@ def run_bench_suite(args):
             has_failures = True
 
         # Highlight failed requests if any failures, green circle for success
-        failed_display = (
-            f"🔴 {failed_count}" if failed_count > 0 else f"🟢 {failed_count}"
-        )
+        failed_display = (f"🔴 {failed_count}"
+                          if failed_count > 0 else f"🟢 {failed_count}")
 
         dataset = r["dataset"].replace("utm50s_hires_onecrs", "utm50s_1crs")
         print(
@@ -437,8 +444,7 @@ def get_dataset_object_for_name(name: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Simple CLI for playing with xpublish-tiles"
-    )
+        description="Simple CLI for playing with xpublish-tiles")
     parser.add_argument(
         "--port",
         type=int,
@@ -449,7 +455,8 @@ def main():
         "--dataset",
         type=str,
         default="global",
-        help="Dataset to serve (default: global). Options: global, air, hrrr, para, eu3035, ifs, curvilinear, sentinel, global-6km, xarray://<tutorial_name> (loads xarray tutorial dataset), zarr:///path/to/zarr/store (loads standard Zarr store, use --group for groups), icechunk:///path/to/repo (loads Icechunk repository, use --group for groups), local://<dataset_name> (shorthand for icechunk:///tmp/tiles-icechunk --group <dataset_name>), or an arraylake dataset name",
+        help=
+        "Dataset to serve (default: global). Options: global, air, hrrr, para, eu3035, ifs, curvilinear, sentinel, global-6km, xarray://<tutorial_name> (loads xarray tutorial dataset), zarr:///path/to/zarr/store (loads standard Zarr store, use --group for groups), icechunk:///path/to/repo (loads Icechunk repository, use --group for groups), local://<dataset_name> (shorthand for icechunk:///tmp/tiles-icechunk --group <dataset_name>), or an arraylake dataset name",
     )
     parser.add_argument(
         "--branch",
@@ -461,7 +468,8 @@ def main():
         "--group",
         type=str,
         default="",
-        help="Group to use for Arraylake, Zarr, or Icechunk datasets (default: '').",
+        help=
+        "Group to use for Arraylake, Zarr, or Icechunk datasets (default: '').",
     )
     parser.add_argument(
         "--cache",
@@ -477,7 +485,8 @@ def main():
     parser.add_argument(
         "--spy",
         action="store_true",
-        help="Run benchmark requests with the specified dataset (alias for --bench)",
+        help=
+        "Run benchmark requests with the specified dataset (alias for --bench)",
     )
     parser.add_argument(
         "--bench-suite",
@@ -495,7 +504,8 @@ def main():
         type=str,
         choices=["local", "local-booth", "arraylake-prod", "arraylake-dev"],
         default="local",
-        help="Where to run benchmark requests: 'local' for localhost (starts server), 'local-booth' for localhost (no server), 'arraylake-prod' for production (earthmover.io), or 'arraylake-dev' for development (earthmover.dev) (default: local)",
+        help=
+        "Where to run benchmark requests: 'local' for localhost (starts server), 'local-booth' for localhost (no server), 'arraylake-prod' for production (earthmover.io), or 'arraylake-dev' for development (earthmover.dev) (default: local)",
     )
     parser.add_argument(
         "--log-level",
@@ -523,10 +533,14 @@ def main():
 
     xr.set_options(keep_attrs=True)
     if args.where == "local":
-        ds = get_dataset_for_name(dataset_name, args.branch, args.group, args.cache)
+        ds = get_dataset_for_name(dataset_name, args.branch, args.group,
+                                  args.cache)
         rest = xpublish.SingleDatasetRest(
             ds,
-            plugins={"tiles": TilesPlugin(), "wms": WMSPlugin()},
+            plugins={
+                "tiles": TilesPlugin(),
+                "wms": WMSPlugin()
+            },
         )
         rest.app.add_middleware(CORSMiddleware, allow_origins=["*"])
 
@@ -537,7 +551,8 @@ def main():
             if result:
                 failed_count = result.get("failed", 0)
                 if failed_count > 0:
-                    print(f"🔴 WARNING: {failed_count} failed requests detected!")
+                    print(
+                        f"🔴 WARNING: {failed_count} failed requests detected!")
                 else:
                     print("🟢 All requests completed successfully!")
             print("BENCHMARK_RESULT_JSON:", json.dumps(result))
@@ -547,19 +562,18 @@ def main():
             if dataset_obj and dataset_obj.benchmark_tiles:
                 benchmark_tiles = dataset_obj.benchmark_tiles
             else:
-                warnings.warn(
-                    "Unknown dataset; using global tiles", RuntimeWarning, stacklevel=2
-                )
+                warnings.warn("Unknown dataset; using global tiles",
+                              RuntimeWarning,
+                              stacklevel=2)
                 benchmark_tiles = GLOBAL_BENCHMARK_TILES
 
             if not ds.data_vars:
-                raise ValueError(f"No data variables found in dataset '{dataset_name}'")
+                raise ValueError(
+                    f"No data variables found in dataset '{dataset_name}'")
             first_var = next(iter(ds.data_vars))
 
-            needs_colorscale = (
-                "valid_min" not in ds[first_var].attrs
-                or "valid_max" not in ds[first_var].attrs
-            )
+            needs_colorscale = ("valid_min" not in ds[first_var].attrs
+                                or "valid_max" not in ds[first_var].attrs)
 
             bench_thread = threading.Thread(
                 target=run_benchmark,
@@ -579,7 +593,9 @@ def main():
 
             if args.where == "local":
                 rest.serve(host="0.0.0.0", port=args.port)
-            elif args.where in ["local-booth", "arraylake-prod", "arraylake-dev"]:
+            elif args.where in [
+                    "local-booth", "arraylake-prod", "arraylake-dev"
+            ]:
                 bench_thread.join()
     elif args.where == "local":
         rest.serve(host="0.0.0.0", port=args.port)
