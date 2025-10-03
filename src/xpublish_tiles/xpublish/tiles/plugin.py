@@ -5,6 +5,8 @@ import logging
 import time
 from enum import Enum
 from typing import Annotated
+from urllib.parse import quote
+import json
 
 import morecantile
 import structlog
@@ -311,6 +313,9 @@ class TilesPlugin(Plugin):
             # Append optional color scale range
             if query.colorscalerange:
                 url_template = f"{url_template}&colorscalerange={query.colorscalerange[0]:g},{query.colorscalerange[1]:g}"
+
+            if query.colormap:
+                url_template = f"{url_template}&colormap={quote(json.dumps(query.colormap))}"
 
             # Append selectors
             if selectors:
