@@ -19,6 +19,7 @@ class TestTileQueryColormap:
             style=None,
             f=ImageFormat.PNG,
             render_errors=False,
+            expression=None,
         )
         assert query.colormap == colormap
 
@@ -33,6 +34,7 @@ class TestTileQueryColormap:
             colormap=None,
             f=ImageFormat.PNG,
             render_errors=False,
+            expression=None,
         )
         assert query.colormap is None
 
@@ -50,6 +52,7 @@ class TestTileQueryColormap:
             colorscalerange=None,
             f=ImageFormat.PNG,
             render_errors=False,
+            expression=None,
         )
         assert query.colormap == colormap
         assert query.style == ("raster", "default")
@@ -64,6 +67,7 @@ class TestTileQueryColormap:
             colorscalerange=None,
             f=ImageFormat.PNG,
             render_errors=False,
+            expression=None,
         )
         assert query.colormap == colormap
         assert query.style == ("raster", "viridis")
