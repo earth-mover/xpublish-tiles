@@ -312,6 +312,10 @@ class TilesPlugin(Plugin):
             if query.colorscalerange:
                 url_template = f"{url_template}&colorscalerange={query.colorscalerange[0]:g},{query.colorscalerange[1]:g}"
 
+            # Append optional expression
+            if query.expression:
+                url_template = f"{url_template}&expression={query.expression}"
+
             # Append selectors
             if selectors:
                 selector_qs = "&".join(f"{k}={v}" for k, v in selectors.items())
@@ -427,6 +431,7 @@ class TilesPlugin(Plugin):
                     format=query.f,
                     selectors=selectors,
                     colormap=query.colormap,
+                    expression=query.expression,
                 )
                 # Track total tile processing time
                 tile_start_time = time.perf_counter()

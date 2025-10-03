@@ -1306,6 +1306,15 @@ class TileQuery(BaseModel):
             },
         ),
     ]
+    expression: Annotated[
+        str | None,
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "Mathematical expression to evaluate on band data using numexpr. Use b{n} notation to reference band indices, e.g., '(b0 + b1) / b2'. Only works with datasets that have a third dimension representing bands.",
+            },
+        ),
+    ]
 
     @field_validator("style", mode="before")
     @classmethod
@@ -1515,4 +1524,5 @@ TILES_FILTERED_QUERY_PARAMS: list[str] = [
     "height",
     "colormap",
     "render_errors",
+    "expression",
 ]

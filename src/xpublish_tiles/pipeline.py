@@ -10,6 +10,7 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from xpublish_tiles.config import config
+from xpublish_tiles.expressions import ValidatedExpression
 from xpublish_tiles.grids import (
     Curvilinear,
     GridMetadata,
@@ -567,7 +568,10 @@ def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool
 
 
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
-    validated = apply_query(ds, variables=query.variables, selectors=query.selectors)
+    expression = ValidatedExpression(query.expression) if query.expression else None
+    validated = apply_query(
+        ds, variables=query.variables, selectors=query.selectors, expression=expression
+    )
     pixel_factor = config.get("max_pixel_factor")
     max_shape = (pixel_factor * query.width, pixel_factor * query.height)
     subsets = await subset_to_bbox(
@@ -628,7 +632,11 @@ def _infer_datatype(array: xr.DataArray) -> DataType:
 
 
 def apply_query(
-    ds: xr.Dataset, *, variables: list[str], selectors: dict[str, Any]
+    ds: xr.Dataset,
+    *,
+    variables: list[str],
+    selectors: dict[str, Any],
+    expression: ValidatedExpression | None = None,
 ) -> dict[str, ValidatedArray]:
     """
     This method does all automagic detection necessary for the rest of the pipeline to work.
@@ -682,20 +690,32 @@ def apply_query(
                     )
                     raise e
         ds = ds.cf.sel(**selectors)
-    for name in variables:
-        grid = guess_grid_system(ds, name)
-        array = ds[name]
-        if grid.Z in array.dims:
-            array = array.sel({grid.Z: 0}, method="nearest")
-        if extra_dims := (set(array.dims) - grid.dims):
-            # Note: this will handle squeezing of label-based selection
-            # along datetime coordinates
-            array = array.isel({dim: -1 for dim in extra_dims})
-        validated[name] = ValidatedArray(
-            da=array,
-            grid=grid,
-            datatype=_infer_datatype(array),
+    if len(variables) != 1:
+        raise ValueError(
+            f"Only one variable can be rendered at a time. Got {variables!r}."
         )
+    name = variables[0]
+    grid = guess_grid_system(ds, name)
+    array = ds[name]
+    if grid.Z in array.dims:
+        array = array.sel({grid.Z: 0}, method="nearest")
+    extra_dims = set(array.dims) - grid.dims
+    if expression is not None:
+        if len(extra_dims) != 1:
+            raise ValueError(
+                f"Expressions can only be applied to data with at one extra dimension. Got {extra_dims!r}."
+            )
+        band_dim = next(iter(extra_dims))
+        array = array.isel({band_dim: expression.band_indexes})
+    elif extra_dims:
+        # Note: this will handle squeezing of label-based selection
+        # along datetime coordinates
+        array = array.isel({dim: -1 for dim in extra_dims})
+    validated[name] = ValidatedArray(
+        da=array,
+        grid=grid,
+        datatype=_infer_datatype(array),
+    )
     return validated
 
 
