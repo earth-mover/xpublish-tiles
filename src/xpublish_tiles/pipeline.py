@@ -707,6 +707,9 @@ def apply_query(
             )
         band_dim = next(iter(extra_dims))
         array = array.isel({band_dim: expression.band_indexes})
+        array = array.assign_coords({band_dim: expression.band_names}).rename(
+            {band_dim: "band"}
+        )
     elif extra_dims:
         # Note: this will handle squeezing of label-based selection
         # along datetime coordinates

@@ -298,7 +298,11 @@ def test_apply_query_with_expression():
         expression=expression,
         selectors={"time": "2000-01-01"},
     )
-    expected = ds.foo.sel(time="2000-01-01").isel(band=[0, 1, 2])
+    expected = (
+        ds.foo.sel(time="2000-01-01")
+        .isel(band=[0, 1, 2])
+        .assign_coords({"band": ["b0", "b1", "b2"]})
+    )
     assert_equal(result["foo"].da, expected)
 
     expression = ValidatedExpression("b0 + b2")
@@ -309,7 +313,11 @@ def test_apply_query_with_expression():
         expression=expression,
         selectors={"time": "2000-01-01"},
     )
-    expected = ds.foo.sel(time="2000-01-01").isel(band=[0, 2])
+    expected = (
+        ds.foo.sel(time="2000-01-01")
+        .isel(band=[0, 2])
+        .assign_coords({"band": ["b0", "b2"]})
+    )
     assert_equal(result["foo"].da, expected)
 
 

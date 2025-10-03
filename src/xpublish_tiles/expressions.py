@@ -29,6 +29,15 @@ class ValidatedExpression:
             )
         self.band_indexes = [int(match.group(1)) for match in matches]
 
+    @property
+    def band_names(self) -> list[str]:
+        """Get the band names used in the expression.
+
+        Returns:
+            list[str]: A list of band names (e.g., 'b1', 'b2').
+        """
+        return [f"b{index}" for index in self.band_indexes]
+
     def evaluate(self, arrays: dict[str, np.ndarray]) -> np.ndarray:
         """Evaluate the expression using the provided arrays.
 

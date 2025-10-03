@@ -7,9 +7,11 @@ from xpublish_tiles.expressions import ValidatedExpression
 def test_valid_expression():
     expr = ValidatedExpression("b1 + b2 / 2")
     assert expr.band_indexes == [1, 2]
+    assert expr.band_names == ["b1", "b2"]
 
     expr = ValidatedExpression("cos(b100)")
     assert expr.band_indexes == [100]
+    assert expr.band_names == ["b100"]
 
 
 def test_invalid_expression():
