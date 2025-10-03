@@ -63,6 +63,36 @@ def sum_tuples(*tuples):
     return tuple(sum(values) for values in zip(*tuples, strict=False))
 
 
+def _guess_band_dim(da: xr.DataArray) -> str | None:
+    """Guess the band dimension name in a DataArray.
+
+    Parameters
+    ----------
+    da : xr.DataArray
+        The DataArray to inspect.
+
+    Returns
+    -------
+    str
+        The name of the band dimension.
+
+    Raises
+    ------
+    ValueError
+        If no suitable band dimension is found.
+    """
+    # Common names for band dimensions
+    common_band_names = {"band", "bands", "b", "bnd", "bnds", "channel", "channels"}
+
+    # Check for common band dimension names first
+    for dim in da.dims:
+        dim_str = str(dim)
+        if dim_str.lower() in common_band_names:
+            return dim_str
+
+    return None
+
+
 def check_data_is_renderable_size(
     slicers: dict[str, list[slice | Fill]],
     da: xr.DataArray,
@@ -332,6 +362,7 @@ async def apply_slicers(
 
     nvars = sum(len(subset.data_vars) for subset in subsets)
     # if any subset has shape < (2, 2) raise.
+    # TODO: make this logic ignore the band dimension, which could be of size 1!
     if any(total_size < 2 * nvars for total_size in total_shape):
         logger.error("Tile request resulted in insufficient data for rendering.")
         raise ValueError("Tile request resulted in insufficient data for rendering.")
@@ -594,12 +625,18 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     results = await asyncio.gather(*tasks)
     new_subsets = dict(zip(subsets.keys(), results, strict=False))
 
+    computed_subsets = (
+        (await async_run(apply_expression, new_subsets, expression))
+        if expression
+        else new_subsets
+    )
+
     buffer = io.BytesIO()
     renderer = query.get_renderer()
 
     await async_run(
         lambda: renderer.render(
-            contexts=new_subsets,
+            contexts=computed_subsets,
             buffer=buffer,
             width=query.width,
             height=query.height,
@@ -690,35 +727,39 @@ def apply_query(
                     )
                     raise e
         ds = ds.cf.sel(**selectors)
-    if len(variables) != 1:
+    if len(variables) > 1 and expression:
         raise ValueError(
-            f"Only one variable can be rendered at a time. Got {variables!r}."
+            f"Only one variable can be rendered at a time with expressions. Got {variables!r}."
         )
-    name = variables[0]
-    grid = guess_grid_system(ds, name)
-    array = ds[name]
-    if grid.Z in array.dims:
-        array = array.sel({grid.Z: 0}, method="nearest")
-    extra_dims = set(array.dims) - grid.dims
-    if expression is not None:
-        if len(extra_dims) != 1:
-            raise ValueError(
-                f"Expressions can only be applied to data with at one extra dimension. Got {extra_dims!r}."
+    for name in variables:
+        grid = guess_grid_system(ds, name)
+        array = ds[name]
+        if grid.Z in array.dims:
+            array = array.sel({grid.Z: 0}, method="nearest")
+        extra_dims = set(array.dims) - grid.dims
+        if expression is not None:
+            band_dim = _guess_band_dim(array)
+            if band_dim is not None:
+                extra_dims.discard(band_dim)
+            else:
+                if len(extra_dims) != 1:
+                    raise ValueError(
+                        f"Couldn't guess band dim from extra dimension. Got {extra_dims!r}."
+                    )
+                band_dim = next(iter(extra_dims))
+            array = array.isel({band_dim: expression.band_indexes})
+            array = array.assign_coords({band_dim: expression.band_names}).rename(
+                {band_dim: "band"}
             )
-        band_dim = next(iter(extra_dims))
-        array = array.isel({band_dim: expression.band_indexes})
-        array = array.assign_coords({band_dim: expression.band_names}).rename(
-            {band_dim: "band"}
+        if extra_dims:
+            # Note: this will handle squeezing of label-based selection
+            # along datetime coordinates
+            array = array.isel({dim: -1 for dim in extra_dims})
+        validated[name] = ValidatedArray(
+            da=array,
+            grid=grid,
+            datatype=_infer_datatype(array),
         )
-    elif extra_dims:
-        # Note: this will handle squeezing of label-based selection
-        # along datetime coordinates
-        array = array.isel({dim: -1 for dim in extra_dims})
-    validated[name] = ValidatedArray(
-        da=array,
-        grid=grid,
-        datatype=_infer_datatype(array),
-    )
     return validated
 
 
@@ -729,13 +770,30 @@ async def subset_to_bbox(
     crs: OutputCRS,
     max_shape: tuple[int, int],
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:
+    """Subset the validated arrays to the given bounding box.
+
+    Arrays should be either 2D or 3D with a band dimension.
+    """
     result = {}
     for var_name, array in validated.items():
         grid = array.grid
         if (ndim := array.da.ndim) > 2:
-            raise ValueError(f"Attempting to visualize array with {ndim=!r} > 2.")
+            if "band" in array.da.dims and ndim == 3:
+                # allow band dimension for expressions
+                pass
+            else:
+                raise ValueError(f"Attempting to visualize array with {ndim=!r} > 2.")
         # Check for insufficient data - either dimension has too few points
-        if min(array.da.shape) < 2:
+        if (
+            min(
+                [
+                    s
+                    for s, dimname in zip(array.da.shape, array.da.dims, strict=False)
+                    if dimname != "band"
+                ]
+            )
+            < 2
+        ):
             raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
 
         if not isinstance(grid, RasterAffine | Rectilinear | Curvilinear):
@@ -813,3 +871,58 @@ async def subset_to_bbox(
             bbox=bbox,
         )
     return result
+
+
+def apply_expression(
+    contexts: dict[str, PopulatedRenderContext | NullRenderContext],
+    expression: ValidatedExpression | None,
+) -> dict[str, PopulatedRenderContext | NullRenderContext]:
+    if expression is None:
+        return contexts
+
+    if len(contexts) != 1:
+        raise ValueError(
+            f"Expressions can only be applied when rendering one variable at a time. Got {list(contexts.keys())!r}."
+        )
+
+    var_name, context = next(iter(contexts.items()))
+    if isinstance(context, NullRenderContext):
+        return contexts
+
+    da = context.da
+
+    if "band" not in da.dims:
+        raise ValueError(
+            f"Expressions can only be applied to data with a 'band' dimension. Got {da.dims!r}."
+        )
+
+    # TODO: this could be more efficient
+    if not all(
+        a == b for a, b in zip(da["band"].values, expression.band_names, strict=True)
+    ):
+        raise ValueError(
+            f"Data 'band' dimension does not match expression bands. Got {da['band'].values!r}, expected {expression.band_names!r}."
+        )
+
+    da = da.transpose("band", ...)
+    input_core_dims = da.dims
+    output_core_dims = input_core_dims[1:]
+
+    result_da = xr.apply_ufunc(
+        expression.evaluate_from_array,
+        da,
+        input_core_dims=[input_core_dims],
+        output_core_dims=[output_core_dims],
+        vectorize=False,
+        dask="forbidden",
+        output_dtypes=[da.dtype],
+    )
+
+    return {
+        var_name: PopulatedRenderContext(
+            da=result_da,
+            grid=context.grid,
+            datatype=context.datatype,
+            bbox=context.bbox,
+        )
+    }

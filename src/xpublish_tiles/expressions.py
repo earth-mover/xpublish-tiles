@@ -47,4 +47,22 @@ class ValidatedExpression:
         Returns:
             np.ndarray: The result of evaluating the expression.
         """
+        if set(arrays.keys()) != set(self.band_names):
+            raise ValueError(
+                "Arrays must contain exactly the bands used in the expression."
+            )
         return ne.evaluate(self.expression, local_dict=arrays)
+
+    def evaluate_from_array(self, array: np.ndarray) -> np.ndarray:
+        """Evaluate the expression using a single array with a band dimension.
+
+        Args:
+            array (np.ndarray): A numpy array with shape (bands, ...).
+            Important! The ordering of the bands along axis 0 is assumed to match the band indexes.
+
+        Returns:
+            np.ndarray: The result of evaluating the expression.
+        """
+        assert array.shape[0] == len(self.band_indexes)
+        band_arrays = {f"b{index}": array[n] for n, index in enumerate(self.band_indexes)}
+        return self.evaluate(band_arrays)

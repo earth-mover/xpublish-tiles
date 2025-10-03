@@ -23,6 +23,7 @@ from xpublish_tiles.pipeline import (
     apply_query,
     bbox_overlap,
     pipeline,
+    subset_to_bbox,
 )
 from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
@@ -217,7 +218,6 @@ async def test_global_nans_data(tile, tms, png_snapshot, pytestconfig):
     assert content == png_snapshot
 
 
-@pytest.mark.xfail(reason="Multiple variables not supported")
 def test_apply_query_selectors_multiple_variables():
     ds = FORECAST.copy(deep=True)
     ds["foo2"] = ds["sst"] * 2
@@ -285,21 +285,21 @@ def test_apply_query_with_expression():
     expression = ValidatedExpression("b0 + b1 + b2")
     assert expression.band_indexes == [0, 1, 2]
 
-    # with no selectors, can't identify unique band dimension
+    # with no selectors, band is identified automatically from extra dims
     with pytest.raises(
         ValueError,
-        match="Expressions can only be applied to data with at one extra dimension.",
+        match="Couldn't guess band dim from extra dimension.",
     ):
-        apply_query(ds, variables=["foo"], expression=expression, selectors={})
+        apply_query(
+            ds.rename({"band": "random_name"}),
+            variables=["foo"],
+            expression=expression,
+            selectors={},
+        )
 
-    result = apply_query(
-        ds,
-        variables=["foo"],
-        expression=expression,
-        selectors={"time": "2000-01-01"},
-    )
+    result = apply_query(ds, variables=["foo"], expression=expression, selectors={})
     expected = (
-        ds.foo.sel(time="2000-01-01")
+        ds.foo.sel(time="2000-01-02")
         .isel(band=[0, 1, 2])
         .assign_coords({"band": ["b0", "b1", "b2"]})
     )
@@ -308,10 +308,7 @@ def test_apply_query_with_expression():
     expression = ValidatedExpression("b0 + b2")
     assert expression.band_indexes == [0, 2]
     result = apply_query(
-        ds,
-        variables=["foo"],
-        expression=expression,
-        selectors={"time": "2000-01-01"},
+        ds, variables=["foo"], expression=expression, selectors={"time": "2000-01-01"}
     )
     expected = (
         ds.foo.sel(time="2000-01-01")
@@ -485,3 +482,71 @@ async def test_hrrr_multiple_vs_hrrr_rendering(tile, tms, pytestconfig):
         f"HRRR_MULTIPLE should render identically to HRRR for tile {tile} "
         f"but images differ"
     )
+
+
+@pytest.mark.asyncio
+async def test_subset_to_bbox_basic():
+    """Test basic functionality of subset_to_bbox with global dataset."""
+    from xpublish_tiles.types import PopulatedRenderContext
+
+    # ds = create_global_dataset()
+    ds = GLOBAL_6KM.create()
+    validated = apply_query(ds, variables=["foo"], selectors={})
+
+    bbox = OutputBBox(BBox(west=-10, south=-10, east=10, north=10))
+    crs = OutputCRS(CRS.from_user_input(4326))
+    max_shape = (512, 512)
+
+    result = await subset_to_bbox(validated, bbox=bbox, crs=crs, max_shape=max_shape)
+
+    assert len(result) == 1
+    assert "foo" in result
+    assert isinstance(result["foo"], PopulatedRenderContext)
+    assert result["foo"].da.ndim == 2
+    assert result["foo"].bbox == bbox
+
+
+@pytest.mark.asyncio
+async def test_pipeline_with_expression():
+    from xpublish_tiles.types import PopulatedRenderContext
+
+    # ds = create_global_dataset()
+    ds = GLOBAL_6KM.create()
+    expression = ValidatedExpression("b0 + b1 + b2")
+    validated = apply_query(ds, variables=["foo"], expression=expression, selectors={})
+
+    bbox = OutputBBox(BBox(west=-10, south=-10, east=10, north=10))
+    crs = OutputCRS(CRS.from_user_input(4326))
+    max_shape = (512, 512)
+
+    result = await subset_to_bbox(validated, bbox=bbox, crs=crs, max_shape=max_shape)
+
+    assert len(result) == 1
+    assert "foo" in result
+    assert isinstance(result["foo"], PopulatedRenderContext)
+    assert result["foo"].da.ndim == 3
+    assert result["foo"].bbox == bbox
+
+
+@pytest.mark.asyncio
+async def test_subset_to_bbox_with_expression():
+    """Test basic functionality of subset_to_bbox with global dataset."""
+
+    # ds = create_global_dataset()
+    ds = GLOBAL_6KM.create()
+    query = QueryParams(
+        variables=["foo"],
+        crs=OutputCRS(CRS.from_user_input(4326)),
+        bbox=OutputBBox(BBox(west=-10, south=-10, east=10, north=10)),
+        selectors={},
+        style="raster",
+        width=256,
+        height=256,
+        variant="viridis",
+        colorscalerange=None,
+        format=ImageFormat.PNG,
+        expression="b0 + b1 + b2",
+    )
+
+    await pipeline(ds, query)
+    # TODO: make this more than just a smoke test
