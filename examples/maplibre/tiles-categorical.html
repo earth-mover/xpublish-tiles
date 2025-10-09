@@ -1,0 +1,83 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>XYZ - xpublish-tiles</title>
+        <meta
+            name="viewport"
+            content="initial-scale=1,maximum-scale=1,user-scalable=no"
+        />
+        <link
+            href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+            rel="stylesheet"
+        />
+        <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+            }
+            #map {
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                width: 100%;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="map"></div>
+        <script>
+            const map = new maplibregl.Map({
+                container: "map",
+                style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+                zoom: 5,
+                center: [-54, -5],
+                projection: {
+                    name: "mercator",
+                    <!-- center: [262.5-360, 38.5], -->
+                    <!-- parallels: [38.5, 38.5] -->
+                },
+            });
+
+            map.on("load", () => {
+                map.setFog({});
+
+                map.addSource("wms-test-source", {
+                    type: "raster",
+                    // use the tiles option to specify a WMS tile source URL
+                    // https://docs.mapbox.com/style-spec/reference/sources/
+                    tiles: [
+                        // CHANGE THIS URL TO DEMO URL and LAYERS/time/other dimensions
+                        "http://localhost:8989/tiles/WebMercatorQuad/{z}/{y}/{x}?variables=foo&style=raster/viridis&width=256&height=256",
+                    ],
+                    tileSize: 256,
+                });
+                map.addLayer(
+                    {
+                        id: "wms-test-layer",
+                        type: "raster",
+                        source: "wms-test-source",
+                        paint: {
+                            "raster-opacity": 0.5,
+                        },
+                    },
+                    // 'building' // Place layer under labels, roads and buildings.
+                );
+
+                // Enable tile boundaries
+                map.showTileBoundaries = true;
+            });
+
+            map.on("style.load", function () {
+                map.on("click", function (e) {
+                    var coordinates = e.lngLat;
+                    new maplibregl.Popup()
+                        .setLngLat(coordinates)
+                        .setHTML("you clicked here: <br/>" + coordinates)
+                        .addTo(map);
+                });
+            });
+        </script>
+    </body>
+</html>

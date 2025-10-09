@@ -204,7 +204,7 @@ Where `4/4/14` represents the tile coordinates in {z}/{y}/{x}
 
 ## Integration Examples
 
-- [Mapbox Usage](./examples/mapbox/)
+- [Maplibre/Mapbox Usage](./examples/maplibre/)
 
 
 ## Deployment notes
