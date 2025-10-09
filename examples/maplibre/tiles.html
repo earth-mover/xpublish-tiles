@@ -1,0 +1,103 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>XYZ - xpublish-tiles</title>
+        <meta
+            name="viewport"
+            content="initial-scale=1,maximum-scale=1,user-scalable=no"
+        />
+        <link
+            href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+            rel="stylesheet"
+        />
+        <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+            }
+            #map {
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                width: 100%;
+            }
+            #toggle-container {
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                z-index: 1000;
+            }
+            #tile-boundaries-toggle {
+                padding: 8px 12px;
+                background: white;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                cursor: pointer;
+                font-family: Arial, sans-serif;
+                font-size: 12px;
+            }
+            #tile-boundaries-toggle:hover {
+                background: #f0f0f0;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="map"></div>
+        <div id="toggle-container">
+            <button id="tile-boundaries-toggle">Show Tile Boundaries</button>
+        </div>
+        <script>
+            const map = new maplibregl.Map({
+                container: "map",
+                style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+                zoom: 2,
+                center: [-71.0367, 42.3739],
+            });
+
+            map.on("load", () => {
+                map.addSource("tiles-test-source", {
+                    type: "raster",
+                    // use the tiles option to specify a raster tile source URL
+                    // https://docs.mapbox.com/style-spec/reference/sources/
+                    url: "http://localhost:8080/tiles/WebMercatorQuad/tilejson.json?variables=gust&width=512&height=512&style=raster/viridis&colorscalerange=0,30",
+                    tileSize: 512,
+                });
+                map.addLayer(
+                    {
+                        id: "tiles-test-layer",
+                        type: "raster",
+                        source: "tiles-test-source",
+                        paint: {
+                            "raster-opacity": 0.5,
+                        },
+                    },
+                    // 'building' // Place layer under labels, roads and buildings.
+                );
+                map.showTileBoundaries = false;
+
+                // Toggle tile boundaries functionality
+                const toggleButton = document.getElementById(
+                    "tile-boundaries-toggle",
+                );
+                toggleButton.addEventListener("click", () => {
+                    map.showTileBoundaries = !map.showTileBoundaries;
+                    toggleButton.textContent = map.showTileBoundaries
+                        ? "Hide Tile Boundaries"
+                        : "Show Tile Boundaries";
+                });
+            });
+
+            map.on("style.load", function () {
+                map.on("click", function (e) {
+                    var coordinates = e.lngLat;
+                    new maplibregl.Popup()
+                        .setLngLat(coordinates)
+                        .setHTML("you clicked here: <br/>" + coordinates)
+                        .addTo(map);
+                });
+            });
+        </script>
+    </body>
+</html>
