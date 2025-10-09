@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <title>XYZ - xpublish-tiles</title>
 <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
-<link href="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.css" rel="stylesheet">
-<script src="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.js"></script>
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <style>
 body { margin: 0; padding: 0; }
 #map { position: absolute; top: 0; bottom: 0; width: 100%; }
@@ -20,14 +20,9 @@ body { margin: 0; padding: 0; }
     <button id="tile-boundaries-toggle">Show Tile Boundaries</button>
 </div>
 <script>
-	// TO MAKE THE MAP APPEAR YOU MUST
-	// ADD YOUR ACCESS TOKEN FROM
-	// https://account.mapbox.com
-	mapboxgl.accessToken = 'pk.eyJ1IjoibXBpYW5udWNjaSIsImEiOiJja3FiZHg2emEwMGNjMndvY2F6OTdpcWN3In0.rjzyODwHa4rsEy2CH7IDwQ';
-    const map = new mapboxgl.Map({
+    const map = new maplibregl.Map({
         container: 'map',
-        // Choose from Mapbox's core styles, or make your own style with Mapbox Studio
-        style: 'mapbox://styles/mapbox/light-v11',
+        style: 'https://demotiles.maplibre.org/style.json',
         zoom: 2,
         center: [-71.0367, 42.3739],
         //center: [-61.5, -4.5],
@@ -74,7 +69,7 @@ body { margin: 0; padding: 0; }
     map.on('style.load', function() {
   map.on('click', function(e) {
     var coordinates = e.lngLat;
-    new mapboxgl.Popup()
+    new maplibregl.Popup()
       .setLngLat(coordinates)
       .setHTML('you clicked here: <br/>' + coordinates)
       .addTo(map);
