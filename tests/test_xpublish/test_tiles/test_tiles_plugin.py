@@ -568,10 +568,10 @@ def test_tilejson_endpoint():
     rest = xpublish.Rest({"temp": data}, plugins={"tiles": TilesPlugin()})
     client = TestClient(rest.app)
 
-    # Test TileJSON endpoint with dimension selectors
+    # Test TileJSON endpoint with dimension selectors and colormap
     response = client.get(
         "/datasets/temp/tiles/WebMercatorQuad/tilejson.json"
-        "?variables=temperature&style=raster/plasma&width=512&height=512&time=2020-02-01&colorscalerange=-3,3"
+        "?variables=temperature&style=raster/plasma&width=512&height=512&time=2020-02-01&colorscalerange=-3,3&colormap=%7B%221%22%3A%22%23f0f0f0%22%7D"
     )
     assert response.status_code == 200
 
@@ -595,6 +595,9 @@ def test_tilejson_endpoint():
     assert "time=2020-02-01" in tile_url  # Dimension selector preserved
     assert "colorscalerange=-3,3" in tile_url  # Additional param preserved
     assert "render_errors=false" in tile_url  # Default param included
+    assert (
+        "colormap=%7B%221%22%3A%20%22%23f0f0f0%22%7D" in tile_url
+    )  # Additional param preserved
 
     # Check optional fields
     assert tilejson["scheme"] == "xyz"
