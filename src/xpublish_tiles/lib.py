@@ -76,7 +76,7 @@ class TileTooBigError(Exception):
 
 
 THREAD_POOL_NUM_THREADS = config.get("num_threads")
-logger.info("setting up thread pool with num threads: ", THREAD_POOL_NUM_THREADS)
+logger.info("setting up thread pool with num threads: %s", THREAD_POOL_NUM_THREADS)
 EXECUTOR = ThreadPoolExecutor(
     max_workers=THREAD_POOL_NUM_THREADS,
     thread_name_prefix="xpublish-tiles-pool",
