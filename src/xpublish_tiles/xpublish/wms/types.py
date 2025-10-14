@@ -16,6 +16,7 @@ from pyproj.aoi import BBox
 from xpublish_tiles.types import ImageFormat
 from xpublish_tiles.validators import (
     validate_bbox,
+    validate_colormap,
     validate_colorscalerange,
     validate_crs,
     validate_image_format,
@@ -80,6 +81,10 @@ class WMSGetMapQuery(WMSBaseQuery):
         None,
         description="Color scale range to use for the query in the format 'min,max'. If not specified, the default color scale range is used or if none is available it is autoscaled",
     )
+    colormap: dict[str, str] | None = Field(
+        None,
+        description="Custom colormap as JSON-encoded dictionary with numeric keys (0-255) and hex color values (#RRGGBB). When provided, overrides any colormap from the styles parameter.",
+    )
     format: ImageFormat = Field(
         ImageFormat.PNG,
         description="The format of the image to return",
@@ -89,6 +94,11 @@ class WMSGetMapQuery(WMSBaseQuery):
     @classmethod
     def validate_colorscalerange(cls, v: str | None) -> tuple[float, float] | None:
         return validate_colorscalerange(v)
+
+    @field_validator("colormap", mode="before")
+    @classmethod
+    def validate_colormap(cls, v: str | dict | None) -> dict[str, str] | None:
+        return validate_colormap(v)
 
     @field_validator("bbox", mode="before")
     @classmethod
@@ -184,6 +194,10 @@ class WMSGetLegendGraphicQuery(WMSBaseQuery):
         None,
         description="Color scale range to use for the query in the format 'min,max'. If not provided, the default will be used or autoscaled if no default is available",
     )
+    colormap: dict[str, str] | None = Field(
+        None,
+        description="Custom colormap as JSON-encoded dictionary with numeric keys (0-255) and hex color values (#RRGGBB). When provided, overrides any colormap from the styles parameter.",
+    )
     styles: tuple[str, str] = Field(
         ("raster", "default"),
         description="Style to use for the query. Defaults to raster/default. Default may be replaced by the name of any colormap defined by matplotlibs defaults",
@@ -197,6 +211,11 @@ class WMSGetLegendGraphicQuery(WMSBaseQuery):
     @classmethod
     def validate_colorscalerange(cls, v: str | None) -> tuple[float, float] | None:
         return validate_colorscalerange(v)
+
+    @field_validator("colormap", mode="before")
+    @classmethod
+    def validate_colormap(cls, v: str | dict | None) -> dict[str, str] | None:
+        return validate_colormap(v)
 
     @field_validator("styles", mode="before")
     @classmethod
@@ -321,6 +340,7 @@ WMS_FILTERED_QUERY_PARAMS = {
     "width",
     "height",
     "colorscalerange",
+    "colormap",
     "autoscale",
     "vertical",
     "item",
