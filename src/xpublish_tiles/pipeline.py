@@ -39,9 +39,7 @@ from xpublish_tiles.types import (
     QueryParams,
     ValidatedArray,
 )
-from xpublish_tiles.utils import (
-    LOCK,
-)
+from xpublish_tiles.utils import LOCK
 
 
 def round_bbox(bbox: BBox) -> BBox:
@@ -276,7 +274,6 @@ async def apply_slicers(
     grid: GridSystem2D,
     alternate: GridMetadata,
     slicers: dict[str, list[slice | Fill]],
-    coarsen_factors: dict[str, int],
     datatype: DataType,
 ) -> xr.DataArray:
     logger = get_context_logger()
@@ -344,30 +341,47 @@ async def apply_slicers(
             results = [subset.load() for subset in subsets]
     subset = xr.concat(results, dim=grid.Xdim) if len(results) > 1 else results[0]
     subset_da = subset.set_coords(pick)[da.name]
-
-    if coarsen_factors:
-        # TODO: I am skipping padding to center the image here;
-        # this introduces a bias in spatial location of the plot but let's think about this:
-        # 1. Global datasets are unaffected. we can always pad in lon as much as we want.
-        # 2. the bottom left corner of a regional dataset:
-        #    coarsening will push the left boundary to the right, and the bottom boundary up,
-        #    introducing a few NaNs in the rendered output; but this doesn't matter visually
-        #    if we trigger coarsening only when quite zoomed out
-        # 3. the upper right corner of a regional dataset; similarly we may add NaNs at the boundaries
-        #    of the viewport, but like in (2) this should not matter as long as we trigger the coarsening
-        #    at appropriate zoom levels.
-        # Avoiding padding here also means we avoid the complexity of having to extrapolate out possibly-2D
-        # coordinate variables to avoid introducing NaNs in coordinate variables.
-        # We also specify `boundary="trim"` to avoid a copy, and accept that we will lose one pixel
-        # if pad_instr := slicers_to_pad_instruction(new_slicers):
-        #     subset_da = subset_da.pad(**pad_instr)
-        with log_duration(f"coarsen {subset_da.shape} by {coarsen_factors!r}", "🔲"):
-            subset_da = await async_run(coarsen_data, subset_da, coarsen_factors)
-
     return subset_da
 
 
-def coarsen_data(da: xr.DataArray, coarsen_factors: dict[str, int]) -> xr.DataArray:
+async def coarsen(
+    da: xr.DataArray, coarsen_factors: dict[str, int], *, grid: GridSystem2D
+) -> xr.DataArray:
+    # TODO: I am skipping padding to center the image here;
+    # this introduces a bias in spatial location of the plot but let's think about this:
+    # 1. Global datasets are unaffected. we can always pad in lon as much as we want.
+    # 2. the bottom left corner of a regional dataset:
+    #    coarsening will push the left boundary to the right, and the bottom boundary up,
+    #    introducing a few NaNs in the rendered output; but this doesn't matter visually
+    #    if we trigger coarsening only when quite zoomed out
+    # 3. the upper right corner of a regional dataset; similarly we may add NaNs at the boundaries
+    #    of the viewport, but like in (2) this should not matter as long as we trigger the coarsening
+    #    at appropriate zoom levels.
+    # Avoiding padding here also means we avoid the complexity of having to extrapolate out possibly-2D
+    # coordinate variables to avoid introducing NaNs in coordinate variables.
+    # We also specify `boundary="trim"` to avoid a copy, and accept that we will lose one pixel
+    # if pad_instr := slicers_to_pad_instruction(new_slicers):
+    #     subset_da = subset_da.pad(**pad_instr)
+    with log_duration(f"coarsen {da.shape} by {coarsen_factors!r}", "🔲"):
+        # a further complication: the padding for periodic longitude introduces
+        # a discontinuity at the anti-meridian; which we end up averaging over below.
+        # So fix that here.
+        if grid.lon_spans_globe:
+            newX = fix_coordinate_discontinuities(
+                da[grid.X].data,
+                # FIXME: test 0->360 also!
+                transformer_from_crs(grid.crs, grid.crs),
+                axis=da[grid.X].get_axis_num(grid.Xdim),
+                bbox=grid.bbox,
+            )
+            da = da.assign_coords({grid.X: da[grid.X].copy(data=newX)})
+        coarsened = await async_run(coarsen_data_with_lock, da, coarsen_factors)
+    return coarsened
+
+
+def coarsen_data_with_lock(
+    da: xr.DataArray, coarsen_factors: dict[str, int]
+) -> xr.DataArray:
     """Apply coarsening to the data array."""
     with LOCK:
         return da.coarsen(coarsen_factors, boundary="trim").mean()  # type: ignore[unresolved-attribute]
@@ -463,12 +477,7 @@ def fix_coordinate_discontinuities(
         return coordinates
 
     # Step 1: Use np.unwrap to fix discontinuities
-    unwrapped_coords = np.unwrap(
-        coordinates,
-        discont=coordinate_space_width / 2,
-        axis=axis,
-        period=coordinate_space_width,
-    )
+    unwrapped_coords = np.unwrap(coordinates, axis=axis, period=coordinate_space_width)
 
     # Step 2: Determine optimal shift based on coordinate and bbox bounds
     coord_min, coord_max = unwrapped_coords.min(), unwrapped_coords.max()
@@ -756,7 +765,6 @@ async def subset_to_bbox(
             grid=grid,
             alternate=alternate,
             slicers=new_slicers,
-            coarsen_factors=coarsen_factors,
             datatype=array.datatype,
         )
 
@@ -767,6 +775,10 @@ async def subset_to_bbox(
             if grid.crs.is_geographic
             else False
         )
+
+        if coarsen_factors:
+            subset = await coarsen(subset, coarsen_factors, grid=grid)
+
         with log_duration("transform_coordinates", "🔄"):
             newX, newY = await transform_coordinates(
                 subset, alternate.X, alternate.Y, transformer_from_crs(alternate.crs, crs)
