@@ -31,21 +31,28 @@ def global_datasets(
     """Strategy that generates global datasets using uniform_grid with random parameters."""
     # Generate dimensions between 100 and 1000 to ensure sufficient coverage
     # Smaller datasets may have gaps when projected
-    nlat = draw(st.integers(min_value=100, max_value=1000))
-    nlon = draw(st.integers(min_value=100, max_value=1000))
+    # Prioritize sizes that exercise coarsening
+    size_st = st.one_of(
+        st.sampled_from([256, 512, 1024, 2048]),
+        st.integers(min_value=100, max_value=2000),
+    )
+    nlat = draw(size_st)
+    nlon = draw(size_st)
 
     # Generate latitude ordering
     lat_ascending = not allow_decreasing_lat or draw(st.booleans())
-    lats = np.linspace(-90, 90, nlat)
+    delta_lat = draw(st.floats(-1e-3, 1e-3))
+    delta_lon = draw(st.floats(-1e-3, 1e-3))
+    lats = np.linspace(-90 - delta_lat, 90 + delta_lat, nlat)
     if not lat_ascending:
         lats = lats[::-1]
 
     # Generate longitude ordering
     lon_0_360 = draw(st.booleans())
     if lon_0_360:
-        lons = np.linspace(0, 360, nlon, endpoint=False)
+        lons = np.linspace(0 - delta_lon, 360 + delta_lon, nlon, endpoint=False)
     else:
-        lons = np.linspace(-180, 180, nlon, endpoint=False)
+        lons = np.linspace(-180 - delta_lon, 180 + delta_lon, nlon, endpoint=False)
 
     # Use full size as chunk size (single chunk)
     dims = (
@@ -187,7 +194,8 @@ async def test_property_global_render_no_transparent_tile(
     """Property test that global datasets should never produce transparent pixels."""
     tile, tms = tile_tms
     query_params = create_query_params(tile, tms)
-    result = await pipeline(ds, query_params)
+    with config.set(max_pixel_factor=2):
+        result = await pipeline(ds, query_params)
     transparent_percent = check_transparent_pixels(result.getvalue())
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
