@@ -179,6 +179,7 @@ async def handle_get_map(
         height=query.height,
         format=query.format,
         selectors=selectors,
+        colormap=query.colormap,
     )
     buffer = await pipeline(dataset, render_params)
 
