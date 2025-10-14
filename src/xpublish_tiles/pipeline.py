@@ -348,8 +348,14 @@ async def coarsen(
     da: xr.DataArray, coarsen_factors: dict[str, int], *, grid: GridSystem2D
 ) -> xr.DataArray:
     # TODO: I am skipping padding to center the image here;
-    # this introduces a bias in spatial location of the plot but let's think about this:
-    # 1. Global datasets are unaffected. we can always pad in lon as much as we want.
+    # Note that we specify `boundary="pad"` to avoid missing pixels at the high end of the coordinate.
+    # 1. Avoiding explicit padding with DataArray.pad here also means we avoid the complexity of having to
+    #    extrapolate out possibly-2D coordinate variables to avoid introducing NaNs in coordinate variables.
+    # 2. We could solve this by adding support for `side="both"` upstream in Xarray.
+    #    This would simply pad in Variable.coarsen (as currently) and is unaffected by the complexities of NaNs
+    #    in indexed coordinate variables.
+    # This choice introduces a bias in spatial location of the plot but let's think about this:
+    # 1. Global datasets are unaffected. we can always pad in lon as much as we need.
     # 2. the bottom left corner of a regional dataset:
     #    coarsening will push the left boundary to the right, and the bottom boundary up,
     #    introducing a few NaNs in the rendered output; but this doesn't matter visually
@@ -357,9 +363,6 @@ async def coarsen(
     # 3. the upper right corner of a regional dataset; similarly we may add NaNs at the boundaries
     #    of the viewport, but like in (2) this should not matter as long as we trigger the coarsening
     #    at appropriate zoom levels.
-    # Avoiding padding here also means we avoid the complexity of having to extrapolate out possibly-2D
-    # coordinate variables to avoid introducing NaNs in coordinate variables.
-    # We also specify `boundary="trim"` to avoid a copy, and accept that we will lose one pixel
     # if pad_instr := slicers_to_pad_instruction(new_slicers):
     #     subset_da = subset_da.pad(**pad_instr)
     with log_duration(f"coarsen {da.shape} by {coarsen_factors!r}", "🔲"):
@@ -384,7 +387,7 @@ def coarsen_data_with_lock(
 ) -> xr.DataArray:
     """Apply coarsening to the data array."""
     with LOCK:
-        return da.coarsen(coarsen_factors, boundary="trim").mean()  # type: ignore[unresolved-attribute]
+        return da.coarsen(coarsen_factors, boundary="pad").mean()  # type: ignore[unresolved-attribute]
 
 
 def has_coordinate_discontinuity(coordinates: np.ndarray, *, axis: int) -> bool:
