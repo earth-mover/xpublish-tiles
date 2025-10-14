@@ -184,16 +184,22 @@ def tile_and_tms(
 
 
 @pytest.mark.asyncio
-@settings(deadline=None, max_examples=500)
-@given(tile_tms=tile_and_tms(), ds=global_datasets(allow_categorical=False))
+@settings(deadline=None, max_examples=750)
+@given(
+    tile_tms=tile_and_tms(), ds=global_datasets(allow_categorical=False), data=st.data()
+)
 async def test_property_global_render_no_transparent_tile(
     tile_tms: tuple[Tile, TileMatrixSet],
     ds: xr.Dataset,
+    data: st.DataObject,
     pytestconfig,
 ):
     """Property test that global datasets should never produce transparent pixels."""
     tile, tms = tile_tms
     query_params = create_query_params(tile, tms)
+    size = 2 ** data.draw(st.sampled_from(np.arange(6, 11)))
+    query_params.width = size
+    query_params.height = size
     with config.set(max_pixel_factor=2):
         result = await pipeline(ds, query_params)
     transparent_percent = check_transparent_pixels(result.getvalue())
