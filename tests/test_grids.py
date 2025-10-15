@@ -344,7 +344,6 @@ async def test_subset(global_datasets, tile, tms):
         grid=grid,
         alternate=grid.to_metadata(),
         slicers=slicers,
-        coarsen_factors={},
         datatype=ContinuousData(valid_min=0, valid_max=1),
     )
     lat_min, lat_max = actual.latitude.min().item(), actual.latitude.max().item()

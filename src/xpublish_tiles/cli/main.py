@@ -26,6 +26,25 @@ from xpublish_tiles.testing.datasets import (
 from xpublish_tiles.xpublish.tiles.plugin import TilesPlugin
 from xpublish_tiles.xpublish.wms.plugin import WMSPlugin
 
+try:
+    import icechunk as ic
+
+    ICECHUNK_CONFIG = ic.RepositoryConfig(
+        caching=ic.CachingConfig(
+            num_bytes_chunks=1073741824,
+            num_chunk_refs=1073741824,
+            num_bytes_attributes=100_000_000,
+            num_snapshot_nodes=100_000_000,
+        ),
+        manifest=ic.ManifestConfig(
+            preload=ic.ManifestPreloadConfig(
+                preload_if=ic.ManifestPreloadCondition.false()
+            )
+        ),
+    )
+except ImportError:
+    ICECHUNK_CONFIG = None
+
 
 def create_onecrs_dataset(ds: xr.Dataset) -> xr.Dataset:
     """Create a single-CRS version of a dataset by dropping alternate CRS coordinates."""
@@ -102,13 +121,7 @@ def get_dataset_for_name(
 
             config: icechunk.RepositoryConfig | None = None
             if icechunk_cache:
-                config = icechunk.RepositoryConfig(
-                    caching=icechunk.CachingConfig(
-                        num_bytes_chunks=1073741824,
-                        num_chunk_refs=1073741824,
-                        num_bytes_attributes=100_000_000,
-                    )
-                )
+                config = ICECHUNK_CONFIG
             repo = icechunk.Repository.open(storage, config=config)
 
             session = repo.readonly_session(branch=branch)
@@ -146,13 +159,7 @@ def get_dataset_for_name(
 
             config: icechunk.RepositoryConfig | None = None
             if icechunk_cache:
-                config = icechunk.RepositoryConfig(
-                    caching=icechunk.CachingConfig(
-                        num_bytes_chunks=1073741824,
-                        num_chunk_refs=1073741824,
-                        num_bytes_attributes=100_000_000,
-                    )
-                )
+                config = ICECHUNK_CONFIG
 
             client = Client()
             repo = cast(icechunk.Repository, client.get_repo(name, config=config))

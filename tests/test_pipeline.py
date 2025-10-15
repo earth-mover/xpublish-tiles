@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
+from morecantile import Tile
 from PIL import Image
 from pyproj import CRS
 from pyproj.aoi import BBox
@@ -26,6 +27,8 @@ from xpublish_tiles.pipeline import (
 from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
     FORECAST,
+    GLOBAL_6KM,
+    GLOBAL_6KM_360,
     GLOBAL_NANS,
     HRRR,
     PARA,
@@ -98,6 +101,29 @@ async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot, pytestco
     query_params = create_query_params(tile, tms)
     with config.set(rectilinear_check_min_size=0):
         result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(result, png_snapshot)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ds", [GLOBAL_6KM.create(), GLOBAL_6KM_360.create()])
+@pytest.mark.parametrize(
+    "tile",
+    [
+        Tile(x=0, y=1, z=2),
+        Tile(x=1, y=1, z=2),
+        Tile(x=0, y=2, z=2),
+        Tile(x=0, y=3, z=3),
+        Tile(x=0, y=6, z=4),
+        Tile(x=0, y=788, z=11),
+    ],
+)
+async def test_global_6km_regression(ds, tile, png_snapshot, pytestconfig):
+    query_params = create_query_params(tile, WEBMERC_TMS)
+    query_params.width = 512
+    query_params.height = 512
+    result = await pipeline(ds, query_params)
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
     assert_render_matches_snapshot(result, png_snapshot)
