@@ -196,10 +196,10 @@ class DatashaderRasterRenderer(Renderer):
         elif isinstance(context.grid, Triangular):
             with log_duration(f"render (continuous) {data.shape} trimesh", "🔺", logger):
                 assert context.ugrid_indexer is not None
-                # dropping gets us a cheap RangeIndex in the DataFrame
-                # Only drop the dimension coordinate if it exists as a variable
-                if context.grid.Xdim in data.coords:
-                    data = data.drop_vars(context.grid.Xdim)
+                if context.grid.dim in data.coords:
+                    # dropping gets us a cheap RangeIndex in the DataFrame
+                    # Only drop the dimension coordinate if it exists as a variable
+                    data = data.drop_vars(context.grid.dim)
                 df = data.to_dataframe()
                 mesh = cvs.trimesh(
                     df[[context.grid.X, context.grid.Y, data.name]],

@@ -1473,10 +1473,7 @@ def _detect_grid_metadata(
         if X.ndim == 1 and Y.ndim == 1:
             if is_rotated_pole(mapping.crs):
                 raise NotImplementedError("Rotated pole grids are not supported yet.")
-            if X.dims == Y.dims:
-                grid_cls = Triangular
-            else:
-                grid_cls = Rectilinear
+            grid_cls = Triangular if X.dims == Y.dims else Rectilinear
         elif X.ndim == 2 and Y.ndim == 2:
             grid_cls = Curvilinear
 
