@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
+from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
@@ -1181,12 +1182,58 @@ HRRR_MULTIPLE = Dataset(
 )
 
 
-def read_reduced_gaussian(*args, **kwargs):
-    return xr.open_dataset("redgauss.nc").rename(geopotential="foo")
+def create_n320(
+    *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
+) -> xr.Dataset:
+    """Create N320 Reduced Gaussian Grid dataset from ECMWF grid definition."""
+    # Load grid definition from CSV
+    grid_csv = Path(__file__).parent / "grids" / "n320_grid.csv"
+    grid_df = pd.read_csv(grid_csv)
+
+    latitudes = grid_df["latitude"].values
+    num_points = grid_df["num_points"].values
+
+    # Generate 1D lat, lon coordinate arrays
+    all_lats = np.repeat(latitudes, num_points)
+    all_lons = np.concatenate(
+        [np.linspace(0, 360, nlon, endpoint=False) for nlon in num_points]
+    )
+
+    # Generate tanh wave data for the points
+    data_array = generate_tanh_wave_data(dims, dtype)
+
+    # Add valid_min/valid_max for continuous data
+    attrs["valid_min"] = -1
+    attrs["valid_max"] = 1
+
+    # Create dataset with point dimension and lat/lon coordinates
+    ds = xr.Dataset(
+        {
+            "foo": (tuple(d.name for d in dims), data_array, attrs),
+        },
+        coords={
+            "latitude": (
+                "point",
+                all_lats,
+                {"standard_name": "latitude", "units": "degrees_north"},
+            ),
+            "longitude": (
+                "point",
+                all_lons,
+                {"standard_name": "longitude", "units": "degrees_east"},
+            ),
+        },
+    )
+
+    # Add coordinates attribute to foo
+    ds.foo.attrs["coordinates"] = "latitude longitude"
+    ds.foo.encoding["chunks"] = tuple(dim.chunk_size for dim in dims)
+
+    return ds
 
 
-REDGAUSS = Dataset(
-    name="reduced_gaussian",
+REDGAUSS_N320 = Dataset(
+    name="redgauss_n320",
     dims=(
         Dim(
             name="point",
@@ -1194,7 +1241,7 @@ REDGAUSS = Dataset(
             chunk_size=542080,
         ),
     ),
-    setup=read_reduced_gaussian,
+    setup=create_n320,
     dtype=np.float32,
     tiles=GLOBAL_BENCHMARK_TILES,
 )
@@ -1216,4 +1263,5 @@ DATASET_LOOKUP = {
     "curvilinear": CURVILINEAR,
     "hrrr_multiple": HRRR_MULTIPLE,
     "global_nans": GLOBAL_NANS,
+    "redgauss_n320": REDGAUSS_N320,
 }

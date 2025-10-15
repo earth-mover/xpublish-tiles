@@ -9,6 +9,7 @@ from xpublish_tiles.testing.datasets import (
     IFS,
     PARA,
     PARA_HIRES,
+    REDGAUSS_N320,
     SENTINEL2_NOCOORDS,
     UTM33S,
     UTM33S_HIRES,
@@ -30,6 +31,7 @@ from xpublish_tiles.testing.datasets import (
         pytest.param(UTM33S, id="utm33s"),
         pytest.param(UTM33S_HIRES, id="utm33s_hires"),
         pytest.param(UTM50S_HIRES, id="utm50s_hires"),
+        pytest.param(REDGAUSS_N320, id="redgauss_n320"),
     ]
 )
 def dataset(request):

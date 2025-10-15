@@ -367,6 +367,7 @@ def run_bench_suite(args):
         "utm50s_hires",
         "utm50s_hires_onecrs",
         "global_6km",
+        "redgauss_n320",
         # This dataset needs to be updated
         # "sentinel",
     ]

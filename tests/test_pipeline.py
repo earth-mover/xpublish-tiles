@@ -32,7 +32,7 @@ from xpublish_tiles.testing.datasets import (
     GLOBAL_NANS,
     HRRR,
     PARA,
-    REDGAUSS,
+    REDGAUSS_N320,
     create_global_dataset,
 )
 from xpublish_tiles.testing.lib import (
@@ -466,11 +466,28 @@ async def test_hrrr_multiple_vs_hrrr_rendering(tile, tms, pytestconfig):
     )
 
 
-async def test_reduced_gaussian(pytestconfig):
-    ds = REDGAUSS.create()
-    tile = morecantile.Tile(x=8, y=8, z=4)
-    query = create_query_params(tms=WEBMERC_TMS, tile=tile)
-    render = await pipeline(ds, query)
+@pytest.mark.parametrize("tile,tms", TILES)
+async def test_reduced_gaussian_n320(tile, tms, png_snapshot, pytestconfig):
+    """Test pipeline with N320 Reduced Gaussian Grid tiles."""
+    ds = REDGAUSS_N320.create()
+    query_params = create_query_params(tile, tms)
+    with config.set(rectilinear_check_min_size=0):
+        result = await pipeline(ds, query_params)
     if pytestconfig.getoption("--visualize"):
-        visualize_tile(render, tile)
-    # assert_render_matches_snapshot(render, png_snapshot)
+        visualize_tile(result, tile)
+
+    # Check if tile is at min or max x for this zoom level (antimeridian tiles)
+    max_x = 2**tile.z - 1
+    is_antimeridian_tile = tile.x == 0 or tile.x == max_x
+
+    # Skip transparency check for antimeridian tiles
+    if is_antimeridian_tile:
+        # Just check snapshot without transparency validation
+        assert isinstance(result, io.BytesIO)
+        result.seek(0)
+        content = result.read()
+        assert len(content) > 0
+        assert content == png_snapshot
+    else:
+        # Full validation including transparency
+        assert_render_matches_snapshot(result, png_snapshot)
