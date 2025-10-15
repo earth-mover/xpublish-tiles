@@ -379,7 +379,7 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
 
         # Determine if dataset uses 0→360 or -180→180 coordinate system
         coord_centers = self.cell_centers
-        self._uses_0_360 = coord_centers.min() >= 0 and coord_centers.max() > 180
+        self._uses_0_360 = coord_centers.max() > 180
 
         # Calculate and store minimum cell width
         widths = self.index.right.values - self.index.left.values
