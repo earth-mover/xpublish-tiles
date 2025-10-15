@@ -475,19 +475,4 @@ async def test_reduced_gaussian_n320(tile, tms, png_snapshot, pytestconfig):
         result = await pipeline(ds, query_params)
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
-
-    # Check if tile is at min or max x for this zoom level (antimeridian tiles)
-    max_x = 2**tile.z - 1
-    is_antimeridian_tile = tile.x == 0 or tile.x == max_x
-
-    # Skip transparency check for antimeridian tiles
-    if is_antimeridian_tile:
-        # Just check snapshot without transparency validation
-        assert isinstance(result, io.BytesIO)
-        result.seek(0)
-        content = result.read()
-        assert len(content) > 0
-        assert content == png_snapshot
-    else:
-        # Full validation including transparency
-        assert_render_matches_snapshot(result, png_snapshot)
+    assert_render_matches_snapshot(result, png_snapshot)

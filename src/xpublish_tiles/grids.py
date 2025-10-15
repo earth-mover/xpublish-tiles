@@ -39,6 +39,8 @@ class UgridIndexer:
 
     vertices: np.ndarray
     connectivity: np.ndarray
+    # face indices that intersect the anti-meridian
+    antimeridian_vertices: dict[str, np.ndarray]
 
 
 @dataclass
@@ -266,10 +268,28 @@ class CellTreeIndex(xr.Index):
         fill_value: Any,
         X: str,
         Y: str,
+        lon_spans_globe: bool,
     ):
         self.tree = CellTree2d(vertices.values, faces.values, fill_value=fill_value)
         self.X = X
         self.Y = Y
+        if lon_spans_globe:
+            # lets find the vertices closest to the -180 & 180 boundaries and cache them.
+            # At indexing time, we'll return the indexes for vertices at the boundary
+            # so we can fix the coordinate discontinuity later in `pipeline`
+            idx, face_indices, _ = self.tree.intersect_edges(
+                np.array([[[180, -90], [180, 90]], [[-180, -90], [-180, 90]]])
+            )
+            (breakpt,) = np.nonzero(np.diff(idx))
+            assert breakpt.size == 1
+            breakpt = breakpt[0] + 1
+            verts = self.tree.faces[face_indices, ...]
+            self.antimeridian_vertices = {
+                "pos": np.unique(verts[:breakpt]),
+                "neg": np.unique(verts[breakpt:]),
+            }
+        else:
+            self.antimeridian_vertices = {"pos": np.array([]), "neg": np.array([])}
 
     def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
         xidxr = labels.get(self.X)
@@ -284,9 +304,31 @@ class CellTreeIndex(xr.Index):
         vertex_indices, inverse = np.unique(
             self.tree.faces[face_indices], return_inverse=True
         )
+        # import matplotlib.pyplot as plt
+        # from matplotlib.tri import Triangulation
+        # lon = self.tree.vertices[vertex_indices, 0]
+        # lat = self.tree.vertices[vertex_indices, 1]
+        # t = Triangulation(lon, lat, triangles=inverse)
+        # plt.triplot(t)
+        # plt.show()
+        # print(len(vertex_indices), len(face_indices))
+
+        # Check if selected faces intersect the anti-meridian
+        # Figure out which of the anti-meridian faces we've ended up selecting, and save those
+        antimeridian_vertices = {}
+        for key, anti_verts in self.antimeridian_vertices.items():
+            present = np.intersect1d(vertex_indices, anti_verts, assume_unique=True)
+            # indices are indexes in to `vertex_indices` i.e. the subset
+            # note that vertex_indices are sorted
+            antimeridian_vertices[key] = np.searchsorted(vertex_indices, present)
+
         return IndexSelResult(
             dim_indexers={
-                "ugrid": UgridIndexer(vertices=vertex_indices, connectivity=inverse)
+                "ugrid": UgridIndexer(
+                    vertices=vertex_indices,
+                    connectivity=inverse,
+                    antimeridian_vertices=antimeridian_vertices,
+                )
             }
         )
 
@@ -1144,22 +1186,27 @@ class Triangular(GridSystem):
         Xname: str,
         Yname: str,
         fill_value: Any,
+        reindexer: slice | np.ndarray,
     ):
         self.crs = crs
         self.X, self.Y = Xname, Yname
         self.dim = dim
-        self.lon_spans_globe = False
         xmin, xmax = vertices[Xname].min().item(), vertices[Xname].max().item()
         ymin, ymax = vertices[Yname].min().item(), vertices[Yname].max().item()
         self.bbox = BBox(west=xmin, east=xmax, south=ymin, north=ymax)
-        if crs.is_geographic and ((xmax - xmin) > 358):
-            self.lon_spans_globe = True
+        self.lon_spans_globe = crs.is_geographic and ((xmax - xmin) > 358)
 
         self.vertices = vertices
         self.faces = faces
+        self.reindexer = reindexer
         self.indexes = (
             CellTreeIndex(
-                self.vertices, self.faces, fill_value=fill_value, X=Xname, Y=Yname
+                self.vertices,
+                self.faces,
+                fill_value=fill_value,
+                X=Xname,
+                Y=Yname,
+                lon_spans_globe=self.lon_spans_globe,
             ),
         )
 
@@ -1194,14 +1241,49 @@ class Triangular(GridSystem):
         Yname: str,
     ) -> Self:
         # FIXME: detect UGRID here
-        # FIXME: do the unit sphere stuff from UXarray
         from scipy.spatial import Delaunay
 
         vertices = ds[[Xname, Yname]].to_dataframe()
         if crs.is_geographic:
+            # TODO: consider normalizing these to the unit sphere like UXarray
+            # normalize to -180<=grid.X<180
             vertices[Xname] = ((vertices[Xname] + 180) % 360) - 180
+        x = vertices[Xname]
+        xmin, xmax = x.min().item(), x.max().item()
+
         (dim,) = ds[Xname].dims
+
+        # always triangulate here; we'll need the convex hull when we have a global grid
         triang = Delaunay(vertices.values)
+        # import matplotlib.pyplot as plt
+        # import scipy.spatial
+        # scipy.spatial.delaunay_plot_2d(triang)
+        # plt.xlim([-182, -178])
+        # plt.show()
+        if crs.is_geographic and (xmax - xmin) > 358:
+            # We want to pad the vertices across the anti-meridian, and then run the triangulation.
+            # For simplicity, we just append two copies of the convex hull the longitudes modified differently.
+            # This could be wasteful at triangulation time for large grids but for now, this is easy and works.
+            # If we don't do pad before triangulating, we run in to the issue where the right edge vertices
+            # are not connected to the left edge vertices, and the padding doesn't affect the rendering.
+            boundary = np.unique(triang.convex_hull)
+            pos_verts = vertices.iloc[boundary].copy()
+            neg_verts = pos_verts.copy()
+
+            pos_verts[Xname] = pos_verts[Xname].values + 360
+            neg_verts[Xname] = neg_verts[Xname].values - 360
+
+            vertices = pd.concat([vertices, pos_verts, neg_verts])
+
+            triang = Delaunay(vertices.values)
+
+            # need to reindex the data to match the padding :(
+            # yet another reason, we'd like to have a hook where xpublish lets the plugin modify the dataset
+            # For now, save an indexer and apply it later.
+            reindexer = np.concatenate([np.arange(ds.sizes["point"]), boundary, boundary])
+        else:
+            reindexer = slice(None)
+
         faces = pd.DataFrame(triang.simplices, columns=["v0", "v1", "v2"])
         return cls(
             vertices=vertices,
@@ -1211,6 +1293,7 @@ class Triangular(GridSystem):
             Yname=Yname,
             dim=dim,
             fill_value=-1,
+            reindexer=reindexer,
         )
 
 

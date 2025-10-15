@@ -318,6 +318,9 @@ async def apply_slicers(
             if isinstance(x_slice, slice)
         ]
     elif isinstance(grid, GridSystem1D):
+        if isinstance(grid, Triangular):
+            # account for any padding needed for triangulations we are executing
+            ds = ds.isel({grid.dim: grid.reindexer})
         subsets = [
             ds.isel({grid.Xdim: sl.vertices})
             for sl in slicers[grid.Xdim]
@@ -797,13 +800,18 @@ async def subset_to_bbox(
             datatype=array.datatype,
         )
 
-        has_discontinuity = (
-            has_coordinate_discontinuity(
-                subset[grid.X].data, axis=subset[grid.X].get_axis_num(grid.Xdim)
-            )
-            if grid.crs.is_geographic and isinstance(grid, GridSystem2D)
-            else False
-        )
+        if grid.crs.is_geographic:
+            if isinstance(grid, GridSystem2D):
+                has_discontinuity = has_coordinate_discontinuity(
+                    subset[grid.X].data, axis=subset[grid.X].get_axis_num(grid.Xdim)
+                )
+            elif isinstance(grid, Triangular):
+                anti = next(iter(slicers[grid.Xdim])).antimeridian_vertices
+                has_discontinuity = anti["pos"].size > 0 or anti["neg"].size > 0
+            else:
+                raise NotImplementedError
+        else:
+            has_discontinuity = False
 
         if coarsen_factors:
             subset = await coarsen(subset, coarsen_factors, grid=grid)
@@ -815,14 +823,24 @@ async def subset_to_bbox(
 
         # Fix coordinate discontinuities in transformed coordinates if detected
         if has_discontinuity:
-            fixed = fix_coordinate_discontinuities(
-                newX.data,
-                input_to_output,
-                axis=newX.get_axis_num(grid.Xdim),
-                bbox=bbox,
-            )
-            newX = newX.copy(data=fixed)
-
+            if isinstance(grid, GridSystem2D):
+                fixed = fix_coordinate_discontinuities(
+                    newX.data,
+                    input_to_output,
+                    axis=newX.get_axis_num(grid.Xdim),
+                    bbox=bbox,
+                )
+                newX = newX.copy(data=fixed)
+            elif isinstance(grid, Triangular):
+                anti = next(iter(slicers[grid.dim])).antimeridian_vertices
+                for verts in [anti["pos"], anti["neg"]]:
+                    if verts.size > 0:
+                        newX.data[verts] = fix_coordinate_discontinuities(
+                            newX.data[verts],
+                            input_to_output,
+                            axis=newX.get_axis_num(grid.dim),
+                            bbox=bbox,
+                        )
         newda = subset.assign_coords({grid.X: newX, grid.Y: newY})
         result[var_name] = PopulatedRenderContext(
             da=newda,
