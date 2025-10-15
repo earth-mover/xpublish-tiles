@@ -6,7 +6,7 @@ from pyproj.aoi import BBox
 from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
 
 
-def create_query_params(tile, tms, *, colorscalerange=None):
+def create_query_params(tile, tms, *, colorscalerange=None, size=256):
     """Create QueryParams instance using test tiles and TMS."""
     epsg_code = tms.crs.to_epsg()
     if epsg_code is None:
@@ -28,8 +28,8 @@ def create_query_params(tile, tms, *, colorscalerange=None):
         bbox=OutputBBox(bbox),
         selectors={},
         style="raster",
-        width=256,
-        height=256,
+        width=size,
+        height=size,
         variant="viridis",
         colorscalerange=colorscalerange,
         format=ImageFormat.PNG,
