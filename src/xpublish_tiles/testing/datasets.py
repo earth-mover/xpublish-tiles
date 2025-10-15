@@ -547,6 +547,36 @@ GLOBAL_6KM = Dataset(
     benchmark_tiles=GLOBAL_BENCHMARK_TILES,
 )
 
+GLOBAL_6KM_360 = Dataset(
+    name="global_6km_360",
+    dims=(
+        Dim(
+            name="time",
+            size=2,
+            chunk_size=1,
+            data=np.array(["2000-01-01", "2000-01-02"], dtype="datetime64[h]"),
+        ),
+        Dim(
+            name="latitude",
+            size=3000,
+            chunk_size=500,
+            data=np.linspace(-89.969999, 89.970001, 3000),
+        ),
+        Dim(
+            name="longitude",
+            size=6000,
+            chunk_size=500,
+            data=np.linspace(0.030001, 359.970001, 6000),
+        ),
+        Dim(name="band", size=3, chunk_size=3, data=np.array(["R", "G", "B"])),
+    ),
+    dtype=np.float32,
+    setup=uniform_grid,
+    edge_case_tiles=WGS84_TILES_EDGE_CASES + WEBMERC_TILES_EDGE_CASES,
+    tiles=WGS84_TILES + WEBMERC_TILES,
+    benchmark_tiles=GLOBAL_BENCHMARK_TILES,
+)
+
 # fmt: off
 UTM33S_BENCHMARK_TILES = [
     "3/4/4", "4/8/8", "4/9/8", "5/17/17", "5/18/17", "6/34/36", "6/35/34",

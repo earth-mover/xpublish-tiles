@@ -28,6 +28,7 @@ from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
     FORECAST,
     GLOBAL_6KM,
+    GLOBAL_6KM_360,
     GLOBAL_NANS,
     HRRR,
     PARA,
@@ -106,7 +107,7 @@ async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot, pytestco
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("ds", [GLOBAL_6KM.create()])
+@pytest.mark.parametrize("ds", [GLOBAL_6KM.create(), GLOBAL_6KM_360.create()])
 @pytest.mark.parametrize(
     "tile",
     [
