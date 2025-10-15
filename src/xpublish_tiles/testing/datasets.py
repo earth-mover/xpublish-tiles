@@ -84,9 +84,9 @@ def generate_tanh_wave_data(dims: tuple[Dim, ...], dtype: npt.DTypeLike):
         else:
             # Numeric coordinates
             coord_min, coord_max = coord_array.min(), coord_array.max()
-            assert (
-                coord_max > coord_min
-            ), f"Coordinate range must be non-zero for dimension {dim.name}"
+            assert coord_max > coord_min, (
+                f"Coordinate range must be non-zero for dimension {dim.name}"
+            )
             normalized = (coord_array - coord_min) / (coord_max - coord_min)
 
         # Add dimension-specific offset to avoid identical patterns

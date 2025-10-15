@@ -785,9 +785,9 @@ class TestGridZoomMethods:
         tms = morecantile.tms.get(tms_id)
         min_zoom = get_min_zoom(grid, tms, ds["temp"])
         max_zoom = get_max_zoom(grid, tms)
-        assert (
-            min_zoom <= max_zoom
-        ), f"min_zoom ({min_zoom}) > max_zoom ({max_zoom}) for TMS {tms_id}"
+        assert min_zoom <= max_zoom, (
+            f"min_zoom ({min_zoom}) > max_zoom ({max_zoom}) for TMS {tms_id}"
+        )
 
     @pytest.mark.parametrize(
         "tms_id", ["WebMercatorQuad", "WGS1984Quad", "WorldCRS84Quad"]
@@ -803,13 +803,13 @@ class TestGridZoomMethods:
         """
         tms = morecantile.tms.get(tms_id)
         target_zoom = data.draw(st.integers(min_value=tms.minzoom, max_value=tms.maxzoom))
-        da, grid = _create_test_dataset(
+        _, grid = _create_test_dataset(
             grid_type, tms, target_zoom=target_zoom, array_size=100
         )
         calculated_zoom = get_max_zoom(grid, tms)
-        assert (
-            calculated_zoom == target_zoom
-        ), f"Expected {target_zoom}, got {calculated_zoom} for {tms_id} {grid_type}"
+        assert calculated_zoom == target_zoom, (
+            f"Expected {target_zoom}, got {calculated_zoom} for {tms_id} {grid_type}"
+        )
 
     @pytest.mark.parametrize(
         "tms_id", ["WebMercatorQuad", "WGS1984Quad", "WorldCRS84Quad"]
@@ -840,6 +840,6 @@ class TestGridZoomMethods:
         with config.set({"max_renderable_size": (pixels_per_tile - 1) ** 2}):
             actual = get_min_zoom(grid, tms, da)
         expected = target_zoom + 1
-        assert (
-            expected == actual
-        ), f"Expected {expected}, got {actual} for {tms_id} {grid_type} at zoom {target_zoom}"
+        assert expected == actual, (
+            f"Expected {expected}, got {actual} for {tms_id} {grid_type} at zoom {target_zoom}"
+        )

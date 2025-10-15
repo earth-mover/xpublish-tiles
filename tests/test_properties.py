@@ -191,9 +191,9 @@ async def test_property_global_render_no_transparent_tile(
     transparent_percent = check_transparent_pixels(result.getvalue())
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
-    assert (
-        transparent_percent == 0
-    ), f"Found {transparent_percent:.1f}% transparent pixels in tile {tile}"
+    assert transparent_percent == 0, (
+        f"Found {transparent_percent:.1f}% transparent pixels in tile {tile}"
+    )
 
 
 @pytest.mark.asyncio
@@ -253,7 +253,9 @@ async def test_property_rectilinear_vs_curvilinear_exact(
         mode="perceptual",
         perceptual_threshold=0.9,  # 90% similarity threshold
     )
-    assert images_similar, f"Rectilinear and curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+    assert images_similar, (
+        f"Rectilinear and curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+    )
 
     lon, lat = ds.longitude, ds.latitude
     transposed = ds.assign_coords(
@@ -272,7 +274,9 @@ async def test_property_rectilinear_vs_curvilinear_exact(
         mode="perceptual",
         perceptual_threshold=0.9,  # 90% similarity threshold
     )
-    assert images_similar, f"Rectilinear and *transposed* curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+    assert images_similar, (
+        f"Rectilinear and *transposed* curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+    )
 
 
 @pytest.mark.asyncio
@@ -299,9 +303,9 @@ async def test_projected_coordinate_succeeds(dataset, data, pytestconfig):
         # Verify it's a valid PNG
         # PNG files start with an 8-byte signature
         png_signature = b"\x89PNG\r\n\x1a\n"
-        assert (
-            result_bytes[:8] == png_signature
-        ), f"Result does not have valid PNG signature, got {result_bytes[:8]!r}"
+        assert result_bytes[:8] == png_signature, (
+            f"Result does not have valid PNG signature, got {result_bytes[:8]!r}"
+        )
 
         if pytestconfig.getoption("--visualize"):
             visualize_tile(result, tile)

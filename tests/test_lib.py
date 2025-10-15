@@ -69,6 +69,6 @@ def test_epsg4326to3857_handles_0_360_range():
     x_extremes, _ = epsg4326to3857(lon_extremes, lat_extremes)
 
     # These should be opposite values
-    assert (
-        x_extremes[0] == -x_extremes[1]
-    ), "180° and -180° should map to opposite X coordinates"
+    assert x_extremes[0] == -x_extremes[1], (
+        "180° and -180° should map to opposite X coordinates"
+    )

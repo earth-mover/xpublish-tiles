@@ -690,7 +690,7 @@ def apply_query(
         if extra_dims := (set(array.dims) - grid.dims):
             # Note: this will handle squeezing of label-based selection
             # along datetime coordinates
-            array = array.isel({dim: -1 for dim in extra_dims})
+            array = array.isel(dict.fromkeys(extra_dims, -1))
         validated[name] = ValidatedArray(
             da=array,
             grid=grid,
