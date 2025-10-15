@@ -55,6 +55,7 @@ class Dataset:
     def create(self):
         ds = self.setup(dims=self.dims, dtype=self.dtype, attrs=self.attrs)
         ds.attrs["name"] = self.name
+        ds.attrs["_xpublish_id"] = self.name
         return ds
 
 
