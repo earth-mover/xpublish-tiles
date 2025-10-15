@@ -126,7 +126,7 @@ def get_min_zoom(
             )
 
             tile_bbox = BBox(west=left, south=bottom, east=right, north=top)
-            slicers = grid.sel(da, bbox=tile_bbox)
+            slicers = grid.sel(bbox=tile_bbox)
 
             if not check_data_is_renderable_size(slicers, da, grid, alternate):
                 all_tiles_renderable = False

@@ -775,8 +775,7 @@ async def subset_to_bbox(
             continue
 
         slicers = cast(
-            dict[str, list[slice | Fill | UgridIndexer]],
-            grid.sel(array.da, bbox=input_bbox),
+            dict[str, list[slice | Fill | UgridIndexer]], grid.sel(bbox=input_bbox)
         )
         da = grid.assign_index(array.da)
 

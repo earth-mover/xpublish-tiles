@@ -333,7 +333,7 @@ async def test_subset(global_datasets, tile, tms):
         west=geo_bounds[0], south=geo_bounds[1], east=geo_bounds[2], north=geo_bounds[3]
     )
 
-    slicers = grid.sel(ds.foo, bbox=bbox_geo)
+    slicers = grid.sel(bbox=bbox_geo)
     assert isinstance(slicers["latitude"], list)
     assert isinstance(slicers["longitude"], list)
     assert len(slicers["latitude"]) == 1  # Y dimension should always have one slice

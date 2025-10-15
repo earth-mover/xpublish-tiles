@@ -622,9 +622,7 @@ class GridSystem(ABC):
         return self.equals(other)
 
     @abstractmethod
-    def sel(
-        self, da: xr.DataArray, *, bbox: BBox
-    ) -> dict[str, list[slice | Fill | UgridIndexer]]:
+    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill | UgridIndexer]]:
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("Subclasses must implement sel method")
 
@@ -680,13 +678,7 @@ class RectilinearSelMixin:
     """Mixin for generic rectilinear .sel"""
 
     def sel(
-        self,
-        *,
-        da: xr.DataArray,
-        bbox: BBox,
-        y_is_increasing: bool,
-        x_size: int,
-        y_size: int,
+        self, *, bbox: BBox, y_is_increasing: bool, x_size: int, y_size: int
     ) -> dict[str, list[slice | Fill | UgridIndexer]]:
         """
         This method handles coordinate selection for rectilinear grids, automatically
@@ -694,8 +686,6 @@ class RectilinearSelMixin:
 
         Parameters
         ----------
-        da : xr.DataArray
-            Data array to select from
         bbox : BBox
             Bounding box for selection
         y_is_increasing : bool
@@ -806,12 +796,11 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
         (index,) = self.indexes
         return da.assign_coords(xr.Coordinates.from_xindex(index))
 
-    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
+    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
         (index,) = self.indexes
         affine = index.transform()
 
         return super().sel(
-            da=da,
             bbox=bbox,
             y_is_increasing=affine.e > 0,
             x_size=index._xy_shape[0],
@@ -934,13 +923,10 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
             indexes=(x_index, y_index),
         )
 
-    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
+    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
         """
         Select a subset of the data array using a bounding box.
         """
-        assert self.X in da.xindexes and self.Y in da.xindexes
-        assert isinstance(da.xindexes[self.Y], xr.indexes.PandasIndex)
-
         x_index, y_index = self.indexes[0], self.indexes[-1]
 
         # For Rectilinear grids, X index is always LongitudeCellIndex (geographic)
@@ -959,10 +945,9 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
         # Both index types have len() method
         x_size = len(x_index.index)
         y_size = len(y_index.index)
-        y_index_cast = cast(xr.indexes.PandasIndex, da.xindexes[self.Y])
+        y_index_cast = cast(xr.indexes.PandasIndex, y_index)
 
         return super().sel(
-            da=da,
             bbox=bbox,
             y_is_increasing=y_index_cast.index.is_monotonic_increasing,
             x_size=x_size,
@@ -1093,9 +1078,7 @@ class Curvilinear(GridSystem):
         else:
             return False
 
-    def sel(
-        self, da: xr.DataArray, *, bbox: BBox
-    ) -> dict[str, list[slice | Fill | UgridIndexer]]:
+    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill | UgridIndexer]]:
         """
         Select a subset of the data array using a bounding box.
 
@@ -1192,9 +1175,7 @@ class Triangular(GridSystem):
     def dims(self) -> set[str]:
         return {self.dim}
 
-    def sel(
-        self, da: xr.DataArray, *, bbox: BBox
-    ) -> dict[str, list[slice | Fill | UgridIndexer]]:
+    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill | UgridIndexer]]:
         index = next(iter(self.indexes))
         result = index.sel(
             {self.X: slice(bbox.west, bbox.east), self.Y: slice(bbox.south, bbox.north)}
@@ -1251,9 +1232,7 @@ class DGGS(GridSystem):
         """Return the set of dimension names for this grid system."""
         return {self.cells}
 
-    def sel(
-        self, da: xr.DataArray, *, bbox: BBox
-    ) -> dict[str, list[slice | Fill | UgridIndexer]]:
+    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill | UgridIndexer]]:
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("sel not implemented for DGGS grids")
 
