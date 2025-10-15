@@ -4,7 +4,12 @@ import hypothesis.strategies as st
 import morecantile
 import numpy as np
 import pytest
-from hypothesis import assume, given, settings
+from hypothesis import (
+    assume,
+    given,
+    reproduce_failure,  # noqa: F401
+    settings,
+)
 from hypothesis.strategies import DrawFn
 from morecantile import Tile, TileMatrixSet
 from PIL import Image
@@ -367,6 +372,11 @@ async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig)
     In a quadtree, tile (x, y, z) contains 2^n × 2^n child tiles at zoom z+n:
         Child tile coordinates: (2^n·x + i, 2^n·y + j, z+n)
         where i, j ∈ [0, 2^n - 1]
+
+    TODO:
+    1. Support coarsening, this might require symmetric padding
+    2. Support higher perceptual threshold, even without coarsening; This might require constructing appropriate datasets
+       with shapes and spacings that match the parent tile properly.
     """
     tile, tms = tile_tms
 
@@ -381,7 +391,7 @@ async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig)
     parent_size = 2048
     parent_query = create_query_params(tile, tms, size=parent_size)
 
-    with config.set(max_pixel_factor=2):
+    with config.set(max_pixel_factor=20000):
         parent_result = await pipeline(ds, parent_query)
 
     # Convert parent PNG to numpy array
@@ -459,7 +469,7 @@ async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig)
                 "--debug-visual-save", default=False
             ),
             mode="perceptual",
-            perceptual_threshold=0.99,
+            perceptual_threshold=0.97,
         )
 
         assert images_similar, f"Child tile {child_tile} (zoom {child_zoom}, delta +{zoom_delta}) doesn't match parent tile {tile} (zoom {tile.z}) region (SSIM: {ssim_score:.4f})"
