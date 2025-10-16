@@ -140,6 +140,12 @@ def global_unstructured_datasets(draw: DrawFn) -> xr.Dataset:
     return ds
 
 
+# Combine both regular and unstructured global datasets
+all_global_datasets = st.one_of(
+    global_datasets(allow_categorical=False), global_unstructured_datasets()
+)
+
+
 @st.composite
 def tile_matrix_sets(draw: DrawFn) -> str:
     """Strategy that returns standard TileMatrixSet names from morecantile."""
@@ -228,10 +234,7 @@ def tile_and_tms(
 @settings(deadline=None, max_examples=750)
 @given(
     tile_tms=tile_and_tms(),
-    ds=st.one_of(
-        global_datasets(allow_categorical=False),
-        global_unstructured_datasets(),
-    ),
+    ds=all_global_datasets,
     data=st.data(),
 )
 async def test_property_global_render_no_transparent_tile(
@@ -369,9 +372,7 @@ async def test_projected_coordinate_succeeds(dataset, data, pytestconfig):
 
 
 @pytest.mark.asyncio
-@given(
-    tile_tms=tile_and_tms(), ds=global_datasets(allow_categorical=False), data=st.data()
-)
+@given(tile_tms=tile_and_tms(), ds=all_global_datasets, data=st.data())
 @settings(deadline=None, max_examples=50)
 async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig) -> None:
     """Property test that zooming in doesn't change rendering.
