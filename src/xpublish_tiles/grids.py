@@ -1173,8 +1173,7 @@ class Triangular(GridSystem):
     lon_spans_globe: bool
     indexes: tuple[xr.Index]
 
-    vertices: pd.DataFrame
-    faces: pd.DataFrame
+    reindexer: np.ndarray
 
     def __init__(
         self,
@@ -1193,16 +1192,17 @@ class Triangular(GridSystem):
         self.dim = dim
         xmin, xmax = vertices[Xname].min().item(), vertices[Xname].max().item()
         ymin, ymax = vertices[Yname].min().item(), vertices[Yname].max().item()
-        self.bbox = BBox(west=xmin, east=xmax, south=ymin, north=ymax)
         self.lon_spans_globe = crs.is_geographic and ((xmax - xmin) > 358)
+        if self.lon_spans_globe:
+            self.bbox = BBox(west=-180, east=180, south=ymin, north=ymax)
+        else:
+            self.bbox = BBox(west=xmin, east=xmax, south=ymin, north=ymax)
 
-        self.vertices = vertices
-        self.faces = faces
         self.reindexer = reindexer
         self.indexes = (
             CellTreeIndex(
-                self.vertices,
-                self.faces,
+                vertices,
+                faces,
                 fill_value=fill_value,
                 X=Xname,
                 Y=Yname,

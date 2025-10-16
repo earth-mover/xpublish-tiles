@@ -25,6 +25,8 @@ from xpublish_tiles.grids import (
     LongitudeCellIndex,
     RasterAffine,
     Rectilinear,
+    Triangular,
+    UgridIndexer,
     guess_grid_system,
 )
 from xpublish_tiles.lib import _prevent_slice_overlap, transformer_from_crs
@@ -41,6 +43,7 @@ from xpublish_tiles.testing.datasets import (
     IFS,
     PARA_HIRES,
     POPDS,
+    REDGAUSS_N320,
     UTM33S_HIRES,
     UTM50S_HIRES,
     Dataset,
@@ -48,6 +51,8 @@ from xpublish_tiles.testing.datasets import (
 from xpublish_tiles.testing.tiles import TILES
 from xpublish_tiles.tiles_lib import get_max_zoom, get_min_zoom
 from xpublish_tiles.types import ContinuousData
+
+TRIANGULAR_SENTINEL = 1
 
 
 @pytest.mark.parametrize(
@@ -257,11 +262,26 @@ from xpublish_tiles.types import ContinuousData
             ),
             id="eu3035",
         ),
+        pytest.param(
+            REDGAUSS_N320.create(),
+            "foo",
+            TRIANGULAR_SENTINEL,
+            id="redgauss_n320",
+        ),
     ],
 )
 def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> None:
     actual = guess_grid_system(ds, array_name)
-    assert expected == actual
+    if expected is TRIANGULAR_SENTINEL:
+        # too hard to construct for a test
+        assert isinstance(actual, Triangular)
+        assert actual.dim == "point"
+        assert actual.bbox == BBox(west=-180, east=180, south=-89.784877, north=89.784877)
+        assert actual.crs == CRS.from_epsg(4326)
+        assert actual.lon_spans_globe
+        assert len(actual.indexes) == 1
+    else:
+        assert expected == actual
 
 
 @pytest.mark.parametrize(
@@ -334,9 +354,15 @@ async def test_subset(global_datasets, tile, tms):
     )
 
     slicers = grid.sel(bbox=bbox_geo)
-    assert isinstance(slicers["latitude"], list)
-    assert isinstance(slicers["longitude"], list)
-    assert len(slicers["latitude"]) == 1  # Y dimension should always have one slice
+    if isinstance(grid, Triangular):
+        assert isinstance(slicers["point"], list)
+        assert len(slicers["point"]) == 1
+        slicer = next(iter(slicers["point"]))
+        assert isinstance(slicer, UgridIndexer)
+    else:
+        assert isinstance(slicers["latitude"], list)
+        assert isinstance(slicers["longitude"], list)
+        assert len(slicers["latitude"]) == 1  # Y dimension should always have one slice
 
     # Check that coordinates are within expected bounds (exact matching with controlled grid)
     actual = await apply_slicers(
