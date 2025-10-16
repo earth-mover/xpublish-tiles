@@ -59,23 +59,34 @@ class Dataset:
         return ds
 
 
-def generate_tanh_wave_data(dims: tuple[Dim, ...], dtype: npt.DTypeLike):
-    """Generate smooth tanh wave data across all dimensions.
+def generate_tanh_wave_data(
+    coords: tuple[np.ndarray | None, ...],
+    sizes: tuple[int, ...],
+    chunks: tuple[int, ...],
+    dtype: npt.DTypeLike,
+    use_meshgrid: bool = True,
+):
+    """Generate smooth tanh wave data across coordinates.
 
-    Fits 3 waves along each dimension using coordinate values as inputs.
+    Fits 3 waves along each coordinate dimension using coordinate values as inputs.
     Uses tanh to create smooth, bounded patterns in [-1, 1] range.
     For dimensions without coordinates, uses normalized indices.
-    """
-    chunks = tuple(4 * d.chunk_size for d in dims)
 
+    Args:
+        coords: Coordinate arrays to use for generating data. Can have more arrays than dims for irregular grids.
+        sizes: Sizes for each coordinate (used when coord is None).
+        chunks: Chunk sizes for the output dask array.
+        dtype: Output data type.
+        use_meshgrid: If True, meshgrid coords for regular grids. If False, use coords directly for irregular grids.
+    """
     # Create coordinate arrays for each dimension
     coord_arrays = []
-    for i, dim in enumerate(dims):
+    for i, (coord_data, size) in enumerate(zip(coords, sizes, strict=False)):
         # Use provided coordinates or indices
-        if dim.data is not None:
-            coord_array = np.asarray(dim.data)
+        if coord_data is not None:
+            coord_array = np.asarray(coord_data)
         else:
-            coord_array = np.arange(dim.size)
+            coord_array = np.arange(size)
 
         # Handle different data types
         if not np.issubdtype(coord_array.dtype, np.number):
@@ -88,21 +99,26 @@ def generate_tanh_wave_data(dims: tuple[Dim, ...], dtype: npt.DTypeLike):
             coord_min, coord_max = coord_array.min(), coord_array.max()
             assert (
                 coord_max > coord_min
-            ), f"Coordinate range must be non-zero for dimension {dim.name}"
+            ), f"Coordinate range must be non-zero for coordinate {i}"
             normalized = (coord_array - coord_min) / (coord_max - coord_min)
 
         # Add dimension-specific offset to avoid identical patterns
         normalized += i * 0.5
         coord_arrays.append(normalized * 6 * np.pi)  # 3 waves = 6π
 
-    # Create dask arrays for coordinates with proper chunking
-    dask_coords = []
-    for coord_array, chunk_size in zip(coord_arrays, chunks, strict=False):
-        dask_coord = dask.array.from_array(coord_array, chunks=chunk_size)
-        dask_coords.append(dask_coord)
-
-    # Create meshgrid with dask arrays
-    grids = dask.array.meshgrid(*dask_coords, indexing="ij")
+    if use_meshgrid:
+        # Regular grids: meshgrid 1D coordinate arrays into N-D grids
+        dask_coords = []
+        for coord_array, chunk_size in zip(coord_arrays, chunks, strict=False):
+            dask_coord = dask.array.from_array(coord_array, chunks=chunk_size)
+            dask_coords.append(dask_coord)
+        grids = dask.array.meshgrid(*dask_coords, indexing="ij")
+    else:
+        # Irregular grids: use coordinate arrays directly (all same length)
+        grids = []
+        for coord_array in coord_arrays:
+            dask_coord = dask.array.from_array(coord_array, chunks=chunks[0])
+            grids.append(dask_coord)
 
     # Create smooth patterns using tanh of summed sine waves
     # tanh naturally bounds to [-1, 1] and creates smooth, flowing patterns
@@ -122,7 +138,12 @@ def generate_flag_values_data(
 ):
     """Generate discretized tanh wave data with noise using flag_values for categorical data."""
     # Generate tanh wave data (returns values in [-1, 1] range)
-    tanh_data = generate_tanh_wave_data(dims, np.float32)
+    tanh_data = generate_tanh_wave_data(
+        coords=tuple(d.data for d in dims),
+        sizes=tuple(d.size for d in dims),
+        chunks=tuple(4 * d.chunk_size for d in dims),
+        dtype=np.float32,
+    )
 
     # Add random noise that preserves the sign
     # Generate noise proportional to the absolute value to avoid sign changes
@@ -170,7 +191,12 @@ def uniform_grid(*, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str
         data_array = generate_flag_values_data(dims, dtype, attrs["flag_values"])
     else:
         # Generate tanh wave data for continuous data
-        data_array = generate_tanh_wave_data(dims, dtype)
+        data_array = generate_tanh_wave_data(
+            coords=tuple(d.data for d in dims),
+            sizes=tuple(d.size for d in dims),
+            chunks=tuple(4 * d.chunk_size for d in dims),
+            dtype=dtype,
+        )
 
     if "flag_values" not in attrs:
         attrs["valid_max"] = 1
@@ -1200,8 +1226,14 @@ def create_n320(
         [np.linspace(0, 360, nlon, endpoint=False) for nlon in num_points]
     )
 
-    # Generate tanh wave data for the points
-    data_array = generate_tanh_wave_data(dims, dtype)
+    # Generate tanh wave data for the points - pass both lon and lat, no meshgrid
+    data_array = generate_tanh_wave_data(
+        coords=(all_lons, all_lats),
+        sizes=(len(all_lons), len(all_lats)),
+        chunks=tuple(dim.chunk_size for dim in dims),
+        dtype=dtype,
+        use_meshgrid=False,
+    )
 
     # Add valid_min/valid_max for continuous data
     attrs["valid_min"] = -1
