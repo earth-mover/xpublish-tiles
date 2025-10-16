@@ -32,7 +32,6 @@ from xpublish_tiles.testing.datasets import (
     GLOBAL_NANS,
     HRRR,
     PARA,
-    REDGAUSS_N320,
     create_global_dataset,
 )
 from xpublish_tiles.testing.lib import (
@@ -464,15 +463,3 @@ async def test_hrrr_multiple_vs_hrrr_rendering(tile, tms, pytestconfig):
         f"HRRR_MULTIPLE should render identically to HRRR for tile {tile} "
         f"but images differ"
     )
-
-
-@pytest.mark.parametrize("tile,tms", TILES)
-async def test_reduced_gaussian_n320(tile, tms, png_snapshot, pytestconfig):
-    """Test pipeline with N320 Reduced Gaussian Grid tiles."""
-    ds = REDGAUSS_N320.create()
-    query_params = create_query_params(tile, tms)
-    with config.set(rectilinear_check_min_size=0):
-        result = await pipeline(ds, query_params)
-    if pytestconfig.getoption("--visualize"):
-        visualize_tile(result, tile)
-    assert_render_matches_snapshot(result, png_snapshot)

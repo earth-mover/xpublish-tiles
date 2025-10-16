@@ -10,6 +10,7 @@ from xpublish_tiles.testing.datasets import (
     EU3035,
     EU3035_HIRES,
     HRRR,
+    REDGAUSS_N320,
     UTM33S,
     create_global_dataset,
 )
@@ -100,6 +101,7 @@ def repo(pytestconfig):
 
 @pytest.fixture(
     params=tuple(map(",".join, product(["-90->90", "90->-90"], ["-180->180", "0->360"])))
+    + ("reduced_gaussian_n320",)
 )
 def global_datasets(request):
     param = request.param
@@ -108,7 +110,10 @@ def global_datasets(request):
     lat_ascending = "-90->90" in param
     lon_0_360 = "0->360" in param
 
-    yield create_global_dataset(lat_ascending=lat_ascending, lon_0_360=lon_0_360)
+    if param == "reduced_gaussian_n320":
+        yield REDGAUSS_N320.create()
+    else:
+        yield create_global_dataset(lat_ascending=lat_ascending, lon_0_360=lon_0_360)
 
 
 # Create the product of datasets and their appropriate tiles
