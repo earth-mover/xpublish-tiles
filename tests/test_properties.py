@@ -23,6 +23,7 @@ from xpublish_tiles.testing.datasets import (
     EU3035_HIRES,
     HRRR,
     HRRR_MULTIPLE,
+    REDGAUSS_N320,
     Dim,
     uniform_grid,
 )
@@ -104,6 +105,38 @@ def global_datasets(
         dtype = np.float32
 
     ds = uniform_grid(dims=dims, dtype=dtype, attrs=attrs)
+    return ds
+
+
+@st.composite
+def global_unstructured_datasets(draw: DrawFn) -> xr.Dataset:
+    """Strategy that returns global unstructured grid datasets.
+
+    Currently returns REDGAUSS_N320 (Reduced Gaussian Grid N320).
+    """
+    ds = REDGAUSS_N320.create()
+
+    # this is yuck; but things are too slow without caching the grid object
+    attr = ds.attrs["_xpublish_id"]
+    # Rescale latitude to full -90 to 90 range
+    lat = ds.latitude.values
+    lat_min, lat_max = lat.min(), lat.max()
+    lat_scaled = -90 + (lat - lat_min) / (lat_max - lat_min) * 180
+    # Occasionally reverse the latitude vector
+    if draw(st.booleans()):
+        lat_scaled = lat_scaled[::-1]
+        attr += "_reversed_lat"
+
+    ds = ds.assign_coords(latitude=("point", lat_scaled))
+
+    # Occasionally convert longitude from 0-360 to -180-180 convention
+    if draw(st.booleans()):
+        lon = ds.longitude.values
+        lon_converted = np.where(lon > 180, lon - 360, lon)
+        ds = ds.assign_coords(longitude=("point", lon_converted))
+        attr += "_converted_lon"
+
+    ds.attrs["_xpublish_id"] = attr
     return ds
 
 
@@ -194,7 +227,12 @@ def tile_and_tms(
 @pytest.mark.asyncio
 @settings(deadline=None, max_examples=750)
 @given(
-    tile_tms=tile_and_tms(), ds=global_datasets(allow_categorical=False), data=st.data()
+    tile_tms=tile_and_tms(),
+    ds=st.one_of(
+        global_datasets(allow_categorical=False),
+        global_unstructured_datasets(),
+    ),
+    data=st.data(),
 )
 async def test_property_global_render_no_transparent_tile(
     tile_tms: tuple[Tile, TileMatrixSet],
