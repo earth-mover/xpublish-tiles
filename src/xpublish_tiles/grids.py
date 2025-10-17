@@ -304,14 +304,6 @@ class CellTreeIndex(xr.Index):
         vertex_indices, inverse = np.unique(
             self.tree.faces[face_indices], return_inverse=True
         )
-        # import matplotlib.pyplot as plt
-        # from matplotlib.tri import Triangulation
-        # lon = self.tree.vertices[vertex_indices, 0]
-        # lat = self.tree.vertices[vertex_indices, 1]
-        # t = Triangulation(lon, lat, triangles=inverse)
-        # plt.triplot(t)
-        # plt.show()
-        # print(len(vertex_indices), len(face_indices))
 
         # Check if selected faces intersect the anti-meridian
         # Figure out which of the anti-meridian faces we've ended up selecting, and save those
@@ -1253,14 +1245,10 @@ class Triangular(GridSystem):
 
         (dim,) = ds[Xname].dims
 
+        is_global = crs.is_geographic and (xmax - xmin) > 358
         # always triangulate here; we'll need the convex hull when we have a global grid
-        triang = Delaunay(vertices.values)
-        # import matplotlib.pyplot as plt
-        # import scipy.spatial
-        # scipy.spatial.delaunay_plot_2d(triang)
-        # plt.xlim([-182, -178])
-        # plt.show()
-        if crs.is_geographic and (xmax - xmin) > 358:
+        triang = Delaunay(vertices.values, incremental=is_global)
+        if is_global:
             # We want to pad the vertices across the anti-meridian, and then run the triangulation.
             # For simplicity, we just append two copies of the convex hull the longitudes modified differently.
             # This could be wasteful at triangulation time for large grids but for now, this is easy and works.
@@ -1273,9 +1261,9 @@ class Triangular(GridSystem):
             pos_verts[Xname] = pos_verts[Xname].values + 360
             neg_verts[Xname] = neg_verts[Xname].values - 360
 
+            triang.add_points(pos_verts)
+            triang.add_points(neg_verts)
             vertices = pd.concat([vertices, pos_verts, neg_verts])
-
-            triang = Delaunay(vertices.values)
 
             # need to reindex the data to match the padding :(
             # yet another reason, we'd like to have a hook where xpublish lets the plugin modify the dataset
