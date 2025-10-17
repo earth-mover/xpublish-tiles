@@ -476,4 +476,6 @@ async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig)
             perceptual_threshold=0.97,
         )
 
-        assert images_similar, f"Child tile {child_tile} (zoom {child_zoom}, delta +{zoom_delta}) doesn't match parent tile {tile} (zoom {tile.z}) region (SSIM: {ssim_score:.4f})"
+        assert images_similar, (
+            f"Child tile {child_tile} (zoom {child_zoom}, delta +{zoom_delta}) doesn't match parent tile {tile} (zoom {tile.z}) region (SSIM: {ssim_score:.4f})"
+        )
