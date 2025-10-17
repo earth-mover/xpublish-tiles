@@ -81,7 +81,7 @@ def generate_tanh_wave_data(
     """
     # Create coordinate arrays for each dimension
     coord_arrays = []
-    for i, (coord_data, size) in enumerate(zip(coords, sizes, strict=False)):
+    for i, (coord_data, size) in enumerate(zip(coords, sizes, strict=True)):
         # Use provided coordinates or indices
         if coord_data is not None:
             coord_array = np.asarray(coord_data)
@@ -109,7 +109,7 @@ def generate_tanh_wave_data(
     if use_meshgrid:
         # Regular grids: meshgrid 1D coordinate arrays into N-D grids
         dask_coords = []
-        for coord_array, chunk_size in zip(coord_arrays, chunks, strict=False):
+        for coord_array, chunk_size in zip(coord_arrays, chunks, strict=True):
             dask_coord = dask.array.from_array(coord_array, chunks=chunk_size)
             dask_coords.append(dask_coord)
         grids = dask.array.meshgrid(*dask_coords, indexing="ij")
