@@ -272,8 +272,8 @@ async def test_property_equivalent_grids_render_equivalently(
     3. unstructured grid constructed from stacking rectilinear grid
     must be preceptually very very similar.
 
-    Note that this test receives new datasets and repeatedly triangulating the gridis slow;
-    so we generate a number of tiles for each dataset; and check them
+    Note that this test receives new datasets and repeatedly triangulating the grid is slow;
+    so we run that comparison in a different test with fewer datasets, and more tiles per dataset.
     """
 
     curvi = rect.rename(latitude="nlat", longitude="nlon")
@@ -304,10 +304,6 @@ async def test_property_equivalent_grids_render_equivalently(
         longitude=lon.transpose() if data.draw(st.booleans()) else curvi.longitude,
         latitude=lat.transpose() if data.draw(st.booleans()) else curvi.latitude,
     )
-
-    if do_triangular := data.draw(st.booleans()):
-        stacked = rect.load().stack(point=("latitude", "longitude"), create_index=False)
-        stacked.attrs["_xpublish_id"] = str(uuid.uuid4())
 
     # Compare images with optional debug visualization using perceptual comparison
     compare = lambda buffer1, buffer2, tile, tms: compare_image_buffers_with_debug(
@@ -340,12 +336,35 @@ async def test_property_equivalent_grids_render_equivalently(
             )
             assert images_similar, f"Rectilinear and *transposed* curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
 
-            if do_triangular:
-                triangular_result = await pipeline(stacked, query)
-                images_similar, ssim_score = compare(
-                    rectilinear_result, triangular_result, tile, tms
-                )
-                assert images_similar, f"Rectilinear and triangular results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+
+@pytest.mark.asyncio
+@given(data=st.data(), rect=global_datasets(allow_categorical=False))
+@settings(deadline=None, max_examples=20)
+async def test_rectilinear_triangular_equivalency(data, rect, pytestconfig):
+    stacked = rect.load().stack(point=("latitude", "longitude"), create_index=False)
+    stacked.attrs["_xpublish_id"] = str(uuid.uuid4())
+
+    for _ in range(20):
+        tile, tms = data.draw(tile_and_tms())
+        query = create_query_params(tile, tms)
+
+        with config.set(transform_chunk_size=256, detect_approx_rectilinear=False):
+            rectilinear_result = await pipeline(rect, query)
+
+            triangular_result = await pipeline(stacked, query)
+            images_similar, ssim_score = compare_image_buffers_with_debug(
+                rectilinear_result,
+                triangular_result,
+                test_name="grid_equivalency",
+                tile_info=(tile, tms),
+                debug_visual=pytestconfig.getoption("--debug-visual", default=False),
+                debug_visual_save=pytestconfig.getoption(
+                    "--debug-visual-save", default=False
+                ),
+                mode="perceptual",
+                perceptual_threshold=0.9,  # 90% similarity threshold
+            )
+            assert images_similar, f"Rectilinear and triangular results differ for tile {tile} (SSIM: {ssim_score:.4f})"
 
 
 @pytest.mark.asyncio
