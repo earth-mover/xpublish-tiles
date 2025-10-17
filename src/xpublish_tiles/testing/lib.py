@@ -302,7 +302,7 @@ Y: {xy_bounds[1]:.0f} to {xy_bounds[3]:.0f}
         transparency_status = f"⚠ Minor transparency change: {transparency_change:+,} pixels ({transparency_change_pct:+.2f}%)"
         transparency_color = "orange"
     else:
-        transparency_status = f"⚠️ TRANSPARENCY CHANGED: {transparency_change:+,} pixels ({transparency_change_pct:+.2f}%)"
+        transparency_status = f"⚠️ TRANSPARENCY DIFFERENCE: {transparency_change:+,} pixels ({transparency_change_pct:+.2f}%)"
         transparency_color = "red"
 
     ax_transparency.text(

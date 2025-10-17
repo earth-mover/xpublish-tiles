@@ -40,8 +40,19 @@ def global_datasets(
     allow_decreasing_lat: bool = True,
     allow_categorical: bool = True,
     maxsize: int = 2000,
+    perturb: bool = True,
 ) -> xr.Dataset:
-    """Strategy that generates global datasets using uniform_grid with random parameters."""
+    """Strategy that generates global datasets using uniform_grid with random parameters.
+
+    Parameters
+    ----------
+    allow_decreasing_lat: bool
+    allow_categorical: bool
+    maxsize: int
+        Max size of either dimension
+    perturb: bool
+        Whether to add tiny perturbations to the bounds of each axis, for robustness testing
+    """
     # Generate dimensions between 100 and 1000 to ensure sufficient coverage
     # Smaller datasets may have gaps when projected
     # Prioritize sizes that exercise coarsening
@@ -54,8 +65,8 @@ def global_datasets(
 
     # Generate latitude ordering
     lat_ascending = not allow_decreasing_lat or draw(st.booleans())
-    delta_lat = draw(st.floats(-1e-3, 1e-3))
-    delta_lon = draw(st.floats(-1e-3, 1e-3))
+    delta_lat = 0 if not perturb else draw(st.floats(-1e-3, 1e-3))
+    delta_lon = 0 if not perturb else draw(st.floats(-1e-3, 1e-3))
     lats = np.linspace(-90 - delta_lat, 90 + delta_lat, nlat)
     if not lat_ascending:
         lats = lats[::-1]
@@ -118,7 +129,7 @@ def global_unstructured_datasets(draw: DrawFn) -> xr.Dataset:
 
     Currently returns REDGAUSS_N320 (Reduced Gaussian Grid N320).
     """
-    # copy avoid interfering with other tests!!!
+    # copy to avoid interfering with other tests!!!
     ds = REDGAUSS_N320.create().copy(deep=True)
 
     # this is yuck; but things are too slow without caching the grid object
@@ -343,7 +354,12 @@ async def test_property_equivalent_grids_render_equivalently(
 
 
 @pytest.mark.asyncio
-@given(data=st.data(), rect=global_datasets(allow_categorical=False, maxsize=720))
+@given(
+    data=st.data(),
+    # disable perturbing the edges because for the triangular grid
+    # we treat these as cell vertices, not centers
+    rect=global_datasets(allow_categorical=False, maxsize=720, perturb=False),
+)
 @settings(deadline=None, max_examples=20)
 async def test_rectilinear_triangular_equivalency(data, rect, pytestconfig):
     stacked = rect.load().stack(point=("latitude", "longitude"), create_index=False)

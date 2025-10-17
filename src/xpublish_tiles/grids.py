@@ -314,6 +314,22 @@ class CellTreeIndex(xr.Index):
             # note that vertex_indices are sorted
             antimeridian_vertices[key] = np.searchsorted(vertex_indices, present)
 
+        # Debugging plot to check indexing if needed
+        # import matplotlib.pyplot as plt
+        # from matplotlib.tri import Triangulation
+        # tri = Triangulation(
+        #     x=self.tree.vertices[vertex_indices, 0],
+        #     y=self.tree.vertices[vertex_indices, 1],
+        #     triangles=inverse,
+        # )
+        # plt.triplot(tri)
+        # plt.plot(
+        #     [xidxr.start, xidxr.stop, xidxr.stop, xidxr.start, xidxr.start],
+        #     [yidxr.start, yidxr.start, yidxr.stop, yidxr.stop, yidxr.start],
+        #     color='k',
+        # )
+        # plt.show()
+
         return IndexSelResult(
             dim_indexers={
                 "ugrid": UgridIndexer(
@@ -1251,7 +1267,9 @@ class Triangular(GridSystem):
 
         (dim,) = ds[Xname].dims
 
-        is_global = crs.is_geographic and (xmax - xmin) > 358
+        # This "350" business is nonsense; we need a way to figure out if a grid has global coverage
+        # but that's basically impossible if all you have are vertices.
+        is_global = crs.is_geographic and (xmax - xmin) > 350
         # always triangulate here; we'll need the convex hull when we have a global grid
         triang = Delaunay(vertices.values, incremental=is_global)
         if is_global:
