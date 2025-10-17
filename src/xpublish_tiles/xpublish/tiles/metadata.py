@@ -1,5 +1,5 @@
 import functools
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import morecantile.models
 import numpy as np
@@ -224,7 +224,7 @@ def _calculate_temporal_resolution(values: xr.DataArray) -> str:
 
 def extract_variable_bounding_box(
     dataset: Dataset, variable_name: str, target_crs: str | morecantile.models.CRS
-) -> Optional[BoundingBox]:
+) -> BoundingBox | None:
     """Extract variable-specific bounding box and transform to target CRS
 
     Args:

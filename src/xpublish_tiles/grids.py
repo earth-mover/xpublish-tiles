@@ -547,7 +547,7 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         Selection result with potentially multiple indexers for boundary crossing
         """
         # Handle slice objects specially for longitude coordinate conversion
-        key, value = next(iter(labels.items()))
+        _, value = next(iter(labels.items()))
         if not isinstance(value, slice):
             raise NotImplementedError
 
@@ -985,14 +985,14 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
         # or PandasIndex (non-geographic)
         if self.crs.is_geographic:
             # Geographic CRS should always have LongitudeCellIndex
-            assert isinstance(
-                x_index, LongitudeCellIndex
-            ), f"Expected LongitudeCellIndex for geographic CRS, got {type(x_index)}"
+            assert isinstance(x_index, LongitudeCellIndex), (
+                f"Expected LongitudeCellIndex for geographic CRS, got {type(x_index)}"
+            )
         else:
             # Non-geographic CRS should have regular PandasIndex
-            assert isinstance(
-                x_index, xr.indexes.PandasIndex
-            ), f"Expected PandasIndex for non-geographic CRS, got {type(x_index)}"
+            assert isinstance(x_index, xr.indexes.PandasIndex), (
+                f"Expected PandasIndex for non-geographic CRS, got {type(x_index)}"
+            )
 
         # Both index types have len() method
         x_size = len(x_index.index)
@@ -1140,9 +1140,9 @@ class Curvilinear(GridSystem):
         # Uses masking to select out the bbox, following the discussion in
         # https://github.com/pydata/xarray/issues/10572
         index = next(iter(self.indexes))
-        assert isinstance(
-            index, CurvilinearCellIndex
-        ), f"Expected CurvilinearCellIndex, got {type(index)}"
+        assert isinstance(index, CurvilinearCellIndex), (
+            f"Expected CurvilinearCellIndex, got {type(index)}"
+        )
 
         # Use the pre-computed lon_spans_globe attribute
         handle_wraparound = self.lon_spans_globe

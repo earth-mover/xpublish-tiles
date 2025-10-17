@@ -1,4 +1,4 @@
-from typing import Any, Literal, Optional, Union, overload
+from typing import Any, Literal, Union, overload
 
 from pydantic import (
     AliasChoices,
@@ -49,7 +49,7 @@ class WMSGetMapQuery(WMSBaseQuery):
     layers: str = Field(
         validation_alias=AliasChoices("layername", "layers", "query_layers"),
     )
-    styles: Optional[tuple[str, str]] = Field(
+    styles: tuple[str, str] | None = Field(
         ("raster", "default"),
         description="Style to use for the query. Defaults to raster/default. Default may be replaced by the name of any colormap available to matplotlibs",
     )

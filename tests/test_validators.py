@@ -99,13 +99,13 @@ class TestValidateImageFormat:
 
     def test_invalid_format(self):
         with pytest.raises(
-            ValueError, match="image format gif is not valid. Options are: PNG, JPEG"
+            ValueError, match=r"image format gif is not valid. Options are: PNG, JPEG"
         ):
             validate_image_format("gif")
 
     def test_invalid_format_with_mime_type(self):
         with pytest.raises(
-            ValueError, match="image format gif is not valid. Options are: PNG, JPEG"
+            ValueError, match=r"image format gif is not valid. Options are: PNG, JPEG"
         ):
             validate_image_format("image/gif")
 
@@ -148,21 +148,21 @@ class TestValidateStyle:
     def test_invalid_format_single_value(self):
         with pytest.raises(
             ValueError,
-            match="style must be in the format 'stylename/palettename'. A common default for this is 'raster/default'",
+            match=r"style must be in the format 'stylename/palettename'. A common default for this is 'raster/default'",
         ):
             validate_style("raster")
 
     def test_invalid_format_three_values(self):
         with pytest.raises(
             ValueError,
-            match="style must be in the format 'stylename/palettename'. A common default for this is 'raster/default'",
+            match=r"style must be in the format 'stylename/palettename'. A common default for this is 'raster/default'",
         ):
             validate_style("raster/default/extra")
 
     def test_invalid_style_name(self):
         with pytest.raises(
             ValueError,
-            match="style 'invalid' is not valid. Available styles are:",
+            match=r"style 'invalid' is not valid. Available styles are:",
         ):
             validate_style("invalid/default")
 

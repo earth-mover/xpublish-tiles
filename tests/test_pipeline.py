@@ -203,7 +203,7 @@ async def test_curvilinear_data(curvilinear_dataset_and_tile, png_snapshot, pyte
     # Can't use a snapshot twice in a test sadly
     result.seek(0)
     transposed_result.seek(0)
-    images_match, _ = compare_image_buffers_with_debug(
+    _, _ = compare_image_buffers_with_debug(
         result,  # Expected (original)
         transposed_result,  # Actual (transposed)
         test_name=f"test_curvilinear_data_transposed_vs_original[{tile.z}/{tile.x}/{tile.y}]",
@@ -452,7 +452,7 @@ async def test_hrrr_multiple_vs_hrrr_rendering(tile, tms, pytestconfig):
         visualize_tile(hrrr_multiple_result, tile)
 
     # Compare the rendered images
-    images_similar, ssim_score = compare_image_buffers_with_debug(
+    images_similar, _ = compare_image_buffers_with_debug(
         hrrr_result,
         hrrr_multiple_result,
         test_name="hrrr_multiple",

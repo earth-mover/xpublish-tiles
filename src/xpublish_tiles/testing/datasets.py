@@ -97,9 +97,9 @@ def generate_tanh_wave_data(
         else:
             # Numeric coordinates
             coord_min, coord_max = coord_array.min(), coord_array.max()
-            assert (
-                coord_max > coord_min
-            ), f"Coordinate range must be non-zero for coordinate {i}"
+            assert coord_max > coord_min, (
+                f"Coordinate range must be non-zero for coordinate {i}"
+            )
             normalized = (coord_array - coord_min) / (coord_max - coord_min)
 
         # Add dimension-specific offset to avoid identical patterns
