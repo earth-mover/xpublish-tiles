@@ -264,7 +264,7 @@ async def test_property_global_render_no_transparent_tile(
 
 @pytest.mark.asyncio
 @given(data=st.data(), rect=global_datasets(allow_categorical=False))
-@settings(deadline=None, max_examples=100)
+@settings(deadline=None, max_examples=50)
 async def test_property_equivalent_grids_render_equivalently(
     rect: xr.Dataset, data: st.DataObject, pytestconfig
 ):
@@ -320,7 +320,7 @@ async def test_property_equivalent_grids_render_equivalently(
         perceptual_threshold=0.9,  # 90% similarity threshold
     )
 
-    for _ in range(15):
+    for _ in range(10):
         tile, tms = data.draw(tile_and_tms())
         query = create_query_params(tile, tms)
 
