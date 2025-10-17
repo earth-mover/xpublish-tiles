@@ -1,6 +1,9 @@
 # xpublish-tiles
 
 ![PyPI - Version](https://img.shields.io/pypi/v/xpublish-tiles)
+![GitHub Actions](https://github.com/earth-mover/xpublish-tiles/actions/workflows/test.yml/badge.svg)
+![Codecov](https://codecov.io/gh/earth-mover/xpublish-tiles/branch/main/graph/badge.svg)
+[![Xarray](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/pydata/xarray/refs/heads/main/doc/badge.json)](https://xarray.dev)
 
 Web mapping plugins for [Xpublish](https://github.com/xpublish-community/xpublish)
 
