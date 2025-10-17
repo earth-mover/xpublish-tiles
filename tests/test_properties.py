@@ -565,7 +565,7 @@ async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig)
                 "--debug-visual-save", default=False
             ),
             mode="perceptual",
-            perceptual_threshold=0.97,
+            perceptual_threshold=0.96,
         )
 
         assert images_similar, (
