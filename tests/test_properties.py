@@ -263,27 +263,32 @@ async def test_property_global_render_no_transparent_tile(
     data=st.data(), tile_tms=tile_and_tms(), ds=global_datasets(allow_categorical=False)
 )
 @settings(deadline=None, max_examples=250)
-async def test_property_rectilinear_vs_curvilinear_exact(
+async def test_property_equivalent_grids_render_equivalently(
     tile_tms: tuple[Tile, TileMatrixSet],
     ds: xr.Dataset,
     data: st.DataObject,
     pytestconfig,
 ):
     """
-    Result from rectilinear grid & curvilinear grid constructed from
-    broadcasting out rectilinear grid must be identical
+    Result from
+    1. rectilinear grid
+    2. curvilinear grid constructed from broadcasting out rectilinear grid
+    3. unstructured grid constructed from stacking rectilinear grid
+    must be preceptually very very similar
     """
+
     tile, tms = tile_tms
     test_name = f"rectilinear_vs_curvilinear_tile_{tile.z}_{tile.x}_{tile.y}"
     query = create_query_params(tile, tms)
-    with config.set(transform_chunk_size=256):
-        rectilinear_result = await pipeline(ds, query)
-    # rectilinear = guess_grid_system(ds, "foo")
-    # rect_ds = ds
 
-    ds = ds.rename(latitude="nlat", longitude="nlon")
-    newlat, newlon = np.meshgrid(ds.nlat.data, ds.nlon.data, indexing="ij")
-    ds = ds.assign_coords(
+    rect = ds
+    with config.set(transform_chunk_size=256):
+        rectilinear_result = await pipeline(rect, query)
+    # rectilinear = guess_grid_system(ds, "foo")
+
+    curvi = rect.rename(latitude="nlat", longitude="nlon")
+    newlat, newlon = np.meshgrid(curvi.nlat.data, curvi.nlon.data, indexing="ij")
+    curvi = curvi.assign_coords(
         longitude=(("nlon", "nlat"), newlon.T, {"standard_name": "longitude"}),
         latitude=(("nlon", "nlat"), newlat.T, {"standard_name": "latitude"}),
     )
@@ -305,9 +310,9 @@ async def test_property_rectilinear_vs_curvilinear_exact(
     # )
 
     # Compare images with optional debug visualization using perceptual comparison
-    images_similar, ssim_score = compare_image_buffers_with_debug(
-        buffer1=rectilinear_result,  # expected
-        buffer2=curvilinear_result,  # actual
+    compare = lambda buffer1, buffer2: compare_image_buffers_with_debug(
+        buffer1,
+        buffer2,
         test_name=test_name,
         tile_info=(tile, tms),
         debug_visual=pytestconfig.getoption("--debug-visual", default=False),
@@ -315,26 +320,26 @@ async def test_property_rectilinear_vs_curvilinear_exact(
         mode="perceptual",
         perceptual_threshold=0.9,  # 90% similarity threshold
     )
+
+    images_similar, ssim_score = compare(rectilinear_result, curvilinear_result)
     assert images_similar, f"Rectilinear and curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
 
-    lon, lat = ds.longitude, ds.latitude
-    transposed = ds.assign_coords(
-        longitude=lon.transpose() if data.draw(st.booleans()) else ds.longitude,
-        latitude=lat.transpose() if data.draw(st.booleans()) else ds.latitude,
+    lon, lat = curvi.longitude, curvi.latitude
+    transposed = curvi.assign_coords(
+        longitude=lon.transpose() if data.draw(st.booleans()) else curvi.longitude,
+        latitude=lat.transpose() if data.draw(st.booleans()) else curvi.latitude,
     )
     with config.set(transform_chunk_size=256, detect_approx_rectilinear=False):
         transposed_result = await pipeline(transposed, query)
-    images_similar, ssim_score = compare_image_buffers_with_debug(
-        buffer1=rectilinear_result,  # expected
-        buffer2=transposed_result,  # actual
-        test_name=test_name,
-        tile_info=(tile, tms),
-        debug_visual=pytestconfig.getoption("--debug-visual", default=False),
-        debug_visual_save=pytestconfig.getoption("--debug-visual-save", default=False),
-        mode="perceptual",
-        perceptual_threshold=0.9,  # 90% similarity threshold
-    )
+    images_similar, ssim_score = compare(rectilinear_result, transposed_result)
     assert images_similar, f"Rectilinear and *transposed* curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+
+    # this is very slow!
+    stacked = rect.stack(point=("latitude", "longitude"), create_index=False)
+    with config.set(transform_chunk_size=256, detect_approx_rectilinear=False):
+        triangular_result = await pipeline(stacked, query)
+    images_similar, ssim_score = compare(rectilinear_result, triangular_result)
+    assert images_similar, f"Rectilinear and triangular results differ for tile {tile} (SSIM: {ssim_score:.4f})"
 
 
 @pytest.mark.asyncio
