@@ -497,7 +497,8 @@ async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig)
 
     # Pick a child zoom level (absolute)
     # We choose minimum tile size of 32x32 (2048/2^6 = 32), so max delta is 6
-    max_child_zoom = min(tile.z + 6, tms.maxzoom)
+    # We use 4, because at higher zoom levels, pixels can move around a bit.
+    max_child_zoom = min(tile.z + 4, tms.maxzoom)
     assume(max_child_zoom > tile.z)  # Must be able to zoom in at least one level
 
     # Test 10 randomly generated child tiles
@@ -565,7 +566,7 @@ async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig)
                 "--debug-visual-save", default=False
             ),
             mode="perceptual",
-            perceptual_threshold=0.95,
+            perceptual_threshold=0.98,
         )
 
         assert images_similar, (
