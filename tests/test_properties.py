@@ -1,4 +1,5 @@
 import io
+import uuid
 
 import hypothesis.strategies as st
 import morecantile
@@ -259,32 +260,21 @@ async def test_property_global_render_no_transparent_tile(
 
 
 @pytest.mark.asyncio
-@given(
-    data=st.data(), tile_tms=tile_and_tms(), ds=global_datasets(allow_categorical=False)
-)
-@settings(deadline=None, max_examples=250)
+@given(data=st.data(), rect=global_datasets(allow_categorical=False))
+@settings(deadline=None, max_examples=100)
 async def test_property_equivalent_grids_render_equivalently(
-    tile_tms: tuple[Tile, TileMatrixSet],
-    ds: xr.Dataset,
-    data: st.DataObject,
-    pytestconfig,
+    rect: xr.Dataset, data: st.DataObject, pytestconfig
 ):
     """
     Result from
     1. rectilinear grid
     2. curvilinear grid constructed from broadcasting out rectilinear grid
     3. unstructured grid constructed from stacking rectilinear grid
-    must be preceptually very very similar
+    must be preceptually very very similar.
+
+    Note that this test receives new datasets and repeatedly triangulating the gridis slow;
+    so we generate a number of tiles for each dataset; and check them
     """
-
-    tile, tms = tile_tms
-    test_name = f"rectilinear_vs_curvilinear_tile_{tile.z}_{tile.x}_{tile.y}"
-    query = create_query_params(tile, tms)
-
-    rect = ds
-    with config.set(transform_chunk_size=256):
-        rectilinear_result = await pipeline(rect, query)
-    # rectilinear = guess_grid_system(ds, "foo")
 
     curvi = rect.rename(latitude="nlat", longitude="nlon")
     newlat, newlon = np.meshgrid(curvi.nlat.data, curvi.nlon.data, indexing="ij")
@@ -292,9 +282,9 @@ async def test_property_equivalent_grids_render_equivalently(
         longitude=(("nlon", "nlat"), newlon.T, {"standard_name": "longitude"}),
         latitude=(("nlon", "nlat"), newlat.T, {"standard_name": "latitude"}),
     )
-    ds["foo"].attrs["coordinates"] = "longitude latitude"
-    with config.set(transform_chunk_size=256, detect_approx_rectilinear=False):
-        curvilinear_result = await pipeline(ds, query)
+    curvi["foo"].attrs["coordinates"] = "longitude latitude"
+
+    # rectilinear = guess_grid_system(ds, "foo")
     # curvilinear = guess_grid_system(ds, "foo")
 
     # Check that grid indexers are the same
@@ -309,11 +299,21 @@ async def test_property_equivalent_grids_render_equivalently(
     #     curvilinear.sel(ds.foo, bbox=bbox).data,
     # )
 
+    lon, lat = curvi.longitude, curvi.latitude
+    transposed = curvi.assign_coords(
+        longitude=lon.transpose() if data.draw(st.booleans()) else curvi.longitude,
+        latitude=lat.transpose() if data.draw(st.booleans()) else curvi.latitude,
+    )
+
+    if do_triangular := data.draw(st.booleans()):
+        stacked = rect.load().stack(point=("latitude", "longitude"), create_index=False)
+        stacked.attrs["_xpublish_id"] = str(uuid.uuid4())
+
     # Compare images with optional debug visualization using perceptual comparison
-    compare = lambda buffer1, buffer2: compare_image_buffers_with_debug(
+    compare = lambda buffer1, buffer2, tile, tms: compare_image_buffers_with_debug(
         buffer1,
         buffer2,
-        test_name=test_name,
+        test_name="grid_equivalency",
         tile_info=(tile, tms),
         debug_visual=pytestconfig.getoption("--debug-visual", default=False),
         debug_visual_save=pytestconfig.getoption("--debug-visual-save", default=False),
@@ -321,25 +321,31 @@ async def test_property_equivalent_grids_render_equivalently(
         perceptual_threshold=0.9,  # 90% similarity threshold
     )
 
-    images_similar, ssim_score = compare(rectilinear_result, curvilinear_result)
-    assert images_similar, f"Rectilinear and curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+    for _ in range(15):
+        tile, tms = data.draw(tile_and_tms())
+        query = create_query_params(tile, tms)
 
-    lon, lat = curvi.longitude, curvi.latitude
-    transposed = curvi.assign_coords(
-        longitude=lon.transpose() if data.draw(st.booleans()) else curvi.longitude,
-        latitude=lat.transpose() if data.draw(st.booleans()) else curvi.latitude,
-    )
-    with config.set(transform_chunk_size=256, detect_approx_rectilinear=False):
-        transposed_result = await pipeline(transposed, query)
-    images_similar, ssim_score = compare(rectilinear_result, transposed_result)
-    assert images_similar, f"Rectilinear and *transposed* curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+        with config.set(transform_chunk_size=256, detect_approx_rectilinear=False):
+            rectilinear_result = await pipeline(rect, query)
 
-    # this is very slow!
-    stacked = rect.stack(point=("latitude", "longitude"), create_index=False)
-    with config.set(transform_chunk_size=256, detect_approx_rectilinear=False):
-        triangular_result = await pipeline(stacked, query)
-    images_similar, ssim_score = compare(rectilinear_result, triangular_result)
-    assert images_similar, f"Rectilinear and triangular results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+            curvilinear_result = await pipeline(curvi, query)
+            images_similar, ssim_score = compare(
+                rectilinear_result, curvilinear_result, tile, tms
+            )
+            assert images_similar, f"Rectilinear and curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+
+            transposed_result = await pipeline(transposed, query)
+            images_similar, ssim_score = compare(
+                rectilinear_result, transposed_result, tile, tms
+            )
+            assert images_similar, f"Rectilinear and *transposed* curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+
+            if do_triangular:
+                triangular_result = await pipeline(stacked, query)
+                images_similar, ssim_score = compare(
+                    rectilinear_result, triangular_result, tile, tms
+                )
+                assert images_similar, f"Rectilinear and triangular results differ for tile {tile} (SSIM: {ssim_score:.4f})"
 
 
 @pytest.mark.asyncio
