@@ -274,52 +274,93 @@ class CellTreeIndex(xr.Index):
     ):
         self.X = X
         self.Y = Y
-        if lon_spans_globe:
-            # We want to reflect the vertices across the anti-meridian, and then run the triangulation.
-            # For simplicity, we just append two copies of the convex hull the longitudes modified differently.
-            # This could be wasteful when re-triangulating for large grids but for now, this is easy and works.
-            # If we don't do pad before triangulating, we run in to the issue where the right edge vertices
-            # are not connected to the left edge vertices, and the padding doesn't affect the rendering.
-            # An alternative approach would be to construct the CellTreeIndex here, then figure out the faces that intersect
-            # the line at 180, -180; calculate the neighbours of those faces; extract those vertices and pad those.
-            boundary = np.unique(triang.convex_hull)
-            pos_verts = vertices[boundary, ...]
-            neg_verts = pos_verts.copy()
+        # if lon_spans_globe:
+        #     # We want to reflect the vertices across the anti-meridian, and then run the triangulation.
+        #     # For simplicity, we just append two copies of the convex hull the longitudes modified differently.
+        #     # This could be wasteful when re-triangulating for large grids but for now, this is easy and works.
+        #     # If we don't do pad before triangulating, we run in to the issue where the right edge vertices
+        #     # are not connected to the left edge vertices, and the padding doesn't affect the rendering.
+        #     # An alternative approach would be to construct the CellTreeIndex here, then figure out the faces that intersect
+        #     # the line at 180, -180; calculate the neighbours of those faces; extract those vertices and pad those.
+        #     boundary = np.unique(triang.convex_hull)
+        #     pos_verts = vertices[boundary, ...]
+        #     neg_verts = pos_verts.copy()
 
-            pos_verts[:, 0] += 360
-            neg_verts[:, 0] -= 360
+        #     pos_verts[:, 0] += 360
+        #     neg_verts[:, 0] -= 360
 
-            triang.add_points(pos_verts)
-            triang.add_points(neg_verts)
+        #     triang.add_points(pos_verts)
+        #     triang.add_points(neg_verts)
 
-            # need to reindex the data to match the padding
-            self.reindexer = np.concatenate(
-                [np.arange(vertices.shape[0]), boundary, boundary]
-            )
-            vertices = np.concatenate([vertices, pos_verts, neg_verts], axis=0)
-            faces = triang.simplices
+        #     # need to reindex the data to match the padding
+        #     self.reindexer = np.concatenate(
+        #         [np.arange(vertices.shape[0]), boundary, boundary]
+        #     )
+        #     vertices = np.concatenate([vertices, pos_verts, neg_verts], axis=0)
+        #     faces = triang.simplices
 
-        else:
-            self.reindexer = None
+        # else:
+        #     self.reindexer = None
 
-        self.tree = CellTree2d(vertices, faces, fill_value=fill_value)
+        tree = CellTree2d(vertices, faces, fill_value=fill_value)
         if lon_spans_globe:
             # lets find the vertices closest to the -180 & 180 boundaries and cache them.
             # At indexing time, we'll return the indexes for vertices at the boundary
             # so we can fix the coordinate discontinuity later in `pipeline`
-            idx, face_indices, _ = self.tree.intersect_edges(
+            idx, face_indices, _ = tree.intersect_edges(
+                np.array([[[180, -90], [180, 90]], [[-180, -90], [-180, 90]]])
+            )
+            (breakpt,) = np.nonzero(np.diff(idx))
+            if breakpt.size == 0:
+                breakpt = 0 if idx[0] == 1 else idx.size
+            else:
+                assert breakpt.size == 1
+                breakpt = breakpt[0] + 1
+            verts = faces[face_indices, ...]
+            pos_verts = np.unique(verts[:breakpt])
+            neg_verts = np.unique(verts[breakpt:])
+
+            # move existing -180 to +180
+            pos_vertices = vertices[neg_verts, :]
+            if pos_vertices.size > 0:
+                pos_vertices[:, 0] += 360
+
+            # move existing +180 to -180
+            neg_vertices = vertices[pos_verts, :]
+            if neg_vertices.size > 0:
+                neg_vertices[:, 0] -= 360
+
+            triang.add_points(pos_vertices)
+            triang.add_points(neg_vertices)
+
+            # need to reindex the data to match the padding
+            self.reindexer = np.concatenate(
+                [np.arange(vertices.shape[0]), neg_verts, pos_verts]
+            )
+            tree = CellTree2d(triang.points, triang.simplices, fill_value=fill_value)
+
+            nverts = vertices.shape[0]
+            nposverts = pos_vertices.shape[0]
+            new_anti = {
+                "pos": [pos_verts, nverts + np.arange(nposverts)],
+                "neg": [neg_verts, nverts + nposverts + np.arange(neg_vertices.shape[0])],
+            }
+
+            idx, face_indices, _ = tree.intersect_edges(
                 np.array([[[180, -90], [180, 90]], [[-180, -90], [-180, 90]]])
             )
             (breakpt,) = np.nonzero(np.diff(idx))
             assert breakpt.size == 1
             breakpt = breakpt[0] + 1
-            verts = faces[face_indices, ...]
+            verts = tree.faces[face_indices, ...]
             self.antimeridian_vertices = {
                 "pos": np.unique(verts[:breakpt]),
                 "neg": np.unique(verts[breakpt:]),
             }
         else:
             self.antimeridian_vertices = {"pos": np.array([]), "neg": np.array([])}
+
+        self.tree = tree
 
     def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
         xidxr = labels.get(self.X)
