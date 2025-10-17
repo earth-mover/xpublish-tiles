@@ -122,8 +122,9 @@ def global_unstructured_datasets(draw: DrawFn) -> xr.Dataset:
     ds = REDGAUSS_N320.create().copy(deep=True)
 
     # this is yuck; but things are too slow without caching the grid object
-    attr = ds.attrs["_xpublish_id"]
-    # Rescale latitude to full -90 to 90 range
+    attr = ds.attrs["_xpublish_id"] + "_proptest"
+
+    # Rescale latitude to full -90 to 90 range, this means we can keep the present property test
     lat = ds.latitude.values
     lat_min, lat_max = lat.min(), lat.max()
     lat_scaled = -90 + (lat - lat_min) / (lat_max - lat_min) * 180
