@@ -595,6 +595,15 @@ class GridSystem(ABC):
     bounds, and reference frame for that specific grid system.
     """
 
+    # Note: The following attributes are expected to be provided by subclasses
+    # as dataclass fields or properties. They are typed here for type checking purposes.
+    crs: CRS
+    bbox: BBox
+    X: str
+    Y: str
+    Xdim: str
+    Ydim: str
+
     # FIXME: do we really need these Index objects on the class?
     #   - reconsider when we do curvilinear and triangular grids
     #   - The ugliness is that booth would have to set the right indexes on the dataset.
@@ -603,16 +612,9 @@ class GridSystem(ABC):
     indexes: tuple[xr.Index, ...]
     Z: str | None = None
     alternates: tuple[GridMetadata, ...] = field(default_factory=tuple)
-    dXmin: float | None = None
-    dYmin: float | None = None
 
-    # Note: The following attributes are expected to be provided by subclasses
-    # as dataclass fields or properties. They are typed here for type checking purposes.
-    crs: CRS = field(init=False)
-    X: str = field(init=False)
-    Y: str = field(init=False)
-    Xdim: str = field(init=False)
-    Ydim: str = field(init=False)
+    dXmin: float = 0
+    dYmin: float = 0
 
     @classmethod
     @abstractmethod
@@ -1164,6 +1166,10 @@ class Triangular(GridSystem):
     dim: str
     lon_spans_globe: bool
     indexes: tuple[xr.Index]
+
+    # these make no sense
+    dXmin: float = 0
+    dYmin: float = 0
 
     reindexer: np.ndarray
 

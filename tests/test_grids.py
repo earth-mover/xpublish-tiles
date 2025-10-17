@@ -289,6 +289,7 @@ def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> Non
     (
         pytest.param(IFS, 0, 3, id="ifs"),
         pytest.param(HRRR, 0, 6, id="hrrr"),
+        pytest.param(REDGAUSS_N320, 0, 24, id="redgauss_n320"),
         # data spacing: 120m; Zoom level 10: 152m spacing @ eq
         pytest.param(EU3035_HIRES, 4, 10, id="eu3035_hires"),
         # data spacing: 30m; Zoom level 13: 38m spacing @ eq

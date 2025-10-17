@@ -67,7 +67,7 @@ def sum_tuples(*tuples):
 def check_data_is_renderable_size(
     slicers: dict[str, list[slice | Fill | UgridIndexer]],
     da: xr.DataArray,
-    grid: GridSystem2D,
+    grid: GridSystem,
     alternate: GridMetadata,
 ) -> bool:
     """
@@ -109,8 +109,8 @@ def check_data_is_renderable_size(
 def shape_from_slicers(
     slicers: dict[str, list[slice | Fill | UgridIndexer]],
     da: xr.DataArray,
-    grid: GridSystem2D,
-) -> tuple[int, int]:
+    grid: GridSystem,
+) -> tuple[int, ...]:
     """
     Calculate the total shape from slicers for X and Y dimensions.
 
@@ -141,6 +141,9 @@ def shape_from_slicers(
         else:
             raise TypeError(f"Unknown indexer type: {type(sl)!r}")
 
+    if isinstance(grid, Triangular):
+        return (get_size(next(iter(slicers[grid.dim])), None),)
+
     # Find the one Y slice that's actually a slice (not Fill)
     yslice = None
     for candidate in slicers[grid.Ydim]:
@@ -164,8 +167,8 @@ def shape_from_slicers(
 
 
 def get_coarsen_factors(
-    shape: tuple[int, int],
-    max_shape: tuple[int, int],
+    shape: tuple[int, ...],
+    max_shape: tuple[int, ...],
     dims: list[str],
     slicers: dict[str, list[slice | Fill | UgridIndexer]],
     da: xr.DataArray,
