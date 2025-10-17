@@ -2,6 +2,7 @@ import logging
 from itertools import product
 
 import pytest
+from hypothesis import Verbosity, settings
 
 import icechunk
 import xarray as xr
@@ -23,6 +24,22 @@ logging.getLogger("datashader").setLevel(logging.WARNING)
 logging.getLogger("PIL").setLevel(logging.WARNING)
 
 IS_SNAPSHOT_UPDATE = False
+
+settings.register_profile(
+    "ci",
+    deadline=None,
+    # suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.too_slow],
+    # verbosity=Verbosity.verbose,
+    print_blob=True,
+)
+
+settings.register_profile(
+    "default",
+    deadline=None,
+    # suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.too_slow],
+    verbosity=Verbosity.verbose,
+    print_blob=True,
+)
 
 
 def pytest_addoption(parser):

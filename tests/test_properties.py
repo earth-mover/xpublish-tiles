@@ -248,7 +248,7 @@ def tile_and_tms(
 
 
 @pytest.mark.asyncio
-@settings(deadline=None, max_examples=750)
+@settings(max_examples=750)
 @given(
     tile_tms=tile_and_tms(),
     ds=all_global_datasets,
@@ -277,7 +277,7 @@ async def test_property_global_render_no_transparent_tile(
 
 @pytest.mark.asyncio
 @given(data=st.data(), rect=global_datasets(allow_categorical=False))
-@settings(deadline=None, max_examples=50)
+@settings(max_examples=50)
 async def test_property_equivalent_grids_render_equivalently(
     rect: xr.Dataset, data: st.DataObject, pytestconfig
 ):
@@ -364,7 +364,7 @@ async def test_property_equivalent_grids_render_equivalently(
     # we treat these as cell vertices, not centers
     rect=global_datasets(allow_categorical=False, maxsize=720, perturb=False),
 )
-@settings(deadline=None, max_examples=20)
+@settings(max_examples=20)
 async def test_rectilinear_triangular_equivalency(data, rect, pytestconfig):
     stacked = rect.load().stack(point=("latitude", "longitude"), create_index=False)
     stacked.attrs["_xpublish_id"] = str(uuid.uuid4())
@@ -396,7 +396,7 @@ async def test_rectilinear_triangular_equivalency(data, rect, pytestconfig):
 
 @pytest.mark.asyncio
 @given(dataset=st.sampled_from([HRRR_MULTIPLE, EU3035_HIRES, HRRR]), data=st.data())
-@settings(deadline=None, max_examples=250)
+@settings(max_examples=250)
 async def test_projected_coordinate_succeeds(dataset, data, pytestconfig):
     """Test that projected coordinate datasets can successfully render tiles within their bbox."""
     ds = dataset.create()
@@ -430,7 +430,7 @@ async def test_projected_coordinate_succeeds(dataset, data, pytestconfig):
 
 @pytest.mark.asyncio
 @given(tile_tms=tile_and_tms(), ds=all_global_datasets, data=st.data())
-@settings(deadline=None, max_examples=50)
+@settings(max_examples=50)
 async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig) -> None:
     """Property test that zooming in doesn't change rendering.
 
