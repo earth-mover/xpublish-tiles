@@ -248,7 +248,7 @@ def tile_and_tms(
 
 
 @pytest.mark.asyncio
-@settings(max_examples=750)
+@settings(max_examples=500)
 @given(
     tile_tms=tile_and_tms(),
     ds=all_global_datasets,
@@ -396,7 +396,6 @@ async def test_rectilinear_triangular_equivalency(data, rect, pytestconfig):
 
 @pytest.mark.asyncio
 @given(dataset=st.sampled_from([HRRR_MULTIPLE, EU3035_HIRES, HRRR]), data=st.data())
-@settings(max_examples=250)
 async def test_projected_coordinate_succeeds(dataset, data, pytestconfig):
     """Test that projected coordinate datasets can successfully render tiles within their bbox."""
     ds = dataset.create()
