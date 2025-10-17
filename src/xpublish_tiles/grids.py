@@ -1311,35 +1311,6 @@ class Triangular(GridSystem):
         )
 
 
-@dataclass(kw_only=True, eq=False)
-class DGGS(GridSystem):
-    cells: str
-    indexes: tuple[xr.Index, ...]
-    Z: str | None = None
-
-    @classmethod
-    def from_dataset(cls, ds: xr.Dataset, crs: CRS, Xname: str, Yname: str) -> Self:
-        """DGGS grids don't support standard from_dataset construction."""
-        raise NotImplementedError(
-            "DGGS grids don't support standard from_dataset construction"
-        )
-
-    @property
-    def dims(self) -> set[str]:
-        """Return the set of dimension names for this grid system."""
-        return {self.cells}
-
-    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill | UgridIndexer]]:
-        """Select a subset of the data array using a bounding box."""
-        raise NotImplementedError("sel not implemented for DGGS grids")
-
-    def equals(self, other: Self) -> bool:
-        if self.cells == other.cells:
-            return super().equals(other)
-        else:
-            return False
-
-
 # Type alias for 1D grid systems
 GridSystem1D = Triangular
 # Type alias for 2D grid systems that have X, Y, and crs attributes

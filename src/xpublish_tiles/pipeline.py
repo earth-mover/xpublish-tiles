@@ -11,13 +11,10 @@ from pyproj.aoi import BBox
 import xarray as xr
 from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
-    Curvilinear,
     GridMetadata,
     GridSystem,
     GridSystem1D,
     GridSystem2D,
-    RasterAffine,
-    Rectilinear,
     Triangular,
     UgridIndexer,
     guess_grid_system,
@@ -757,10 +754,6 @@ async def subset_to_bbox(
         if min(array.da.shape) < 2:
             raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
 
-        if not isinstance(grid, RasterAffine | Rectilinear | Curvilinear | Triangular):
-            raise NotImplementedError(f"{grid=!r} not supported yet.")
-        # Cast to help type checker understand narrowed type
-        grid = cast(RasterAffine | Rectilinear | Curvilinear, grid)
         input_to_output = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
         output_to_input = transformer_from_crs(crs_from=crs, crs_to=grid.crs)
 
@@ -780,9 +773,7 @@ async def subset_to_bbox(
             result[var_name] = NullRenderContext()
             continue
 
-        slicers = cast(
-            dict[str, list[slice | Fill | UgridIndexer]], grid.sel(bbox=input_bbox)
-        )
+        slicers = grid.sel(bbox=input_bbox)
         da = grid.assign_index(array.da)
 
         # Estimate coarsen factors and adjusted slicers
