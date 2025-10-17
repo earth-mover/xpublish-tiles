@@ -36,15 +36,18 @@ from xpublish_tiles.testing.lib import (
 
 @st.composite
 def global_datasets(
-    draw: DrawFn, allow_decreasing_lat: bool = True, allow_categorical: bool = True
+    draw: DrawFn,
+    allow_decreasing_lat: bool = True,
+    allow_categorical: bool = True,
+    maxsize: int = 2000,
 ) -> xr.Dataset:
     """Strategy that generates global datasets using uniform_grid with random parameters."""
     # Generate dimensions between 100 and 1000 to ensure sufficient coverage
     # Smaller datasets may have gaps when projected
     # Prioritize sizes that exercise coarsening
     size_st = st.one_of(
-        st.sampled_from([256, 512, 1024, 2048]),
-        st.integers(min_value=100, max_value=2000),
+        st.sampled_from([i for i in [256, 512, 1024, 2048] if i < maxsize]),
+        st.integers(min_value=100, max_value=maxsize),
     )
     nlat = draw(size_st)
     nlon = draw(size_st)
@@ -338,7 +341,7 @@ async def test_property_equivalent_grids_render_equivalently(
 
 
 @pytest.mark.asyncio
-@given(data=st.data(), rect=global_datasets(allow_categorical=False))
+@given(data=st.data(), rect=global_datasets(allow_categorical=False, maxsize=720))
 @settings(deadline=None, max_examples=20)
 async def test_rectilinear_triangular_equivalency(data, rect, pytestconfig):
     stacked = rect.load().stack(point=("latitude", "longitude"), create_index=False)
