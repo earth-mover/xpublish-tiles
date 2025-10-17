@@ -15,6 +15,7 @@ import rasterix
 from numba_celltree import CellTree2d
 from pyproj import CRS
 from pyproj.aoi import BBox
+from scipy.spatial import Delaunay
 
 import xarray as xr
 from xarray.core.indexing import IndexSelResult
@@ -262,17 +263,46 @@ def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
 class CellTreeIndex(xr.Index):
     def __init__(
         self,
-        vertices: pd.DataFrame,
-        faces: pd.DataFrame,
+        vertices: np.ndarray,
+        faces: np.ndarray,
         *,
         fill_value: Any,
         X: str,
         Y: str,
         lon_spans_globe: bool,
+        triang: Delaunay,
     ):
-        self.tree = CellTree2d(vertices.values, faces.values, fill_value=fill_value)
         self.X = X
         self.Y = Y
+        if lon_spans_globe:
+            # We want to reflect the vertices across the anti-meridian, and then run the triangulation.
+            # For simplicity, we just append two copies of the convex hull the longitudes modified differently.
+            # This could be wasteful when re-triangulating for large grids but for now, this is easy and works.
+            # If we don't do pad before triangulating, we run in to the issue where the right edge vertices
+            # are not connected to the left edge vertices, and the padding doesn't affect the rendering.
+            # An alternative approach would be to construct the CellTreeIndex here, then figure out the faces that intersect
+            # the line at 180, -180; calculate the neighbours of those faces; extract those vertices and pad those.
+            boundary = np.unique(triang.convex_hull)
+            pos_verts = vertices[boundary, ...]
+            neg_verts = pos_verts.copy()
+
+            pos_verts[:, 0] += 360
+            neg_verts[:, 0] -= 360
+
+            triang.add_points(pos_verts)
+            triang.add_points(neg_verts)
+
+            # need to reindex the data to match the padding
+            self.reindexer = np.concatenate(
+                [np.arange(vertices.shape[0]), boundary, boundary]
+            )
+            vertices = np.concatenate([vertices, pos_verts, neg_verts], axis=0)
+            faces = triang.simplices
+
+        else:
+            self.reindexer = None
+
+        self.tree = CellTree2d(vertices, faces, fill_value=fill_value)
         if lon_spans_globe:
             # lets find the vertices closest to the -180 & 180 boundaries and cache them.
             # At indexing time, we'll return the indexes for vertices at the boundary
@@ -313,6 +343,10 @@ class CellTreeIndex(xr.Index):
             # indices are indexes in to `vertex_indices` i.e. the subset
             # note that vertex_indices are sorted
             antimeridian_vertices[key] = np.searchsorted(vertex_indices, present)
+
+        # account for any padding needed for triangulations we are executing
+        if self.reindexer is not None:
+            vertex_indices = self.reindexer[vertex_indices]
 
         # Debugging plot to check indexing if needed
         # import matplotlib.pyplot as plt
@@ -1187,32 +1221,30 @@ class Triangular(GridSystem):
     dXmin: float = 0
     dYmin: float = 0
 
-    reindexer: np.ndarray
-
     def __init__(
         self,
         *,
-        vertices: pd.DataFrame,
-        faces: pd.DataFrame,
+        vertices: np.ndarray,
+        faces: np.ndarray,
         crs: CRS,
         dim: str,
         Xname: str,
         Yname: str,
         fill_value: Any,
-        reindexer: slice | np.ndarray,
+        triang: Delaunay,
     ):
         self.crs = crs
         self.X, self.Y = Xname, Yname
         self.dim = dim
-        xmin, xmax = vertices[Xname].min().item(), vertices[Xname].max().item()
-        ymin, ymax = vertices[Yname].min().item(), vertices[Yname].max().item()
-        self.lon_spans_globe = crs.is_geographic and ((xmax - xmin) > 358)
+        xmin, xmax = vertices[:, 0].min(), vertices[:, 0].max()
+        ymin, ymax = vertices[:, 1].min(), vertices[:, 1].max()
+        # This "350" business is nonsense; we need a way to figure out if a grid has global coverage
+        # but that's basically impossible if all you have are vertices.
+        self.lon_spans_globe = crs.is_geographic and ((xmax - xmin) > 350)
         if self.lon_spans_globe:
             self.bbox = BBox(west=-180, east=180, south=ymin, north=ymax)
         else:
             self.bbox = BBox(west=xmin, east=xmax, south=ymin, north=ymax)
-
-        self.reindexer = reindexer
         self.indexes = (
             CellTreeIndex(
                 vertices,
@@ -1221,6 +1253,7 @@ class Triangular(GridSystem):
                 X=Xname,
                 Y=Yname,
                 lon_spans_globe=self.lon_spans_globe,
+                triang=triang,
             ),
         )
 
@@ -1244,8 +1277,6 @@ class Triangular(GridSystem):
         # Extract the UgridIndexer from the IndexSelResult
         ugrid_indexer = result.dim_indexers["ugrid"]
         assert isinstance(ugrid_indexer, UgridIndexer)
-        # account for any padding needed for triangulations we are executing
-        ugrid_indexer.vertices = self.reindexer[ugrid_indexer.vertices]
         return {self.dim: [ugrid_indexer]}
 
     @classmethod
@@ -1257,50 +1288,22 @@ class Triangular(GridSystem):
         Yname: str,
     ) -> Self:
         # FIXME: detect UGRID here
-        from scipy.spatial import Delaunay
-
-        vertices = ds[[Xname, Yname]].to_dataframe()
+        vertices = (
+            ds[[Xname, Yname]]
+            .reset_coords()
+            .to_dataarray("variable")
+            .transpose(..., "variable")
+            .data
+        )
         if crs.is_geographic:
             # TODO: consider normalizing these to the unit sphere like UXarray
             # normalize to -180<=grid.X<180
-            vertices[Xname] = ((vertices[Xname] + 180) % 360) - 180
-        x = vertices[Xname]
-        xmin, xmax = x.min().item(), x.max().item()
+            vertices[:, 0] = ((vertices[:, 0] + 180) % 360) - 180
 
         (dim,) = ds[Xname].dims
+        triang = Delaunay(vertices, incremental=True)
 
-        # This "350" business is nonsense; we need a way to figure out if a grid has global coverage
-        # but that's basically impossible if all you have are vertices.
-        is_global = crs.is_geographic and (xmax - xmin) > 350
-        # always triangulate here; we'll need the convex hull when we have a global grid
-        triang = Delaunay(vertices.values, incremental=is_global)
-        if is_global:
-            # We want to reflect the vertices across the anti-meridian, and then run the triangulation.
-            # For simplicity, we just append two copies of the convex hull the longitudes modified differently.
-            # This could be wasteful at triangulation time for large grids but for now, this is easy and works.
-            # If we don't do pad before triangulating, we run in to the issue where the right edge vertices
-            # are not connected to the left edge vertices, and the padding doesn't affect the rendering.
-            # An alternative approach would be to construct the CellTreeIndex here, then figure out the faces that intersect
-            # the line at 180, -180; calculate the neighbours of those faces; extract those vertices and pad those.
-            boundary = np.unique(triang.convex_hull)
-            pos_verts = vertices.iloc[boundary].copy()
-            neg_verts = pos_verts.copy()
-
-            pos_verts[Xname] = pos_verts[Xname].values + 360
-            neg_verts[Xname] = neg_verts[Xname].values - 360
-
-            triang.add_points(pos_verts)
-            triang.add_points(neg_verts)
-            vertices = pd.concat([vertices, pos_verts, neg_verts])
-
-            # need to reindex the data to match the padding :(
-            # yet another reason, we'd like to have a hook where xpublish lets the plugin modify the dataset
-            # For now, save an indexer and apply it later.
-            reindexer = np.concatenate([np.arange(ds.sizes["point"]), boundary, boundary])
-        else:
-            reindexer = slice(None)
-
-        faces = pd.DataFrame(triang.simplices, columns=["v0", "v1", "v2"])
+        faces = triang.simplices
         return cls(
             vertices=vertices,
             faces=faces,
@@ -1309,7 +1312,7 @@ class Triangular(GridSystem):
             Yname=Yname,
             dim=dim,
             fill_value=-1,
-            reindexer=reindexer,
+            triang=triang,
         )
 
 
