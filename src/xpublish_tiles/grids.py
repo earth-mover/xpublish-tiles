@@ -282,6 +282,8 @@ class CellTreeIndex(xr.Index):
             # are not connected to the left edge vertices, and the padding doesn't affect the rendering.
             # An alternative approach would be to construct the CellTreeIndex here, then figure out the faces that intersect
             # the line at 180, -180; calculate the neighbours of those faces; extract those vertices and pad those.
+            # However this does not work if the boundary faces without padding don't intersect those bounding longitudes
+            # e.g. consider if vertices are between -178.4 and +178.4, how do we connect the boundary without the convex hull approach?
             boundary = np.unique(triang.convex_hull)
             pos_verts = vertices[boundary, ...]
             neg_verts = pos_verts.copy()
