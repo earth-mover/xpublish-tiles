@@ -24,8 +24,9 @@ jobs:
       - name: Run Type Checker
         run: uv run ty check src/ tests/
 
+      # To debug snapshot test failures run with --debug-visual-save and download the artifact zip created in the next step.
       - name: Run tests with coverage
-        run: uv run pytest tests/test_pipeline.py -k n320  --cov=src/xpublish_tiles --cov-report=xml --cov-report=term-missing --durations=10 -nauto --debug-visual-save
+        run: uv run pytest tests/ --cov=src/xpublish_tiles --cov-report=xml --cov-report=term-missing --durations=10 -nauto
 
       - name: Upload debug visual images on failure
         if: failure()
