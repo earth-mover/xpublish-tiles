@@ -159,7 +159,14 @@ async def test_pipeline_bad_bbox(global_datasets, png_snapshot, pytestconfig):
         format=ImageFormat.PNG,
     )
     result = await pipeline(ds, query)
-    assert_render_matches_snapshot(result, png_snapshot)
+    assert_render_matches_snapshot(
+        result,
+        png_snapshot,
+        # we have small rasterization differences in CI
+        perceptual_threshold=0.99
+        if ds.attrs["name"] == "reduced_gaussian_n320"
+        else None,
+    )
 
 
 @pytest.mark.asyncio
