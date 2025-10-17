@@ -102,11 +102,14 @@ async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot, pytestco
         result = await pipeline(ds, query_params)
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
-    if ds.attrs["name"] == "redgauss_n320":
-        # We have small rasterization differences in CI
-        assert_render_matches_snapshot(result, png_snapshot, perceptual_threshold=0.99)
-    else:
-        assert_render_matches_snapshot(result, png_snapshot)
+    assert_render_matches_snapshot(
+        result,
+        png_snapshot,
+        # we have small rasterization differences in CI
+        perceptual_threshold=0.99
+        if ds.attrs["name"] == "reduced_gaussian_n320"
+        else None,
+    )
 
 
 @pytest.mark.asyncio

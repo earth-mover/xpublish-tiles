@@ -111,9 +111,11 @@ def global_datasets(request):
     lon_0_360 = "0->360" in param
 
     if param == "reduced_gaussian_n320":
-        yield REDGAUSS_N320.create()
+        ds = REDGAUSS_N320.create()
     else:
-        yield create_global_dataset(lat_ascending=lat_ascending, lon_0_360=lon_0_360)
+        ds = create_global_dataset(lat_ascending=lat_ascending, lon_0_360=lon_0_360)
+    ds.attrs["name"] = param
+    yield ds
 
 
 # Create the product of datasets and their appropriate tiles
