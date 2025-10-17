@@ -118,7 +118,8 @@ def global_unstructured_datasets(draw: DrawFn) -> xr.Dataset:
 
     Currently returns REDGAUSS_N320 (Reduced Gaussian Grid N320).
     """
-    ds = REDGAUSS_N320.create()
+    # copy avoid interfering with other tests!!!
+    ds = REDGAUSS_N320.create().copy(deep=True)
 
     # this is yuck; but things are too slow without caching the grid object
     attr = ds.attrs["_xpublish_id"]
