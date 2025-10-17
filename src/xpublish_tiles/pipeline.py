@@ -13,7 +13,6 @@ from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
     GridMetadata,
     GridSystem,
-    GridSystem1D,
     GridSystem2D,
     Triangular,
     UgridIndexer,
@@ -317,10 +316,7 @@ async def apply_slicers(
             for x_slice in slicers[grid.Xdim]
             if isinstance(x_slice, slice)
         ]
-    elif isinstance(grid, GridSystem1D):
-        if isinstance(grid, Triangular):
-            # account for any padding needed for triangulations we are executing
-            ds = ds.isel({grid.dim: grid.reindexer})
+    elif isinstance(grid, Triangular):
         subsets = [
             ds.isel({grid.Xdim: sl.vertices})
             for sl in slicers[grid.Xdim]

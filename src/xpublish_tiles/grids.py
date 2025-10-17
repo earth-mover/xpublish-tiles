@@ -1244,6 +1244,8 @@ class Triangular(GridSystem):
         # Extract the UgridIndexer from the IndexSelResult
         ugrid_indexer = result.dim_indexers["ugrid"]
         assert isinstance(ugrid_indexer, UgridIndexer)
+        # account for any padding needed for triangulations we are executing
+        ugrid_indexer.vertices = self.reindexer[ugrid_indexer.vertices]
         return {self.dim: [ugrid_indexer]}
 
     @classmethod
