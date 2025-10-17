@@ -313,7 +313,7 @@ class CellTreeIndex(xr.Index):
             (breakpt,) = np.nonzero(np.diff(idx))
             assert breakpt.size == 1
             breakpt = breakpt[0] + 1
-            verts = self.tree.faces[face_indices, ...]
+            verts = faces[face_indices, ...]
             self.antimeridian_vertices = {
                 "pos": np.unique(verts[:breakpt]),
                 "neg": np.unique(verts[breakpt:]),
