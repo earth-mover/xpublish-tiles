@@ -2203,6 +2203,19 @@ wheels = [
 ]
 
 [[package]]
+name = "numba-celltree"
+version = "0.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numba" },
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/23/26/25e427ced1c590fcdca932a5dc9a67c4b588dbd1620fa43e6468eba54609/numba_celltree-0.4.1.tar.gz", hash = "sha256:ec2fdd42072a7473cdc9564743abe786ea67726a3a4c81ca2637411f019ac2a6", size = 52884, upload-time = "2025-04-15T14:44:52.762Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ea/5c/4f473af97b69736eff1f1ba3df77dae9fd2a3176327cf8a83952e0fd38f5/numba_celltree-0.4.1-py3-none-any.whl", hash = "sha256:847a91793182d1d9992d276bf3cb9d60d047c32cda44413eaaab95d738007d64", size = 42341, upload-time = "2025-04-15T14:44:50.4Z" },
+]
+
+[[package]]
 name = "numbagg"
 version = "0.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3826,6 +3839,7 @@ dependencies = [
     { name = "matplotlib" },
     { name = "morecantile" },
     { name = "numba" },
+    { name = "numba-celltree" },
     { name = "numbagg" },
     { name = "pillow" },
     { name = "pydantic-xml" },
@@ -3881,6 +3895,7 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.10.5" },
     { name = "morecantile", specifier = ">=5.4.2" },
     { name = "numba", specifier = ">=0.60.0" },
+    { name = "numba-celltree", specifier = ">=0.4.1" },
     { name = "numbagg", specifier = ">=0.9.0" },
     { name = "pillow", specifier = ">=11.3.0" },
     { name = "pydantic-xml", specifier = ">=2.17.3" },

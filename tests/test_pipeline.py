@@ -32,7 +32,6 @@ from xpublish_tiles.testing.datasets import (
     GLOBAL_NANS,
     HRRR,
     PARA,
-    create_global_dataset,
 )
 from xpublish_tiles.testing.lib import (
     assert_render_matches_snapshot,
@@ -103,7 +102,14 @@ async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot, pytestco
         result = await pipeline(ds, query_params)
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
-    assert_render_matches_snapshot(result, png_snapshot)
+    assert_render_matches_snapshot(
+        result,
+        png_snapshot,
+        # we have small rasterization differences in CI
+        perceptual_threshold=0.99
+        if ds.attrs["name"] == "reduced_gaussian_n320"
+        else None,
+    )
 
 
 @pytest.mark.asyncio
@@ -153,12 +159,19 @@ async def test_pipeline_bad_bbox(global_datasets, png_snapshot, pytestconfig):
         format=ImageFormat.PNG,
     )
     result = await pipeline(ds, query)
-    assert_render_matches_snapshot(result, png_snapshot)
+    assert_render_matches_snapshot(
+        result,
+        png_snapshot,
+        # we have small rasterization differences in CI
+        perceptual_threshold=0.99
+        if ds.attrs["name"] == "reduced_gaussian_n320"
+        else None,
+    )
 
 
 @pytest.mark.asyncio
-async def test_high_zoom_tile_global_dataset(png_snapshot, pytestconfig):
-    ds = create_global_dataset()
+async def test_high_zoom_tile_global_dataset(global_datasets, png_snapshot, pytestconfig):
+    ds = global_datasets
     tms = WEBMERC_TMS
     tile = morecantile.Tile(x=524288 + 2916, y=262144, z=20)
     query_params = create_query_params(tile, tms, colorscalerange=(-1, 1))

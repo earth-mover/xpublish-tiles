@@ -6,11 +6,11 @@ from pyproj import CRS
 from pyproj.aoi import BBox
 
 import xarray as xr
-from xpublish_tiles.grids import GridSystem2D
+from xpublish_tiles.grids import GridSystem, Triangular
 from xpublish_tiles.lib import transformer_from_crs
 
 
-def get_max_zoom(grid: GridSystem2D, tms: morecantile.TileMatrixSet) -> int:
+def get_max_zoom(grid: GridSystem, tms: morecantile.TileMatrixSet) -> int:
     """Calculate maximum zoom level based on grid spacing and TMS.
 
     Takes the lower left corner of the grid bounding box, adds the minimum
@@ -29,6 +29,9 @@ def get_max_zoom(grid: GridSystem2D, tms: morecantile.TileMatrixSet) -> int:
     int
         Maximum appropriate zoom level for this grid
     """
+    if isinstance(grid, Triangular):
+        # no dXmin, dYmin defined, punt for now
+        return tms.maxzoom
     ll_box = BBox(
         west=grid.bbox.west,
         south=grid.bbox.south,
@@ -52,7 +55,7 @@ def get_max_zoom(grid: GridSystem2D, tms: morecantile.TileMatrixSet) -> int:
 
 
 def get_min_zoom(
-    grid: GridSystem2D, tms: morecantile.TileMatrixSet, da: xr.DataArray
+    grid: GridSystem, tms: morecantile.TileMatrixSet, da: xr.DataArray
 ) -> int:
     """Calculate minimum zoom level that avoids TileTooBigError.
 
@@ -126,7 +129,7 @@ def get_min_zoom(
             )
 
             tile_bbox = BBox(west=left, south=bottom, east=right, north=top)
-            slicers = grid.sel(da, bbox=tile_bbox)
+            slicers = grid.sel(bbox=tile_bbox)
 
             if not check_data_is_renderable_size(slicers, da, grid, alternate):
                 all_tiles_renderable = False

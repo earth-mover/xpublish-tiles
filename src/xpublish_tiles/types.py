@@ -11,7 +11,7 @@ import pyproj.aoi
 
 import xarray as xr
 from xpublish_tiles.config import config
-from xpublish_tiles.grids import GridSystem, GridSystem2D, Rectilinear
+from xpublish_tiles.grids import GridSystem, GridSystem2D, Rectilinear, UgridIndexer
 from xpublish_tiles.logger import get_context_logger
 
 InputCRS = NewType("InputCRS", pyproj.CRS)
@@ -119,6 +119,7 @@ class PopulatedRenderContext(RenderContext):
     datatype: DataType
     grid: GridSystem
     bbox: OutputBBox
+    ugrid_indexer: UgridIndexer | None = None
 
     async def maybe_rewrite_to_rectilinear(
         self, *, width: int, height: int, logger=None

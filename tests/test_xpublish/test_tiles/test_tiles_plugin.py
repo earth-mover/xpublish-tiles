@@ -504,11 +504,13 @@ def test_no_bbox_overlap_transparent_png():
 
 def test_para_hires_zoom_level_2_size_limit():
     """Test that requesting zoom level 2 for PARA_HIRES dataset triggers size limit error"""
-    rest = xpublish.Rest({"para": PARA_HIRES.create()}, plugins={"tiles": TilesPlugin()})
+    rest = xpublish.Rest(
+        {"para_hires": PARA_HIRES.create()}, plugins={"tiles": TilesPlugin()}
+    )
     client = TestClient(rest.app)
 
     response = client.get(
-        "/datasets/para/tiles/WebMercatorQuad/2/1/1"
+        "/datasets/para_hires/tiles/WebMercatorQuad/2/1/1"
         "?variables=foo&style=raster/viridis&width=256&height=256"
     )
     assert response.status_code == 413

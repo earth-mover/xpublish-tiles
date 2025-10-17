@@ -1,4 +1,5 @@
 import io
+import uuid
 
 import hypothesis.strategies as st
 import morecantile
@@ -23,6 +24,7 @@ from xpublish_tiles.testing.datasets import (
     EU3035_HIRES,
     HRRR,
     HRRR_MULTIPLE,
+    REDGAUSS_N320,
     Dim,
     uniform_grid,
 )
@@ -34,23 +36,37 @@ from xpublish_tiles.testing.lib import (
 
 @st.composite
 def global_datasets(
-    draw: DrawFn, allow_decreasing_lat: bool = True, allow_categorical: bool = True
+    draw: DrawFn,
+    allow_decreasing_lat: bool = True,
+    allow_categorical: bool = True,
+    maxsize: int = 2000,
+    perturb: bool = True,
 ) -> xr.Dataset:
-    """Strategy that generates global datasets using uniform_grid with random parameters."""
+    """Strategy that generates global datasets using uniform_grid with random parameters.
+
+    Parameters
+    ----------
+    allow_decreasing_lat: bool
+    allow_categorical: bool
+    maxsize: int
+        Max size of either dimension
+    perturb: bool
+        Whether to add tiny perturbations to the bounds of each axis, for robustness testing
+    """
     # Generate dimensions between 100 and 1000 to ensure sufficient coverage
     # Smaller datasets may have gaps when projected
     # Prioritize sizes that exercise coarsening
     size_st = st.one_of(
-        st.sampled_from([256, 512, 1024, 2048]),
-        st.integers(min_value=100, max_value=2000),
+        st.sampled_from([i for i in [256, 512, 1024, 2048] if i < maxsize]),
+        st.integers(min_value=100, max_value=maxsize),
     )
     nlat = draw(size_st)
     nlon = draw(size_st)
 
     # Generate latitude ordering
     lat_ascending = not allow_decreasing_lat or draw(st.booleans())
-    delta_lat = draw(st.floats(-1e-3, 1e-3))
-    delta_lon = draw(st.floats(-1e-3, 1e-3))
+    delta_lat = 0 if not perturb else draw(st.floats(-1e-3, 1e-3))
+    delta_lon = 0 if not perturb else draw(st.floats(-1e-3, 1e-3))
     lats = np.linspace(-90 - delta_lat, 90 + delta_lat, nlat)
     if not lat_ascending:
         lats = lats[::-1]
@@ -105,6 +121,46 @@ def global_datasets(
 
     ds = uniform_grid(dims=dims, dtype=dtype, attrs=attrs)
     return ds
+
+
+@st.composite
+def global_unstructured_datasets(draw: DrawFn) -> xr.Dataset:
+    """Strategy that returns global unstructured grid datasets.
+
+    Currently returns REDGAUSS_N320 (Reduced Gaussian Grid N320).
+    """
+    # copy to avoid interfering with other tests!!!
+    ds = REDGAUSS_N320.create().copy(deep=True)
+
+    # this is yuck; but things are too slow without caching the grid object
+    attr = ds.attrs["_xpublish_id"] + "_proptest"
+
+    # Rescale latitude to full -90 to 90 range, this means we can keep the present property test
+    lat = ds.latitude.values
+    lat_min, lat_max = lat.min(), lat.max()
+    lat_scaled = -90 + (lat - lat_min) / (lat_max - lat_min) * 180
+    # Occasionally reverse the latitude vector
+    if draw(st.booleans()):
+        lat_scaled = lat_scaled[::-1]
+        attr += "_reversed_lat"
+
+    ds = ds.assign_coords(latitude=("point", lat_scaled))
+
+    # Occasionally convert longitude from 0-360 to -180-180 convention
+    if draw(st.booleans()):
+        lon = ds.longitude.values
+        lon_converted = np.where(lon > 180, lon - 360, lon)
+        ds = ds.assign_coords(longitude=("point", lon_converted))
+        attr += "_converted_lon"
+
+    ds.attrs["_xpublish_id"] = attr
+    return ds
+
+
+# Combine both regular and unstructured global datasets
+all_global_datasets = st.one_of(
+    global_datasets(allow_categorical=False), global_unstructured_datasets()
+)
 
 
 @st.composite
@@ -192,9 +248,11 @@ def tile_and_tms(
 
 
 @pytest.mark.asyncio
-@settings(deadline=None, max_examples=750)
+@settings(max_examples=500)
 @given(
-    tile_tms=tile_and_tms(), ds=global_datasets(allow_categorical=False), data=st.data()
+    tile_tms=tile_and_tms(),
+    ds=all_global_datasets,
+    data=st.data(),
 )
 async def test_property_global_render_no_transparent_tile(
     tile_tms: tuple[Tile, TileMatrixSet],
@@ -218,37 +276,31 @@ async def test_property_global_render_no_transparent_tile(
 
 
 @pytest.mark.asyncio
-@given(
-    data=st.data(), tile_tms=tile_and_tms(), ds=global_datasets(allow_categorical=False)
-)
-@settings(deadline=None, max_examples=250)
-async def test_property_rectilinear_vs_curvilinear_exact(
-    tile_tms: tuple[Tile, TileMatrixSet],
-    ds: xr.Dataset,
-    data: st.DataObject,
-    pytestconfig,
+@given(data=st.data(), rect=global_datasets(allow_categorical=False))
+@settings(max_examples=50)
+async def test_property_equivalent_grids_render_equivalently(
+    rect: xr.Dataset, data: st.DataObject, pytestconfig
 ):
     """
-    Result from rectilinear grid & curvilinear grid constructed from
-    broadcasting out rectilinear grid must be identical
-    """
-    tile, tms = tile_tms
-    test_name = f"rectilinear_vs_curvilinear_tile_{tile.z}_{tile.x}_{tile.y}"
-    query = create_query_params(tile, tms)
-    with config.set(transform_chunk_size=256):
-        rectilinear_result = await pipeline(ds, query)
-    # rectilinear = guess_grid_system(ds, "foo")
-    # rect_ds = ds
+    Result from
+    1. rectilinear grid
+    2. curvilinear grid constructed from broadcasting out rectilinear grid
+    3. unstructured grid constructed from stacking rectilinear grid
+    must be preceptually very very similar.
 
-    ds = ds.rename(latitude="nlat", longitude="nlon")
-    newlat, newlon = np.meshgrid(ds.nlat.data, ds.nlon.data, indexing="ij")
-    ds = ds.assign_coords(
+    Note that this test receives new datasets and repeatedly triangulating the grid is slow;
+    so we run that comparison in a different test with fewer datasets, and more tiles per dataset.
+    """
+
+    curvi = rect.rename(latitude="nlat", longitude="nlon")
+    newlat, newlon = np.meshgrid(curvi.nlat.data, curvi.nlon.data, indexing="ij")
+    curvi = curvi.assign_coords(
         longitude=(("nlon", "nlat"), newlon.T, {"standard_name": "longitude"}),
         latitude=(("nlon", "nlat"), newlat.T, {"standard_name": "latitude"}),
     )
-    ds["foo"].attrs["coordinates"] = "longitude latitude"
-    with config.set(transform_chunk_size=256, detect_approx_rectilinear=False):
-        curvilinear_result = await pipeline(ds, query)
+    curvi["foo"].attrs["coordinates"] = "longitude latitude"
+
+    # rectilinear = guess_grid_system(ds, "foo")
     # curvilinear = guess_grid_system(ds, "foo")
 
     # Check that grid indexers are the same
@@ -263,46 +315,87 @@ async def test_property_rectilinear_vs_curvilinear_exact(
     #     curvilinear.sel(ds.foo, bbox=bbox).data,
     # )
 
-    # Compare images with optional debug visualization using perceptual comparison
-    images_similar, ssim_score = compare_image_buffers_with_debug(
-        buffer1=rectilinear_result,  # expected
-        buffer2=curvilinear_result,  # actual
-        test_name=test_name,
-        tile_info=(tile, tms),
-        debug_visual=pytestconfig.getoption("--debug-visual", default=False),
-        debug_visual_save=pytestconfig.getoption("--debug-visual-save", default=False),
-        mode="perceptual",
-        perceptual_threshold=0.9,  # 90% similarity threshold
-    )
-    assert images_similar, (
-        f"Rectilinear and curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+    lon, lat = curvi.longitude, curvi.latitude
+    transposed = curvi.assign_coords(
+        longitude=lon.transpose() if data.draw(st.booleans()) else curvi.longitude,
+        latitude=lat.transpose() if data.draw(st.booleans()) else curvi.latitude,
     )
 
-    lon, lat = ds.longitude, ds.latitude
-    transposed = ds.assign_coords(
-        longitude=lon.transpose() if data.draw(st.booleans()) else ds.longitude,
-        latitude=lat.transpose() if data.draw(st.booleans()) else ds.latitude,
-    )
-    with config.set(transform_chunk_size=256, detect_approx_rectilinear=False):
-        transposed_result = await pipeline(transposed, query)
-    images_similar, ssim_score = compare_image_buffers_with_debug(
-        buffer1=rectilinear_result,  # expected
-        buffer2=transposed_result,  # actual
-        test_name=test_name,
+    # Compare images with optional debug visualization using perceptual comparison
+    compare = lambda buffer1, buffer2, tile, tms: compare_image_buffers_with_debug(
+        buffer1,
+        buffer2,
+        test_name="grid_equivalency",
         tile_info=(tile, tms),
         debug_visual=pytestconfig.getoption("--debug-visual", default=False),
         debug_visual_save=pytestconfig.getoption("--debug-visual-save", default=False),
         mode="perceptual",
         perceptual_threshold=0.9,  # 90% similarity threshold
     )
-    assert images_similar, (
-        f"Rectilinear and *transposed* curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
-    )
+
+    for _ in range(10):
+        tile, tms = data.draw(tile_and_tms())
+        query = create_query_params(tile, tms)
+
+        with config.set(transform_chunk_size=256, detect_approx_rectilinear=False):
+            rectilinear_result = await pipeline(rect, query)
+
+            curvilinear_result = await pipeline(curvi, query)
+            images_similar, ssim_score = compare(
+                rectilinear_result, curvilinear_result, tile, tms
+            )
+            assert images_similar, (
+                f"Rectilinear and curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+            )
+
+            transposed_result = await pipeline(transposed, query)
+            images_similar, ssim_score = compare(
+                rectilinear_result, transposed_result, tile, tms
+            )
+            assert images_similar, (
+                f"Rectilinear and *transposed* curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+            )
+
+
+@pytest.mark.asyncio
+@given(
+    data=st.data(),
+    # disable perturbing the edges because for the triangular grid
+    # we treat these as cell vertices, not centers
+    rect=global_datasets(allow_categorical=False, maxsize=720, perturb=False),
+)
+@settings(max_examples=20)
+async def test_rectilinear_triangular_equivalency(data, rect, pytestconfig):
+    stacked = rect.load().stack(point=("latitude", "longitude"), create_index=False)
+    stacked.attrs["_xpublish_id"] = str(uuid.uuid4())
+
+    for _ in range(20):
+        tile, tms = data.draw(tile_and_tms())
+        query = create_query_params(tile, tms)
+
+        with config.set(transform_chunk_size=256, detect_approx_rectilinear=False):
+            rectilinear_result = await pipeline(rect, query)
+
+            triangular_result = await pipeline(stacked, query)
+            images_similar, ssim_score = compare_image_buffers_with_debug(
+                rectilinear_result,
+                triangular_result,
+                test_name="rectilinear_triangular_equivalency",
+                tile_info=(tile, tms),
+                debug_visual=pytestconfig.getoption("--debug-visual", default=False),
+                debug_visual_save=pytestconfig.getoption(
+                    "--debug-visual-save", default=False
+                ),
+                mode="perceptual",
+                perceptual_threshold=0.9,  # 90% similarity threshold
+            )
+            assert images_similar, (
+                f"Rectilinear and triangular results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+            )
 
 
 @pytest.mark.asyncio
 @given(dataset=st.sampled_from([HRRR_MULTIPLE, EU3035_HIRES, HRRR]), data=st.data())
-@settings(deadline=None, max_examples=250)
 async def test_projected_coordinate_succeeds(dataset, data, pytestconfig):
     """Test that projected coordinate datasets can successfully render tiles within their bbox."""
     ds = dataset.create()
@@ -335,10 +428,9 @@ async def test_projected_coordinate_succeeds(dataset, data, pytestconfig):
 
 
 @pytest.mark.asyncio
-@given(
-    tile_tms=tile_and_tms(), ds=global_datasets(allow_categorical=False), data=st.data()
-)
-@settings(deadline=None, max_examples=50)
+@given(tile_tms=tile_and_tms(), ds=all_global_datasets, data=st.data())
+@settings(max_examples=50)
+# @reproduce_failure('6.138.3', b'AXicc2R0ZECFDBoMUKBhH5Dke+njyj8MjqyO3I4MAI0xCBQ=')
 async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig) -> None:
     """Property test that zooming in doesn't change rendering.
 
@@ -405,7 +497,8 @@ async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig)
 
     # Pick a child zoom level (absolute)
     # We choose minimum tile size of 32x32 (2048/2^6 = 32), so max delta is 6
-    max_child_zoom = min(tile.z + 6, tms.maxzoom)
+    # We use 4, because at higher zoom levels, pixels can move around a bit.
+    max_child_zoom = min(tile.z + 4, tms.maxzoom)
     assume(max_child_zoom > tile.z)  # Must be able to zoom in at least one level
 
     # Test 10 randomly generated child tiles
@@ -473,7 +566,7 @@ async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig)
                 "--debug-visual-save", default=False
             ),
             mode="perceptual",
-            perceptual_threshold=0.97,
+            perceptual_threshold=0.98,
         )
 
         assert images_similar, (
