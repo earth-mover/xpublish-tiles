@@ -1255,11 +1255,13 @@ class Triangular(GridSystem):
         # always triangulate here; we'll need the convex hull when we have a global grid
         triang = Delaunay(vertices.values, incremental=is_global)
         if is_global:
-            # We want to pad the vertices across the anti-meridian, and then run the triangulation.
+            # We want to reflect the vertices across the anti-meridian, and then run the triangulation.
             # For simplicity, we just append two copies of the convex hull the longitudes modified differently.
             # This could be wasteful at triangulation time for large grids but for now, this is easy and works.
             # If we don't do pad before triangulating, we run in to the issue where the right edge vertices
             # are not connected to the left edge vertices, and the padding doesn't affect the rendering.
+            # An alternative approach would be to construct the CellTreeIndex here, then figure out the faces that intersect
+            # the line at 180, -180; calculate the neighbours of those faces; extract those vertices and pad those.
             boundary = np.unique(triang.convex_hull)
             pos_verts = vertices.iloc[boundary].copy()
             neg_verts = pos_verts.copy()

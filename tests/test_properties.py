@@ -358,7 +358,7 @@ async def test_rectilinear_triangular_equivalency(data, rect, pytestconfig):
             images_similar, ssim_score = compare_image_buffers_with_debug(
                 rectilinear_result,
                 triangular_result,
-                test_name="grid_equivalency",
+                test_name="rectilinear_triangular_equivalency",
                 tile_info=(tile, tms),
                 debug_visual=pytestconfig.getoption("--debug-visual", default=False),
                 debug_visual_save=pytestconfig.getoption(
