@@ -142,9 +142,9 @@ def extract_dataset_extents(
     else:
         ds = dataset
 
-    for var in ds.data_vars:
-        if var == "spatial_ref":
-            continue  # Skip spatial_ref variable
+    for var, array in ds.data_vars.items():
+        if array.ndim == 0:
+            continue
         dimensions = extract_dimension_extents(ds, var)
         for dim in dimensions:
             # Use the first occurrence of each dimension name

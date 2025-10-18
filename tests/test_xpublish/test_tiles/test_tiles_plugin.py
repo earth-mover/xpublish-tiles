@@ -363,6 +363,7 @@ def test_no_dimensions_dataset():
     """Test dataset with only spatial dimensions"""
     data = xr.Dataset(
         {
+            "scalar": ((), 0, {"foo": "bar"}),
             "temperature": xr.DataArray(
                 np.random.randn(90, 180),
                 dims=["lat", "lon"],
@@ -387,7 +388,7 @@ def test_no_dimensions_dataset():
                     ),
                 },
                 attrs={"long_name": "Temperature"},
-            )
+            ),
         }
     )
 
