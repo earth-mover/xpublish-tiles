@@ -1,12 +1,16 @@
 """Benchmarking functionality for xpublish-tiles CLI."""
 
-import asyncio
-import os
-import random
 import time
 
 import aiohttp
 import requests
+
+from xpublish_tiles.cli.benchmark_common import (
+    calculate_benchmark_stats,
+    finalize_benchmark_results,
+    print_benchmark_results,
+    run_concurrent_tile_requests,
+)
 
 
 def run_benchmark(
@@ -19,7 +23,7 @@ def run_benchmark(
     variable_name: str = "foo",
     needs_colorscale: bool = False,
     return_results: bool = False,
-):
+) -> dict | None:
     """Run benchmarking requests for the given dataset.
 
     If return_results is True, returns a dict with benchmark results instead of exiting.
@@ -35,173 +39,113 @@ def run_benchmark(
 
     warmup_tiles = [benchmark_tiles[0]]  # Use first tile for warmup
 
-    # Randomly shuffle the benchmark tiles to avoid ordering bias
-    # Use current time as seed for different order each run
-    random.seed(int(time.time() * 1000000))
-    shuffled_tiles = benchmark_tiles.copy()
-    # random.shuffle(shuffled_tiles)
-
     print(f"Starting benchmark requests for {dataset_name} using endpoint")
     print(f"Warmup tiles: {warmup_tiles}")
-    print(f"Benchmark tiles: {len(shuffled_tiles)} tiles")
+    print(f"Benchmark tiles: {len(benchmark_tiles)} tiles")
 
-    # Wait for server to start with warmup
+    # Determine server URL based on where parameter
     if where == "local":
         server_url = f"http://localhost:{port}"
     elif where == "local-booth":
         server_url = f"http://localhost:{port}/services/tiles/earthmover-integration/tiles-icechunk/main/{dataset_name}"
-    elif where == "arraylake-prod":
-        server_url = f"https://compute.earthmover.io/v1/services/tiles/earthmover-integration/tiles-icechunk/main/{dataset_name}"
-    elif where == "arraylake-dev":
+    else:  # prod
         server_url = f"https://compute.earthmover.dev/v1/services/tiles/earthmover-integration/tiles-icechunk/main/{dataset_name}"
-    else:
-        raise ValueError(f"Unknown --where option: {where}")
-    max_retries = 10
-    for _i in range(max_retries):
-        try:
-            # Use a tile endpoint for health check and warmup
-            z, x, y = warmup_tiles[0].split("/")
-            # Build base URL with required parameters
-            base_params = (
-                f"variables={variable_name}&style=raster/viridis&width=256&height=256"
-            )
-            if needs_colorscale:
-                base_params += "&colorscalerange=-100,100"  # Use reasonable default range
 
-            warmup_url = f"{server_url}/tiles/WebMercatorQuad/{z}/{x}/{y}?{base_params}"
-            response = requests.get(warmup_url, timeout=10)
-            if response.status_code == 200:
-                print(
-                    f"Server is ready at {server_url} (warmed up with tile {warmup_tiles[0]})"
-                )
-                break
-            else:
-                print(
-                    f"Warmup request returned status {response.status_code}, retrying..."
-                )
-        except Exception as e:
-            print(f"Warmup request failed: {e}, retrying...")
-        time.sleep(0.5)
-    else:
-        print(f"ERROR: Server warmup failed after {max_retries} attempts")
-        print(f"Failed to get 200 response from: {warmup_url}")
-        raise RuntimeError("Server warmup failed - did not receive 200 response")
+    # For local servers, we can use a health check endpoint if available, otherwise warmup with tiles
+    if where == "local":
+        # For local servers, try a basic warmup with the first tile
+        z, x, y = warmup_tiles[0].split("/")
+        base_params = (
+            f"variables={variable_name}&style=raster/viridis&width=256&height=256"
+        )
+        if needs_colorscale:
+            base_params += "&colorscalerange=-100,100"
+        warmup_url = f"{server_url}/tiles/WebMercatorQuad/{z}/{x}/{y}?{base_params}"
 
-    # Make requests to benchmark tiles concurrently using async with semaphore
+        # Custom warmup for xpublish-tiles
+        max_retries = 10
+        for _i in range(max_retries):
+            try:
+                response = requests.get(warmup_url, timeout=10)
+                if response.status_code == 200:
+                    print(
+                        f"Server is ready at {server_url} (warmed up with tile {warmup_tiles[0]})"
+                    )
+                    break
+                else:
+                    print(
+                        f"Warmup request returned status {response.status_code}, retrying..."
+                    )
+            except Exception as e:
+                print(f"Warmup request failed: {e}, retrying...")
+            time.sleep(0.5)
+        else:
+            print(f"ERROR: Server warmup failed after {max_retries} attempts")
+            print(f"Failed to get 200 response from: {warmup_url}")
+            raise RuntimeError("Server warmup failed - did not receive 200 response")
+    else:
+        # For remote servers, just assume they're ready
+        print(f"Using server at {server_url}")
+
+    # Make requests to benchmark tiles concurrently
     print(f"Making concurrent benchmark tile requests (max {concurrency} at a time)...")
 
-    # Create a semaphore to limit concurrent requests
-    semaphore = asyncio.Semaphore(concurrency)
+    async def fetch_tile(session: aiohttp.ClientSession, tile: str):
+        """Fetch a single tile using xpublish-tiles API."""
+        z, x, y = tile.split("/")
+        # Build tile URL with required parameters
+        tile_params = (
+            f"variables={variable_name}&style=raster/viridis&width=256&height=256"
+        )
+        if needs_colorscale:
+            tile_params += "&colorscalerange=-100,100"
 
-    async def fetch_tile(session, tile):
-        async with semaphore:  # Acquire semaphore before making request
-            z, x, y = tile.split("/")
-            # The tile endpoint format is /tiles/{tileMatrixSetId}/{tileMatrix}/{tileCol}/{tileRow}
-            # Include required query parameters
-            # Build tile URL with required parameters
-            tile_params = (
-                f"variables={variable_name}&style=raster/viridis&width=256&height=256"
-            )
-            if needs_colorscale:
-                tile_params += "&colorscalerange=-100,100"  # Use reasonable default range
+        tile_url = f"{server_url}/tiles/WebMercatorQuad/{z}/{x}/{y}?{tile_params}"
 
-            tile_url = f"{server_url}/tiles/WebMercatorQuad/{z}/{x}/{y}?{tile_params}"
-
-            start_time = time.perf_counter()
-            try:
-                async with session.get(
-                    tile_url, timeout=aiohttp.ClientTimeout(total=90)
-                ) as response:
-                    duration = time.perf_counter() - start_time
-                    if response.status != 200:
-                        return {
-                            "tile": tile,
-                            "status": response.status,
-                            "duration": duration,
-                            "error": None,
-                        }
-                    return {
-                        "tile": tile,
-                        "status": 200,
-                        "duration": duration,
-                        "error": None,
-                    }
-            except Exception as e:
+        start_time = time.perf_counter()
+        try:
+            async with session.get(
+                tile_url, timeout=aiohttp.ClientTimeout(total=90)
+            ) as response:
                 duration = time.perf_counter() - start_time
                 return {
                     "tile": tile,
-                    "status": None,
+                    "status": response.status,
                     "duration": duration,
-                    "error": f"{type(e).__name__}: {e}",
+                    "error": None
+                    if response.status == 200
+                    else f"HTTP {response.status}",
                 }
-
-    async def fetch_all_tiles():
-        async with aiohttp.ClientSession() as session:
-            tasks = [fetch_tile(session, tile) for tile in shuffled_tiles]
-            results = await asyncio.gather(*tasks)
-            return results
+        except Exception as e:
+            duration = time.perf_counter() - start_time
+            return {
+                "tile": tile,
+                "status": None,
+                "duration": duration,
+                "error": f"{type(e).__name__}: {e}",
+            }
 
     # Run the async tile requests
-    print(f"Starting benchmark with {len(shuffled_tiles)} tiles...")
+    print(f"Starting benchmark with {len(benchmark_tiles)} tiles...")
     start_time = time.perf_counter()
-    results = asyncio.run(fetch_all_tiles())
+
+    import asyncio
+
+    results = asyncio.run(
+        run_concurrent_tile_requests(
+            tiles=benchmark_tiles,
+            concurrency=concurrency,
+            fetch_tile_func=fetch_tile,
+        )
+    )
     total_time = time.perf_counter() - start_time
 
-    # Print detailed results and summary
-    print("\n=== Benchmark Results ===")
-    successful = 0
-    failed = 0
-    total_duration = 0
-    durations = []
+    # Print results and calculate statistics
+    print_benchmark_results(results, total_time, dataset_name)
+    stats = calculate_benchmark_stats(results, total_time)
 
-    for result in results:
-        if result["error"]:
-            print(
-                f"  Tile {result['tile']}: ERROR - {result['error']} ({result['duration']:.3f}s)"
-            )
-            failed += 1
-        elif result["status"] != 200:
-            print(
-                f"  Tile {result['tile']}: {result['status']} ({result['duration']:.3f}s)"
-            )
-            failed += 1
-        else:
-            # Only include timing for successful requests
-            total_duration += result["duration"]
-            durations.append(result["duration"])
-            successful += 1
-
-    # Calculate statistics
-    avg_duration = sum(durations) / len(durations) if durations else 0
-    min_duration = min(durations) if durations else 0
-    max_duration = max(durations) if durations else 0
-    requests_per_second = len(shuffled_tiles) / total_time if total_time > 0 else 0
-
-    print("\n=== Summary ===")
-    print(f"Total tiles: {len(shuffled_tiles)}")
-    print(f"Successful: {successful}")
-    print(f"Failed: {failed}")
-    print(f"Total wall time: {total_time:.3f}s")
-    print(f"Avg request time: {avg_duration:.3f}s (successful only)")
-    print(f"Min request time: {min_duration:.3f}s (successful only)")
-    print(f"Max request time: {max_duration:.3f}s (successful only)")
-    print(f"Requests/second: {requests_per_second:.2f}")
-    print("Benchmark completed!")
-
-    if return_results:
-        # Return results for bench-suite mode or internal benchmarking
-        result = {
-            "dataset": dataset_name,
-            "total_tiles": len(shuffled_tiles),
-            "successful": successful,
-            "failed": failed,
-            "total_wall_time": total_time,
-            "avg_request_time": avg_duration,
-            "min_request_time": min_duration,
-            "max_request_time": max_duration,
-            "requests_per_second": requests_per_second,
-        }
-        return result
-    else:
-        # Exit the process since this is a benchmarking run
-        os._exit(0)
+    return finalize_benchmark_results(
+        stats=stats,
+        dataset_name=dataset_name,
+        return_results=return_results,
+    )
