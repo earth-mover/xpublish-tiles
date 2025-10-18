@@ -70,6 +70,7 @@ testing = [
     "hypothesis>=6.136.6",
     "pytest-randomly>=3.16.0",
     "scikit-image>=0.25.2",
+    "titiler>=0.24.0",
 ]
 
 [dependency-groups]
