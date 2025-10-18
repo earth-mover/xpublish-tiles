@@ -1,7 +1,7 @@
 """Tile matrix set definitions for OGC Tiles API"""
 
 from collections.abc import Hashable
-from typing import Optional, Union, cast
+from typing import Union, cast
 
 import cf_xarray as cfxr  # noqa: F401 - needed to enable .cf accessor
 import morecantile
@@ -170,7 +170,7 @@ def extract_tile_bbox_and_crs(
 
 
 def get_tile_matrix_limits(
-    tms_id: str, dataset: xr.Dataset, zoom_levels: Optional[range] = None
+    tms_id: str, dataset: xr.Dataset, zoom_levels: range | None = None
 ) -> list[TileMatrixSetLimit]:
     """Generate tile matrix limits for the specified zoom levels based on dataset bounds.
 

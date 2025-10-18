@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from functools import lru_cache, partial
 from itertools import product
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pyproj
@@ -18,6 +18,9 @@ from pyproj import CRS
 
 import xarray as xr
 from xpublish_tiles.config import config
+
+if TYPE_CHECKING:
+    from xpublish_tiles.grids import UgridIndexer
 from xpublish_tiles.logger import logger
 from xpublish_tiles.utils import async_time_debug
 
@@ -76,7 +79,7 @@ class TileTooBigError(Exception):
 
 
 THREAD_POOL_NUM_THREADS = config.get("num_threads")
-logger.info("setting up thread pool with num threads: ", THREAD_POOL_NUM_THREADS)
+logger.info("setting up thread pool with num threads: %s", THREAD_POOL_NUM_THREADS)
 EXECUTOR = ThreadPoolExecutor(
     max_workers=THREAD_POOL_NUM_THREADS,
     thread_name_prefix="xpublish-tiles-pool",
@@ -370,10 +373,10 @@ def _prevent_slice_overlap(indexers: list[slice]) -> list[slice]:
 
 
 def pad_slicers(
-    slicers: dict[str, list[slice | Fill]],
+    slicers: "dict[str, list[slice | Fill | UgridIndexer]]",
     *,
     dimensions: list[PadDimension] | None = None,
-) -> dict[str, list[slice | Fill]]:
+) -> "dict[str, list[slice | Fill | UgridIndexer]]":
     """
     Apply padding to slicers for specified dimensions.
 

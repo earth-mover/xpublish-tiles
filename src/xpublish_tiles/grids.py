@@ -4,7 +4,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Hashable
 from dataclasses import dataclass, field
-from typing import Self, cast
+from typing import Any, Self, cast
 
 import cachetools
 import cf_xarray  # noqa: F401
@@ -12,8 +12,10 @@ import numbagg
 import numpy as np
 import pandas as pd
 import rasterix
+from numba_celltree import CellTree2d
 from pyproj import CRS
 from pyproj.aoi import BBox
+from scipy.spatial import Delaunay
 
 import xarray as xr
 from xarray.core.indexing import IndexSelResult
@@ -30,6 +32,16 @@ from xpublish_tiles.utils import time_debug
 
 DEFAULT_CRS = CRS.from_epsg(4326)
 MAX_COORD_VAR_NBYTES = 1 * 1024 * 1024 * 1024
+
+
+@dataclass
+class UgridIndexer:
+    """Dataclass for UGRID indexing results from CellTreeIndex.sel."""
+
+    vertices: np.ndarray
+    connectivity: np.ndarray
+    # face indices that intersect the anti-meridian
+    antimeridian_vertices: dict[str, np.ndarray]
 
 
 @dataclass
@@ -248,6 +260,123 @@ def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
     return bounds
 
 
+class CellTreeIndex(xr.Index):
+    def __init__(
+        self,
+        vertices: np.ndarray,
+        faces: np.ndarray,
+        *,
+        fill_value: Any,
+        X: str,
+        Y: str,
+        lon_spans_globe: bool,
+        triang: Delaunay,
+    ):
+        self.X = X
+        self.Y = Y
+        if lon_spans_globe:
+            # We want to reflect the vertices across the anti-meridian, and then run the triangulation.
+            # For simplicity, we just append two copies of the convex hull the longitudes modified differently.
+            # This could be wasteful when re-triangulating for large grids but for now, this is easy and works.
+            # If we don't do pad before triangulating, we run in to the issue where the right edge vertices
+            # are not connected to the left edge vertices, and the padding doesn't affect the rendering.
+            # An alternative approach would be to construct the CellTreeIndex here, then figure out the faces that intersect
+            # the line at 180, -180; calculate the neighbours of those faces; extract those vertices and pad those.
+            # However this does not work if the boundary faces without padding don't intersect those bounding longitudes
+            # e.g. consider if vertices are between -178.4 and +178.4, how do we connect the boundary without the convex hull approach?
+            boundary = np.unique(triang.convex_hull)
+            pos_verts = vertices[boundary, ...]
+            neg_verts = pos_verts.copy()
+
+            pos_verts[:, 0] += 360
+            neg_verts[:, 0] -= 360
+
+            triang.add_points(pos_verts)
+            triang.add_points(neg_verts)
+
+            # need to reindex the data to match the padding
+            self.reindexer = np.concatenate(
+                [np.arange(vertices.shape[0]), boundary, boundary]
+            )
+            vertices = np.concatenate([vertices, pos_verts, neg_verts], axis=0)
+            faces = triang.simplices
+
+        else:
+            self.reindexer = None
+
+        self.tree = CellTree2d(vertices, faces, fill_value=fill_value)
+        if lon_spans_globe:
+            # lets find the vertices closest to the -180 & 180 boundaries and cache them.
+            # At indexing time, we'll return the indexes for vertices at the boundary
+            # so we can fix the coordinate discontinuity later in `pipeline`
+            idx, face_indices, _ = self.tree.intersect_edges(
+                np.array([[[180, -90], [180, 90]], [[-180, -90], [-180, 90]]])
+            )
+            (breakpt,) = np.nonzero(np.diff(idx))
+            assert breakpt.size == 1
+            breakpt = breakpt[0] + 1
+            verts = faces[face_indices, ...]
+            self.antimeridian_vertices = {
+                "pos": np.unique(verts[:breakpt]),
+                "neg": np.unique(verts[breakpt:]),
+            }
+        else:
+            self.antimeridian_vertices = {"pos": np.array([]), "neg": np.array([])}
+
+    def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
+        xidxr = labels.get(self.X)
+        yidxr = labels.get(self.Y)
+
+        assert isinstance(xidxr, slice)
+        assert isinstance(yidxr, slice)
+
+        _, face_indices = self.tree.locate_boxes(
+            np.array([[xidxr.start, xidxr.stop, yidxr.start, yidxr.stop]])
+        )
+        vertex_indices, inverse = np.unique(
+            self.tree.faces[face_indices], return_inverse=True
+        )
+
+        # Check if selected faces intersect the anti-meridian
+        # Figure out which of the anti-meridian faces we've ended up selecting, and save those
+        antimeridian_vertices = {}
+        for key, anti_verts in self.antimeridian_vertices.items():
+            present = np.intersect1d(vertex_indices, anti_verts, assume_unique=True)
+            # indices are indexes in to `vertex_indices` i.e. the subset
+            # note that vertex_indices are sorted
+            antimeridian_vertices[key] = np.searchsorted(vertex_indices, present)
+
+        # account for any padding needed for triangulations we are executing
+        if self.reindexer is not None:
+            vertex_indices = self.reindexer[vertex_indices]
+
+        # Debugging plot to check indexing if needed
+        # import matplotlib.pyplot as plt
+        # from matplotlib.tri import Triangulation
+        # tri = Triangulation(
+        #     x=self.tree.vertices[vertex_indices, 0],
+        #     y=self.tree.vertices[vertex_indices, 1],
+        #     triangles=inverse,
+        # )
+        # plt.triplot(tri)
+        # plt.plot(
+        #     [xidxr.start, xidxr.stop, xidxr.stop, xidxr.start, xidxr.start],
+        #     [yidxr.start, yidxr.start, yidxr.stop, yidxr.stop, yidxr.start],
+        #     color='k',
+        # )
+        # plt.show()
+
+        return IndexSelResult(
+            dim_indexers={
+                "ugrid": UgridIndexer(
+                    vertices=vertex_indices,
+                    connectivity=inverse,
+                    antimeridian_vertices=antimeridian_vertices,
+                )
+            }
+        )
+
+
 class CurvilinearCellIndex(xr.Index):
     uses_0_360: bool
     Xdim: str
@@ -379,7 +508,7 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
 
         # Determine if dataset uses 0→360 or -180→180 coordinate system
         coord_centers = self.cell_centers
-        self._uses_0_360 = coord_centers.min() >= 0 and coord_centers.max() > 180
+        self._uses_0_360 = coord_centers.max() > 180
 
         # Calculate and store minimum cell width
         widths = self.index.right.values - self.index.left.values
@@ -454,7 +583,7 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         Selection result with potentially multiple indexers for boundary crossing
         """
         # Handle slice objects specially for longitude coordinate conversion
-        key, value = next(iter(labels.items()))
+        _, value = next(iter(labels.items()))
         if not isinstance(value, slice):
             raise NotImplementedError
 
@@ -518,6 +647,15 @@ class GridSystem(ABC):
     bounds, and reference frame for that specific grid system.
     """
 
+    # Note: The following attributes are expected to be provided by subclasses
+    # as dataclass fields or properties. They are typed here for type checking purposes.
+    crs: CRS
+    bbox: BBox
+    X: str
+    Y: str
+    Xdim: str
+    Ydim: str
+
     # FIXME: do we really need these Index objects on the class?
     #   - reconsider when we do curvilinear and triangular grids
     #   - The ugliness is that booth would have to set the right indexes on the dataset.
@@ -526,8 +664,14 @@ class GridSystem(ABC):
     indexes: tuple[xr.Index, ...]
     Z: str | None = None
     alternates: tuple[GridMetadata, ...] = field(default_factory=tuple)
-    dXmin: float | None = None
-    dYmin: float | None = None
+
+    dXmin: float = 0
+    dYmin: float = 0
+
+    @classmethod
+    @abstractmethod
+    def from_dataset(cls, ds: xr.Dataset, crs: CRS, Xname: str, Yname: str) -> Self:
+        pass
 
     @property
     @abstractmethod
@@ -565,7 +709,8 @@ class GridSystem(ABC):
             return False
         return self.equals(other)
 
-    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
+    @abstractmethod
+    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill | UgridIndexer]]:
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("Subclasses must implement sel method")
 
@@ -621,22 +766,14 @@ class RectilinearSelMixin:
     """Mixin for generic rectilinear .sel"""
 
     def sel(
-        self,
-        *,
-        da: xr.DataArray,
-        bbox: BBox,
-        y_is_increasing: bool,
-        x_size: int,
-        y_size: int,
-    ) -> dict[str, list[slice | Fill]]:
+        self, *, bbox: BBox, y_is_increasing: bool, x_size: int, y_size: int
+    ) -> dict[str, list[slice | Fill | UgridIndexer]]:
         """
         This method handles coordinate selection for rectilinear grids, automatically
         converting between different longitude conventions (0→360 vs -180→180).
 
         Parameters
         ----------
-        da : xr.DataArray
-            Data array to select from
         bbox : BBox
             Bounding box for selection
         y_is_increasing : bool
@@ -747,12 +884,11 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
         (index,) = self.indexes
         return da.assign_coords(xr.Coordinates.from_xindex(index))
 
-    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
+    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
         (index,) = self.indexes
         affine = index.transform()
 
         return super().sel(
-            da=da,
             bbox=bbox,
             y_is_increasing=affine.e > 0,
             x_size=index._xy_shape[0],
@@ -875,35 +1011,31 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
             indexes=(x_index, y_index),
         )
 
-    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
+    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
         """
         Select a subset of the data array using a bounding box.
         """
-        assert self.X in da.xindexes and self.Y in da.xindexes
-        assert isinstance(da.xindexes[self.Y], xr.indexes.PandasIndex)
-
         x_index, y_index = self.indexes[0], self.indexes[-1]
 
         # For Rectilinear grids, X index is always LongitudeCellIndex (geographic)
         # or PandasIndex (non-geographic)
         if self.crs.is_geographic:
             # Geographic CRS should always have LongitudeCellIndex
-            assert isinstance(
-                x_index, LongitudeCellIndex
-            ), f"Expected LongitudeCellIndex for geographic CRS, got {type(x_index)}"
+            assert isinstance(x_index, LongitudeCellIndex), (
+                f"Expected LongitudeCellIndex for geographic CRS, got {type(x_index)}"
+            )
         else:
             # Non-geographic CRS should have regular PandasIndex
-            assert isinstance(
-                x_index, xr.indexes.PandasIndex
-            ), f"Expected PandasIndex for non-geographic CRS, got {type(x_index)}"
+            assert isinstance(x_index, xr.indexes.PandasIndex), (
+                f"Expected PandasIndex for non-geographic CRS, got {type(x_index)}"
+            )
 
         # Both index types have len() method
         x_size = len(x_index.index)
         y_size = len(y_index.index)
-        y_index_cast = cast(xr.indexes.PandasIndex, da.xindexes[self.Y])
+        y_index_cast = cast(xr.indexes.PandasIndex, y_index)
 
         return super().sel(
-            da=da,
             bbox=bbox,
             y_is_increasing=y_index_cast.index.is_monotonic_increasing,
             x_size=x_size,
@@ -1034,7 +1166,7 @@ class Curvilinear(GridSystem):
         else:
             return False
 
-    def sel(self, da: xr.DataArray, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
+    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill | UgridIndexer]]:
         """
         Select a subset of the data array using a bounding box.
 
@@ -1044,9 +1176,9 @@ class Curvilinear(GridSystem):
         # Uses masking to select out the bbox, following the discussion in
         # https://github.com/pydata/xarray/issues/10572
         index = next(iter(self.indexes))
-        assert isinstance(
-            index, CurvilinearCellIndex
-        ), f"Expected CurvilinearCellIndex, got {type(index)}"
+        assert isinstance(index, CurvilinearCellIndex), (
+            f"Expected CurvilinearCellIndex, got {type(index)}"
+        )
 
         # Use the pre-computed lon_spans_globe attribute
         handle_wraparound = self.lon_spans_globe
@@ -1075,28 +1207,119 @@ class Curvilinear(GridSystem):
         )
 
 
-@dataclass(kw_only=True, eq=False)
-class DGGS(GridSystem):
-    cells: str
-    indexes: tuple[xr.Index, ...]
+@dataclass(init=False, kw_only=True, eq=False)
+class Triangular(GridSystem):
+    crs: CRS
+    bbox: BBox
+
+    X: str
+    Y: str
     Z: str | None = None
+    dim: str
+    lon_spans_globe: bool
+    indexes: tuple[xr.Index]
+
+    # these make no sense
+    dXmin: float = 0
+    dYmin: float = 0
+
+    def __init__(
+        self,
+        *,
+        vertices: np.ndarray,
+        faces: np.ndarray,
+        crs: CRS,
+        dim: str,
+        Xname: str,
+        Yname: str,
+        fill_value: Any,
+        triang: Delaunay,
+    ):
+        self.crs = crs
+        self.X, self.Y = Xname, Yname
+        self.dim = dim
+        xmin, xmax = vertices[:, 0].min(), vertices[:, 0].max()
+        ymin, ymax = vertices[:, 1].min(), vertices[:, 1].max()
+        # This "350" business is nonsense; we need a way to figure out if a grid has global coverage
+        # but that's basically impossible if all you have are vertices.
+        self.lon_spans_globe = crs.is_geographic and ((xmax - xmin) > 350)
+        if self.lon_spans_globe:
+            self.bbox = BBox(west=-180, east=180, south=ymin, north=ymax)
+        else:
+            self.bbox = BBox(west=xmin, east=xmax, south=ymin, north=ymax)
+        self.indexes = (
+            CellTreeIndex(
+                vertices,
+                faces,
+                fill_value=fill_value,
+                X=Xname,
+                Y=Yname,
+                lon_spans_globe=self.lon_spans_globe,
+                triang=triang,
+            ),
+        )
+
+    @property
+    def Xdim(self) -> str:
+        return self.dim
+
+    @property
+    def Ydim(self) -> str:
+        return self.dim
 
     @property
     def dims(self) -> set[str]:
-        """Return the set of dimension names for this grid system."""
-        return {self.cells}
+        return {self.dim}
 
-    def sel(self, da: xr.DataArray, *, bbox: BBox) -> xr.DataArray:
-        """Select a subset of the data array using a bounding box."""
-        raise NotImplementedError("sel not implemented for DGGS grids")
+    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill | UgridIndexer]]:
+        index = next(iter(self.indexes))
+        result = index.sel(
+            {self.X: slice(bbox.west, bbox.east), self.Y: slice(bbox.south, bbox.north)}
+        )
+        # Extract the UgridIndexer from the IndexSelResult
+        ugrid_indexer = result.dim_indexers["ugrid"]
+        assert isinstance(ugrid_indexer, UgridIndexer)
+        return {self.dim: [ugrid_indexer]}
 
-    def equals(self, other: Self) -> bool:
-        if self.cells == other.cells:
-            return super().equals(other)
-        else:
-            return False
+    @classmethod
+    def from_dataset(
+        cls,
+        ds: xr.Dataset,
+        crs: CRS,
+        Xname: str,
+        Yname: str,
+    ) -> Self:
+        # FIXME: detect UGRID here
+        vertices = (
+            ds[[Xname, Yname]]
+            .reset_coords()
+            .to_dataarray("variable")
+            .transpose(..., "variable")
+            .data
+        )
+        if crs.is_geographic:
+            # TODO: consider normalizing these to the unit sphere like UXarray
+            # normalize to -180<=grid.X<180
+            vertices[:, 0] = ((vertices[:, 0] + 180) % 360) - 180
+
+        (dim,) = ds[Xname].dims
+        triang = Delaunay(vertices, incremental=True)
+
+        faces = triang.simplices
+        return cls(
+            vertices=vertices,
+            faces=faces,
+            crs=crs,
+            Xname=Xname,
+            Yname=Yname,
+            dim=dim,
+            fill_value=-1,
+            triang=triang,
+        )
 
 
+# Type alias for 1D grid systems
+GridSystem1D = Triangular
 # Type alias for 2D grid systems that have X, Y, and crs attributes
 GridSystem2D = RasterAffine | Rectilinear | Curvilinear
 
@@ -1304,7 +1527,7 @@ def _detect_grid_metadata(
         if X.ndim == 1 and Y.ndim == 1:
             if is_rotated_pole(mapping.crs):
                 raise NotImplementedError("Rotated pole grids are not supported yet.")
-            grid_cls = Rectilinear
+            grid_cls = Triangular if X.dims == Y.dims else Rectilinear
         elif X.ndim == 2 and Y.ndim == 2:
             grid_cls = Curvilinear
 

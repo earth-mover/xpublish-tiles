@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
+from morecantile import Tile
 from PIL import Image
 from pyproj import CRS
 from pyproj.aoi import BBox
@@ -26,10 +27,11 @@ from xpublish_tiles.pipeline import (
 from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
     FORECAST,
+    GLOBAL_6KM,
+    GLOBAL_6KM_360,
     GLOBAL_NANS,
     HRRR,
     PARA,
-    create_global_dataset,
 )
 from xpublish_tiles.testing.lib import (
     assert_render_matches_snapshot,
@@ -100,6 +102,36 @@ async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot, pytestco
         result = await pipeline(ds, query_params)
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
+    assert_render_matches_snapshot(
+        result,
+        png_snapshot,
+        # we have small rasterization differences in CI
+        perceptual_threshold=0.99
+        if ds.attrs["name"] == "reduced_gaussian_n320"
+        else None,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ds", [GLOBAL_6KM.create(), GLOBAL_6KM_360.create()])
+@pytest.mark.parametrize(
+    "tile",
+    [
+        Tile(x=0, y=1, z=2),
+        Tile(x=1, y=1, z=2),
+        Tile(x=0, y=2, z=2),
+        Tile(x=0, y=3, z=3),
+        Tile(x=0, y=6, z=4),
+        Tile(x=0, y=788, z=11),
+    ],
+)
+async def test_global_6km_regression(ds, tile, png_snapshot, pytestconfig):
+    query_params = create_query_params(tile, WEBMERC_TMS)
+    query_params.width = 512
+    query_params.height = 512
+    result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
     assert_render_matches_snapshot(result, png_snapshot)
 
 
@@ -127,12 +159,19 @@ async def test_pipeline_bad_bbox(global_datasets, png_snapshot, pytestconfig):
         format=ImageFormat.PNG,
     )
     result = await pipeline(ds, query)
-    assert_render_matches_snapshot(result, png_snapshot)
+    assert_render_matches_snapshot(
+        result,
+        png_snapshot,
+        # we have small rasterization differences in CI
+        perceptual_threshold=0.99
+        if ds.attrs["name"] == "reduced_gaussian_n320"
+        else None,
+    )
 
 
 @pytest.mark.asyncio
-async def test_high_zoom_tile_global_dataset(png_snapshot, pytestconfig):
-    ds = create_global_dataset()
+async def test_high_zoom_tile_global_dataset(global_datasets, png_snapshot, pytestconfig):
+    ds = global_datasets
     tms = WEBMERC_TMS
     tile = morecantile.Tile(x=524288 + 2916, y=262144, z=20)
     query_params = create_query_params(tile, tms, colorscalerange=(-1, 1))
@@ -174,7 +213,7 @@ async def test_curvilinear_data(curvilinear_dataset_and_tile, png_snapshot, pyte
     # Can't use a snapshot twice in a test sadly
     result.seek(0)
     transposed_result.seek(0)
-    images_match, _ = compare_image_buffers_with_debug(
+    _, _ = compare_image_buffers_with_debug(
         result,  # Expected (original)
         transposed_result,  # Actual (transposed)
         test_name=f"test_curvilinear_data_transposed_vs_original[{tile.z}/{tile.x}/{tile.y}]",
@@ -423,7 +462,7 @@ async def test_hrrr_multiple_vs_hrrr_rendering(tile, tms, pytestconfig):
         visualize_tile(hrrr_multiple_result, tile)
 
     # Compare the rendered images
-    images_similar, ssim_score = compare_image_buffers_with_debug(
+    images_similar, _ = compare_image_buffers_with_debug(
         hrrr_result,
         hrrr_multiple_result,
         test_name="hrrr_multiple",

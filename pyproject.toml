@@ -35,8 +35,13 @@ dependencies = [
     "pillow>=11.3.0",
     "matplotlib>=3.10.5",
     "requests>=2.32.5",
+    "numba-celltree>=0.4.1",
 ]
 dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/earth-mover/xpublish-tiles"
+Repository = "https://github.com/earth-mover/xpublish-tiles"
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]

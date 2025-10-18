@@ -1,6 +1,9 @@
 # xpublish-tiles
 
 ![PyPI - Version](https://img.shields.io/pypi/v/xpublish-tiles)
+![GitHub Actions](https://github.com/earth-mover/xpublish-tiles/actions/workflows/test.yml/badge.svg)
+![Codecov](https://codecov.io/gh/earth-mover/xpublish-tiles/branch/main/graph/badge.svg)
+[![Xarray](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/pydata/xarray/refs/heads/main/doc/badge.json)](https://xarray.dev)
 
 Web mapping plugins for [Xpublish](https://github.com/xpublish-community/xpublish)
 
@@ -13,6 +16,28 @@ The goal of this project is to transform xarray datasets to raster, vector and o
 
 > [!NOTE]
 > The `TilesPlugin` is feature complete, but the `WMSPlugin` is still in active development.
+
+## Features
+
+### Extensive grid support
+
+`xpublish-tiles` supports handling a wide variety of grids including:
+1. Raster grids specified using an Affine transform specified in the `GeoTransform` attribute of the grid mapping variable (`spatial_ref`)
+2. Rectilinear grids specified using two 1D orthogonal coordinates `lat[lat], lon[lon]`.
+3. Curvilinear grids specified using two 2D coordinates `lat[nlat, nlon], lon[nlat, nlon]`.
+4. Unstructured grids specified using two 1D coordinates, interpreted as vertices and triangulated using `scipy.spatial.Delaunay` : `lat[point], lon[point]`.
+
+Here `lat[lat]` means a coordinate variable named `lat` with one dimension named `lat`.
+
+> [!NOTE]
+> The library is built to be extensible, and could easily accommodate more grid definitions. Contributions welcome!
+
+We attempt to require as little metadata as possible, and attempts to infer as much as possible. However, it is *always* better
+for you to annotate your dataset using the CF & ACDD conventions as well as possible.
+
+## Integration Examples
+
+- [Maplibre/Mapbox Usage](./examples/maplibre/)
 
 ## Development
 
@@ -202,11 +227,6 @@ http://localhost:8080/tiles/WebMercatorQuad/4/4/14?variables=2t&style=raster/vir
 
 Where `4/4/14` represents the tile coordinates in {z}/{y}/{x}
 
-## Integration Examples
-
-- [Mapbox Usage](./examples/mapbox/)
-
-
 ## Deployment notes
 
 1. Make sure to limit `NUMBA_NUM_THREADS`; this is used for rendering categorical data with datashader.
@@ -240,7 +260,7 @@ For context, the rendering pipeline is:
    d. Realistically this optimization is triggered on high resolution data at zoom levels where the grid distortion isn't very high.
 
 
-Performance recommendations:
+### Performance recommendations:
 1. Make sure `_xpublish_id` is set in `Dataset.attrs`.
 2. If CRS transformations are a bottleneck,
    1. Assign reprojected coordinates for the desired output CRS using multiple grid mapping variables. This will take reprojection time down to 0.
