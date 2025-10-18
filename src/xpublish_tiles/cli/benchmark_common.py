@@ -6,7 +6,7 @@ import random
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import aiohttp
 
@@ -16,16 +16,16 @@ class BenchmarkResult:
     """Represents the result of a single tile request."""
 
     tile: str
-    status: Optional[int]
+    status: int | None
     duration: float
-    error: Optional[str] = None
+    error: str | None = None
 
 
 async def run_concurrent_tile_requests(
     tiles: list[str],
     concurrency: int,
     fetch_tile_func: Callable[[aiohttp.ClientSession, str], Any],
-    shuffle_seed: Optional[int] = None,
+    shuffle_seed: int | None = None,
 ) -> list[BenchmarkResult]:
     """Run concurrent tile requests using the provided fetch function.
 
@@ -113,7 +113,7 @@ def calculate_benchmark_stats(results: list[BenchmarkResult], total_time: float)
 def print_benchmark_results(
     results: list[BenchmarkResult],
     total_time: float,
-    dataset_name: Optional[str],
+    dataset_name: str | None,
     implementation: str = "",
 ):
     """Print detailed benchmark results to console.
@@ -184,10 +184,10 @@ def wait_for_server_ready(
 
 def finalize_benchmark_results(
     stats: dict,
-    dataset_name: Optional[str],
+    dataset_name: str | None,
     return_results: bool = False,
     implementation_suffix: str = "",
-) -> Optional[dict]:
+) -> dict | None:
     """Finalize benchmark results - either return them or exit process.
 
     Args:

@@ -373,7 +373,7 @@ def run_bench_suite(args):
 
     for impl in implementations:
         use_titiler = impl == "titiler"
-        print(f"\n{'='*20} {impl.upper()} BENCHMARKS {'='*20}")
+        print(f"\n{'=' * 20} {impl.upper()} BENCHMARKS {'=' * 20}")
 
         for dataset_name in available_datasets:
             print(f"\n=== Benchmarking {dataset_name} with {impl} ===")

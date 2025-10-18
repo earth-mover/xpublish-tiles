@@ -3,7 +3,6 @@
 import threading
 import time
 from collections.abc import Callable
-from typing import Optional
 
 import attr
 import uvicorn
@@ -141,7 +140,7 @@ def run_titiler_benchmark(
     variable_name: str = "foo",
     needs_colorscale: bool = False,
     return_results: bool = False,
-) -> Optional[dict]:
+) -> dict | None:
     """Run benchmark using titiler.xarray server.
 
     Args:
@@ -187,7 +186,7 @@ def run_titiler_benchmark(
 
 
 def run_titiler_benchmark_requests(
-    dataset_name: Optional[str],
+    dataset_name: str | None,
     port: int,
     benchmark_tiles: list[str],
     concurrency: int,
@@ -195,7 +194,7 @@ def run_titiler_benchmark_requests(
     variable_name: str = "foo",
     needs_colorscale: bool = False,
     return_results: bool = False,
-) -> Optional[dict]:
+) -> dict | None:
     """Run benchmarking requests against titiler.xarray server.
 
     This is adapted for titiler.xarray URL patterns and API endpoints.

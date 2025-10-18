@@ -1,7 +1,6 @@
 """Benchmarking functionality for xpublish-tiles CLI."""
 
 import time
-from typing import Optional
 
 import aiohttp
 import requests
@@ -24,7 +23,7 @@ def run_benchmark(
     variable_name: str = "foo",
     needs_colorscale: bool = False,
     return_results: bool = False,
-) -> Optional[dict]:
+) -> dict | None:
     """Run benchmarking requests for the given dataset.
 
     If return_results is True, returns a dict with benchmark results instead of exiting.
