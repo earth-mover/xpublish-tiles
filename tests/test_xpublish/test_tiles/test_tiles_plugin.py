@@ -75,6 +75,7 @@ def test_tilesets_list_with_metadata():
 
     data = xr.Dataset(
         {
+            "scalar": ((), 0, {"foo": "bar"}),
             "temperature": xr.DataArray(
                 np.random.randn(12, 90, 180),
                 dims=["time", "lat", "lon"],
@@ -108,7 +109,7 @@ def test_tilesets_list_with_metadata():
                     "description": "Global surface temperature data",
                     "units": "degC",
                 },
-            )
+            ),
         },
         attrs={
             "title": "Global Climate Data",
@@ -192,6 +193,7 @@ def test_multi_dimensional_dataset():
 
     data = xr.Dataset(
         {
+            "scalar": ((), 0, {"foo": "bar"}),
             "temperature": xr.DataArray(
                 np.random.randn(6, 5, 3, 90, 180),
                 dims=["time", "elevation", "scenario", "lat", "lon"],
@@ -240,7 +242,7 @@ def test_multi_dimensional_dataset():
                     "description": "Multi-dimensional temperature data",
                     "units": "degC",
                 },
-            )
+            ),
         },
         attrs={
             "title": "Multi-dimensional Climate Data",
@@ -337,6 +339,7 @@ def test_dimension_extraction_utilities():
     )
 
     ds = data_array.to_dataset(name="foo")
+    ds["scalar"] = ((), 0, {"foo": "bar"})
     dimensions = extract_dimension_extents(ds, "foo")
 
     # Should extract time and depth, but not lat/lon (spatial)
@@ -436,6 +439,7 @@ def test_cf_axis_detection():
     )
 
     ds = data_array.to_dataset(name="foo")
+    ds["scalar"] = ((), 0, {"foo": "bar"})
     dimensions = extract_dimension_extents(ds, "foo")
 
     # Should detect temporal and vertical dimensions despite non-standard names
@@ -529,6 +533,7 @@ def test_tilejson_endpoint():
     time_coords = pd.date_range("2020-01-01", periods=3, freq="MS")
     data = xr.Dataset(
         {
+            "scalar": ((), 0, {"foo": "bar"}),
             "temperature": xr.DataArray(
                 np.random.randn(3, 90, 180),
                 dims=["time", "lat", "lon"],
@@ -558,7 +563,7 @@ def test_tilejson_endpoint():
                     ),
                 },
                 attrs={"long_name": "Temperature"},
-            )
+            ),
         },
         attrs={
             "title": "Global Temperature Data",
@@ -663,6 +668,7 @@ def test_tilejson_bounds_normalized_from_0_360_global():
     """TileJSON bounds should normalize 0..360 longitudes to [-180, 180]."""
     data = xr.Dataset(
         {
+            "scalar": ((), 0, {"foo": "bar"}),
             "temperature": xr.DataArray(
                 np.random.randn(90, 180),
                 dims=["lat", "lon"],
@@ -678,7 +684,7 @@ def test_tilejson_bounds_normalized_from_0_360_global():
                         {"axis": "X", "standard_name": "longitude"},
                     ),
                 },
-            )
+            ),
         }
     )
 
@@ -699,6 +705,7 @@ def test_tilejson_bounds_dateline_crossing_0_360():
     """For dateline-crossing 0..360 datasets, use full world longitudes in TileJSON."""
     data = xr.Dataset(
         {
+            "scalar": ((), 0, {"foo": "bar"}),
             "temperature": xr.DataArray(
                 np.random.randn(10, 20),
                 dims=["lat", "lon"],
@@ -714,7 +721,7 @@ def test_tilejson_bounds_dateline_crossing_0_360():
                         {"axis": "X", "standard_name": "longitude"},
                     ),
                 },
-            )
+            ),
         }
     )
 
@@ -737,6 +744,7 @@ def test_tilejson_bounds_with_decreasing_lat_lon():
     """Bounds should normalize correctly when lat and lon coords decrease."""
     data = xr.Dataset(
         {
+            "scalar": ((), 0, {"foo": "bar"}),
             "temperature": xr.DataArray(
                 np.random.randn(90, 180),
                 dims=["lat", "lon"],
@@ -752,7 +760,7 @@ def test_tilejson_bounds_with_decreasing_lat_lon():
                         {"axis": "X", "standard_name": "longitude"},
                     ),
                 },
-            )
+            ),
         }
     )
 
