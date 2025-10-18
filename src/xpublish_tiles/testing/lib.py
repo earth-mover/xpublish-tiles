@@ -4,7 +4,7 @@ import io
 import re
 import subprocess
 import sys
-from typing import Literal, Optional
+from typing import Literal
 from unittest import mock
 
 import matplotlib.pyplot as plt
@@ -78,7 +78,7 @@ def compare_image_buffers_with_debug(
     buffer1: io.BytesIO,
     buffer2: io.BytesIO,
     test_name: str = "image_comparison",
-    tile_info: Optional[tuple] = None,
+    tile_info: tuple | None = None,
     debug_visual: bool = False,
     debug_visual_save: bool = False,
     mode: Literal["exact", "perceptual"] = "exact",
@@ -133,9 +133,9 @@ def create_debug_visualization(
     actual_array: np.ndarray,
     expected_array: np.ndarray,
     test_name: str,
-    tile_info: Optional[tuple] = None,
+    tile_info: tuple | None = None,
     debug_visual_save: bool = False,
-    ssim_score: Optional[float] = None,
+    ssim_score: float | None = None,
 ) -> None:
     """Create a 3-panel debug visualization: Expected | Actual | Differences."""
 
@@ -160,7 +160,7 @@ def create_debug_visualization(
         # Calculate SSIM
         ssim_score = ssim(array1, array2, channel_axis=2, data_range=255)
 
-    def extract_tile_info(test_name: str, tile_info: Optional[tuple]) -> dict:
+    def extract_tile_info(test_name: str, tile_info: tuple | None) -> dict:
         """Extract tile coordinates and TMS info from tile parameter."""
         if tile_info is None:
             return {
@@ -228,8 +228,8 @@ def create_debug_visualization(
             geo_bounds = tms.bounds(tile)
 
             bbox_info = f"""
-Tile: z={extracted_tile_info['z']}, x={extracted_tile_info['x']}, y={extracted_tile_info['y']} ({extracted_tile_info['tms_name']})
-Coordinate System: {extracted_tile_info['coord_info']}
+Tile: z={extracted_tile_info["z"]}, x={extracted_tile_info["x"]}, y={extracted_tile_info["y"]} ({extracted_tile_info["tms_name"]})
+Coordinate System: {extracted_tile_info["coord_info"]}
 West: {geo_bounds.left:.3f}°, East: {geo_bounds.right:.3f}°
 South: {geo_bounds.bottom:.3f}°, North: {geo_bounds.top:.3f}°
 
@@ -302,7 +302,7 @@ Y: {xy_bounds[1]:.0f} to {xy_bounds[3]:.0f}
         transparency_status = f"⚠ Minor transparency change: {transparency_change:+,} pixels ({transparency_change_pct:+.2f}%)"
         transparency_color = "orange"
     else:
-        transparency_status = f"⚠️ TRANSPARENCY CHANGED: {transparency_change:+,} pixels ({transparency_change_pct:+.2f}%)"
+        transparency_status = f"⚠️ TRANSPARENCY DIFFERENCE: {transparency_change:+,} pixels ({transparency_change_pct:+.2f}%)"
         transparency_color = "red"
 
     ax_transparency.text(
@@ -550,20 +550,20 @@ def validate_transparency(
     if not skip_transparency_check:
         if tile_bbox is not None and dataset_bbox is not None:
             if dataset_bbox.contains(tile_bbox):
-                assert (
-                    transparent_percent == 0
-                ), f"Found {transparent_percent:.1f}% transparent pixels in fully contained tile."
+                assert transparent_percent == 0, (
+                    f"Found {transparent_percent:.1f}% transparent pixels in fully contained tile."
+                )
             elif dataset_bbox.intersects(tile_bbox):
                 # relaxed from > 0 for UTM data which is heavily distorted over antarctica
                 assert transparent_percent >= 0, transparent_percent
             else:
-                assert (
-                    transparent_percent == 100
-                ), f"Found {transparent_percent:.1f}% transparent pixels in fully disjoint tile (expected 100%)."
+                assert transparent_percent == 100, (
+                    f"Found {transparent_percent:.1f}% transparent pixels in fully disjoint tile (expected 100%)."
+                )
         else:
-            assert (
-                transparent_percent == 0
-            ), f"Found {transparent_percent:.1f}% transparent pixels."
+            assert transparent_percent == 0, (
+                f"Found {transparent_percent:.1f}% transparent pixels."
+            )
 
 
 def assert_render_matches_snapshot(
@@ -573,7 +573,7 @@ def assert_render_matches_snapshot(
     tile=None,
     tms=None,
     dataset_bbox=None,
-    perceptual_threshold: Optional[float] = None,
+    perceptual_threshold: float | None = None,
 ):
     """Helper function to validate PNG content against snapshot.
 
@@ -639,7 +639,7 @@ def visualize_tile(result: io.BytesIO, tile: Tile) -> None:
     pil_img = Image.open(result)
     img_array = np.array(pil_img)
 
-    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+    _, axes = plt.subplots(1, 2, figsize=(10, 5))
 
     # Show the rendered tile
     axes[0].imshow(img_array)

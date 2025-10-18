@@ -2,6 +2,7 @@ import logging
 from itertools import product
 
 import pytest
+from hypothesis import Verbosity, settings
 
 import icechunk
 import xarray as xr
@@ -10,6 +11,7 @@ from xpublish_tiles.testing.datasets import (
     EU3035,
     EU3035_HIRES,
     HRRR,
+    REDGAUSS_N320,
     UTM33S,
     create_global_dataset,
 )
@@ -22,6 +24,22 @@ logging.getLogger("datashader").setLevel(logging.WARNING)
 logging.getLogger("PIL").setLevel(logging.WARNING)
 
 IS_SNAPSHOT_UPDATE = False
+
+settings.register_profile(
+    "ci",
+    deadline=None,
+    # suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.too_slow],
+    # verbosity=Verbosity.verbose,
+    print_blob=True,
+)
+
+settings.register_profile(
+    "default",
+    deadline=None,
+    # suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.too_slow],
+    verbosity=Verbosity.verbose,
+    print_blob=True,
+)
 
 
 def pytest_addoption(parser):
@@ -100,6 +118,7 @@ def repo(pytestconfig):
 
 @pytest.fixture(
     params=tuple(map(",".join, product(["-90->90", "90->-90"], ["-180->180", "0->360"])))
+    + ("reduced_gaussian_n320",)
 )
 def global_datasets(request):
     param = request.param
@@ -108,7 +127,12 @@ def global_datasets(request):
     lat_ascending = "-90->90" in param
     lon_0_360 = "0->360" in param
 
-    yield create_global_dataset(lat_ascending=lat_ascending, lon_0_360=lon_0_360)
+    if param == "reduced_gaussian_n320":
+        ds = REDGAUSS_N320.create()
+    else:
+        ds = create_global_dataset(lat_ascending=lat_ascending, lon_0_360=lon_0_360)
+    ds.attrs["name"] = param
+    yield ds
 
 
 # Create the product of datasets and their appropriate tiles

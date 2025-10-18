@@ -6,7 +6,6 @@ import contextlib
 import contextvars
 import logging
 import time
-from typing import Optional
 
 import structlog
 
@@ -25,7 +24,7 @@ class LogAccumulator:
 
 
 # Context variable to hold the current bound logger
-_context_logger: contextvars.ContextVar[Optional[structlog.stdlib.BoundLogger]] = (
+_context_logger: contextvars.ContextVar[structlog.stdlib.BoundLogger | None] = (
     contextvars.ContextVar("context_logger")
 )
 

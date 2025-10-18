@@ -1,3 +1,4 @@
+import json
 from typing import cast
 
 from pyproj import CRS
@@ -124,3 +125,69 @@ def validate_crs(v: str | None) -> CRS | None:
         raise ValueError(
             f"crs {v} is not valid",
         ) from e
+
+
+def validate_colormap(v: str | dict | None) -> dict[str, str] | None:
+    """Validate and parse custom colormap parameter.
+
+    Args:
+        v: Colormap input - can be None, a JSON string, or a dict
+
+    Returns:
+        Parsed colormap dict with string keys (0-255) and hex color values (#RRGGBB) or None
+
+    Raises:
+        ValueError: If colormap format is invalid
+    """
+    if v is None:
+        return None
+
+    # If it's already a dict, validate it
+    if isinstance(v, dict):
+        colormap = v
+    elif isinstance(v, str):
+        # Try to parse as JSON string
+        try:
+            colormap = json.loads(v)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise ValueError("colormap must be a valid JSON-encoded dictionary") from e
+    else:
+        raise ValueError("colormap must be a dictionary or JSON string")
+
+    if not isinstance(colormap, dict):
+        raise ValueError("colormap must be a dictionary")
+
+    # Convert all keys to strings and validate format
+    validated_colormap = {}
+    for key, value in colormap.items():
+        # Convert numeric keys to strings
+        str_key = str(key)
+
+        # Validate key is numeric (0-255)
+        try:
+            numeric_key = int(str_key)
+            if not 0 <= numeric_key <= 255:
+                raise ValueError(
+                    f"colormap keys must be integers between 0 and 255, got {numeric_key}"
+                )
+        except ValueError as e:
+            if "invalid literal" in str(e):
+                raise ValueError(f"colormap keys must be numeric, got '{key}'") from e
+            raise
+
+        # Validate value is a valid color (hex or rgb)
+        if not isinstance(value, str):
+            raise ValueError(
+                f"colormap values must be strings, got {type(value).__name__} for key {key}"
+            )
+
+        # Validation for hex colors only (#RRGGBB)
+        value = value.strip()
+        if not (value.startswith("#") and len(value) == 7):
+            raise ValueError(
+                f"colormap value '{value}' for key {key} must be a hex color (#RRGGBB)"
+            )
+
+        validated_colormap[str_key] = value
+
+    return validated_colormap

@@ -5,13 +5,15 @@ import datashader as dsh  # type: ignore
 import datashader.reductions  # type: ignore
 import datashader.transfer_functions as tf  # type: ignore
 import matplotlib as mpl  # type: ignore
+import matplotlib.colors as mcolors  # type: ignore
 import numbagg
 import numpy as np
+import pandas as pd
 from PIL import Image
 from scipy.interpolate import NearestNDInterpolator
 
 import xarray as xr
-from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear
+from xpublish_tiles.grids import Curvilinear, GridSystem2D, Triangular
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import Renderer, register_renderer, render_error_image
 from xpublish_tiles.types import (
@@ -83,6 +85,27 @@ class DatashaderRasterRenderer(Renderer):
     def validate(self, context: dict[str, "RenderContext"]):
         assert len(context) == 1
 
+    def _create_colormap_from_dict(
+        self, colormap_dict: dict[str, str]
+    ) -> mcolors.Colormap:
+        """Create a matplotlib colormap from a dictionary of index->color mappings."""
+        # Sort by numeric keys to ensure proper order
+        sorted_items = sorted(colormap_dict.items(), key=lambda x: int(x[0]))
+
+        # Extract positions (normalized 0-1) and colors
+        positions = []
+        colors = []
+
+        for key, color in sorted_items:
+            position = int(key) / 255.0  # Normalize to 0-1 range
+            positions.append(position)
+            colors.append(color)
+
+        # Create a LinearSegmentedColormap
+        return mcolors.LinearSegmentedColormap.from_list(
+            "custom", list(zip(positions, colors, strict=False)), N=256
+        )
+
     def maybe_cast_data(self, data) -> xr.DataArray:  # type: ignore[name-defined]
         dtype = data.dtype
         totype = str(dtype.str)
@@ -103,6 +126,7 @@ class DatashaderRasterRenderer(Renderer):
         colorscalerange: tuple[float, float] | None = None,
         format: ImageFormat = ImageFormat.PNG,
         context_logger=None,
+        colormap: dict[str, str] | None = None,
     ):
         # Use the passed context logger or fallback to get_context_logger
         logger = context_logger if context_logger is not None else get_context_logger()
@@ -128,10 +152,11 @@ class DatashaderRasterRenderer(Renderer):
             x_range=(bbox.west, bbox.east),
             y_range=(bbox.south, bbox.north),
         )
+        data = self.maybe_cast_data(context.da)
 
-        if isinstance(context.grid, RasterAffine | Rectilinear | Curvilinear):
+        if isinstance(context.grid, GridSystem2D):
             # Use the actual coordinate names from the grid system
-            grid = cast(RasterAffine | Rectilinear | Curvilinear, context.grid)
+            grid = cast(GridSystem2D, context.grid)
             if isinstance(context.datatype, DiscreteData):
                 if isinstance(grid, Curvilinear):
                     # FIXME: we'll need to track Xdim, Ydim explicitly no dims: tuple[str]
@@ -142,8 +167,6 @@ class DatashaderRasterRenderer(Renderer):
                 # the mode aggregation.
                 # https://github.com/holoviz/datashader/issues/1435
                 # Lock is only used when tbb is not available (e.g., on macOS)
-                data = self.maybe_cast_data(context.da)
-
                 with LOCK:
                     with log_duration(
                         f"nearest neighbour regridding (discrete) {data.shape}",
@@ -170,6 +193,20 @@ class DatashaderRasterRenderer(Renderer):
                         mesh = cvs.quadmesh(
                             data.transpose(grid.Ydim, grid.Xdim), x=grid.X, y=grid.Y
                         )
+        elif isinstance(context.grid, Triangular):
+            with log_duration(f"render (continuous) {data.shape} trimesh", "🔺", logger):
+                assert context.ugrid_indexer is not None
+                if context.grid.dim in data.coords:
+                    # dropping gets us a cheap RangeIndex in the DataFrame
+                    # Only drop the dimension coordinate if it exists as a variable
+                    data = data.drop_vars(context.grid.dim)
+                df = data.to_dataframe()
+                mesh = cvs.trimesh(
+                    df[[context.grid.X, context.grid.Y, data.name]],
+                    pd.DataFrame(
+                        context.ugrid_indexer.connectivity, columns=["v0", "v1", "v2"]
+                    ),
+                )
         else:
             raise NotImplementedError(
                 f"Grid type {type(context.grid)} not supported by DatashaderRasterRenderer"
@@ -185,10 +222,17 @@ class DatashaderRasterRenderer(Renderer):
                     raise ValueError(
                         "`colorscalerange` must be specified when array does not have valid_min and valid_max attributes specified."
                     )
+
+            # Use custom colormap if provided, otherwise use variant
+            if colormap is not None:
+                cmap = self._create_colormap_from_dict(colormap)
+            else:
+                cmap = mpl.colormaps.get_cmap(variant)
+
             with np.errstate(invalid="ignore"):
                 shaded = tf.shade(
                     mesh,
-                    cmap=mpl.colormaps.get_cmap(variant),
+                    cmap=cmap,
                     how="linear",
                     span=colorscalerange,
                 )

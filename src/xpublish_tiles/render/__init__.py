@@ -85,6 +85,7 @@ class Renderer(ABC):
         colorscalerange: tuple[Number, Number] | None = None,
         format: ImageFormat = ImageFormat.PNG,
         context_logger=None,
+        colormap: dict[str, str] | None = None,
     ):
         pass
 

@@ -31,8 +31,17 @@ dependencies = [
     "cachetools>=5.5.2",
     "tbb>=2022.2.0 ; sys_platform == 'linux'",
     "structlog>=24.4.0",
+    "aiohttp>=3.12.15",
+    "pillow>=11.3.0",
+    "matplotlib>=3.10.5",
+    "requests>=2.32.5",
+    "numba-celltree>=0.4.1",
 ]
 dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/earth-mover/xpublish-tiles"
+Repository = "https://github.com/earth-mover/xpublish-tiles"
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
@@ -60,7 +69,6 @@ testing = [
     "syrupy>=4.9.1",
     "hypothesis>=6.136.6",
     "pytest-randomly>=3.16.0",
-    "matplotlib>=3.10.3",
     "scikit-image>=0.25.2",
     "titiler>=0.24.0",
 ]
@@ -151,3 +159,21 @@ known-first-party = ["dask", "distributed", "icechunk", "xarray", "zarr"]
 [tool.ruff.lint.flake8-tidy-imports]
 # Disallow all relative imports.
 ban-relative-imports = "all"
+
+[tool.coverage.run]
+source = ["src/xpublish_tiles"]
+omit = ["src/xpublish_tiles/_version.py", "src/xpublish_tiles/testing/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]

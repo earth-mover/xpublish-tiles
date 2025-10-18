@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
+from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
@@ -54,26 +55,38 @@ class Dataset:
     def create(self):
         ds = self.setup(dims=self.dims, dtype=self.dtype, attrs=self.attrs)
         ds.attrs["name"] = self.name
+        ds.attrs["_xpublish_id"] = self.name
         return ds
 
 
-def generate_tanh_wave_data(dims: tuple[Dim, ...], dtype: npt.DTypeLike):
-    """Generate smooth tanh wave data across all dimensions.
+def generate_tanh_wave_data(
+    coords: tuple[np.ndarray | None, ...],
+    sizes: tuple[int, ...],
+    chunks: tuple[int, ...],
+    dtype: npt.DTypeLike,
+    use_meshgrid: bool = True,
+):
+    """Generate smooth tanh wave data across coordinates.
 
-    Fits 3 waves along each dimension using coordinate values as inputs.
+    Fits 3 waves along each coordinate dimension using coordinate values as inputs.
     Uses tanh to create smooth, bounded patterns in [-1, 1] range.
     For dimensions without coordinates, uses normalized indices.
-    """
-    chunks = tuple(4 * d.chunk_size for d in dims)
 
+    Args:
+        coords: Coordinate arrays to use for generating data. Can have more arrays than dims for irregular grids.
+        sizes: Sizes for each coordinate (used when coord is None).
+        chunks: Chunk sizes for the output dask array.
+        dtype: Output data type.
+        use_meshgrid: If True, meshgrid coords for regular grids. If False, use coords directly for irregular grids.
+    """
     # Create coordinate arrays for each dimension
     coord_arrays = []
-    for i, dim in enumerate(dims):
+    for i, (coord_data, size) in enumerate(zip(coords, sizes, strict=True)):
         # Use provided coordinates or indices
-        if dim.data is not None:
-            coord_array = np.asarray(dim.data)
+        if coord_data is not None:
+            coord_array = np.asarray(coord_data)
         else:
-            coord_array = np.arange(dim.size)
+            coord_array = np.arange(size)
 
         # Handle different data types
         if not np.issubdtype(coord_array.dtype, np.number):
@@ -84,23 +97,28 @@ def generate_tanh_wave_data(dims: tuple[Dim, ...], dtype: npt.DTypeLike):
         else:
             # Numeric coordinates
             coord_min, coord_max = coord_array.min(), coord_array.max()
-            assert (
-                coord_max > coord_min
-            ), f"Coordinate range must be non-zero for dimension {dim.name}"
+            assert coord_max > coord_min, (
+                f"Coordinate range must be non-zero for coordinate {i}"
+            )
             normalized = (coord_array - coord_min) / (coord_max - coord_min)
 
         # Add dimension-specific offset to avoid identical patterns
         normalized += i * 0.5
         coord_arrays.append(normalized * 6 * np.pi)  # 3 waves = 6π
 
-    # Create dask arrays for coordinates with proper chunking
-    dask_coords = []
-    for coord_array, chunk_size in zip(coord_arrays, chunks, strict=False):
-        dask_coord = dask.array.from_array(coord_array, chunks=chunk_size)
-        dask_coords.append(dask_coord)
-
-    # Create meshgrid with dask arrays
-    grids = dask.array.meshgrid(*dask_coords, indexing="ij")
+    if use_meshgrid:
+        # Regular grids: meshgrid 1D coordinate arrays into N-D grids
+        dask_coords = []
+        for coord_array, chunk_size in zip(coord_arrays, chunks, strict=True):
+            dask_coord = dask.array.from_array(coord_array, chunks=chunk_size)
+            dask_coords.append(dask_coord)
+        grids = dask.array.meshgrid(*dask_coords, indexing="ij")
+    else:
+        # Irregular grids: use coordinate arrays directly (all same length)
+        grids = []
+        for coord_array in coord_arrays:
+            dask_coord = dask.array.from_array(coord_array, chunks=chunks[0])
+            grids.append(dask_coord)
 
     # Create smooth patterns using tanh of summed sine waves
     # tanh naturally bounds to [-1, 1] and creates smooth, flowing patterns
@@ -120,7 +138,12 @@ def generate_flag_values_data(
 ):
     """Generate discretized tanh wave data with noise using flag_values for categorical data."""
     # Generate tanh wave data (returns values in [-1, 1] range)
-    tanh_data = generate_tanh_wave_data(dims, np.float32)
+    tanh_data = generate_tanh_wave_data(
+        coords=tuple(d.data for d in dims),
+        sizes=tuple(d.size for d in dims),
+        chunks=tuple(4 * d.chunk_size for d in dims),
+        dtype=np.float32,
+    )
 
     # Add random noise that preserves the sign
     # Generate noise proportional to the absolute value to avoid sign changes
@@ -168,7 +191,12 @@ def uniform_grid(*, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str
         data_array = generate_flag_values_data(dims, dtype, attrs["flag_values"])
     else:
         # Generate tanh wave data for continuous data
-        data_array = generate_tanh_wave_data(dims, dtype)
+        data_array = generate_tanh_wave_data(
+            coords=tuple(d.data for d in dims),
+            sizes=tuple(d.size for d in dims),
+            chunks=tuple(4 * d.chunk_size for d in dims),
+            dtype=dtype,
+        )
 
     if "flag_values" not in attrs:
         attrs["valid_max"] = 1
@@ -530,13 +558,43 @@ GLOBAL_6KM = Dataset(
             name="latitude",
             size=3000,
             chunk_size=500,
-            data=np.linspace(-89.97, 89.97, 3000),
+            data=np.linspace(-89.969999, 89.970001, 3000),
         ),
         Dim(
             name="longitude",
             size=6000,
             chunk_size=500,
-            data=np.linspace(-179.97, 179.97, 6000),
+            data=np.linspace(-179.969999, 179.970001, 6000),
+        ),
+        Dim(name="band", size=3, chunk_size=3, data=np.array(["R", "G", "B"])),
+    ),
+    dtype=np.float32,
+    setup=uniform_grid,
+    edge_case_tiles=WGS84_TILES_EDGE_CASES + WEBMERC_TILES_EDGE_CASES,
+    tiles=WGS84_TILES + WEBMERC_TILES,
+    benchmark_tiles=GLOBAL_BENCHMARK_TILES,
+)
+
+GLOBAL_6KM_360 = Dataset(
+    name="global_6km_360",
+    dims=(
+        Dim(
+            name="time",
+            size=2,
+            chunk_size=1,
+            data=np.array(["2000-01-01", "2000-01-02"], dtype="datetime64[h]"),
+        ),
+        Dim(
+            name="latitude",
+            size=3000,
+            chunk_size=500,
+            data=np.linspace(-89.969999, 89.970001, 3000),
+        ),
+        Dim(
+            name="longitude",
+            size=6000,
+            chunk_size=500,
+            data=np.linspace(0.030001, 359.970001, 6000),
         ),
         Dim(name="band", size=3, chunk_size=3, data=np.array(["R", "G", "B"])),
     ),
@@ -596,29 +654,28 @@ HRRR_BENCHMARK_TILES = [
     # Level 0
     "0/0/0",
     # Level 1
-    "1/0/0", "1/0/1", "1/1/0", "1/1/1",
-    # Level 2 - All tiles
-    "2/0/1", "2/0/2", "2/0/3",
-    "2/1/0", "2/1/1", "2/1/2", "2/1/3",
-    "2/2/0", "2/2/1", "2/2/2", "2/2/3",
-    "2/3/0", "2/3/1", "2/3/2", "2/3/3",
-    # Level 3 - All tiles
-    "3/0/0", "3/0/1", "3/0/2", "3/0/3", "3/0/4", "3/0/5", "3/0/6", "3/0/7",
-    "3/1/0", "3/1/1", "3/1/2", "3/1/3", "3/1/4", "3/1/5", "3/1/6", "3/1/7",
-    "3/2/0", "3/2/1", "3/2/2", "3/2/3", "3/2/4", "3/2/5", "3/2/6", "3/2/7",
-    "3/3/0", "3/3/1", "3/3/2", "3/3/3", "3/3/4", "3/3/5", "3/3/6", "3/3/7",
-    "3/4/0", "3/4/1", "3/4/2", "3/4/3", "3/4/4", "3/4/5", "3/4/6", "3/4/7",
-    "3/5/0", "3/5/1", "3/5/2", "3/5/3", "3/5/4", "3/5/5", "3/5/6", "3/5/7",
-    "3/6/0", "3/6/1", "3/6/2", "3/6/3", "3/6/4", "3/6/5", "3/6/6", "3/6/7",
-    "3/7/0", "3/7/1", "3/7/2", "3/7/3", "3/7/4", "3/7/5", "3/7/6", "3/7/7",
-    # Level 4 and above
-    "4/6/2", "4/5/4", "4/6/3", "4/5/2", "4/6/4", "4/5/3", "4/7/4", "4/5/5", "4/7/2",
-    "4/5/1", "4/6/5", "5/10/7", "5/10/6", "5/11/6", "5/12/7", "5/11/7", "5/12/6",
-    "5/11/5", "5/11/8", "5/12/5", "5/12/8", "5/13/6", "5/10/5", "5/13/7", "5/10/8",
-    "5/13/5", "5/13/8", "5/11/4", "5/12/4", "5/10/4", "5/13/4", "4/4/3", "4/4/4",
-    "4/4/2", "4/7/3", "4/6/1", "4/3/3", "4/4/5", "4/4/1", "4/3/4", "4/3/2", "4/7/5",
-    "4/7/1", "4/5/6", "4/3/5", "4/6/6", "4/3/1", "4/6/0", "4/5/0", "4/4/6", "4/4/0",
-    "4/7/0", "4/3/6", "4/7/6", "4/3/0",
+    "1/0/0",
+    # Level 2 - Only valid tiles
+    "2/1/0", "2/1/1",
+    # Level 3 - Only valid tiles (Y: 2-3, X: 1-2)
+    "3/2/1", "3/3/1", "3/2/2", "3/3/2",
+    # Level 4 - Valid tiles (Y: 5-6, X: 2-5)
+    "4/5/2", "4/5/3", "4/5/4", "4/5/5", "4/6/2",
+    "4/6/3", "4/6/4", "4/7/4",
+    # Level 5 - Valid tiles (Y: 10-13, X: 4-9)
+    "5/10/4", "5/11/4", "5/12/4", "5/13/4",
+    "5/10/5", "5/11/5", "5/12/5", "5/13/5",
+    "5/10/6", "5/11/6", "5/12/6", "5/13/6",
+    "5/10/7", "5/11/7", "5/12/7", "5/13/7",
+    "5/10/8", "5/11/8", "5/12/8", "5/13/8",
+    "5/10/9", "5/11/9", "5/12/9", "5/13/9",
+    "5/10/10", "5/11/10", "5/12/10", "5/10/8",
+    # Level 6 - Sample tiles
+    "6/22/10", "6/23/10", "6/23/12", "6/23/14", "6/20/14", "6/20/15",
+    "6/21/16", "6/21/17", "6/22/18", "6/22/19", "6/21/15", "6/21/16",
+    # Level 7 - Sample tiles
+    "7/43/25", "7/42/25", "7/41/27", "7/41/28", "7/42/29", "7/42/30",
+    "7/43/31", "7/43/32", "7/44/33", "7/44/34", "7/45/35", "7/45/36",
 ]
 
 # fmt: on
@@ -1152,6 +1209,76 @@ HRRR_MULTIPLE = Dataset(
 )
 
 
+def create_n320(
+    *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
+) -> xr.Dataset:
+    """Create N320 Reduced Gaussian Grid dataset from ECMWF grid definition."""
+    # Load grid definition from CSV
+    grid_csv = Path(__file__).parent / "grids" / "n320_grid.csv"
+    grid_df = pd.read_csv(grid_csv)
+
+    latitudes = grid_df["latitude"].values
+    num_points = grid_df["num_points"].values
+
+    # Generate 1D lat, lon coordinate arrays
+    all_lats = np.repeat(latitudes, num_points)
+    all_lons = np.concatenate(
+        [np.linspace(0, 360, nlon, endpoint=False) for nlon in num_points]
+    )
+
+    # Generate tanh wave data for the points - pass both lon and lat, no meshgrid
+    data_array = generate_tanh_wave_data(
+        coords=(all_lons, all_lats),
+        sizes=(len(all_lons), len(all_lats)),
+        chunks=tuple(dim.chunk_size for dim in dims),
+        dtype=dtype,
+        use_meshgrid=False,
+    )
+
+    # Add valid_min/valid_max for continuous data
+    attrs["valid_min"] = -1
+    attrs["valid_max"] = 1
+
+    # Create dataset with point dimension and lat/lon coordinates
+    ds = xr.Dataset(
+        {
+            "foo": (tuple(d.name for d in dims), data_array, attrs),
+        },
+        coords={
+            "latitude": (
+                "point",
+                all_lats,
+                {"standard_name": "latitude", "units": "degrees_north"},
+            ),
+            "longitude": (
+                "point",
+                all_lons,
+                {"standard_name": "longitude", "units": "degrees_east"},
+            ),
+        },
+    )
+
+    # Add coordinates attribute to foo
+    ds.foo.attrs["coordinates"] = "latitude longitude"
+    ds.foo.encoding["chunks"] = tuple(dim.chunk_size for dim in dims)
+
+    return ds
+
+
+REDGAUSS_N320 = Dataset(
+    name="redgauss_n320",
+    dims=(
+        Dim(
+            name="point",
+            size=542080,
+            chunk_size=542080,
+        ),
+    ),
+    setup=create_n320,
+    dtype=np.float32,
+    tiles=GLOBAL_BENCHMARK_TILES,
+)
+
 # Lookup dictionary for all available datasets
 DATASET_LOOKUP = {
     "hrrr": HRRR,
@@ -1169,4 +1296,5 @@ DATASET_LOOKUP = {
     "curvilinear": CURVILINEAR,
     "hrrr_multiple": HRRR_MULTIPLE,
     "global_nans": GLOBAL_NANS,
+    "redgauss_n320": REDGAUSS_N320,
 }

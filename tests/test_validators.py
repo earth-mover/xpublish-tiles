@@ -3,6 +3,7 @@ from pyproj import CRS
 
 from xpublish_tiles.types import ImageFormat
 from xpublish_tiles.validators import (
+    validate_colormap,
     validate_colorscalerange,
     validate_crs,
     validate_image_format,
@@ -98,13 +99,13 @@ class TestValidateImageFormat:
 
     def test_invalid_format(self):
         with pytest.raises(
-            ValueError, match="image format gif is not valid. Options are: PNG, JPEG"
+            ValueError, match=r"image format gif is not valid. Options are: PNG, JPEG"
         ):
             validate_image_format("gif")
 
     def test_invalid_format_with_mime_type(self):
         with pytest.raises(
-            ValueError, match="image format gif is not valid. Options are: PNG, JPEG"
+            ValueError, match=r"image format gif is not valid. Options are: PNG, JPEG"
         ):
             validate_image_format("image/gif")
 
@@ -147,21 +148,21 @@ class TestValidateStyle:
     def test_invalid_format_single_value(self):
         with pytest.raises(
             ValueError,
-            match="style must be in the format 'stylename/palettename'. A common default for this is 'raster/default'",
+            match=r"style must be in the format 'stylename/palettename'. A common default for this is 'raster/default'",
         ):
             validate_style("raster")
 
     def test_invalid_format_three_values(self):
         with pytest.raises(
             ValueError,
-            match="style must be in the format 'stylename/palettename'. A common default for this is 'raster/default'",
+            match=r"style must be in the format 'stylename/palettename'. A common default for this is 'raster/default'",
         ):
             validate_style("raster/default/extra")
 
     def test_invalid_style_name(self):
         with pytest.raises(
             ValueError,
-            match="style 'invalid' is not valid. Available styles are:",
+            match=r"style 'invalid' is not valid. Available styles are:",
         ):
             validate_style("invalid/default")
 
@@ -214,3 +215,80 @@ class TestValidateCrs:
     def test_invalid_epsg_code(self):
         with pytest.raises(ValueError, match="crs EPSG:999999 is not valid"):
             validate_crs("EPSG:999999")
+
+
+class TestValidateColormap:
+    def test_none_input(self):
+        result = validate_colormap(None)
+        assert result is None
+
+    def test_valid_dict_input(self):
+        colormap = {"0": "#ffffff", "255": "#000000"}
+        result = validate_colormap(colormap)
+        assert result == {"0": "#ffffff", "255": "#000000"}
+
+    def test_valid_json_string_input(self):
+        colormap_json = '{"0": "#ffffff", "128": "#808080", "255": "#000000"}'
+        result = validate_colormap(colormap_json)
+        assert result == {"0": "#ffffff", "128": "#808080", "255": "#000000"}
+
+    def test_numeric_keys_converted_to_strings(self):
+        colormap = {0: "#ffffff", 255: "#000000"}
+        result = validate_colormap(colormap)
+        assert result == {"0": "#ffffff", "255": "#000000"}
+
+    def test_valid_range_0_to_255(self):
+        colormap = {"0": "#ffffff", "100": "#808080", "255": "#000000"}
+        result = validate_colormap(colormap)
+        assert result == {"0": "#ffffff", "100": "#808080", "255": "#000000"}
+
+    def test_invalid_json_string(self):
+        with pytest.raises(
+            ValueError, match="colormap must be a valid JSON-encoded dictionary"
+        ):
+            validate_colormap('{"invalid": json}')
+
+    def test_invalid_key_out_of_range_high(self):
+        with pytest.raises(
+            ValueError, match="colormap keys must be integers between 0 and 255, got 256"
+        ):
+            validate_colormap({"256": "#ffffff"})
+
+    def test_invalid_key_out_of_range_low(self):
+        with pytest.raises(
+            ValueError, match="colormap keys must be integers between 0 and 255, got -1"
+        ):
+            validate_colormap({"-1": "#ffffff"})
+
+    def test_invalid_key_non_numeric(self):
+        with pytest.raises(ValueError, match="colormap keys must be numeric, got 'abc'"):
+            validate_colormap({"abc": "#ffffff"})
+
+    def test_invalid_value_non_string(self):
+        with pytest.raises(
+            ValueError, match="colormap values must be strings, got int for key 0"
+        ):
+            validate_colormap({"0": 255})
+
+    def test_invalid_color_format(self):
+        with pytest.raises(
+            ValueError,
+            match="colormap value 'invalid' for key 0 must be a hex color \\(#RRGGBB\\)",
+        ):
+            validate_colormap({"0": "invalid"})
+
+    def test_invalid_named_colors(self):
+        with pytest.raises(
+            ValueError,
+            match="colormap value 'white' for key 0 must be a hex color \\(#RRGGBB\\)",
+        ):
+            validate_colormap({"0": "white", "255": "black"})
+
+    def test_valid_hex_colors(self):
+        colormap = {"0": "#FFFFFF", "255": "#000000"}
+        result = validate_colormap(colormap)
+        assert result == {"0": "#FFFFFF", "255": "#000000"}
+
+    def test_non_dict_json_input(self):
+        with pytest.raises(ValueError, match="colormap must be a dictionary"):
+            validate_colormap(["not", "a", "dict"])  # type: ignore  # this doesn't validate with the type checker

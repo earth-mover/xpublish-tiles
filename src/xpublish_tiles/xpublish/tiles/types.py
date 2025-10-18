@@ -1,13 +1,14 @@
 """OGC Tiles API data models"""
 
 from enum import Enum
-from typing import Annotated, Any, Optional, Union
+from typing import Annotated, Any, Union
 
 import morecantile.models
 from pydantic import BaseModel, Field, field_validator
 
 from xpublish_tiles.types import ImageFormat
 from xpublish_tiles.validators import (
+    validate_colormap,
     validate_colorscalerange,
     validate_image_format,
     validate_style,
@@ -18,7 +19,7 @@ class MD_ReferenceSystem(BaseModel):
     """ISO 19115 MD_ReferenceSystem data structure"""
 
     code: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Alphanumeric value identifying an instance in the namespace",
@@ -26,7 +27,7 @@ class MD_ReferenceSystem(BaseModel):
         ),
     ] = None
     codeSpace: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Name or identifier of the person or organization responsible for namespace",
@@ -34,7 +35,7 @@ class MD_ReferenceSystem(BaseModel):
         ),
     ] = None
     version: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Identifier of the version of the associated codeSpace or code",
@@ -63,7 +64,7 @@ class Link(BaseModel):
         ),
     ]
     type: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "The media type of the linked resource",
@@ -71,7 +72,7 @@ class Link(BaseModel):
         ),
     ] = None
     title: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "A human-readable title for the link",
@@ -79,7 +80,7 @@ class Link(BaseModel):
         ),
     ] = None
     templated: Annotated[
-        Optional[bool],
+        bool | None,
         Field(
             json_schema_extra={
                 "description": "Whether the href is a URI template",
@@ -87,7 +88,7 @@ class Link(BaseModel):
         ),
     ] = None
     varBase: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Base URI for template variable resolution",
@@ -95,7 +96,7 @@ class Link(BaseModel):
         ),
     ] = None
     hreflang: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Language of the linked resource",
@@ -103,7 +104,7 @@ class Link(BaseModel):
         ),
     ] = None
     length: Annotated[
-        Optional[int],
+        int | None,
         Field(
             json_schema_extra={
                 "description": "Length of the linked resource in bytes",
@@ -145,7 +146,7 @@ class BoundingBox(BaseModel):
         ),
     ]
     crs: Annotated[
-        Optional[Union[morecantile.models.CRS, str]],
+        Union[morecantile.models.CRS, str] | None,
         Field(
             json_schema_extra={
                 "description": "Coordinate reference system of the bounding box",
@@ -153,7 +154,7 @@ class BoundingBox(BaseModel):
         ),
     ] = None
     orderedAxes: Annotated[
-        Optional[list[str]],
+        list[str] | None,
         Field(
             json_schema_extra={
                 "description": "Ordered list of axis names for the CRS",
@@ -235,7 +236,7 @@ class TileMatrixSet(BaseModel):
         ),
     ]
     title: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Human-readable title for this tile matrix set",
@@ -243,7 +244,7 @@ class TileMatrixSet(BaseModel):
         ),
     ] = None
     uri: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "URI identifier for this tile matrix set",
@@ -280,7 +281,7 @@ class TileMatrixSetSummary(BaseModel):
         ),
     ]
     title: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Human-readable title for this tile matrix set",
@@ -288,7 +289,7 @@ class TileMatrixSetSummary(BaseModel):
         ),
     ] = None
     uri: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "URI identifier for this tile matrix set",
@@ -361,7 +362,7 @@ class TileSetMetadata(BaseModel):
     """Metadata for a tileset applied to a specific dataset"""
 
     title: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Human-readable title for this tileset",
@@ -401,7 +402,7 @@ class TileSetMetadata(BaseModel):
         ),
     ]
     boundingBox: Annotated[
-        Optional[BoundingBox],
+        BoundingBox | None,
         Field(
             json_schema_extra={
                 "description": "Bounding box of the tileset data",
@@ -409,7 +410,7 @@ class TileSetMetadata(BaseModel):
         ),
     ] = None
     styles: Annotated[
-        Optional[list["Style"]],
+        list["Style"] | None,
         Field(
             json_schema_extra={
                 "description": "Available styles for this tileset",
@@ -475,7 +476,7 @@ class Style(BaseModel):
         ),
     ]
     title: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Human-readable title for this style",
@@ -483,7 +484,7 @@ class Style(BaseModel):
         ),
     ] = None
     description: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Brief narrative description of this style",
@@ -491,7 +492,7 @@ class Style(BaseModel):
         ),
     ] = None
     keywords: Annotated[
-        Optional[list[str]],
+        list[str] | None,
         Field(
             json_schema_extra={
                 "description": "Keywords associated with this style",
@@ -499,7 +500,7 @@ class Style(BaseModel):
         ),
     ] = None
     links: Annotated[
-        Optional[list[Link]],
+        list[Link] | None,
         Field(
             json_schema_extra={
                 "description": "Links related to this style",
@@ -512,7 +513,7 @@ class PropertySchema(BaseModel):
     """Schema definition for a property"""
 
     title: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Human-readable title for this property",
@@ -520,7 +521,7 @@ class PropertySchema(BaseModel):
         ),
     ] = None
     description: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Description of this property",
@@ -528,7 +529,7 @@ class PropertySchema(BaseModel):
         ),
     ] = None
     type: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Data type of this property",
@@ -536,7 +537,7 @@ class PropertySchema(BaseModel):
         ),
     ] = None
     enum: Annotated[
-        Optional[list[str]],
+        list[str] | None,
         Field(
             json_schema_extra={
                 "description": "List of valid enumerated values",
@@ -544,7 +545,7 @@ class PropertySchema(BaseModel):
         ),
     ] = None
     format: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Format specification for this property",
@@ -552,7 +553,7 @@ class PropertySchema(BaseModel):
         ),
     ] = None
     contentMediaType: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Media type of the property content",
@@ -560,7 +561,7 @@ class PropertySchema(BaseModel):
         ),
     ] = None
     maximum: Annotated[
-        Optional[float],
+        float | None,
         Field(
             json_schema_extra={
                 "description": "Maximum allowed value (inclusive)",
@@ -568,7 +569,7 @@ class PropertySchema(BaseModel):
         ),
     ] = None
     exclusiveMaximum: Annotated[
-        Optional[float],
+        float | None,
         Field(
             json_schema_extra={
                 "description": "Maximum allowed value (exclusive)",
@@ -576,7 +577,7 @@ class PropertySchema(BaseModel):
         ),
     ] = None
     minimum: Annotated[
-        Optional[float],
+        float | None,
         Field(
             json_schema_extra={
                 "description": "Minimum allowed value (inclusive)",
@@ -584,7 +585,7 @@ class PropertySchema(BaseModel):
         ),
     ] = None
     exclusiveMinimum: Annotated[
-        Optional[float],
+        float | None,
         Field(
             json_schema_extra={
                 "description": "Minimum allowed value (exclusive)",
@@ -592,7 +593,7 @@ class PropertySchema(BaseModel):
         ),
     ] = None
     pattern: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Regular expression pattern for validation",
@@ -600,7 +601,7 @@ class PropertySchema(BaseModel):
         ),
     ] = None
     maxItems: Annotated[
-        Optional[int],
+        int | None,
         Field(
             json_schema_extra={
                 "description": "Maximum number of items in array",
@@ -608,7 +609,7 @@ class PropertySchema(BaseModel):
         ),
     ] = None
     minItems: Annotated[
-        Optional[int],
+        int | None,
         Field(
             json_schema_extra={
                 "description": "Minimum number of items in array",
@@ -616,7 +617,7 @@ class PropertySchema(BaseModel):
         ),
     ] = None
     observedProperty: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Name of the observed property",
@@ -624,7 +625,7 @@ class PropertySchema(BaseModel):
         ),
     ] = None
     observedPropertyURI: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "URI of the observed property definition",
@@ -632,7 +633,7 @@ class PropertySchema(BaseModel):
         ),
     ] = None
     uom: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Unit of measurement",
@@ -640,7 +641,7 @@ class PropertySchema(BaseModel):
         ),
     ] = None
     uomURI: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "URI of the unit of measurement definition",
@@ -685,7 +686,7 @@ class DimensionExtent(BaseModel):
         ),
     ]
     values: Annotated[
-        Optional[list[Union[str, float, int]]],
+        list[Union[str, float, int]] | None,
         Field(
             json_schema_extra={
                 "description": "Available discrete values for this dimension",
@@ -693,7 +694,7 @@ class DimensionExtent(BaseModel):
         ),
     ] = None
     units: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Units of measurement for this dimension",
@@ -701,7 +702,7 @@ class DimensionExtent(BaseModel):
         ),
     ] = None
     description: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Description of this dimension",
@@ -709,7 +710,7 @@ class DimensionExtent(BaseModel):
         ),
     ] = None
     default: Annotated[
-        Optional[Union[str, float, int]],
+        Union[str, float, int] | None,
         Field(
             json_schema_extra={
                 "description": "Default value for this dimension",
@@ -730,7 +731,7 @@ class Layer(BaseModel):
         ),
     ]
     title: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Human-readable title for this layer",
@@ -738,7 +739,7 @@ class Layer(BaseModel):
         ),
     ] = None
     description: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Brief narrative description of this layer",
@@ -746,7 +747,7 @@ class Layer(BaseModel):
         ),
     ] = None
     keywords: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Keywords associated with this layer",
@@ -754,7 +755,7 @@ class Layer(BaseModel):
         ),
     ] = None
     dataType: Annotated[
-        Optional[Union[DataType, str]],
+        Union[DataType, str] | None,
         Field(
             json_schema_extra={
                 "description": "Type of data in this layer (map, vector, coverage)",
@@ -762,7 +763,7 @@ class Layer(BaseModel):
         ),
     ] = None
     geometryDimension: Annotated[
-        Optional[int],
+        int | None,
         Field(
             json_schema_extra={
                 "description": "Dimension of the geometry (0=point, 1=line, 2=polygon, 3=volume)",
@@ -770,7 +771,7 @@ class Layer(BaseModel):
         ),
     ] = None
     featureType: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Type of features in this layer",
@@ -778,7 +779,7 @@ class Layer(BaseModel):
         ),
     ] = None
     attribution: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Attribution text for this layer",
@@ -786,7 +787,7 @@ class Layer(BaseModel):
         ),
     ] = None
     license: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "License information for this layer",
@@ -794,7 +795,7 @@ class Layer(BaseModel):
         ),
     ] = None
     pointOfContact: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Contact information for this layer",
@@ -802,7 +803,7 @@ class Layer(BaseModel):
         ),
     ] = None
     publisher: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Publisher of this layer",
@@ -810,7 +811,7 @@ class Layer(BaseModel):
         ),
     ] = None
     theme: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Theme or category of this layer",
@@ -826,7 +827,7 @@ class Layer(BaseModel):
         ),
     ]
     epoch: Annotated[
-        Optional[float],
+        float | None,
         Field(
             json_schema_extra={
                 "description": "Epoch for coordinate reference system",
@@ -834,7 +835,7 @@ class Layer(BaseModel):
         ),
     ] = None
     minScaleDenominator: Annotated[
-        Optional[float],
+        float | None,
         Field(
             json_schema_extra={
                 "description": "Minimum scale denominator for this layer",
@@ -842,7 +843,7 @@ class Layer(BaseModel):
         ),
     ] = None
     maxScaleDenominator: Annotated[
-        Optional[float],
+        float | None,
         Field(
             json_schema_extra={
                 "description": "Maximum scale denominator for this layer",
@@ -850,7 +851,7 @@ class Layer(BaseModel):
         ),
     ] = None
     minCellSize: Annotated[
-        Optional[float],
+        float | None,
         Field(
             json_schema_extra={
                 "description": "Minimum cell size for this layer",
@@ -858,7 +859,7 @@ class Layer(BaseModel):
         ),
     ] = None
     maxCellSize: Annotated[
-        Optional[float],
+        float | None,
         Field(
             json_schema_extra={
                 "description": "Maximum cell size for this layer",
@@ -866,7 +867,7 @@ class Layer(BaseModel):
         ),
     ] = None
     maxTileMatrix: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Maximum tile matrix identifier for this layer",
@@ -874,7 +875,7 @@ class Layer(BaseModel):
         ),
     ] = None
     minTileMatrix: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Minimum tile matrix identifier for this layer",
@@ -882,7 +883,7 @@ class Layer(BaseModel):
         ),
     ] = None
     boundingBox: Annotated[
-        Optional[BoundingBox],
+        BoundingBox | None,
         Field(
             json_schema_extra={
                 "description": "Bounding box of this layer",
@@ -890,7 +891,7 @@ class Layer(BaseModel):
         ),
     ] = None
     created: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Creation date of this layer",
@@ -898,7 +899,7 @@ class Layer(BaseModel):
         ),
     ] = None
     updated: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Last update date of this layer",
@@ -906,7 +907,7 @@ class Layer(BaseModel):
         ),
     ] = None
     style: Annotated[
-        Optional[Style],
+        Style | None,
         Field(
             json_schema_extra={
                 "description": "Default style for this layer",
@@ -914,7 +915,7 @@ class Layer(BaseModel):
         ),
     ] = None
     geoDataClasses: Annotated[
-        Optional[list[str]],
+        list[str] | None,
         Field(
             json_schema_extra={
                 "description": "Geographic data classes for this layer",
@@ -922,7 +923,7 @@ class Layer(BaseModel):
         ),
     ] = None
     propertiesSchema: Annotated[
-        Optional[dict[str, PropertySchema]],
+        dict[str, PropertySchema] | None,
         Field(
             json_schema_extra={
                 "description": "Schema definitions for layer properties",
@@ -930,7 +931,7 @@ class Layer(BaseModel):
         ),
     ] = None
     dimensions: Annotated[
-        Optional[list[DimensionExtent]],
+        list[DimensionExtent] | None,
         Field(
             json_schema_extra={
                 "description": "Available dimensions for this layer",
@@ -938,7 +939,7 @@ class Layer(BaseModel):
         ),
     ] = None
     links: Annotated[
-        Optional[list[Link]],
+        list[Link] | None,
         Field(
             json_schema_extra={
                 "description": "Links related to this layer",
@@ -946,7 +947,7 @@ class Layer(BaseModel):
         ),
     ] = None
     extents: Annotated[
-        Optional[dict[str, dict[str, Any]]],
+        dict[str, dict[str, Any]] | None,
         Field(
             json_schema_extra={
                 "description": "Extents for additional dimensions (temporal, elevation, etc.)",
@@ -967,7 +968,7 @@ class CenterPoint(BaseModel):
         ),
     ]
     crs: Annotated[
-        Optional[Union[str, morecantile.models.CRS]],
+        Union[str, morecantile.models.CRS] | None,
         Field(
             json_schema_extra={
                 "description": "Coordinate reference system for the center point",
@@ -975,7 +976,7 @@ class CenterPoint(BaseModel):
         ),
     ] = None
     tileMatrix: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Tile matrix identifier for the center point",
@@ -983,7 +984,7 @@ class CenterPoint(BaseModel):
         ),
     ] = None
     scaleDenominator: Annotated[
-        Optional[float],
+        float | None,
         Field(
             json_schema_extra={
                 "description": "Scale denominator at the center point",
@@ -991,7 +992,7 @@ class CenterPoint(BaseModel):
         ),
     ] = None
     cellSize: Annotated[
-        Optional[float],
+        float | None,
         Field(
             json_schema_extra={
                 "description": "Cell size at the center point",
@@ -1004,7 +1005,7 @@ class TilesetSummary(BaseModel):
     """Summary of a tileset in a tilesets list"""
 
     title: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Human-readable title for this tileset",
@@ -1012,7 +1013,7 @@ class TilesetSummary(BaseModel):
         ),
     ] = None
     description: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Brief narrative description of this tileset",
@@ -1036,7 +1037,7 @@ class TilesetSummary(BaseModel):
         ),
     ]
     tileMatrixSetURI: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "URI of the tile matrix set used by this tileset",
@@ -1052,7 +1053,7 @@ class TilesetSummary(BaseModel):
         ),
     ]
     tileMatrixSetLimits: Annotated[
-        Optional[list[TileMatrixSetLimit]],
+        list[TileMatrixSetLimit] | None,
         Field(
             json_schema_extra={
                 "description": "Limits for tile matrices in this tileset",
@@ -1060,7 +1061,7 @@ class TilesetSummary(BaseModel):
         ),
     ] = None
     epoch: Annotated[
-        Optional[float],
+        float | None,
         Field(
             json_schema_extra={
                 "description": "Epoch for coordinate reference system",
@@ -1068,7 +1069,7 @@ class TilesetSummary(BaseModel):
         ),
     ] = None
     layers: Annotated[
-        Optional[list[Layer]],
+        list[Layer] | None,
         Field(
             json_schema_extra={
                 "description": "Layers contained in this tileset",
@@ -1076,7 +1077,7 @@ class TilesetSummary(BaseModel):
         ),
     ] = None
     boundingBox: Annotated[
-        Optional[BoundingBox],
+        BoundingBox | None,
         Field(
             json_schema_extra={
                 "description": "Bounding box of the tileset data",
@@ -1084,7 +1085,7 @@ class TilesetSummary(BaseModel):
         ),
     ] = None
     centerPoint: Annotated[
-        Optional[CenterPoint],
+        CenterPoint | None,
         Field(
             json_schema_extra={
                 "description": "Center point of the tileset",
@@ -1092,7 +1093,7 @@ class TilesetSummary(BaseModel):
         ),
     ] = None
     style: Annotated[
-        Optional[Style],
+        Style | None,
         Field(
             json_schema_extra={
                 "description": "Default style for this tileset",
@@ -1100,7 +1101,7 @@ class TilesetSummary(BaseModel):
         ),
     ] = None
     attribution: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Attribution text for this tileset",
@@ -1108,7 +1109,7 @@ class TilesetSummary(BaseModel):
         ),
     ] = None
     license: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "License information for this tileset",
@@ -1116,7 +1117,7 @@ class TilesetSummary(BaseModel):
         ),
     ] = None
     accessConstraints: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Access constraints for this tileset",
@@ -1124,7 +1125,7 @@ class TilesetSummary(BaseModel):
         ),
     ] = None
     keywords: Annotated[
-        Optional[list[str]],
+        list[str] | None,
         Field(
             json_schema_extra={
                 "description": "Keywords associated with this tileset",
@@ -1132,7 +1133,7 @@ class TilesetSummary(BaseModel):
         ),
     ] = None
     version: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Version of this tileset",
@@ -1140,7 +1141,7 @@ class TilesetSummary(BaseModel):
         ),
     ] = None
     created: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Creation date of this tileset",
@@ -1148,7 +1149,7 @@ class TilesetSummary(BaseModel):
         ),
     ] = None
     updated: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Last update date of this tileset",
@@ -1156,7 +1157,7 @@ class TilesetSummary(BaseModel):
         ),
     ] = None
     pointOfContact: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Contact information for this tileset",
@@ -1164,7 +1165,7 @@ class TilesetSummary(BaseModel):
         ),
     ] = None
     mediaTypes: Annotated[
-        Optional[list[str]],
+        list[str] | None,
         Field(
             json_schema_extra={
                 "description": "Supported media types for this tileset",
@@ -1172,7 +1173,7 @@ class TilesetSummary(BaseModel):
         ),
     ] = None
     styles: Annotated[
-        Optional[list["Style"]],
+        list["Style"] | None,
         Field(
             json_schema_extra={
                 "description": "Available styles for this tileset",
@@ -1193,7 +1194,7 @@ class TilesetsList(BaseModel):
         ),
     ]
     links: Annotated[
-        Optional[list[Link]],
+        list[Link] | None,
         Field(
             json_schema_extra={
                 "description": "Links related to this tilesets collection",
@@ -1214,7 +1215,7 @@ class TilesLandingPage(BaseModel):
         ),
     ]
     description: Annotated[
-        Optional[str],
+        str | None,
         Field(
             json_schema_extra={
                 "description": "Description of the tiles service",
@@ -1250,7 +1251,7 @@ class TileQuery(BaseModel):
         ),
     ]
     style: Annotated[
-        Optional[tuple[str, str]],
+        tuple[str, str] | None,
         Field(
             default="raster/default",
             json_schema_extra={
@@ -1296,6 +1297,15 @@ class TileQuery(BaseModel):
             },
         ),
     ]
+    colormap: Annotated[
+        dict[str, str] | None,
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "Custom colormap as JSON-encoded dictionary with numeric keys (0-255) and hex color values (#RRGGBB). When provided, overrides any colormap from the style parameter.",
+            },
+        ),
+    ]
 
     @field_validator("style", mode="before")
     @classmethod
@@ -1322,6 +1332,16 @@ class TileQuery(BaseModel):
             raise ValueError("At least one variable must be specified")
         return v
 
+    @field_validator("colormap", mode="before")
+    @classmethod
+    def validate_colormap(cls, v: str | dict | None) -> dict[str, str] | None:
+        return validate_colormap(v)
+
+    def model_post_init(self, __context) -> None:
+        """Validate colormap usage constraints."""
+        # Colormap is allowed with any style - colormap will override the style's colormap
+        pass
+
 
 class TileJSON(BaseModel):
     """TileJSON 3.0.0 specification model"""
@@ -1344,7 +1364,7 @@ class TileJSON(BaseModel):
         ),
     ]
     vector_layers: Annotated[
-        Optional[list[dict[str, Any]]],
+        list[dict[str, Any]] | None,
         Field(
             default=None,
             json_schema_extra={
@@ -1353,7 +1373,7 @@ class TileJSON(BaseModel):
         ),
     ] = None
     attribution: Annotated[
-        Optional[str],
+        str | None,
         Field(
             default=None,
             json_schema_extra={
@@ -1362,7 +1382,7 @@ class TileJSON(BaseModel):
         ),
     ] = None
     bounds: Annotated[
-        Optional[list[float]],
+        list[float] | None,
         Field(
             default=None,
             json_schema_extra={
@@ -1371,7 +1391,7 @@ class TileJSON(BaseModel):
         ),
     ] = None
     center: Annotated[
-        Optional[list[float]],
+        list[float] | None,
         Field(
             default=None,
             json_schema_extra={
@@ -1380,7 +1400,7 @@ class TileJSON(BaseModel):
         ),
     ] = None
     data: Annotated[
-        Optional[list[str]],
+        list[str] | None,
         Field(
             default=None,
             json_schema_extra={
@@ -1389,7 +1409,7 @@ class TileJSON(BaseModel):
         ),
     ] = None
     description: Annotated[
-        Optional[str],
+        str | None,
         Field(
             default=None,
             json_schema_extra={
@@ -1398,7 +1418,7 @@ class TileJSON(BaseModel):
         ),
     ] = None
     fillzoom: Annotated[
-        Optional[int],
+        int | None,
         Field(
             default=None,
             ge=0,
@@ -1409,7 +1429,7 @@ class TileJSON(BaseModel):
         ),
     ] = None
     grids: Annotated[
-        Optional[list[str]],
+        list[str] | None,
         Field(
             default=None,
             json_schema_extra={
@@ -1418,7 +1438,7 @@ class TileJSON(BaseModel):
         ),
     ] = None
     legend: Annotated[
-        Optional[str],
+        str | None,
         Field(
             default=None,
             json_schema_extra={
@@ -1427,7 +1447,7 @@ class TileJSON(BaseModel):
         ),
     ] = None
     maxzoom: Annotated[
-        Optional[int],
+        int | None,
         Field(
             default=None,
             ge=0,
@@ -1438,7 +1458,7 @@ class TileJSON(BaseModel):
         ),
     ] = None
     minzoom: Annotated[
-        Optional[int],
+        int | None,
         Field(
             default=None,
             ge=0,
@@ -1449,7 +1469,7 @@ class TileJSON(BaseModel):
         ),
     ] = None
     name: Annotated[
-        Optional[str],
+        str | None,
         Field(
             default=None,
             json_schema_extra={
@@ -1458,7 +1478,7 @@ class TileJSON(BaseModel):
         ),
     ] = None
     scheme: Annotated[
-        Optional[str],
+        str | None,
         Field(
             default="xyz",
             json_schema_extra={
@@ -1467,7 +1487,7 @@ class TileJSON(BaseModel):
         ),
     ] = None
     template: Annotated[
-        Optional[str],
+        str | None,
         Field(
             default=None,
             json_schema_extra={
@@ -1476,7 +1496,7 @@ class TileJSON(BaseModel):
         ),
     ] = None
     version: Annotated[
-        Optional[str],
+        str | None,
         Field(
             default=None,
             json_schema_extra={
@@ -1493,4 +1513,6 @@ TILES_FILTERED_QUERY_PARAMS: list[str] = [
     "variables",
     "width",
     "height",
+    "colormap",
+    "render_errors",
 ]

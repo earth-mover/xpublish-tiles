@@ -25,6 +25,8 @@ from xpublish_tiles.grids import (
     LongitudeCellIndex,
     RasterAffine,
     Rectilinear,
+    Triangular,
+    UgridIndexer,
     guess_grid_system,
 )
 from xpublish_tiles.lib import _prevent_slice_overlap, transformer_from_crs
@@ -41,6 +43,7 @@ from xpublish_tiles.testing.datasets import (
     IFS,
     PARA_HIRES,
     POPDS,
+    REDGAUSS_N320,
     UTM33S_HIRES,
     UTM50S_HIRES,
     Dataset,
@@ -48,6 +51,8 @@ from xpublish_tiles.testing.datasets import (
 from xpublish_tiles.testing.tiles import TILES
 from xpublish_tiles.tiles_lib import get_max_zoom, get_min_zoom
 from xpublish_tiles.types import ContinuousData
+
+TRIANGULAR_SENTINEL = 1
 
 
 @pytest.mark.parametrize(
@@ -257,11 +262,26 @@ from xpublish_tiles.types import ContinuousData
             ),
             id="eu3035",
         ),
+        pytest.param(
+            REDGAUSS_N320.create(),
+            "foo",
+            TRIANGULAR_SENTINEL,
+            id="redgauss_n320",
+        ),
     ],
 )
 def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> None:
     actual = guess_grid_system(ds, array_name)
-    assert expected == actual
+    if expected is TRIANGULAR_SENTINEL:
+        # too hard to construct for a test
+        assert isinstance(actual, Triangular)
+        assert actual.dim == "point"
+        assert actual.bbox == BBox(west=-180, east=180, south=-89.784877, north=89.784877)
+        assert actual.crs == CRS.from_epsg(4326)
+        assert actual.lon_spans_globe
+        assert len(actual.indexes) == 1
+    else:
+        assert expected == actual
 
 
 @pytest.mark.parametrize(
@@ -269,6 +289,7 @@ def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> Non
     (
         pytest.param(IFS, 0, 3, id="ifs"),
         pytest.param(HRRR, 0, 6, id="hrrr"),
+        pytest.param(REDGAUSS_N320, 0, 24, id="redgauss_n320"),
         # data spacing: 120m; Zoom level 10: 152m spacing @ eq
         pytest.param(EU3035_HIRES, 4, 10, id="eu3035_hires"),
         # data spacing: 30m; Zoom level 13: 38m spacing @ eq
@@ -333,10 +354,16 @@ async def test_subset(global_datasets, tile, tms):
         west=geo_bounds[0], south=geo_bounds[1], east=geo_bounds[2], north=geo_bounds[3]
     )
 
-    slicers = grid.sel(ds.foo, bbox=bbox_geo)
-    assert isinstance(slicers["latitude"], list)
-    assert isinstance(slicers["longitude"], list)
-    assert len(slicers["latitude"]) == 1  # Y dimension should always have one slice
+    slicers = grid.sel(bbox=bbox_geo)
+    if isinstance(grid, Triangular):
+        assert isinstance(slicers["point"], list)
+        assert len(slicers["point"]) == 1
+        slicer = next(iter(slicers["point"]))
+        assert isinstance(slicer, UgridIndexer)
+    else:
+        assert isinstance(slicers["latitude"], list)
+        assert isinstance(slicers["longitude"], list)
+        assert len(slicers["latitude"]) == 1  # Y dimension should always have one slice
 
     # Check that coordinates are within expected bounds (exact matching with controlled grid)
     actual = await apply_slicers(
@@ -344,7 +371,6 @@ async def test_subset(global_datasets, tile, tms):
         grid=grid,
         alternate=grid.to_metadata(),
         slicers=slicers,
-        coarsen_factors={},
         datatype=ContinuousData(valid_min=0, valid_max=1),
     )
     lat_min, lat_max = actual.latitude.min().item(), actual.latitude.max().item()
@@ -785,9 +811,9 @@ class TestGridZoomMethods:
         tms = morecantile.tms.get(tms_id)
         min_zoom = get_min_zoom(grid, tms, ds["temp"])
         max_zoom = get_max_zoom(grid, tms)
-        assert (
-            min_zoom <= max_zoom
-        ), f"min_zoom ({min_zoom}) > max_zoom ({max_zoom}) for TMS {tms_id}"
+        assert min_zoom <= max_zoom, (
+            f"min_zoom ({min_zoom}) > max_zoom ({max_zoom}) for TMS {tms_id}"
+        )
 
     @pytest.mark.parametrize(
         "tms_id", ["WebMercatorQuad", "WGS1984Quad", "WorldCRS84Quad"]
@@ -803,13 +829,13 @@ class TestGridZoomMethods:
         """
         tms = morecantile.tms.get(tms_id)
         target_zoom = data.draw(st.integers(min_value=tms.minzoom, max_value=tms.maxzoom))
-        da, grid = _create_test_dataset(
+        _, grid = _create_test_dataset(
             grid_type, tms, target_zoom=target_zoom, array_size=100
         )
         calculated_zoom = get_max_zoom(grid, tms)
-        assert (
-            calculated_zoom == target_zoom
-        ), f"Expected {target_zoom}, got {calculated_zoom} for {tms_id} {grid_type}"
+        assert calculated_zoom == target_zoom, (
+            f"Expected {target_zoom}, got {calculated_zoom} for {tms_id} {grid_type}"
+        )
 
     @pytest.mark.parametrize(
         "tms_id", ["WebMercatorQuad", "WGS1984Quad", "WorldCRS84Quad"]
@@ -840,6 +866,6 @@ class TestGridZoomMethods:
         with config.set({"max_renderable_size": (pixels_per_tile - 1) ** 2}):
             actual = get_min_zoom(grid, tms, da)
         expected = target_zoom + 1
-        assert (
-            expected == actual
-        ), f"Expected {expected}, got {actual} for {tms_id} {grid_type} at zoom {target_zoom}"
+        assert expected == actual, (
+            f"Expected {expected}, got {actual} for {tms_id} {grid_type} at zoom {target_zoom}"
+        )

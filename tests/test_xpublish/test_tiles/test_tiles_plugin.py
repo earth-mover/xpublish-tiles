@@ -1,4 +1,5 @@
 import io
+import json
 
 import numpy as np
 import pandas as pd
@@ -503,11 +504,13 @@ def test_no_bbox_overlap_transparent_png():
 
 def test_para_hires_zoom_level_2_size_limit():
     """Test that requesting zoom level 2 for PARA_HIRES dataset triggers size limit error"""
-    rest = xpublish.Rest({"para": PARA_HIRES.create()}, plugins={"tiles": TilesPlugin()})
+    rest = xpublish.Rest(
+        {"para_hires": PARA_HIRES.create()}, plugins={"tiles": TilesPlugin()}
+    )
     client = TestClient(rest.app)
 
     response = client.get(
-        "/datasets/para/tiles/WebMercatorQuad/2/1/1"
+        "/datasets/para_hires/tiles/WebMercatorQuad/2/1/1"
         "?variables=foo&style=raster/viridis&width=256&height=256"
     )
     assert response.status_code == 413
@@ -567,10 +570,10 @@ def test_tilejson_endpoint():
     rest = xpublish.Rest({"temp": data}, plugins={"tiles": TilesPlugin()})
     client = TestClient(rest.app)
 
-    # Test TileJSON endpoint with dimension selectors
+    # Test TileJSON endpoint with dimension selectors and colormap
     response = client.get(
         "/datasets/temp/tiles/WebMercatorQuad/tilejson.json"
-        "?variables=temperature&style=raster/plasma&width=512&height=512&time=2020-02-01&colorscalerange=-3,3"
+        "?variables=temperature&style=raster/plasma&width=512&height=512&time=2020-02-01&colorscalerange=-3,3&colormap=%7B%221%22%3A%22%23f0f0f0%22%7D"
     )
     assert response.status_code == 200
 
@@ -594,6 +597,9 @@ def test_tilejson_endpoint():
     assert "time=2020-02-01" in tile_url  # Dimension selector preserved
     assert "colorscalerange=-3,3" in tile_url  # Additional param preserved
     assert "render_errors=false" in tile_url  # Default param included
+    assert (
+        "colormap=%7B%221%22%3A%20%22%23f0f0f0%22%7D" in tile_url
+    )  # Additional param preserved
 
     # Check optional fields
     assert tilejson["scheme"] == "xyz"
@@ -761,3 +767,49 @@ def test_tilejson_bounds_with_decreasing_lat_lon():
     bounds = tj.get("bounds")
     if bounds is not None:
         assert bounds == [-180.0, -90.0, 180.0, 90.0]
+
+
+def test_colormap_tile_endpoint(xpublish_client):
+    """Test that tiles can be generated with custom colormap."""
+    from urllib.parse import quote
+
+    colormap = {"0": "#ff0000", "255": "#0000ff"}  # Red to blue
+    colormap_json = json.dumps(colormap)
+    colormap_encoded = quote(colormap_json)
+
+    # Note: We don't specify style parameter, letting it use default behavior with colormap
+    url = (
+        f"/datasets/air/tiles/WebMercatorQuad/0/0/0"
+        f"?variables=air&width=256&height=256&colormap={colormap_encoded}"
+    )
+    response = xpublish_client.get(url)
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+
+    # Verify it's a valid PNG image
+    image_data = io.BytesIO(response.content)
+    img = Image.open(image_data)
+    assert img.format == "PNG"
+    assert img.size == (256, 256)
+
+
+def test_colormap_with_style_parameter_succeeds(xpublish_client):
+    """Test that specifying both colormap and style works - colormap overrides style."""
+    from urllib.parse import quote
+
+    colormap = {"0": "#ff0000", "255": "#0000ff"}
+    colormap_json = json.dumps(colormap)
+    colormap_encoded = quote(colormap_json)
+
+    response = xpublish_client.get(
+        f"/datasets/air/tiles/WebMercatorQuad/0/0/0"
+        f"?variables=air&width=256&height=256&colormap={colormap_encoded}&style=raster/viridis"
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+
+    # Verify it's a valid PNG image
+    image_data = io.BytesIO(response.content)
+    img = Image.open(image_data)
+    assert img.format == "PNG"
+    assert img.size == (256, 256)
