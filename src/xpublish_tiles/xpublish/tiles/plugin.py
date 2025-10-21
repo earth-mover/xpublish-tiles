@@ -16,7 +16,7 @@ from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import Dataset
 from xpublish_tiles.grids import guess_grid_system
-from xpublish_tiles.lib import TileTooBigError
+from xpublish_tiles.lib import IndexingError, TileTooBigError, VariableNotFoundError
 from xpublish_tiles.logger import (
     CleanConsoleRenderer,
     LogAccumulator,
@@ -446,10 +446,14 @@ class TilesPlugin(Plugin):
                     status_code = 413
                     detail = f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} request too big. Please choose a higher zoom level."
                     bound_logger.error("TileTooBigError", message=detail)
-                except KeyError as ke:
-                    bound_logger.error("KeyError", error=str(ke))
+                except VariableNotFoundError as e:
+                    bound_logger.error("VariableNotFoundError", error=str(e))
                     status_code = 422
                     detail = f"Invalid variable name(s): {query.variables!r}."
+                except IndexingError as e:
+                    bound_logger.error("IndexingError", error=str(e))
+                    status_code = 422
+                    detail = f"Invalid indexer: {selectors!r}."
                 except Exception as e:
                     status_code = 500
                     bound_logger.error("Exception", error=str(e))
