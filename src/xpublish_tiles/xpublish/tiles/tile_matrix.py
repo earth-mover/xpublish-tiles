@@ -14,7 +14,6 @@ import pyproj.aoi
 import xarray as xr
 from xpublish_tiles.grids import (
     Curvilinear,
-    GridSystem2D,
     RasterAffine,
     Rectilinear,
     guess_grid_system,
@@ -184,13 +183,13 @@ def get_tile_matrix_limits(
         List of TileMatrixSetLimit objects
     """
     for name, var in dataset.data_vars.items():
-        if var.ndim >= 2:
+        if var.ndim >= 1:
             first_data_var = name
             break
     else:
-        raise ValueError("Could not find a DataArray with at least two dimensions.")
+        raise ValueError("Could not find a DataArray with at least one dimension.")
 
-    grid = cast(GridSystem2D, guess_grid_system(dataset, first_data_var))
+    grid = guess_grid_system(dataset, first_data_var)
     tms = morecantile.tms.get(tms_id)
 
     if zoom_levels is None:

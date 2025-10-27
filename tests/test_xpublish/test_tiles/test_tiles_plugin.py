@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import xarray as xr
-from xpublish_tiles.testing.datasets import EU3035, PARA_HIRES
+from xpublish_tiles.testing.datasets import EU3035, PARA_HIRES, REDGAUSS_N320
 from xpublish_tiles.xpublish.tiles import TilesPlugin
 from xpublish_tiles.xpublish.tiles.tile_matrix import extract_dimension_extents
 
@@ -180,6 +180,25 @@ def test_tilesets_list_with_metadata():
 
     metadata = metadata_response.json()
     assert "extents" not in metadata
+
+
+def test_one_dimensional_dataset():
+    rest = xpublish.Rest(
+        {"n320": REDGAUSS_N320.create().isel(point=slice(2000))},
+        plugins={"tiles": TilesPlugin()},
+    )
+    client = TestClient(rest.app)
+
+    response = client.get("/datasets/n320/tiles/")
+    assert response.status_code == 200
+    response_data = response.json()
+
+    response = client.get(
+        "/datasets/n320/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=foo&style=raster/plasma&width=512&height=512&colorscalerange=-3,3&colormap=%7B%221%22%3A%22%23f0f0f0%22%7D"
+    )
+    assert response.status_code == 200
+    response_data = response.json()
 
 
 def test_multi_dimensional_dataset():
