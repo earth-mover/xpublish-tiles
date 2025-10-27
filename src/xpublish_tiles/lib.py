@@ -78,6 +78,18 @@ class TileTooBigError(Exception):
     pass
 
 
+class VariableNotFoundError(Exception):
+    """Raised when the user-requested variable cannot be found."""
+
+    pass
+
+
+class IndexingError(Exception):
+    """Raised when an invalid coordinate is passed for selection."""
+
+    pass
+
+
 THREAD_POOL_NUM_THREADS = config.get("num_threads")
 logger.info("setting up thread pool with num threads: %s", THREAD_POOL_NUM_THREADS)
 EXECUTOR = ThreadPoolExecutor(

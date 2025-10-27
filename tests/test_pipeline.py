@@ -19,6 +19,7 @@ from src.xpublish_tiles.render.raster import nearest_on_uniform_grid_quadmesh
 from tests import create_query_params
 from xarray.testing import assert_equal
 from xpublish_tiles import config
+from xpublish_tiles.lib import IndexingError, VariableNotFoundError
 from xpublish_tiles.pipeline import (
     apply_query,
     bbox_overlap,
@@ -252,6 +253,16 @@ async def test_global_nans_data(tile, tms, png_snapshot, pytestconfig):
     content = result.read()
     assert len(content) > 0
     assert content == png_snapshot
+
+
+def test_apply_query_errors():
+    ds = FORECAST.copy(deep=True)
+    ds["foo2"] = ds["sst"] * 2
+
+    with pytest.raises(VariableNotFoundError):
+        apply_query(ds, variables=["foooooooo"], selectors={})
+    with pytest.raises(IndexingError):
+        apply_query(ds, variables=["sst"], selectors={"L": 123123123})
 
 
 def test_apply_query_selectors():
