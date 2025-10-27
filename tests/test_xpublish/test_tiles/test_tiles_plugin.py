@@ -54,9 +54,13 @@ def test_tilesets_list_endpoint(xpublish_client):
     limit = tileset["tileMatrixSetLimits"][0]
     assert "tileMatrix" in limit
     assert "minTileRow" in limit
+    assert limit["minTileRow"] == 0
     assert "maxTileRow" in limit
+    assert limit["maxTileRow"] == 359
     assert "minTileCol" in limit
+    assert limit["minTileCol"] == 0
     assert "maxTileCol" in limit
+    assert limit["maxTileCol"] == 179
 
     # Check layers if present
     if tileset.get("layers"):
@@ -198,7 +202,11 @@ def test_one_dimensional_dataset():
         "?variables=foo&style=raster/plasma&width=512&height=512&colorscalerange=-3,3&colormap=%7B%221%22%3A%22%23f0f0f0%22%7D"
     )
     assert response.status_code == 200
-    response_data = response.json()
+    tilejson = response.json()
+
+    # Zoom levels should be valid
+    assert tilejson["minzoom"] == 0
+    assert tilejson["maxzoom"] == 24
 
 
 def test_multi_dimensional_dataset():
