@@ -20,8 +20,10 @@ from xpublish_tiles.grids import (
 )
 from xpublish_tiles.lib import (
     Fill,
+    IndexingError,
     PadDimension,
     TileTooBigError,
+    VariableNotFoundError,
     async_run,
     pad_slicers,
     transform_coordinates,
@@ -716,8 +718,15 @@ def apply_query(
                         expected_type=ds[name].dtype,
                     )
                     raise e
-        ds = ds.cf.sel(**selectors)
+        try:
+            ds = ds.cf.sel(**selectors)
+        except KeyError as e:
+            raise IndexingError(str(e))  # noqa: B904
+
     for name in variables:
+        if name not in ds:
+            raise VariableNotFoundError(f"Variable {name!r} not found in dataset.")
+
         grid = guess_grid_system(ds, name)
         array = ds[name]
         if grid.Z in array.dims:
