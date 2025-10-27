@@ -166,8 +166,8 @@ class TilesPlugin(Plugin):
 
             layer_extents = {}
             for var_name in dataset.data_vars.keys():
-                # Skip variables with less than 2 dimensions
-                if dataset[var_name].ndim < 2:
+                # Skip scalar variables
+                if dataset[var_name].ndim == 0:
                     continue
                 extents = extract_dataset_extents(dataset, var_name)
                 layer_extents[var_name] = extents
@@ -182,8 +182,8 @@ class TilesPlugin(Plugin):
                     # Create layers for each data variable
                     layers = []
                     for var_name, var_data in dataset.data_vars.items():
-                        # Skip variables with less than 2 dimensions
-                        if var_data.ndim < 2:
+                        # Skip scalar variables
+                        if var_data.ndim == 0:
                             continue
                         extents = layer_extents[var_name]
 

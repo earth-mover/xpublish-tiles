@@ -196,6 +196,9 @@ def test_one_dimensional_dataset():
     response = client.get("/datasets/n320/tiles/")
     assert response.status_code == 200
     response_data = response.json()
+    tileset = next(iter(response_data["tilesets"]))
+    assert "layers" in tileset
+    assert len(tileset["layers"]) == 1
 
     response = client.get(
         "/datasets/n320/tiles/WebMercatorQuad/tilejson.json"
