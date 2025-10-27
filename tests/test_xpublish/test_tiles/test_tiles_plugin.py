@@ -649,7 +649,7 @@ def test_tilejson_endpoint():
     if tilejson["minzoom"] is not None:
         assert 0 <= tilejson["minzoom"] <= 30
     if tilejson["maxzoom"] is not None:
-        assert 0 <= tilejson["maxzoom"] <= 30
+        assert tilejson["maxzoom"] == 24
         if tilejson["minzoom"] is not None:
             assert tilejson["minzoom"] <= tilejson["maxzoom"]
 
