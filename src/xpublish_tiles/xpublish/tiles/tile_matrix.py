@@ -12,14 +12,8 @@ import pyproj
 import pyproj.aoi
 
 import xarray as xr
-from xpublish_tiles.grids import (
-    Curvilinear,
-    GridSystem2D,
-    RasterAffine,
-    Rectilinear,
-    guess_grid_system,
-)
-from xpublish_tiles.tiles_lib import get_max_zoom, get_min_zoom
+from xpublish_tiles.grids import guess_grid_system
+from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import OutputBBox, OutputCRS
 from xpublish_tiles.xpublish.tiles.types import (
     DimensionExtent,
@@ -184,13 +178,12 @@ def get_tile_matrix_limits(
         List of TileMatrixSetLimit objects
     """
     first_data_var = next(iter(dataset.data_vars))
-    grid = cast(GridSystem2D, guess_grid_system(dataset, first_data_var))
+    grid = guess_grid_system(dataset, first_data_var)
     tms = morecantile.tms.get(tms_id)
 
     if zoom_levels is None:
         min_zoom = get_min_zoom(grid, tms, dataset[first_data_var])
-        max_zoom = get_max_zoom(grid, tms)
-        zoom_levels = range(min_zoom, max_zoom + 1)
+        zoom_levels = range(min_zoom, tms.maxzoom)
 
     transformer = pyproj.Transformer.from_crs(
         grid.crs, pyproj.CRS.from_wkt(tms.crs.to_wkt()), always_xy=True
@@ -248,7 +241,7 @@ def extract_dimension_extents(
     """
     dimensions = []
 
-    grid = cast(RasterAffine | Rectilinear | Curvilinear, guess_grid_system(ds, name))
+    grid = guess_grid_system(ds, name)
     data_array = ds[name]
 
     # Get CF axes information
