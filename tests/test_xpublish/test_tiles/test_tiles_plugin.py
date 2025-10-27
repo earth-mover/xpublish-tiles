@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import xarray as xr
-from xpublish_tiles.testing.datasets import EU3035, PARA_HIRES
+from xpublish_tiles.testing.datasets import EU3035, PARA_HIRES, REDGAUSS_N320
 from xpublish_tiles.xpublish.tiles import TilesPlugin
 from xpublish_tiles.xpublish.tiles.tile_matrix import extract_dimension_extents
 
@@ -54,9 +54,13 @@ def test_tilesets_list_endpoint(xpublish_client):
     limit = tileset["tileMatrixSetLimits"][0]
     assert "tileMatrix" in limit
     assert "minTileRow" in limit
+    assert limit["minTileRow"] == 0
     assert "maxTileRow" in limit
+    assert limit["maxTileRow"] == 359
     assert "minTileCol" in limit
+    assert limit["minTileCol"] == 0
     assert "maxTileCol" in limit
+    assert limit["maxTileCol"] == 179
 
     # Check layers if present
     if tileset.get("layers"):
@@ -75,6 +79,7 @@ def test_tilesets_list_with_metadata():
 
     data = xr.Dataset(
         {
+            "scalar": ((), 0, {"foo": "bar"}),
             "temperature": xr.DataArray(
                 np.random.randn(12, 90, 180),
                 dims=["time", "lat", "lon"],
@@ -108,7 +113,7 @@ def test_tilesets_list_with_metadata():
                     "description": "Global surface temperature data",
                     "units": "degC",
                 },
-            )
+            ),
         },
         attrs={
             "title": "Global Climate Data",
@@ -181,6 +186,73 @@ def test_tilesets_list_with_metadata():
     assert "extents" not in metadata
 
 
+def test_one_dimensional_dataset():
+    rest = xpublish.Rest(
+        {"n320": REDGAUSS_N320.create().isel(point=slice(2000))},
+        plugins={"tiles": TilesPlugin()},
+    )
+    client = TestClient(rest.app)
+
+    response = client.get("/datasets/n320/tiles/")
+    assert response.status_code == 200
+    response_data = response.json()
+    tileset = next(iter(response_data["tilesets"]))
+    assert "layers" in tileset
+    assert len(tileset["layers"]) == 1
+
+    layer = next(iter(tileset["layers"]))
+    assert "extents" in layer
+    assert len(layer["extents"]) == 0
+
+    response = client.get(
+        "/datasets/n320/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=foo&style=raster/plasma&width=512&height=512&colorscalerange=-3,3&colormap=%7B%221%22%3A%22%23f0f0f0%22%7D"
+    )
+    assert response.status_code == 200
+    tilejson = response.json()
+
+    # Zoom levels should be valid
+    assert tilejson["minzoom"] == 0
+    assert tilejson["maxzoom"] == 24
+
+    rest = xpublish.Rest(
+        {
+            "n320": REDGAUSS_N320.create()
+            .isel(point=slice(2000))
+            .expand_dims({"time": pd.date_range("2001-01-01", periods=5, freq="D")})
+        },
+        plugins={"tiles": TilesPlugin()},
+    )
+    client = TestClient(rest.app)
+
+    response = client.get("/datasets/n320/tiles/")
+    assert response.status_code == 200
+    response_data = response.json()
+    tileset = next(iter(response_data["tilesets"]))
+    assert "layers" in tileset
+    assert len(tileset["layers"]) == 1
+
+    layer = next(iter(tileset["layers"]))
+    assert "extents" in layer
+    assert layer["extents"] == {
+        "time": {
+            "default": "2001-01-05T00:00:00",
+            "interval": ["2001-01-01T00:00:00", "2001-01-05T00:00:00"],
+        }
+    }
+
+    response = client.get(
+        "/datasets/n320/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=foo&style=raster/plasma&width=512&height=512&colorscalerange=-3,3&colormap=%7B%221%22%3A%22%23f0f0f0%22%7D"
+    )
+    assert response.status_code == 200
+    tilejson = response.json()
+
+    # Zoom levels should be valid
+    assert tilejson["minzoom"] == 0
+    assert tilejson["maxzoom"] == 24
+
+
 def test_multi_dimensional_dataset():
     """Test dataset with multiple dimension types (time, elevation, custom)"""
     import pandas as pd
@@ -192,6 +264,7 @@ def test_multi_dimensional_dataset():
 
     data = xr.Dataset(
         {
+            "scalar": ((), 0, {"foo": "bar"}),
             "temperature": xr.DataArray(
                 np.random.randn(6, 5, 3, 90, 180),
                 dims=["time", "elevation", "scenario", "lat", "lon"],
@@ -240,7 +313,7 @@ def test_multi_dimensional_dataset():
                     "description": "Multi-dimensional temperature data",
                     "units": "degC",
                 },
-            )
+            ),
         },
         attrs={
             "title": "Multi-dimensional Climate Data",
@@ -337,6 +410,7 @@ def test_dimension_extraction_utilities():
     )
 
     ds = data_array.to_dataset(name="foo")
+    ds["scalar"] = ((), 0, {"foo": "bar"})
     dimensions = extract_dimension_extents(ds, "foo")
 
     # Should extract time and depth, but not lat/lon (spatial)
@@ -363,6 +437,7 @@ def test_no_dimensions_dataset():
     """Test dataset with only spatial dimensions"""
     data = xr.Dataset(
         {
+            "scalar": ((), 0, {"foo": "bar"}),
             "temperature": xr.DataArray(
                 np.random.randn(90, 180),
                 dims=["lat", "lon"],
@@ -387,7 +462,7 @@ def test_no_dimensions_dataset():
                     ),
                 },
                 attrs={"long_name": "Temperature"},
-            )
+            ),
         }
     )
 
@@ -435,6 +510,7 @@ def test_cf_axis_detection():
     )
 
     ds = data_array.to_dataset(name="foo")
+    ds["scalar"] = ((), 0, {"foo": "bar"})
     dimensions = extract_dimension_extents(ds, "foo")
 
     # Should detect temporal and vertical dimensions despite non-standard names
@@ -528,6 +604,7 @@ def test_tilejson_endpoint():
     time_coords = pd.date_range("2020-01-01", periods=3, freq="MS")
     data = xr.Dataset(
         {
+            "scalar": ((), 0, {"foo": "bar"}),
             "temperature": xr.DataArray(
                 np.random.randn(3, 90, 180),
                 dims=["time", "lat", "lon"],
@@ -557,7 +634,7 @@ def test_tilejson_endpoint():
                     ),
                 },
                 attrs={"long_name": "Temperature"},
-            )
+            ),
         },
         attrs={
             "title": "Global Temperature Data",
@@ -662,6 +739,7 @@ def test_tilejson_bounds_normalized_from_0_360_global():
     """TileJSON bounds should normalize 0..360 longitudes to [-180, 180]."""
     data = xr.Dataset(
         {
+            "scalar": ((), 0, {"foo": "bar"}),
             "temperature": xr.DataArray(
                 np.random.randn(90, 180),
                 dims=["lat", "lon"],
@@ -677,7 +755,7 @@ def test_tilejson_bounds_normalized_from_0_360_global():
                         {"axis": "X", "standard_name": "longitude"},
                     ),
                 },
-            )
+            ),
         }
     )
 
@@ -698,6 +776,7 @@ def test_tilejson_bounds_dateline_crossing_0_360():
     """For dateline-crossing 0..360 datasets, use full world longitudes in TileJSON."""
     data = xr.Dataset(
         {
+            "scalar": ((), 0, {"foo": "bar"}),
             "temperature": xr.DataArray(
                 np.random.randn(10, 20),
                 dims=["lat", "lon"],
@@ -713,7 +792,7 @@ def test_tilejson_bounds_dateline_crossing_0_360():
                         {"axis": "X", "standard_name": "longitude"},
                     ),
                 },
-            )
+            ),
         }
     )
 
@@ -736,6 +815,7 @@ def test_tilejson_bounds_with_decreasing_lat_lon():
     """Bounds should normalize correctly when lat and lon coords decrease."""
     data = xr.Dataset(
         {
+            "scalar": ((), 0, {"foo": "bar"}),
             "temperature": xr.DataArray(
                 np.random.randn(90, 180),
                 dims=["lat", "lon"],
@@ -751,7 +831,7 @@ def test_tilejson_bounds_with_decreasing_lat_lon():
                         {"axis": "X", "standard_name": "longitude"},
                     ),
                 },
-            )
+            ),
         }
     )
 

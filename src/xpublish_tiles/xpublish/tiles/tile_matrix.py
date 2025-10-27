@@ -177,7 +177,13 @@ def get_tile_matrix_limits(
     Returns:
         List of TileMatrixSetLimit objects
     """
-    first_data_var = next(iter(dataset.data_vars))
+    for name, var in dataset.data_vars.items():
+        if var.ndim >= 1:
+            first_data_var = name
+            break
+    else:
+        raise ValueError("Could not find a DataArray with at least one dimension.")
+
     grid = guess_grid_system(dataset, first_data_var)
     tms = morecantile.tms.get(tms_id)
 
@@ -185,33 +191,16 @@ def get_tile_matrix_limits(
         min_zoom = get_min_zoom(grid, tms, dataset[first_data_var])
         zoom_levels = range(min_zoom, tms.maxzoom)
 
-    transformer = pyproj.Transformer.from_crs(
-        grid.crs, pyproj.CRS.from_wkt(tms.crs.to_wkt()), always_xy=True
-    )
-    tms_bbox = transformer.transform_bounds(
-        grid.bbox.west,
-        grid.bbox.south,
-        grid.bbox.east,
-        grid.bbox.north,
-    )
-
     limits = []
     for z in zoom_levels:
-        west, south, east, north = tms_bbox
-        tiles = [
-            tms.tile(west, south, z),
-            tms.tile(east, north, z),
-            tms.tile(west, north, z),
-            tms.tile(east, south, z),
-        ]
-
+        minmax = tms.minmax(z)
         limits.append(
             TileMatrixSetLimit(
                 tileMatrix=str(z),
-                minTileRow=min(tile.y for tile in tiles),
-                maxTileRow=max(tile.y for tile in tiles),
-                minTileCol=min(tile.x for tile in tiles),
-                maxTileCol=max(tile.x for tile in tiles),
+                minTileRow=minmax["x"]["min"],
+                maxTileRow=minmax["x"]["max"],
+                minTileCol=minmax["y"]["min"],
+                maxTileCol=minmax["y"]["max"],
             )
         )
 
