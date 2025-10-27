@@ -200,6 +200,47 @@ def test_one_dimensional_dataset():
     assert "layers" in tileset
     assert len(tileset["layers"]) == 1
 
+    layer = next(iter(tileset["layers"]))
+    assert "extents" in layer
+    assert len(layer["extents"]) == 0
+
+    response = client.get(
+        "/datasets/n320/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=foo&style=raster/plasma&width=512&height=512&colorscalerange=-3,3&colormap=%7B%221%22%3A%22%23f0f0f0%22%7D"
+    )
+    assert response.status_code == 200
+    tilejson = response.json()
+
+    # Zoom levels should be valid
+    assert tilejson["minzoom"] == 0
+    assert tilejson["maxzoom"] == 24
+
+    rest = xpublish.Rest(
+        {
+            "n320": REDGAUSS_N320.create()
+            .isel(point=slice(2000))
+            .expand_dims({"time": pd.date_range("2001-01-01", periods=5, freq="D")})
+        },
+        plugins={"tiles": TilesPlugin()},
+    )
+    client = TestClient(rest.app)
+
+    response = client.get("/datasets/n320/tiles/")
+    assert response.status_code == 200
+    response_data = response.json()
+    tileset = next(iter(response_data["tilesets"]))
+    assert "layers" in tileset
+    assert len(tileset["layers"]) == 1
+
+    layer = next(iter(tileset["layers"]))
+    assert "extents" in layer
+    assert layer["extents"] == {
+        "time": {
+            "default": "2001-01-05T00:00:00",
+            "interval": ["2001-01-01T00:00:00", "2001-01-05T00:00:00"],
+        }
+    }
+
     response = client.get(
         "/datasets/n320/tiles/WebMercatorQuad/tilejson.json"
         "?variables=foo&style=raster/plasma&width=512&height=512&colorscalerange=-3,3&colormap=%7B%221%22%3A%22%23f0f0f0%22%7D"
