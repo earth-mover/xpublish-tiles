@@ -2,7 +2,7 @@
 
 Run the following command to start the server:
 ```
-uv run xpublish-tiles --dataset=earthmover-public/gfs --solar
+uv run xpublish-tiles --dataset=earthmover-public/gfs --group=solar
 ```
 
 Then you can try the examples:
