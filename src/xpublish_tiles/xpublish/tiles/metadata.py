@@ -6,12 +6,7 @@ import numpy as np
 
 import xarray as xr
 from xarray import Dataset
-from xpublish_tiles.grids import (
-    Curvilinear,
-    RasterAffine,
-    Rectilinear,
-    guess_grid_system,
-)
+from xpublish_tiles.grids import guess_grid_system
 from xpublish_tiles.logger import logger
 from xpublish_tiles.pipeline import transformer_from_crs
 from xpublish_tiles.render import RenderRegistry
@@ -239,15 +234,7 @@ def extract_variable_bounding_box(
     """
     try:
         # Get the grid system for this variable
-        guessed_grid = guess_grid_system(dataset, variable_name)
-
-        if not isinstance(guessed_grid, RasterAffine | Rectilinear | Curvilinear):
-            logger.error(f"Failed to guess grid system for {variable_name}")
-            return None
-
-        grid = cast(RasterAffine | Rectilinear | Curvilinear, guessed_grid)
-
-        # After isinstance check, grid is guaranteed to have crs and bbox attributes
+        grid = guess_grid_system(dataset, variable_name)
 
         # Convert target CRS to string format for transformer
         if isinstance(target_crs, morecantile.models.CRS):
