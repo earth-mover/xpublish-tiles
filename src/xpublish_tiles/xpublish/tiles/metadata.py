@@ -1,5 +1,5 @@
 import functools
-from typing import Any, cast
+from typing import Any
 
 import morecantile.models
 import numpy as np
@@ -133,15 +133,12 @@ def extract_dataset_extents(
     all_dimensions = {}
 
     # When a variable name is provided, extract dimensions from that variable only
-    if variable_name:
-        ds = cast(xr.Dataset, dataset[[variable_name]])
-    else:
-        ds = dataset
-
-    for var, array in ds.data_vars.items():
+    varnames = (variable_name,) if variable_name else tuple(dataset.data_vars)
+    for var in varnames:
+        array = dataset[var]
         if array.ndim == 0:
             continue
-        dimensions = extract_dimension_extents(ds, var)
+        dimensions = extract_dimension_extents(dataset, var)
         for dim in dimensions:
             # Use the first occurrence of each dimension name
             if dim.name not in all_dimensions:

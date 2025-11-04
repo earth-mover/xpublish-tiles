@@ -33,6 +33,8 @@ from xpublish_tiles.utils import time_debug
 
 DEFAULT_CRS = CRS.from_epsg(4326)
 MAX_COORD_VAR_NBYTES = 1 * 1024 * 1024 * 1024
+# we look for these specifically even if not explicitly tagged as a "grid mapping" variable.
+EXPLICIT_GRID_MAPPING_NAMES = ("spatial_ref", "crs")
 
 
 @dataclass
@@ -1352,10 +1354,9 @@ def _guess_grid_mappings_and_crs(
 
     # Fall back to existing single grid mapping approach - construct default grid mapping
     grid_mapping_names: tuple[str, ...] = ()
-    if "spatial_ref" in ds.variables:
-        grid_mapping_names += ("spatial_ref",)
-    elif "crs" in ds.variables:
-        grid_mapping_names += ("crs",)
+    for explicit in EXPLICIT_GRID_MAPPING_NAMES:
+        if explicit in ds.variables:
+            grid_mapping_names += (explicit,)
 
     if len(grid_mapping_names) == 0:
         keys = ds.cf.keys()
@@ -1612,14 +1613,34 @@ def guess_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
         if (cache_key := (xpublish_id, name)) in _GRID_CACHE:
             return _GRID_CACHE[cache_key]
 
+    # Ensure that `spatial_ref` data vars and other "coordinate" data vars also get picked up properly
+    # Really the best way here is for the Dataset to be opened with `decode_coords="all"`
+    # But that's not something we control sadly.
+    for explicit in EXPLICIT_GRID_MAPPING_NAMES:
+        if explicit in ds.data_vars:
+            ds = ds.set_coords(explicit)
+
+    ds = xr.decode_cf(
+        ds,
+        decode_coords="all",
+        # turn everything else off
+        mask_and_scale=False,
+        decode_times=False,
+        decode_timedelta=False,
+        concat_characters=False,
+    )
+
     try:
-        grid = _guess_grid_for_dataset(ds.cf[[name]])
+        grid = _guess_grid_for_dataset(ds[[name]])
     except RuntimeError:
         try:
-            grid = _guess_grid_for_dataset(ds)
+            grid = _guess_grid_for_dataset(ds.cf[[name]])
         except RuntimeError:
-            ds = ds.cf.guess_coord_axis()
-            grid = _guess_grid_for_dataset(ds)
+            try:
+                grid = _guess_grid_for_dataset(ds)
+            except RuntimeError:
+                ds = ds.cf.guess_coord_axis()
+                grid = _guess_grid_for_dataset(ds)
     except KeyError:
         raise VariableNotFoundError(f"Variable {name!r} not found in dataset.") from None
 
