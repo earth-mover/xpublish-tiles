@@ -293,9 +293,16 @@ class TilesPlugin(Plugin):
             if not query.variables or len(query.variables) == 0:
                 raise HTTPException(status_code=422, detail="No variables specified")
 
-            bounds = extract_variable_bounding_box(
-                dataset, query.variables[0], "EPSG:4326"
-            )
+            try:
+                bounds = extract_variable_bounding_box(
+                    dataset, query.variables[0], "EPSG:4326"
+                )
+            except VariableNotFoundError as e:
+                logger.error("VariableNotFoundError", str(e))
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Invalid variable name(s): {query.variables!r}.",
+                ) from None
 
             logger.info(f"base_url: {request.base_url}")
             logger.info(f"url: {request.url.path}")

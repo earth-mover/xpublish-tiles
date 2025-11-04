@@ -7,6 +7,7 @@ import numpy as np
 import xarray as xr
 from xarray import Dataset
 from xpublish_tiles.grids import guess_grid_system
+from xpublish_tiles.lib import VariableNotFoundError
 from xpublish_tiles.logger import logger
 from xpublish_tiles.pipeline import transformer_from_crs
 from xpublish_tiles.render import RenderRegistry
@@ -256,6 +257,8 @@ def extract_variable_bounding_box(
             upperRight=[transformed_bounds[2], transformed_bounds[3]],
             crs=target_crs,
         )
+    except VariableNotFoundError as e:
+        raise e
 
     except Exception as e:
         logger.error(f"Failed to transform bounds: {e}")

@@ -22,6 +22,7 @@ from xarray.core.indexing import IndexSelResult
 from xpublish_tiles.lib import (
     Fill,
     PadDimension,
+    VariableNotFoundError,
     _prevent_slice_overlap,
     crs_repr,
     is_4326_like,
@@ -1619,6 +1620,8 @@ def guess_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
         except RuntimeError:
             ds = ds.cf.guess_coord_axis()
             grid = _guess_grid_for_dataset(ds)
+    except KeyError:
+        raise VariableNotFoundError(f"Variable {name!r} not found in dataset.") from None
 
     grid.Z = _guess_z_dimension(ds.cf[name])
 
