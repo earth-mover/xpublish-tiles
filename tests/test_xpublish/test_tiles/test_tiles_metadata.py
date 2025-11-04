@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 import xarray as xr
+from xpublish_tiles.lib import VariableNotFoundError
 
 
 def test_extract_dataset_extents():
@@ -514,10 +515,8 @@ def test_extract_variable_bounding_box_invalid_variable():
     )
 
     # Test with non-existent variable
-    bbox = extract_variable_bounding_box(dataset, "nonexistent", "EPSG:4326")
-
-    # Should return None for invalid variable
-    assert bbox is None
+    with pytest.raises(VariableNotFoundError):
+        extract_variable_bounding_box(dataset, "nonexistent", "EPSG:4326")
 
 
 def test_variable_bounding_boxes_in_tileset_metadata():
