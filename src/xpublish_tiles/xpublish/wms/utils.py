@@ -1,11 +1,11 @@
 """Utilities for WMS dataset introspection and metadata extraction"""
 
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 
 import xarray as xr
-from xpublish_tiles.grids import Curvilinear, RasterAffine, Rectilinear, guess_grid_system
+from xpublish_tiles.grids import guess_grid_system
 from xpublish_tiles.pipeline import transformer_from_crs
 from xpublish_tiles.xpublish.wms.types import (
     WMSAttributeResponse,
@@ -229,30 +229,28 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
         wms_attributes = convert_attributes_to_wms(var.attrs)
 
         # Extract geographic bounds
-        guessed_grid = guess_grid_system(dataset, var_name)
+        grid = guess_grid_system(dataset, var_name)
         supported_crs = ["EPSG:4326", "EPSG:3857"]
         supported_bounds = []
         bounding_boxes = []
 
-        if isinstance(guessed_grid, Rectilinear | Curvilinear | RasterAffine):
-            grid = cast(Rectilinear | Curvilinear | RasterAffine, guessed_grid)
-            for crs in supported_crs:
-                transformer = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
-                bounds = transformer.transform_bounds(
-                    grid.bbox.west, grid.bbox.south, grid.bbox.east, grid.bbox.north
-                )
-                supported_bounds.append(bounds)
+        for crs in supported_crs:
+            transformer = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
+            bounds = transformer.transform_bounds(
+                grid.bbox.west, grid.bbox.south, grid.bbox.east, grid.bbox.north
+            )
+            supported_bounds.append(bounds)
 
-            supported_crs.append(grid.crs.to_string())
-            bounding_boxes = [
-                WMSBoundingBoxResponse(
-                    crs=grid.crs.to_string(),
-                    minx=grid.bbox.west,
-                    miny=grid.bbox.south,
-                    maxx=grid.bbox.east,
-                    maxy=grid.bbox.north,
-                )
-            ]
+        supported_crs.append(grid.crs.to_string())
+        bounding_boxes = [
+            WMSBoundingBoxResponse(
+                crs=grid.crs.to_string(),
+                minx=grid.bbox.west,
+                miny=grid.bbox.south,
+                maxx=grid.bbox.east,
+                maxy=grid.bbox.north,
+            )
+        ]
 
         layer = WMSLayerResponse(
             name=var_name,
