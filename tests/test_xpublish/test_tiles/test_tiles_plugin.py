@@ -7,6 +7,7 @@ import pytest
 import xpublish
 from fastapi.testclient import TestClient
 from PIL import Image
+from pyproj import CRS
 
 import xarray as xr
 from xpublish_tiles.testing.datasets import EU3035, PARA_HIRES, REDGAUSS_N320
@@ -704,6 +705,52 @@ def test_tilejson_endpoint():
         assert tilejson["maxzoom"] == 24
         if tilejson["minzoom"] is not None:
             assert tilejson["minzoom"] <= tilejson["maxzoom"]
+
+
+def test_metadata_dataset_with_spatial_ref_data_var():
+    expected_crs = CRS.from_epsg(3035)
+    ds = xr.Dataset(
+        {
+            "spatial_ref": (
+                (),
+                0,
+                expected_crs.to_cf() | {"GeoTransform": "50000 30 0 20000 0 -30"},
+            ),
+            "foo": (("latitude", "longitude"), np.zeros((20, 30))),
+            "foo2": (("latitude", "longitude"), np.zeros((20, 30))),
+            "foo3": (("latitude", "longitude"), np.zeros((20, 30))),
+        },
+        coords={
+            # intentionally confusing, we want to NOT detect 4326 for this dataset
+            # because it has an explicit spatial_ref data var.
+            "latitude": (
+                "latitude",
+                np.linspace(20000, 30000, 20),
+                {"standard_name": "latitude"},
+            ),
+            "longitude": (
+                "longitude",
+                np.linspace(50000, 60000, 30),
+                {"standard_name": "longitude"},
+            ),
+        },
+    )
+    rest = xpublish.Rest({"temp": ds}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    response = client.get(
+        "/datasets/temp/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=foo2&style=raster/plasma&width=512&height=512&time=2020-02-01&colorscalerange=-3,3"
+    )
+    assert response.status_code == 200
+
+    json = response.json()
+    assert json["bounds"] == [
+        -28.71790019520472,
+        13.376788769907641,
+        -28.708662853271306,
+        13.38579340233987,
+    ]
 
 
 def test_tilejson_invalid_tile_matrix_set():
