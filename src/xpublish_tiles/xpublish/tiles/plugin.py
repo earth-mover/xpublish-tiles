@@ -501,6 +501,6 @@ class TilesPlugin(Plugin):
                         format=query.f,
                     )
 
-            return Response(buffer, media_type="image/png")
+            return Response(buffer.getbuffer(), media_type="image/png")
 
         return router
