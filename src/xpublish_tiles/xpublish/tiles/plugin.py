@@ -11,7 +11,7 @@ from urllib.parse import quote
 import morecantile
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import Dataset
@@ -501,9 +501,6 @@ class TilesPlugin(Plugin):
                         format=query.f,
                     )
 
-            return StreamingResponse(
-                buffer,
-                media_type="image/png",
-            )
+            return Response(buffer.getbuffer(), media_type="image/png")
 
         return router

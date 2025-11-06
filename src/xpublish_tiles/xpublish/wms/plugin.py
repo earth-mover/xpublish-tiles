@@ -6,7 +6,7 @@ from typing import Annotated
 
 import cf_xarray  # noqa: F401
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response
 from PIL import Image
 from xpublish import Dependencies, Plugin, hookimpl
 
@@ -183,10 +183,7 @@ async def handle_get_map(
     )
     buffer = await pipeline(dataset, render_params)
 
-    return StreamingResponse(
-        buffer,
-        media_type="image/png",
-    )
+    return Response(buffer.getbuffer(), media_type="image/png")
 
 
 async def handle_get_legend_graphic(query: WMSGetLegendGraphicQuery) -> Response:
