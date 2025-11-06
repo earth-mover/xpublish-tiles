@@ -183,7 +183,7 @@ async def handle_get_map(
     )
     buffer = await pipeline(dataset, render_params)
 
-    return Response(buffer, media_type="image/png")
+    return Response(buffer.getbuffer(), media_type="image/png")
 
 
 async def handle_get_legend_graphic(query: WMSGetLegendGraphicQuery) -> Response:
