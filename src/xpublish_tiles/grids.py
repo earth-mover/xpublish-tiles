@@ -29,7 +29,7 @@ from xpublish_tiles.lib import (
     is_4326_like,
     pad_slicers,
 )
-from xpublish_tiles.logger import get_context_logger
+from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.utils import time_debug
 
 GRID_DETECTION_LOCK = threading.Lock()
@@ -295,8 +295,9 @@ class CellTreeIndex(xr.Index):
             pos_verts[:, 0] += 360
             neg_verts[:, 0] -= 360
 
-            triang.add_points(pos_verts)
-            triang.add_points(neg_verts)
+            with log_duration("re-triangulating", "▲"):
+                triang.add_points(pos_verts)
+                triang.add_points(neg_verts)
 
             # need to reindex the data to match the padding
             self.reindexer = np.concatenate(
@@ -308,7 +309,8 @@ class CellTreeIndex(xr.Index):
         else:
             self.reindexer = None
 
-        self.tree = CellTree2d(vertices, faces, fill_value=fill_value)
+        with log_duration("Creating CellTree", "⊠"):
+            self.tree = CellTree2d(vertices, faces, fill_value=fill_value)
         if lon_spans_globe:
             # lets find the vertices closest to the -180 & 180 boundaries and cache them.
             # At indexing time, we'll return the indexes for vertices at the boundary
@@ -1307,7 +1309,8 @@ class Triangular(GridSystem):
             vertices[:, 0] = ((vertices[:, 0] + 180) % 360) - 180
 
         (dim,) = ds[Xname].dims
-        triang = Delaunay(vertices, incremental=True)
+        with log_duration("Triangulating", "🔺"):
+            triang = Delaunay(vertices, incremental=True)
 
         faces = triang.simplices
         return cls(
