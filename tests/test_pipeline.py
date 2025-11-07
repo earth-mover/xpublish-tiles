@@ -280,7 +280,7 @@ def test_apply_query_selectors():
     result = apply_query(
         ds,
         variables=["sst"],
-        selectors={"L": 0, "forecast_reference_time": "1960-02-01 00:00:00"},
+        selectors={"L": 0, "S": "1960-02-01 00:00:00"},
     )
     assert_equal(
         result["sst"].da,
@@ -290,6 +290,17 @@ def test_apply_query_selectors():
     curvilinear_ds = CURVILINEAR.create()
     result = apply_query(curvilinear_ds, variables=["foo"], selectors={})
     assert_equal(result["foo"].da, curvilinear_ds.foo.sel(s_rho=0, method="nearest"))
+
+    hrrr = HRRR.create()
+    hrrr.time.attrs = {"standard_name": "time"}
+    result = apply_query(hrrr, variables=["foo"], selectors={"time": "2018-01-01"})
+    expected = hrrr.foo.isel(time=0, step=-1)
+    assert_equal(result["foo"].da, expected)
+
+    # second time coordinate with same CF-compliant attrs
+    hrrr.coords["time2"] = hrrr.time.copy()
+    result = apply_query(hrrr, variables=["foo"], selectors={"time": "2018-01-01"})
+    assert_equal(result["foo"].da, expected.assign_coords(time2=hrrr.time.data.item()))
 
 
 def test_apply_query_with_string_selectors():

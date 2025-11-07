@@ -719,7 +719,7 @@ def apply_query(
                     )
                     raise e
         try:
-            ds = ds.cf.sel(**selectors)
+            ds = ds.sel(**selectors)
         except KeyError as e:
             raise IndexingError(str(e))  # noqa: B904
 
