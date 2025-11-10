@@ -1,4 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Literal, cast
+from unittest.mock import patch
 
 import cf_xarray as cfxr  # noqa: F401
 import morecantile
@@ -869,3 +871,21 @@ class TestGridZoomMethods:
         assert expected == actual, (
             f"Expected {expected}, got {actual} for {tms_id} {grid_type} at zoom {target_zoom}"
         )
+
+
+def test_grid_detection_thread_lock():
+    """Test that concurrent calls to guess_grid_system only call constructor once."""
+    ds = IFS.create()
+
+    original_from_dataset = Rectilinear.from_dataset
+
+    with patch.object(
+        Rectilinear, "from_dataset", wraps=original_from_dataset
+    ) as mock_from_dataset:
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(guess_grid_system, ds, "foo") for _ in range(4)]
+            results = [future.result() for future in futures]
+
+    assert all(isinstance(r, Rectilinear) for r in results)
+    # Constructor should only be called once due to thread lock and caching
+    assert mock_from_dataset.call_count == 1

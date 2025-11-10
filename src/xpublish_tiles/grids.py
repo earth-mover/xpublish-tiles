@@ -1,5 +1,6 @@
 import itertools
 import re
+import threading
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Hashable
@@ -30,6 +31,8 @@ from xpublish_tiles.lib import (
 )
 from xpublish_tiles.logger import get_context_logger
 from xpublish_tiles.utils import time_debug
+
+GRID_DETECTION_LOCK = threading.Lock()
 
 DEFAULT_CRS = CRS.from_epsg(4326)
 MAX_COORD_VAR_NBYTES = 1 * 1024 * 1024 * 1024
@@ -1607,25 +1610,33 @@ def guess_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
     Uses caching with ds.attrs['_xpublish_id'] as cache key if present.
     If no _xpublish_id, skips caching to avoid cross-contamination.
     """
-    # Only use cache if _xpublish_id is present
-    if (xpublish_id := ds.attrs.get("_xpublish_id")) is not None:
-        if (cache_key := (xpublish_id, name)) in _GRID_CACHE:
+    xpublish_id = ds.attrs.get("_xpublish_id")
+    cache_key = (xpublish_id, name) if xpublish_id is not None else None
+
+    if cache_key is not None and cache_key in _GRID_CACHE:
+        return _GRID_CACHE[cache_key]
+
+    with GRID_DETECTION_LOCK:
+        # Double-check in case another thread populated cache while we waited
+        if cache_key is not None and cache_key in _GRID_CACHE:
             return _GRID_CACHE[cache_key]
 
-    try:
-        grid = _guess_grid_for_dataset(ds.cf[[name]])
-    except RuntimeError:
         try:
-            grid = _guess_grid_for_dataset(ds)
+            grid = _guess_grid_for_dataset(ds.cf[[name]])
         except RuntimeError:
-            ds = ds.cf.guess_coord_axis()
-            grid = _guess_grid_for_dataset(ds)
-    except KeyError:
-        raise VariableNotFoundError(f"Variable {name!r} not found in dataset.") from None
+            try:
+                grid = _guess_grid_for_dataset(ds)
+            except RuntimeError:
+                ds = ds.cf.guess_coord_axis()
+                grid = _guess_grid_for_dataset(ds)
+        except KeyError:
+            raise VariableNotFoundError(
+                f"Variable {name!r} not found in dataset."
+            ) from None
 
-    grid.Z = _guess_z_dimension(ds.cf[name])
+        grid.Z = _guess_z_dimension(ds.cf[name])
 
-    if xpublish_id is not None:
-        _GRID_CACHE[cache_key] = grid
+        if cache_key is not None:
+            _GRID_CACHE[cache_key] = grid
 
-    return grid
+        return grid
