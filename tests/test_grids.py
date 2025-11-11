@@ -876,6 +876,8 @@ class TestGridZoomMethods:
 def test_grid_detection_thread_lock():
     """Test that concurrent calls to guess_grid_system only call constructor once."""
     ds = IFS.create()
+    # avoid clashing with other tests
+    ds.attrs["_xpublish_id"] = "ifs_thread_lock_test"
 
     original_from_dataset = Rectilinear.from_dataset
 
