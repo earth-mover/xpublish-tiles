@@ -14,6 +14,7 @@ from scipy.interpolate import NearestNDInterpolator
 
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, GridSystem2D, Triangular
+from xpublish_tiles.lib import MissingParameterError
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import Renderer, register_renderer, render_error_image
 from xpublish_tiles.types import (
@@ -219,7 +220,7 @@ class DatashaderRasterRenderer(Renderer):
                 if valid_min is not None and valid_max is not None:
                     colorscalerange = (valid_min, valid_max)
                 else:
-                    raise ValueError(
+                    raise MissingParameterError(
                         "`colorscalerange` must be specified when array does not have valid_min and valid_max attributes specified."
                     )
 
