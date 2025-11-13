@@ -13,7 +13,6 @@ import numbagg
 import numpy as np
 import pandas as pd
 import rasterix
-import scipy
 from numba_celltree import CellTree2d
 from pyproj import CRS
 from pyproj.aoi import BBox
@@ -1315,10 +1314,11 @@ class Triangular(GridSystem):
         with log_duration("Triangulating", "🔺"):
             try:
                 triang = Delaunay(vertices, incremental=True)
-            except scipy.spatial.QhullError:
+            except Exception as e:
                 raise ValueError(
                     f"Triangulation failed. This may indicate bad data in variables {Xname!r}, {Yname!r}."
-                    "Please check for presence of NaNs, or whether all values are the same."
+                    f"Please check for presence of NaNs, or whether all values are the same. "
+                    f"Original exception is of type {type(e)!r}"
                 ) from None
 
         faces = triang.simplices

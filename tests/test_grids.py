@@ -891,3 +891,19 @@ def test_grid_detection_thread_lock():
     assert all(isinstance(r, Rectilinear) for r in results)
     # Constructor should only be called once due to thread lock and caching
     assert mock_from_dataset.call_count == 1
+
+
+def test_qhull_error():
+    ds = REDGAUSS_N320.create()
+    # make sure it works
+    guess_grid_system(ds, "foo")
+
+    ds.attrs["_xpublish_id"] = "n320_with_nans"
+    ds["latitude"][-1] = np.nan
+    with pytest.raises(ValueError):
+        guess_grid_system(ds, "foo")
+
+    ds.attrs["_xpublish_id"] = "n320_with_zeros"
+    ds["latitude"][:] = 0
+    with pytest.raises(ValueError):
+        guess_grid_system(ds, "foo")
