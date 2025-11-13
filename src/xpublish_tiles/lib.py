@@ -90,6 +90,12 @@ class IndexingError(Exception):
     pass
 
 
+class MissingParameterError(Exception):
+    """Raised when an expected parameter (e.g. colorscalerange) is not passed."""
+
+    pass
+
+
 THREAD_POOL_NUM_THREADS = config.get("num_threads")
 logger.info("setting up thread pool with num threads: %s", THREAD_POOL_NUM_THREADS)
 EXECUTOR = ThreadPoolExecutor(

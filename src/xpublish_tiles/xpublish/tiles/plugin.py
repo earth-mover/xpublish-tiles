@@ -16,7 +16,12 @@ from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import Dataset
 from xpublish_tiles.grids import guess_grid_system
-from xpublish_tiles.lib import IndexingError, TileTooBigError, VariableNotFoundError
+from xpublish_tiles.lib import (
+    IndexingError,
+    MissingParameterError,
+    TileTooBigError,
+    VariableNotFoundError,
+)
 from xpublish_tiles.logger import (
     CleanConsoleRenderer,
     LogAccumulator,
@@ -467,10 +472,14 @@ class TilesPlugin(Plugin):
                     bound_logger.error("IndexingError", error=str(e))
                     status_code = 422
                     detail = f"Invalid indexer: {selectors!r}."
+                except MissingParameterError as e:
+                    bound_logger.error("MissingParameterError", error=str(e))
+                    status_code = 422
+                    detail = f"Missing parameter: {e!s}."
                 except Exception as e:
                     status_code = 500
                     bound_logger.error("Exception", error=str(e))
-                    detail = e
+                    detail = str(e)
                 tile_total_ms = (time.perf_counter() - tile_start_time) * 1000
             finally:
                 # Print all log lines per tile if logger level allows

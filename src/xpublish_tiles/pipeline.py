@@ -21,6 +21,7 @@ from xpublish_tiles.grids import (
 from xpublish_tiles.lib import (
     Fill,
     IndexingError,
+    MissingParameterError,
     PadDimension,
     TileTooBigError,
     VariableNotFoundError,
@@ -355,7 +356,7 @@ async def apply_slicers(
     # if any subset has shape < (2, 2) raise.
     if any(total_size < 2 * nvars for total_size in total_shape):
         logger.error("Tile request resulted in insufficient data for rendering.")
-        raise ValueError("Tile request resulted in insufficient data for rendering.")
+        raise AssertionError("Tile request resulted in insufficient data for rendering.")
 
     if config.get("async_load"):
         with log_duration("async_load data subsets", "📥"):
@@ -721,16 +722,26 @@ def apply_query(
         try:
             ds = ds.sel(**selectors)
         except KeyError as e:
-            raise IndexingError(str(e))  # noqa: B904
+            raise IndexingError(str(e)) from None
 
     for name in variables:
         if name not in ds:
-            raise VariableNotFoundError(f"Variable {name!r} not found in dataset.")
+            raise VariableNotFoundError(
+                f"Variable {name!r} not found in dataset."
+            ) from None
 
         grid = guess_grid_system(ds, name)
         array = ds[name]
         if grid.Z in array.dims:
-            array = array.sel({grid.Z: 0}, method="nearest")
+            # This code assumes all datasets are ocean datasets :/
+            try:
+                array = array.sel({grid.Z: 0}, method="nearest")
+            except Exception as e:
+                raise MissingParameterError(
+                    f"Please pass an appropriate coordinate location for {grid.Z!r}. "
+                    f"Automatic selection failed with error: {str(e)!r}."
+                ) from None
+
         if extra_dims := (set(array.dims) - grid.dims):
             # Note: this will handle squeezing of label-based selection
             # along datetime coordinates
