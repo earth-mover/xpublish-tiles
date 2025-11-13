@@ -1260,7 +1260,7 @@ def create_n320(
     )
 
     # Add coordinates attribute to foo
-    ds.foo.attrs["coordinates"] = "latitude longitude"
+    ds.foo.attrs["coordinates"] = "latitude longitude pressure_level"
     ds.foo.encoding["chunks"] = tuple(dim.chunk_size for dim in dims)
 
     return ds
