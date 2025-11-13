@@ -19,7 +19,7 @@ from src.xpublish_tiles.render.raster import nearest_on_uniform_grid_quadmesh
 from tests import create_query_params
 from xarray.testing import assert_equal
 from xpublish_tiles import config
-from xpublish_tiles.lib import IndexingError, VariableNotFoundError
+from xpublish_tiles.lib import IndexingError, MissingParameterError, VariableNotFoundError
 from xpublish_tiles.pipeline import (
     apply_query,
     bbox_overlap,
@@ -301,6 +301,13 @@ def test_apply_query_selectors():
     hrrr.coords["time2"] = hrrr.time.copy()
     result = apply_query(hrrr, variables=["foo"], selectors={"time": "2018-01-01"})
     assert_equal(result["foo"].da, expected.assign_coords(time2=hrrr.time.data.item()))
+
+    # out of order Z coordinates
+    ds = ds.isel(M=[1, 0, 2])
+    ds["M"].attrs["axis"] = "Z"
+    ds.attrs["_xpublish_id"] = "foo"
+    with pytest.raises(MissingParameterError):
+        apply_query(ds, variables=["sst"], selectors={})
 
 
 def test_apply_query_with_string_selectors():
