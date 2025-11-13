@@ -13,6 +13,7 @@ import numbagg
 import numpy as np
 import pandas as pd
 import rasterix
+import scipy
 from numba_celltree import CellTree2d
 from pyproj import CRS
 from pyproj.aoi import BBox
@@ -1297,11 +1298,13 @@ class Triangular(GridSystem):
     ) -> Self:
         # FIXME: detect UGRID here
         vertices = (
-            ds[[Xname, Yname]]
-            .reset_coords()
+            ds.reset_coords()[[Xname, Yname]]
             .to_dataarray("variable")
             .transpose(..., "variable")
             .data
+        )
+        assert vertices.shape[-1] == 2, (
+            f"Attempting to triangulate vertices with shape={vertices.shape}. Expected (n_points, 2)"
         )
         if crs.is_geographic:
             # TODO: consider normalizing these to the unit sphere like UXarray
@@ -1310,7 +1313,13 @@ class Triangular(GridSystem):
 
         (dim,) = ds[Xname].dims
         with log_duration("Triangulating", "🔺"):
-            triang = Delaunay(vertices, incremental=True)
+            try:
+                triang = Delaunay(vertices, incremental=True)
+            except scipy.spatial.QhullError:
+                raise ValueError(
+                    f"Triangulation failed. This may indicate bad data in variables {Xname!r}, {Yname!r}."
+                    "Please check for presence of NaNs, or whether all values are the same."
+                ) from None
 
         faces = triang.simplices
         return cls(

@@ -1255,6 +1255,7 @@ def create_n320(
                 all_lons,
                 {"standard_name": "longitude", "units": "degrees_east"},
             ),
+            "pressure_level": 500,
         },
     )
 
