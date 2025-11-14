@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import xarray as xr
-from xpublish_tiles.testing.datasets import EU3035, PARA_HIRES, REDGAUSS_N320
+from xpublish_tiles.testing.datasets import EU3035, IFS, PARA_HIRES, REDGAUSS_N320
 from xpublish_tiles.xpublish.tiles import TilesPlugin
 from xpublish_tiles.xpublish.tiles.tile_matrix import extract_dimension_extents
 
@@ -809,6 +809,28 @@ def test_tilejson_bounds_dateline_crossing_0_360():
     if bounds is not None:
         assert bounds[0] == -180.0
         assert bounds[2] == 180.0
+
+
+def test_selection_method_dsl():
+    ds = IFS.create()
+    t0 = ds.time.data[0]
+    ds = ds.reindex(time=pd.date_range(t0, periods=ds.sizes["time"] + 3, freq="6h"))
+
+    rest = xpublish.Rest({"ifs": ds}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+    resp = client.get(
+        "/datasets/ifs/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=foo&time=nearest::2000-01-01T04:00"
+        "&style=raster/viridis&width=256&height=256&f=png"
+    )
+    assert resp.status_code == 200
+
+    resp = client.get(
+        "/datasets/ifs/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=foo&time=nearest::2000-01-01T04:00&step=3h"
+        "&style=raster/viridis&width=256&height=256&f=png"
+    )
+    assert resp.status_code == 200
 
 
 def test_tilejson_bounds_with_decreasing_lat_lon():

@@ -25,6 +25,31 @@ class ImageFormat(enum.StrEnum):
     JPEG = enum.auto()
 
 
+class SelectionMethod(str, enum.Enum):
+    """Selection methods for dimension indexing.
+
+    These map to xarray's .sel() method parameter.
+    EXACT maps to method=None for exact matching.
+    """
+
+    EXACT = "exact"
+    NEAREST = "nearest"
+    PAD = "pad"
+    FFILL = "ffill"
+    BACKFILL = "backfill"
+    BFILL = "bfill"
+
+    @property
+    def xarray_method(self) -> str | None:
+        """Return the method argument to pass to xarray's .sel().
+
+        Returns None for EXACT (exact matching).
+        """
+        if self == SelectionMethod.EXACT:
+            return None
+        return self.value
+
+
 @dataclass
 class DataType:
     pass

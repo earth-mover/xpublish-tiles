@@ -40,6 +40,7 @@ from xpublish_tiles.types import (
     OutputCRS,
     PopulatedRenderContext,
     QueryParams,
+    SelectionMethod,
     ValidatedArray,
 )
 from xpublish_tiles.utils import LOCK
@@ -665,6 +666,44 @@ def _infer_datatype(array: xr.DataArray) -> DataType:
     )
 
 
+def parse_selector(value: str) -> tuple[str | None, str]:
+    """Parse 'method::value' or 'value' selector syntax.
+
+    Parameters
+    ----------
+    value : str
+        Selector value, optionally prefixed with method using :: separator
+        (e.g., 'nearest::2000-01-01T12:00:00')
+
+    Returns
+    -------
+    tuple[str | None, str]
+        (method, value) tuple where method is None for exact matching
+
+    Raises
+    ------
+    ValueError
+        If an invalid method is specified
+    """
+    if "::" not in value:
+        return None, value
+
+    # Split on first :: only
+    method_str, actual_value = value.split("::", 1)
+    method_str_lower = method_str.lower()
+
+    # Check if the part before :: is a valid method
+    try:
+        method = SelectionMethod(method_str_lower)
+    except ValueError:
+        valid_methods = ", ".join(m.value for m in SelectionMethod)
+        raise ValueError(
+            f"Invalid selection method '{method_str}'. Valid methods are: {valid_methods}"
+        ) from None
+
+    return method.xarray_method, actual_value
+
+
 def apply_query(
     ds: xr.Dataset, *, variables: list[str], selectors: dict[str, Any]
 ) -> dict[str, ValidatedArray]:
@@ -673,24 +712,33 @@ def apply_query(
     """
     validated: dict[str, ValidatedArray] = {}
     if selectors:
-        for name, value in selectors.items():
+        # Apply selections serially to meet xarray limitations
+        for name, value_str in selectors.items():
             if name not in ds:
                 logger = get_context_logger()
                 logger.warning(
-                    "Selector not found in dataset, skipping", selector=name, value=value
+                    "Selector not found in dataset, skipping",
+                    selector=name,
+                    value=value_str,
                 )
                 continue
 
+            # Parse the selector to extract method and value
+            try:
+                method, value = parse_selector(str(value_str))
+            except ValueError as e:
+                raise IndexingError(str(e)) from None
+
             # If the value is not the same type as the variable, try to cast it
             try:
-                selectors[name] = ds[name].dtype.type(value)
+                typed_value = ds[name].dtype.type(value)
             except ValueError as e:
                 logger = get_context_logger()
 
                 if ds[name].dtype.kind == "m":
                     # Custom casting for timedelta64 if it fails
                     try:
-                        selectors[name] = pd.to_timedelta(value).to_timedelta64()
+                        typed_value = pd.to_timedelta(value).to_timedelta64()
                     except ValueError as tde:
                         logger.warning(
                             "Failed to cast selector to timedelta64",
@@ -702,7 +750,7 @@ def apply_query(
                 elif ds[name].dtype.kind == "M":
                     # Custom casting for datetime64 if it fails
                     try:
-                        selectors[name] = pd.to_datetime(value).to_datetime64()
+                        typed_value = pd.to_datetime(value).to_datetime64()
                     except ValueError as tde:
                         logger.warning(
                             "Failed to cast selector to datetime64",
@@ -719,10 +767,12 @@ def apply_query(
                         expected_type=ds[name].dtype,
                     )
                     raise e
-        try:
-            ds = ds.sel(**selectors)
-        except KeyError as e:
-            raise IndexingError(str(e)) from None
+
+            # Apply selection serially
+            try:
+                ds = ds.sel({name: typed_value}, method=method)
+            except KeyError as e:
+                raise IndexingError(str(e)) from None
 
     for name in variables:
         if name not in ds:
