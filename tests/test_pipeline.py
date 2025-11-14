@@ -237,6 +237,38 @@ async def test_categorical_data(tile, tms, png_snapshot, pytestconfig):
     )
 
 
+async def test_categorical_data_with_custom_colormap(png_snapshot, pytestconfig):
+    """Test categorical data with custom colormap renders correctly."""
+    ds = PARA.create().squeeze("time")
+
+    # PARA has 10 categories (flag_values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+    # Create a custom colormap with 10 distinct colors
+    custom_colormap = {
+        "0": "#ff0000",  # red
+        "1": "#00ff00",  # green
+        "2": "#0000ff",  # blue
+        "3": "#ffff00",  # yellow
+        "4": "#ff00ff",  # magenta
+        "5": "#00ffff",  # cyan
+        "6": "#800000",  # maroon
+        "7": "#008000",  # dark green
+        "8": "#000080",  # navy
+        "9": "#808080",  # gray
+    }
+
+    tile, tms = PARA_TILES[0].values
+    query_params = create_query_params(
+        tile, tms, style="raster", variant="custom", colormap=custom_colormap
+    )
+    result = await pipeline(ds, query_params)
+
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(
+        result, png_snapshot, tile=tile, tms=tms, dataset_bbox=ds.attrs["bbox"]
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tile,tms", GLOBAL_NANS.tiles)
 async def test_global_nans_data(tile, tms, png_snapshot, pytestconfig):

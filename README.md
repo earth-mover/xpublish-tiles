@@ -35,6 +35,17 @@ Here `lat[lat]` means a coordinate variable named `lat` with one dimension named
 We attempt to require as little metadata as possible, and attempts to infer as much as possible. However, it is *always* better
 for you to annotate your dataset using the CF & ACDD conventions as well as possible.
 
+### Custom Colormaps
+
+Custom colormaps can be provided using the `colormap` parameter. When using a custom colormap, you must set `style=raster/custom`.
+
+The colormap is a JSON-encoded dictionary with:
+- **Keys**: String integers from "0" to "255" (not data values)
+- **Values**: Hex color codes in the format `#RRGGBB`
+
+> [!IMPORTANT]
+> Custom colormaps must include both "0" and "255" as keys. These colormaps must have keys that are "0" and "255", not data values. The data value is rescaled by `colorscalerange` to 0→1; the colormap is rescaled from 0→255 to 0→1 and then applied to the scaled 0→1 data.
+
 ### Dimension selection with methods
 
 `xpublish-tiles` supports flexible dimension selection using a DSL that allows you to specify selection methods. This is particularly useful for temporal and vertical coordinates where you may want to select the nearest value, or use forward/backward fill.

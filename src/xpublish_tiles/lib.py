@@ -10,6 +10,7 @@ from functools import lru_cache, partial
 from itertools import product
 from typing import TYPE_CHECKING, Any
 
+import matplotlib.colors as mcolors
 import numpy as np
 import pyproj
 import toolz as tlz
@@ -485,3 +486,26 @@ def slicers_to_pad_instruction(slicers, datatype) -> dict[str, Any]:
         pad_kwargs["pad_width"] = pad_widths
         pad_kwargs["mode"] = "edge" if isinstance(datatype, DiscreteData) else "constant"
     return pad_kwargs
+
+
+def create_colormap_from_dict(colormap_dict: dict[str, str]) -> mcolors.Colormap:
+    """Create a matplotlib colormap from a dictionary of index->color mappings."""
+    # Sort by numeric keys to ensure proper order
+    sorted_items = sorted(colormap_dict.items(), key=lambda x: int(x[0]))
+
+    # Extract positions (normalized 0-1) and colors
+    positions = []
+    colors = []
+
+    for key, color in sorted_items:
+        position = int(key) / 255.0  # Normalize to 0-1 range
+        positions.append(position)
+        colors.append(color)
+
+    if positions[0] != 0 and positions[-1] != 1:
+        # this is a matplotlib requirement
+        raise ValueError("Provided colormap keys must contain 0 and 255.")
+
+    return mcolors.LinearSegmentedColormap.from_list(
+        "custom", list(zip(positions, colors, strict=True)), N=256
+    )

@@ -1,5 +1,6 @@
 import io
 import json
+import urllib.parse
 
 import numpy as np
 import pandas as pd
@@ -12,6 +13,8 @@ import xarray as xr
 from xpublish_tiles.testing.datasets import EU3035, IFS, PARA_HIRES, REDGAUSS_N320
 from xpublish_tiles.xpublish.tiles import TilesPlugin
 from xpublish_tiles.xpublish.tiles.tile_matrix import extract_dimension_extents
+
+CUSTOM_COLORMAP = urllib.parse.quote(json.dumps({"0": "#000000", "255": "#ffffff"}))
 
 
 @pytest.fixture(scope="session")
@@ -187,8 +190,9 @@ def test_tilesets_list_with_metadata():
 
 
 def test_one_dimensional_dataset():
+    ds = REDGAUSS_N320.create().isel(point=slice(2000))
     rest = xpublish.Rest(
-        {"n320": REDGAUSS_N320.create().isel(point=slice(2000))},
+        {"n320": ds},
         plugins={"tiles": TilesPlugin()},
     )
     client = TestClient(rest.app)
@@ -206,7 +210,7 @@ def test_one_dimensional_dataset():
 
     response = client.get(
         "/datasets/n320/tiles/WebMercatorQuad/tilejson.json"
-        "?variables=foo&style=raster/plasma&width=512&height=512&colorscalerange=-3,3&colormap=%7B%221%22%3A%22%23f0f0f0%22%7D"
+        "?variables=foo&style=raster/custom&width=512&height=512&colorscalerange=-3,3"
     )
     assert response.status_code == 200
     tilejson = response.json()
@@ -217,9 +221,9 @@ def test_one_dimensional_dataset():
 
     rest = xpublish.Rest(
         {
-            "n320": REDGAUSS_N320.create()
-            .isel(point=slice(2000))
-            .expand_dims({"time": pd.date_range("2001-01-01", periods=5, freq="D")})
+            "n320": ds.expand_dims(
+                {"time": pd.date_range("2001-01-01", periods=5, freq="D")}
+            )
         },
         plugins={"tiles": TilesPlugin()},
     )
@@ -243,7 +247,7 @@ def test_one_dimensional_dataset():
 
     response = client.get(
         "/datasets/n320/tiles/WebMercatorQuad/tilejson.json"
-        "?variables=foo&style=raster/plasma&width=512&height=512&colorscalerange=-3,3&colormap=%7B%221%22%3A%22%23f0f0f0%22%7D"
+        "?variables=foo&style=raster/custom&width=512&height=512&colorscalerange=-3,3"
     )
     assert response.status_code == 200
     tilejson = response.json()
@@ -650,7 +654,8 @@ def test_tilejson_endpoint():
     # Test TileJSON endpoint with dimension selectors and colormap
     response = client.get(
         "/datasets/temp/tiles/WebMercatorQuad/tilejson.json"
-        "?variables=temperature&style=raster/plasma&width=512&height=512&time=2020-02-01&colorscalerange=-3,3&colormap=%7B%221%22%3A%22%23f0f0f0%22%7D"
+        "?variables=temperature&style=raster/custom&width=512&height=512&time=2020-02-01&"
+        f"colorscalerange=-3,3&colormap={CUSTOM_COLORMAP}"
     )
     assert response.status_code == 200
 
@@ -668,15 +673,13 @@ def test_tilejson_endpoint():
     assert "{y}" in tile_url
     assert "{x}" in tile_url
     assert "variables=temperature" in tile_url
-    assert "style=raster/plasma" in tile_url
+    assert "style=raster/custom" in tile_url
     assert "width=512" in tile_url
     assert "height=512" in tile_url
     assert "time=2020-02-01" in tile_url  # Dimension selector preserved
     assert "colorscalerange=-3,3" in tile_url  # Additional param preserved
     assert "render_errors=false" in tile_url  # Default param included
-    assert (
-        "colormap=%7B%221%22%3A%20%22%23f0f0f0%22%7D" in tile_url
-    )  # Additional param preserved
+    assert f"colormap={CUSTOM_COLORMAP}" in tile_url  # Additional param preserved
 
     # Check optional fields
     assert tilejson["scheme"] == "xyz"
@@ -872,17 +875,17 @@ def test_tilejson_bounds_with_decreasing_lat_lon():
 
 
 def test_colormap_tile_endpoint(xpublish_client):
-    """Test that tiles can be generated with custom colormap."""
+    """Test that tiles can be generated with custom colormap using raster/custom style."""
     from urllib.parse import quote
 
     colormap = {"0": "#ff0000", "255": "#0000ff"}  # Red to blue
     colormap_json = json.dumps(colormap)
     colormap_encoded = quote(colormap_json)
 
-    # Note: We don't specify style parameter, letting it use default behavior with colormap
+    # Must specify style=raster/custom when using colormap
     url = (
         f"/datasets/air/tiles/WebMercatorQuad/0/0/0"
-        f"?variables=air&width=256&height=256&colormap={colormap_encoded}"
+        f"?variables=air&width=256&height=256&style=raster/custom&colormap={colormap_encoded}"
     )
     response = xpublish_client.get(url)
     assert response.status_code == 200
@@ -894,18 +897,29 @@ def test_colormap_tile_endpoint(xpublish_client):
     assert img.format == "PNG"
     assert img.size == (256, 256)
 
+    # Test that invalid colormap keys are rejected
+    bad_colormap = {"0": "#ff0000", "2": "#0000ff"}
+    colormap_encoded = quote(json.dumps(bad_colormap))
+    url = (
+        f"/datasets/air/tiles/WebMercatorQuad/0/0/0"
+        f"?variables=air&width=256&height=256&style=raster/custom&colormap={colormap_encoded}"
+    )
+    response = xpublish_client.get(url)
+    assert response.status_code == 422
+
 
 def test_colormap_with_style_parameter_succeeds(xpublish_client):
-    """Test that specifying both colormap and style works - colormap overrides style."""
+    """Test that colormap requires raster/custom style, other styles return 422."""
     from urllib.parse import quote
 
     colormap = {"0": "#ff0000", "255": "#0000ff"}
     colormap_json = json.dumps(colormap)
     colormap_encoded = quote(colormap_json)
 
+    # Test that colormap with raster/custom succeeds
     response = xpublish_client.get(
         f"/datasets/air/tiles/WebMercatorQuad/0/0/0"
-        f"?variables=air&width=256&height=256&colormap={colormap_encoded}&style=raster/viridis"
+        f"?variables=air&width=256&height=256&colormap={colormap_encoded}&style=raster/custom"
     )
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
@@ -915,3 +929,17 @@ def test_colormap_with_style_parameter_succeeds(xpublish_client):
     img = Image.open(image_data)
     assert img.format == "PNG"
     assert img.size == (256, 256)
+
+    # Test that colormap with raster/viridis fails with 422
+    response = xpublish_client.get(
+        f"/datasets/air/tiles/WebMercatorQuad/0/0/0"
+        f"?variables=air&width=256&height=256&colormap={colormap_encoded}&style=raster/viridis"
+    )
+    assert response.status_code == 422
+
+    # Test that colormap with raster/default fails with 422
+    response = xpublish_client.get(
+        f"/datasets/air/tiles/WebMercatorQuad/0/0/0"
+        f"?variables=air&width=256&height=256&colormap={colormap_encoded}&style=raster/default"
+    )
+    assert response.status_code == 422

@@ -119,6 +119,10 @@ class TestValidateStyle:
         result = validate_style("raster/viridis")
         assert result == ("raster", "viridis")
 
+    def test_valid_raster_style_custom(self):
+        result = validate_style("raster/custom")
+        assert result == ("raster", "custom")
+
     @pytest.mark.skip()
     def test_valid_quiver_style(self):
         result = validate_style("quiver/arrows")
@@ -260,6 +264,25 @@ class TestValidateColormap:
         ):
             validate_colormap({"-1": "#ffffff"})
 
+    def test_invalid_key_range(self):
+        with pytest.raises(
+            ValueError,
+            match="colormap keys must include 0 and 255 as minimum and maximum",
+        ):
+            validate_colormap({"0": "#000000", "1": "#123123"})
+
+        with pytest.raises(
+            ValueError,
+            match="colormap keys must include 0 and 255 as minimum and maximum",
+        ):
+            validate_colormap({"1": "#000000", "255": "#123123"})
+
+        with pytest.raises(
+            ValueError,
+            match="colormap keys must include 0 and 255 as minimum and maximum",
+        ):
+            validate_colormap({"1": "#000000", "254": "#123123"})
+
     def test_invalid_key_non_numeric(self):
         with pytest.raises(ValueError, match="colormap keys must be numeric, got 'abc'"):
             validate_colormap({"abc": "#ffffff"})
@@ -292,3 +315,65 @@ class TestValidateColormap:
     def test_non_dict_json_input(self):
         with pytest.raises(ValueError, match="colormap must be a dictionary"):
             validate_colormap(["not", "a", "dict"])  # type: ignore  # this doesn't validate with the type checker
+
+
+class TestCategoricalColormap:
+    def test_create_listed_colormap_valid(self):
+        """Test creating a ListedColormap with valid categorical colormap."""
+        from xpublish_tiles.render.raster import create_listed_colormap_from_dict
+
+        colormap_dict = {
+            "0": "#ff0000",
+            "1": "#00ff00",
+            "2": "#0000ff",
+        }
+        flag_values = [0, 1, 2]
+        cmap = create_listed_colormap_from_dict(colormap_dict, flag_values)
+        assert cmap.N == 3
+        assert len(cmap.colors) == 3
+
+    def test_create_listed_colormap_missing_flag_value(self):
+        """Test that missing flag_value raises error."""
+        from xpublish_tiles.render.raster import create_listed_colormap_from_dict
+
+        colormap_dict = {
+            "0": "#ff0000",
+            "1": "#00ff00",
+        }
+        flag_values = [0, 1, 2, 3, 4]
+        with pytest.raises(
+            ValueError,
+            match="colormap is missing entries for flag_values",
+        ):
+            create_listed_colormap_from_dict(colormap_dict, flag_values)
+
+    def test_create_listed_colormap_invalid_key(self):
+        """Test that keys not in flag_values raise error."""
+        from xpublish_tiles.render.raster import create_listed_colormap_from_dict
+
+        colormap_dict = {
+            "0": "#ff0000",
+            "1": "#00ff00",
+            "99": "#0000ff",  # 99 is not in flag_values
+        }
+        flag_values = [0, 1, 2]
+        with pytest.raises(
+            ValueError,
+            match="colormap contains keys not in flag_values: \\['99'\\]",
+        ):
+            create_listed_colormap_from_dict(colormap_dict, flag_values)
+
+    def test_create_listed_colormap_non_consecutive_flag_values(self):
+        """Test that non-consecutive flag_values work correctly."""
+        from xpublish_tiles.render.raster import create_listed_colormap_from_dict
+
+        # flag_values don't have to be consecutive
+        colormap_dict = {
+            "0": "#ff0000",
+            "5": "#00ff00",  # skipping 1-4
+            "10": "#0000ff",
+        }
+        flag_values = [0, 5, 10]
+        cmap = create_listed_colormap_from_dict(colormap_dict, flag_values)
+        assert cmap.N == 3
+        assert len(cmap.colors) == 3

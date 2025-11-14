@@ -123,6 +123,19 @@ class WMSGetMapQuery(WMSBaseQuery):
     def validate_format(cls, v: str | None) -> ImageFormat | None:
         return validate_image_format(v)
 
+    @model_validator(mode="after")
+    def validate_colormap_requires_custom_style(self):
+        """Validate that colormap requires style to be raster/custom."""
+        if self.colormap is not None:
+            if self.styles is None or self.styles != ("raster", "custom"):
+                style_str = (
+                    f"{self.styles[0]}/{self.styles[1]}" if self.styles else "None"
+                )
+                raise ValueError(
+                    f"When 'colormap' parameter is provided, 'styles' must be 'raster/custom'. Got styles='{style_str}' instead."
+                )
+        return self
+
 
 class WMSGetFeatureInfoQuery(WMSBaseQuery):
     """WMS GetFeatureInfo query"""
@@ -226,6 +239,19 @@ class WMSGetLegendGraphicQuery(WMSBaseQuery):
     @classmethod
     def validate_format(cls, v: str | None) -> ImageFormat | None:
         return validate_image_format(v)
+
+    @model_validator(mode="after")
+    def validate_colormap_requires_custom_style(self):
+        """Validate that colormap requires style to be raster/custom."""
+        if self.colormap is not None:
+            if self.styles is None or self.styles != ("raster", "custom"):
+                style_str = (
+                    f"{self.styles[0]}/{self.styles[1]}" if self.styles else "None"
+                )
+                raise ValueError(
+                    f"When 'colormap' parameter is provided, 'styles' must be 'raster/custom'. Got styles='{style_str}' instead."
+                )
+        return self
 
 
 WMSQueryType = Union[
