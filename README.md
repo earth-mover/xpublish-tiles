@@ -282,6 +282,7 @@ Settings can be configured via environment variables or config files. The async 
 5. `XPUBLISH_TILES_RECTILINEAR_CHECK_MIN_SIZE: int` - check for rectilinearity if array.shape > (N, N)
 6. `XPUBLISH_TILES_MAX_RENDERABLE_SIZE: int` - do not attempt to load or render arrays with size greater than this value
 7. `XPUBLISH_TILES_DEFAULT_PAD: int` - how much to pad a selection on either side
+8. `XPUBLISH_TILES_GRID_CACHE_MAX_SIZE: int` - maximum number of grid systems to cache (default: 16). **Note:** This must be set via environment variable before importing the module, as the cache is initialized at import time.
 
 ## Performance Notes
 

@@ -20,6 +20,7 @@ from scipy.spatial import Delaunay
 
 import xarray as xr
 from xarray.core.indexing import IndexSelResult
+from xpublish_tiles.config import config
 from xpublish_tiles.lib import (
     Fill,
     PadDimension,
@@ -92,8 +93,7 @@ Y_COORD_PATTERN = re.compile(
     r"^(y|j|eta|nlat|rlat|nj)[a-z0-9_]*$|^y?(nav_lat|lat|gphi)[a-z0-9_]*$"
 )
 
-# TTL cache for grid systems (5 minute TTL, max 128 entries)
-_GRID_CACHE = cachetools.TTLCache(maxsize=128, ttl=300)
+_GRID_CACHE = cachetools.LRUCache(maxsize=config["grid_cache_max_size"])
 
 
 def _grab_edges(
