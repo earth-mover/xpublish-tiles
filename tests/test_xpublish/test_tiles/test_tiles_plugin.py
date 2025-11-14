@@ -1,5 +1,6 @@
 import io
 import json
+import urllib.parse
 
 import numpy as np
 import pandas as pd
@@ -12,6 +13,8 @@ import xarray as xr
 from xpublish_tiles.testing.datasets import EU3035, PARA_HIRES, REDGAUSS_N320
 from xpublish_tiles.xpublish.tiles import TilesPlugin
 from xpublish_tiles.xpublish.tiles.tile_matrix import extract_dimension_extents
+
+CUSTOM_COLORMAP = urllib.parse.quote(json.dumps({"0": "#000000", "255": "#ffffff"}))
 
 
 @pytest.fixture(scope="session")
@@ -187,8 +190,9 @@ def test_tilesets_list_with_metadata():
 
 
 def test_one_dimensional_dataset():
+    ds = REDGAUSS_N320.create().isel(point=slice(2000))
     rest = xpublish.Rest(
-        {"n320": REDGAUSS_N320.create().isel(point=slice(2000))},
+        {"n320": ds},
         plugins={"tiles": TilesPlugin()},
     )
     client = TestClient(rest.app)
@@ -206,7 +210,7 @@ def test_one_dimensional_dataset():
 
     response = client.get(
         "/datasets/n320/tiles/WebMercatorQuad/tilejson.json"
-        "?variables=foo&style=raster/plasma&width=512&height=512&colorscalerange=-3,3&colormap=%7B%221%22%3A%22%23f0f0f0%22%7D"
+        "?variables=foo&style=raster/custom&width=512&height=512&colorscalerange=-3,3"
     )
     assert response.status_code == 200
     tilejson = response.json()
@@ -217,9 +221,9 @@ def test_one_dimensional_dataset():
 
     rest = xpublish.Rest(
         {
-            "n320": REDGAUSS_N320.create()
-            .isel(point=slice(2000))
-            .expand_dims({"time": pd.date_range("2001-01-01", periods=5, freq="D")})
+            "n320": ds.expand_dims(
+                {"time": pd.date_range("2001-01-01", periods=5, freq="D")}
+            )
         },
         plugins={"tiles": TilesPlugin()},
     )
@@ -243,7 +247,7 @@ def test_one_dimensional_dataset():
 
     response = client.get(
         "/datasets/n320/tiles/WebMercatorQuad/tilejson.json"
-        "?variables=foo&style=raster/plasma&width=512&height=512&colorscalerange=-3,3&colormap=%7B%221%22%3A%22%23f0f0f0%22%7D"
+        "?variables=foo&style=raster/custom&width=512&height=512&colorscalerange=-3,3"
     )
     assert response.status_code == 200
     tilejson = response.json()
@@ -650,7 +654,8 @@ def test_tilejson_endpoint():
     # Test TileJSON endpoint with dimension selectors and colormap
     response = client.get(
         "/datasets/temp/tiles/WebMercatorQuad/tilejson.json"
-        "?variables=temperature&style=raster/plasma&width=512&height=512&time=2020-02-01&colorscalerange=-3,3&colormap=%7B%221%22%3A%22%23f0f0f0%22%7D"
+        "?variables=temperature&style=raster/custom&width=512&height=512&time=2020-02-01&"
+        f"colorscalerange=-3,3&colormap={CUSTOM_COLORMAP}"
     )
     assert response.status_code == 200
 
@@ -668,15 +673,13 @@ def test_tilejson_endpoint():
     assert "{y}" in tile_url
     assert "{x}" in tile_url
     assert "variables=temperature" in tile_url
-    assert "style=raster/plasma" in tile_url
+    assert "style=raster/custom" in tile_url
     assert "width=512" in tile_url
     assert "height=512" in tile_url
     assert "time=2020-02-01" in tile_url  # Dimension selector preserved
     assert "colorscalerange=-3,3" in tile_url  # Additional param preserved
     assert "render_errors=false" in tile_url  # Default param included
-    assert (
-        "colormap=%7B%221%22%3A%20%22%23f0f0f0%22%7D" in tile_url
-    )  # Additional param preserved
+    assert f"colormap={CUSTOM_COLORMAP}" in tile_url  # Additional param preserved
 
     # Check optional fields
     assert tilejson["scheme"] == "xyz"
