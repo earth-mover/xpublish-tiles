@@ -5,7 +5,6 @@ import datashader as dsh  # type: ignore
 import datashader.reductions  # type: ignore
 import datashader.transfer_functions as tf  # type: ignore
 import matplotlib as mpl  # type: ignore
-import matplotlib.colors as mcolors  # type: ignore
 import numbagg
 import numpy as np
 import pandas as pd
@@ -14,7 +13,7 @@ from scipy.interpolate import NearestNDInterpolator
 
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, GridSystem2D, Triangular
-from xpublish_tiles.lib import MissingParameterError
+from xpublish_tiles.lib import MissingParameterError, create_colormap_from_dict
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import Renderer, register_renderer, render_error_image
 from xpublish_tiles.types import (
@@ -85,27 +84,6 @@ def nearest_on_uniform_grid_quadmesh(
 class DatashaderRasterRenderer(Renderer):
     def validate(self, context: dict[str, "RenderContext"]):
         assert len(context) == 1
-
-    def _create_colormap_from_dict(
-        self, colormap_dict: dict[str, str]
-    ) -> mcolors.Colormap:
-        """Create a matplotlib colormap from a dictionary of index->color mappings."""
-        # Sort by numeric keys to ensure proper order
-        sorted_items = sorted(colormap_dict.items(), key=lambda x: int(x[0]))
-
-        # Extract positions (normalized 0-1) and colors
-        positions = []
-        colors = []
-
-        for key, color in sorted_items:
-            position = int(key) / 255.0  # Normalize to 0-1 range
-            positions.append(position)
-            colors.append(color)
-
-        # Create a LinearSegmentedColormap
-        return mcolors.LinearSegmentedColormap.from_list(
-            "custom", list(zip(positions, colors, strict=False)), N=256
-        )
 
     def maybe_cast_data(self, data) -> xr.DataArray:  # type: ignore[name-defined]
         dtype = data.dtype
@@ -226,7 +204,7 @@ class DatashaderRasterRenderer(Renderer):
 
             # Use custom colormap if provided, otherwise use variant
             if colormap is not None:
-                cmap = self._create_colormap_from_dict(colormap)
+                cmap = create_colormap_from_dict(colormap)
             else:
                 cmap = mpl.colormaps.get_cmap(variant)
 
@@ -244,7 +222,13 @@ class DatashaderRasterRenderer(Renderer):
                     zip(context.datatype.values, context.datatype.colors, strict=True)
                 )
             else:
-                kwargs["cmap"] = mpl.colormaps.get_cmap(variant)
+                if colormap is not None:
+                    raise NotImplementedError(
+                        "custom colormap not supported for categorical data yet. "
+                        "Set the `flag_colors` attribute instead."
+                    )
+                else:
+                    kwargs["cmap"] = mpl.colormaps.get_cmap(variant)
                 kwargs["span"] = (
                     min(context.datatype.values),
                     max(context.datatype.values),

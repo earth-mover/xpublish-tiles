@@ -260,6 +260,25 @@ class TestValidateColormap:
         ):
             validate_colormap({"-1": "#ffffff"})
 
+    def test_invalid_key_range(self):
+        with pytest.raises(
+            ValueError,
+            match="colormap keys must include 0 and 255 as minimum and maximum",
+        ):
+            validate_colormap({"0": "#000000", "1": "#123123"})
+
+        with pytest.raises(
+            ValueError,
+            match="colormap keys must include 0 and 255 as minimum and maximum",
+        ):
+            validate_colormap({"1": "#000000", "255": "#123123"})
+
+        with pytest.raises(
+            ValueError,
+            match="colormap keys must include 0 and 255 as minimum and maximum",
+        ):
+            validate_colormap({"1": "#000000", "254": "#123123"})
+
     def test_invalid_key_non_numeric(self):
         with pytest.raises(ValueError, match="colormap keys must be numeric, got 'abc'"):
             validate_colormap({"abc": "#ffffff"})

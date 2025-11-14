@@ -872,6 +872,15 @@ def test_colormap_tile_endpoint(xpublish_client):
     assert img.format == "PNG"
     assert img.size == (256, 256)
 
+    bad_colormap = {"0": "#ff0000", "2": "#0000ff"}
+    colormap_encoded = quote(json.dumps(bad_colormap))
+    url = (
+        f"/datasets/air/tiles/WebMercatorQuad/0/0/0"
+        f"?variables=air&width=256&height=256&colormap={colormap_encoded}"
+    )
+    response = xpublish_client.get(url)
+    assert response.status_code == 422
+
 
 def test_colormap_with_style_parameter_succeeds(xpublish_client):
     """Test that specifying both colormap and style works - colormap overrides style."""
