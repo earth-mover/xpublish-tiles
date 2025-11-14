@@ -850,17 +850,17 @@ def test_tilejson_bounds_with_decreasing_lat_lon():
 
 
 def test_colormap_tile_endpoint(xpublish_client):
-    """Test that tiles can be generated with custom colormap."""
+    """Test that tiles can be generated with custom colormap using raster/custom style."""
     from urllib.parse import quote
 
     colormap = {"0": "#ff0000", "255": "#0000ff"}  # Red to blue
     colormap_json = json.dumps(colormap)
     colormap_encoded = quote(colormap_json)
 
-    # Note: We don't specify style parameter, letting it use default behavior with colormap
+    # Must specify style=raster/custom when using colormap
     url = (
         f"/datasets/air/tiles/WebMercatorQuad/0/0/0"
-        f"?variables=air&width=256&height=256&colormap={colormap_encoded}"
+        f"?variables=air&width=256&height=256&style=raster/custom&colormap={colormap_encoded}"
     )
     response = xpublish_client.get(url)
     assert response.status_code == 200
@@ -872,27 +872,29 @@ def test_colormap_tile_endpoint(xpublish_client):
     assert img.format == "PNG"
     assert img.size == (256, 256)
 
+    # Test that invalid colormap keys are rejected
     bad_colormap = {"0": "#ff0000", "2": "#0000ff"}
     colormap_encoded = quote(json.dumps(bad_colormap))
     url = (
         f"/datasets/air/tiles/WebMercatorQuad/0/0/0"
-        f"?variables=air&width=256&height=256&colormap={colormap_encoded}"
+        f"?variables=air&width=256&height=256&style=raster/custom&colormap={colormap_encoded}"
     )
     response = xpublish_client.get(url)
     assert response.status_code == 422
 
 
 def test_colormap_with_style_parameter_succeeds(xpublish_client):
-    """Test that specifying both colormap and style works - colormap overrides style."""
+    """Test that colormap requires raster/custom style, other styles return 422."""
     from urllib.parse import quote
 
     colormap = {"0": "#ff0000", "255": "#0000ff"}
     colormap_json = json.dumps(colormap)
     colormap_encoded = quote(colormap_json)
 
+    # Test that colormap with raster/custom succeeds
     response = xpublish_client.get(
         f"/datasets/air/tiles/WebMercatorQuad/0/0/0"
-        f"?variables=air&width=256&height=256&colormap={colormap_encoded}&style=raster/viridis"
+        f"?variables=air&width=256&height=256&colormap={colormap_encoded}&style=raster/custom"
     )
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
@@ -902,3 +904,17 @@ def test_colormap_with_style_parameter_succeeds(xpublish_client):
     img = Image.open(image_data)
     assert img.format == "PNG"
     assert img.size == (256, 256)
+
+    # Test that colormap with raster/viridis fails with 422
+    response = xpublish_client.get(
+        f"/datasets/air/tiles/WebMercatorQuad/0/0/0"
+        f"?variables=air&width=256&height=256&colormap={colormap_encoded}&style=raster/viridis"
+    )
+    assert response.status_code == 422
+
+    # Test that colormap with raster/default fails with 422
+    response = xpublish_client.get(
+        f"/datasets/air/tiles/WebMercatorQuad/0/0/0"
+        f"?variables=air&width=256&height=256&colormap={colormap_encoded}&style=raster/default"
+    )
+    assert response.status_code == 422

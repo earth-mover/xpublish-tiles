@@ -1339,8 +1339,12 @@ class TileQuery(BaseModel):
 
     def model_post_init(self, __context) -> None:
         """Validate colormap usage constraints."""
-        # Colormap is allowed with any style - colormap will override the style's colormap
-        pass
+        if self.colormap is not None:
+            if self.style is None or self.style != ("raster", "custom"):
+                style_str = f"{self.style[0]}/{self.style[1]}" if self.style else "None"
+                raise ValueError(
+                    f"When 'colormap' parameter is provided, 'style' must be 'raster/custom'. Got style='{style_str}' instead."
+                )
 
 
 class TileJSON(BaseModel):

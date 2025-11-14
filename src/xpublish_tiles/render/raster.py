@@ -267,7 +267,9 @@ class DatashaderRasterRenderer(Renderer):
     @staticmethod
     def supported_variants() -> list[str]:
         colormaps = list(mpl.colormaps)
-        return [name for name in sorted(colormaps) if not name.endswith("_r")]
+        variants = [name for name in sorted(colormaps) if not name.endswith("_r")]
+        variants.append("custom")
+        return variants
 
     @staticmethod
     def default_variant() -> str:
@@ -275,6 +277,12 @@ class DatashaderRasterRenderer(Renderer):
 
     @classmethod
     def describe_style(cls, variant: str) -> dict[str, str]:
+        if variant == "custom":
+            return {
+                "id": f"{cls.style_id()}/{variant}",
+                "title": "Raster - Custom",
+                "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
+            }
         return {
             "id": f"{cls.style_id()}/{variant}",
             "title": f"Raster - {variant.title()}",

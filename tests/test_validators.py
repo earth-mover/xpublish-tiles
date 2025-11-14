@@ -119,6 +119,10 @@ class TestValidateStyle:
         result = validate_style("raster/viridis")
         assert result == ("raster", "viridis")
 
+    def test_valid_raster_style_custom(self):
+        result = validate_style("raster/custom")
+        assert result == ("raster", "custom")
+
     @pytest.mark.skip()
     def test_valid_quiver_style(self):
         result = validate_style("quiver/arrows")
