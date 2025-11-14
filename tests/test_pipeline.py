@@ -6,6 +6,7 @@ import io
 import cf_xarray  # noqa: F401 - Enable cf accessor
 import morecantile
 import numpy as np
+import pandas as pd
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
@@ -296,6 +297,18 @@ def test_apply_query_errors():
     with pytest.raises(IndexingError):
         apply_query(ds, variables=["sst"], selectors={"L": 123123123})
 
+    hrrr = HRRR.create()
+
+    with pytest.raises(IndexingError, match="Invalid selection method 'invalid'"):
+        apply_query(
+            hrrr, variables=["foo"], selectors={"time": "invalid::2018-01-01T01:00"}
+        )
+
+    with pytest.raises(IndexingError, match="Invalid selection method 'badmethod'"):
+        apply_query(
+            hrrr, variables=["foo"], selectors={"time": "badmethod::2018-01-01T01:00"}
+        )
+
 
 def test_apply_query_selectors():
     ds = FORECAST.copy(deep=True)
@@ -340,6 +353,84 @@ def test_apply_query_selectors():
     ds.attrs["_xpublish_id"] = "foo"
     with pytest.raises(MissingParameterError):
         apply_query(ds, variables=["sst"], selectors={})
+
+
+def test_apply_query_selectors_method_nearest():
+    hrrr = HRRR.create().reindex(
+        time=pd.date_range("2018-01-01", "2018-01-02", freq="6h")
+    )
+    actual = apply_query(
+        hrrr,
+        variables=["foo"],
+        selectors={
+            "time": "nearest::2018-01-01T01:15",
+        },
+    )
+    expected = hrrr.sel(time="2018-01-01T01:15", method="nearest").isel(step=-1)
+    xr.testing.assert_equal(actual["foo"].da, expected["foo"])
+
+    # Test with multiple selectors (using existing step dimension)
+    actual_multi = apply_query(
+        hrrr,
+        variables=["foo"],
+        selectors={
+            "time": "nearest::2018-01-01T01:15",
+            "step": "nearest::45min",
+        },
+    )
+    expected_multi = hrrr.sel(time="2018-01-01T01:15", method="nearest").sel(
+        step="45min", method="nearest"
+    )
+    xr.testing.assert_equal(actual_multi["foo"].da, expected_multi["foo"])
+
+    # Test ffill
+    target_time = "2018-01-01T04:00"  # Between first two timestamps
+    actual_ffill = apply_query(
+        hrrr, variables=["foo"], selectors={"time": f"ffill::{target_time}"}
+    )
+    expected_ffill = hrrr.sel(time=target_time, method="ffill").isel(step=-1)
+    xr.testing.assert_equal(actual_ffill["foo"].da, expected_ffill["foo"])
+
+    # Test bfill
+    actual_bfill = apply_query(
+        hrrr, variables=["foo"], selectors={"time": f"bfill::{target_time}"}
+    )
+    expected_bfill = hrrr.sel(time=target_time, method="bfill").isel(step=-1)
+    xr.testing.assert_equal(actual_bfill["foo"].da, expected_bfill["foo"])
+
+    # Test backfill (alias for bfill)
+    actual_backfill = apply_query(
+        hrrr, variables=["foo"], selectors={"time": f"backfill::{target_time}"}
+    )
+    expected_backfill = hrrr.sel(time=target_time, method="backfill").isel(step=-1)
+    xr.testing.assert_equal(actual_backfill["foo"].da, expected_backfill["foo"])
+
+    target_time = "2018-01-01T04:00"
+    actual = apply_query(
+        hrrr, variables=["foo"], selectors={"time": f"pad::{target_time}"}
+    )
+    expected = hrrr.sel(time=target_time, method="pad").isel(step=-1)
+    xr.testing.assert_equal(actual["foo"].da, expected["foo"])
+
+
+def test_apply_query_selectors_exact():
+    """Test exact selection method (explicit and implicit)"""
+    hrrr = HRRR.create().reindex(
+        time=pd.date_range("2018-01-01", "2018-01-02", freq="6h")
+    )
+
+    # Implicit exact (no method prefix)
+    actual_implicit = apply_query(
+        hrrr, variables=["foo"], selectors={"time": "2018-01-01T00:00"}
+    )
+    expected = hrrr.sel(time="2018-01-01T00:00").isel(step=-1)
+    xr.testing.assert_equal(actual_implicit["foo"].da, expected["foo"])
+
+    # Explicit exact
+    actual_explicit = apply_query(
+        hrrr, variables=["foo"], selectors={"time": "exact::2018-01-01T00:00"}
+    )
+    xr.testing.assert_equal(actual_explicit["foo"].da, expected["foo"])
 
 
 def test_apply_query_with_string_selectors():

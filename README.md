@@ -46,6 +46,47 @@ The colormap is a JSON-encoded dictionary with:
 > [!IMPORTANT]
 > Custom colormaps must include both "0" and "255" as keys. These colormaps must have keys that are "0" and "255", not data values. The data value is rescaled by `colorscalerange` to 0→1; the colormap is rescaled from 0→255 to 0→1 and then applied to the scaled 0→1 data.
 
+### Dimension selection with methods
+
+`xpublish-tiles` supports flexible dimension selection using a DSL that allows you to specify selection methods. This is particularly useful for temporal and vertical coordinates where you may want to select the nearest value, or use forward/backward fill.
+
+**Syntax:** `dimension=method::value`
+
+**Supported methods:**
+- `nearest` - Select the nearest coordinate value
+- `pad` / `ffill` - Forward fill (use the previous valid value)
+- `backfill` / `bfill` - Backward fill (use the next valid value)
+- `exact` - Exact match (also the default when no method is specified)
+
+**Examples:**
+
+```bash
+# Select nearest time to 2000-01-01T04:00
+http://localhost:8080/tiles/WebMercatorQuad/4/4/14?variables=temperature&time=nearest::2000-01-01T04:00
+
+# Exact match (implicit)
+http://localhost:8080/tiles/WebMercatorQuad/4/4/14?variables=temperature&time=2000-01-01T00:00
+
+# Forward fill for missing timestep
+http://localhost:8080/tiles/WebMercatorQuad/4/4/14?variables=temperature&time=ffill::2000-01-01T03:30
+
+# Multiple dimension selections with different methods
+http://localhost:8080/tiles/WebMercatorQuad/4/4/14?time=nearest::2000-01-01T04:00&pressure_level=500
+
+# Using timedelta selections
+http://localhost:8080/tiles/WebMercatorQuad/4/4/14?variables=temperature&time=nearest::2000-01-01T04:00&step=pad::3h
+```
+
+**Key features:**
+- Uses `::` separator to avoid ambiguity with datetime colons (e.g., `2000-01-01T12:00:00`)
+- Case-insensitive method names
+- Works with any dimension type (temporal, vertical, or custom)
+
+
+### Automatic dimension reduction
+
+Since each tile can only take a 2D DataArray as input, if enough selectors (or indexers; e.g. `step=1h`) are not provided `xpublish-tiles` will index out the last location along each dimension that is not X, Y. Along the "vertical" dimension we index out coordinate location 0. It is recommended that you apply as many selectors as necessary explicitly.
+
 ## Integration Examples
 
 - [Maplibre/Mapbox Usage](./examples/maplibre/)
@@ -252,6 +293,7 @@ Settings can be configured via environment variables or config files. The async 
 5. `XPUBLISH_TILES_RECTILINEAR_CHECK_MIN_SIZE: int` - check for rectilinearity if array.shape > (N, N)
 6. `XPUBLISH_TILES_MAX_RENDERABLE_SIZE: int` - do not attempt to load or render arrays with size greater than this value
 7. `XPUBLISH_TILES_DEFAULT_PAD: int` - how much to pad a selection on either side
+8. `XPUBLISH_TILES_GRID_CACHE_MAX_SIZE: int` - maximum number of grid systems to cache (default: 16). **Note:** This must be set via environment variable before importing the module, as the cache is initialized at import time.
 
 ## Performance Notes
 

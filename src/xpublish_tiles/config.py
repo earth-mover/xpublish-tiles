@@ -20,6 +20,7 @@ config = donfig.Config(
             "max_renderable_size": 400_000_000,  # 10,000 * 10,000 pixels - this takes the pipeline ~ 1s
             "max_pixel_factor": 4,  # coarsen down to this many input grid cells per output pixel
             "async_load": True,
+            "grid_cache_max_size": 16,  # maximum number of grid systems to cache
         }
     ],
     paths=[],
