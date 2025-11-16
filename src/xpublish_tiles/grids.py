@@ -13,10 +13,10 @@ import numbagg
 import numpy as np
 import pandas as pd
 import rasterix
+import triangle
 from numba_celltree import CellTree2d
 from pyproj import CRS
 from pyproj.aoi import BBox
-from scipy.spatial import Delaunay
 
 import xarray as xr
 from xarray.core.indexing import IndexSelResult
@@ -274,7 +274,6 @@ class CellTreeIndex(xr.Index):
         X: str,
         Y: str,
         lon_spans_globe: bool,
-        triang: Delaunay,
     ):
         self.X = X
         self.Y = Y
@@ -288,44 +287,42 @@ class CellTreeIndex(xr.Index):
             # the line at 180, -180; calculate the neighbours of those faces; extract those vertices and pad those.
             # However this does not work if the boundary faces without padding don't intersect those bounding longitudes
             # e.g. consider if vertices are between -178.4 and +178.4, how do we connect the boundary without the convex hull approach?
-            boundary = np.unique(triang.convex_hull)
+            boundary = np.unique(triangle.convex_hull(vertices))
+            nverts = vertices.shape[0]
             pos_verts = vertices[boundary, ...]
             neg_verts = pos_verts.copy()
 
             pos_verts[:, 0] += 360
             neg_verts[:, 0] -= 360
 
-            with log_duration("re-triangulating", "▲"):
-                triang.add_points(pos_verts)
-                triang.add_points(neg_verts)
-
-            # need to reindex the data to match the padding
-            self.reindexer = np.concatenate(
-                [np.arange(vertices.shape[0]), boundary, boundary]
-            )
             vertices = np.concatenate([vertices, pos_verts, neg_verts], axis=0)
-            faces = triang.simplices
+            with log_duration("re-triangulating", "▲"):
+                faces = triangle.delaunay(vertices)
+            # need to reindex the data to match the padding
+            self.reindexer = np.concatenate([np.arange(nverts), boundary, boundary])
 
         else:
             self.reindexer = None
 
         with log_duration("Creating CellTree", "⊠"):
             self.tree = CellTree2d(vertices, faces, fill_value=fill_value)
+
         if lon_spans_globe:
-            # lets find the vertices closest to the -180 & 180 boundaries and cache them.
-            # At indexing time, we'll return the indexes for vertices at the boundary
-            # so we can fix the coordinate discontinuity later in `pipeline`
-            idx, face_indices, _ = self.tree.intersect_edges(
-                np.array([[[180, -90], [180, 90]], [[-180, -90], [-180, 90]]])
-            )
-            (breakpt,) = np.nonzero(np.diff(idx))
-            assert breakpt.size == 1
-            breakpt = breakpt[0] + 1
-            verts = faces[face_indices, ...]
-            self.antimeridian_vertices = {
-                "pos": np.unique(verts[:breakpt]),
-                "neg": np.unique(verts[breakpt:]),
-            }
+            with log_duration("Handling periodic boundaries", "⊠"):
+                # lets find the vertices closest to the -180 & 180 boundaries and cache them.
+                # At indexing time, we'll return the indexes for vertices at the boundary
+                # so we can fix the coordinate discontinuity later in `pipeline`
+                idx, face_indices, _ = self.tree.intersect_edges(
+                    np.array([[[180, -90], [180, 90]], [[-180, -90], [-180, 90]]])
+                )
+                (breakpt,) = np.nonzero(np.diff(idx))
+                assert breakpt.size == 1
+                breakpt = breakpt[0] + 1
+                verts = faces[face_indices, ...]
+                self.antimeridian_vertices = {
+                    "pos": np.unique(verts[:breakpt]),
+                    "neg": np.unique(verts[breakpt:]),
+                }
         else:
             self.antimeridian_vertices = {"pos": np.array([]), "neg": np.array([])}
 
@@ -1239,7 +1236,6 @@ class Triangular(GridSystem):
         Xname: str,
         Yname: str,
         fill_value: Any,
-        triang: Delaunay,
     ):
         self.crs = crs
         self.X, self.Y = Xname, Yname
@@ -1261,7 +1257,6 @@ class Triangular(GridSystem):
                 X=Xname,
                 Y=Yname,
                 lon_spans_globe=self.lon_spans_globe,
-                triang=triang,
             ),
         )
 
@@ -1312,16 +1307,19 @@ class Triangular(GridSystem):
 
         (dim,) = ds[Xname].dims
         with log_duration("Triangulating", "🔺"):
+            if np.isnan(vertices).any():
+                raise ValueError(
+                    f"Triangulation failed. Variables {Xname!r} or {Yname!r} contain NaNs."
+                )
             try:
-                triang = Delaunay(vertices, incremental=True)
+                faces = triangle.delaunay(vertices)
             except Exception as e:
                 raise ValueError(
                     f"Triangulation failed. This may indicate bad data in variables {Xname!r}, {Yname!r}."
-                    f"Please check for presence of NaNs, or whether all values are the same. "
-                    f"Original exception is of type {type(e)!r}"
+                    f"Please check whether all values are the same. "
+                    f"Original exception: {e!r}"
                 ) from None
 
-        faces = triang.simplices
         return cls(
             vertices=vertices,
             faces=faces,
@@ -1330,7 +1328,6 @@ class Triangular(GridSystem):
             Yname=Yname,
             dim=dim,
             fill_value=-1,
-            triang=triang,
         )
 
 
