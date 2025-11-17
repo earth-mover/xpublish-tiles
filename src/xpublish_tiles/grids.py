@@ -1307,7 +1307,7 @@ class Triangular(GridSystem):
 
         (dim,) = ds[Xname].dims
         with log_duration("Triangulating", "🔺"):
-            if np.isnan(vertices).any():
+            if numbagg.anynan(vertices):
                 raise ValueError(
                     f"Triangulation failed. Variables {Xname!r} or {Yname!r} contain NaNs."
                 )
