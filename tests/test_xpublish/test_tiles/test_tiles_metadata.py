@@ -8,7 +8,7 @@ import xarray as xr
 from xpublish_tiles.lib import VariableNotFoundError
 
 
-def test_extract_dataset_extents():
+async def test_extract_dataset_extents():
     """Test the extract_dataset_extents function directly"""
     import pandas as pd
 
@@ -59,7 +59,7 @@ def test_extract_dataset_extents():
         }
     )
 
-    extents = extract_dataset_extents(dataset, "temperature")
+    extents = await extract_dataset_extents(dataset, "temperature")
 
     # Should have 3 non-spatial dimensions
     assert len(extents) == 3
@@ -94,7 +94,7 @@ def test_extract_dataset_extents():
     assert scenario_extent["description"] == "Test scenario"
 
 
-def test_extract_dataset_extents_empty():
+async def test_extract_dataset_extents_empty():
     """Test extract_dataset_extents with dataset containing no non-spatial dimensions"""
     from xpublish_tiles.xpublish.tiles.metadata import extract_dataset_extents
 
@@ -120,11 +120,11 @@ def test_extract_dataset_extents_empty():
         }
     )
 
-    extents = extract_dataset_extents(dataset, "temperature")
+    extents = await extract_dataset_extents(dataset, "temperature")
     assert len(extents) == 0
 
 
-def test_extract_dataset_extents_multiple_variables():
+async def test_extract_dataset_extents_multiple_variables():
     """Test extract_dataset_extents with multiple variables having different dimensions"""
     import pandas as pd
 
@@ -186,12 +186,12 @@ def test_extract_dataset_extents_multiple_variables():
     )
 
     # Test with surface_temp variable (only has time)
-    extents_surface = extract_dataset_extents(dataset, "surface_temp")
+    extents_surface = await extract_dataset_extents(dataset, "surface_temp")
     assert len(extents_surface) == 1
     assert "time" in extents_surface
 
     # Test with ocean_temp variable (has time and depth)
-    extents_ocean = extract_dataset_extents(dataset, "ocean_temp")
+    extents_ocean = await extract_dataset_extents(dataset, "ocean_temp")
     assert len(extents_ocean) == 2
     assert "time" in extents_ocean
     assert "depth" in extents_ocean
@@ -303,7 +303,7 @@ def test_calculate_temporal_resolution_edge_cases():
     assert _calculate_temporal_resolution(invalid_values) == "PT1H"
 
 
-def test_create_tileset_metadata_with_extents():
+async def test_create_tileset_metadata_with_extents():
     """Test create_tileset_metadata - extents are now on layers, not tileset"""
     import pandas as pd
 
@@ -347,7 +347,7 @@ def test_create_tileset_metadata_with_extents():
     assert not hasattr(metadata, "extents")
 
     # Test that extract_dataset_extents works for the variable
-    extents = extract_dataset_extents(dataset, "temperature")
+    extents = await extract_dataset_extents(dataset, "temperature")
     assert "time" in extents
 
     time_extent = extents["time"]
@@ -356,7 +356,7 @@ def test_create_tileset_metadata_with_extents():
     assert time_extent["resolution"] == "PT6H"  # 6-hourly
 
 
-def test_create_tileset_metadata_no_extents():
+async def test_create_tileset_metadata_no_extents():
     """Test create_tileset_metadata with no non-spatial dimensions"""
     from xpublish_tiles.xpublish.tiles.metadata import (
         create_tileset_metadata,
@@ -392,7 +392,7 @@ def test_create_tileset_metadata_no_extents():
     assert not hasattr(metadata, "extents")
 
     # Test that extract_dataset_extents returns empty dict when no non-spatial dimensions
-    extents = extract_dataset_extents(dataset, "temperature")
+    extents = await extract_dataset_extents(dataset, "temperature")
     assert len(extents) == 0
 
 

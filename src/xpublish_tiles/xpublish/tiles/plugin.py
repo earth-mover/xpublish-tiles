@@ -1,5 +1,6 @@
 """OGC Tiles API XPublish Plugin"""
 
+import asyncio
 import io
 import json
 import logging
@@ -21,6 +22,7 @@ from xpublish_tiles.lib import (
     MissingParameterError,
     TileTooBigError,
     VariableNotFoundError,
+    async_run,
 )
 from xpublish_tiles.logger import (
     CleanConsoleRenderer,
@@ -35,6 +37,7 @@ from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import QueryParams
 from xpublish_tiles.utils import normalize_tilejson_bounds
 from xpublish_tiles.xpublish.tiles.metadata import (
+    create_tileset_for_tms,
     create_tileset_metadata,
     extract_dataset_extents,
     extract_variable_bounding_box,
@@ -44,14 +47,10 @@ from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SETS,
     extract_tile_bbox_and_crs,
     get_all_tile_matrix_set_ids,
-    get_tile_matrix_limits,
 )
 from xpublish_tiles.xpublish.tiles.types import (
     TILES_FILTERED_QUERY_PARAMS,
     ConformanceDeclaration,
-    DataType,
-    Layer,
-    Link,
     Style,
     TileJSON,
     TileMatrixSet,
@@ -59,7 +58,6 @@ from xpublish_tiles.xpublish.tiles.types import (
     TileQuery,
     TileSetMetadata,
     TilesetsList,
-    TilesetSummary,
 )
 
 
@@ -174,84 +172,29 @@ class TilesPlugin(Plugin):
                 # Skip scalar variables
                 if dataset[var_name].ndim == 0:
                     continue
-                extents = extract_dataset_extents(dataset, var_name)
+                extents = await extract_dataset_extents(dataset, var_name)
                 layer_extents[var_name] = extents
 
             # Create one tileset entry per supported tile matrix set
             supported_tms = get_all_tile_matrix_set_ids()
 
-            for tms_id in supported_tms:
-                if tms_id in TILE_MATRIX_SETS:
-                    tms_summary = TILE_MATRIX_SET_SUMMARIES[tms_id]()
-
-                    # Create layers for each data variable
-                    layers = []
-                    for var_name, var_data in dataset.data_vars.items():
-                        # Skip scalar variables
-                        if var_data.ndim == 0:
-                            continue
-                        extents = layer_extents[var_name]
-
-                        # Extract variable-specific bounding box, fallback to dataset bounds
-                        var_bounding_box = extract_variable_bounding_box(
-                            dataset, var_name, tms_summary.crs
-                        )
-
-                        layer = Layer(
-                            id=var_name,
-                            title=str(var_data.attrs.get("long_name", var_name)),
-                            description=var_data.attrs.get("description", ""),
-                            dataType=DataType.COVERAGE,
-                            boundingBox=var_bounding_box,
-                            crs=tms_summary.crs,
-                            links=[
-                                Link(
-                                    href=f"./{tms_id}/{{tileMatrix}}/{{tileRow}}/{{tileCol}}?variables={var_name}",
-                                    rel="item",
-                                    type="image/png",
-                                    title=f"Tiles for {var_name}",
-                                    templated=True,
-                                )
-                            ],
-                            extents=extents,
-                        )
-                        layers.append(layer)
-
-                    # Define tile matrix limits
-                    tileMatrixSetLimits = get_tile_matrix_limits(tms_id, dataset)
-
-                    tileset = TilesetSummary(
-                        title=f"{title} - {tms_id}",
-                        description=description
-                        or f"Tiles for {title} in {tms_id} projection",
-                        tileMatrixSetURI=tms_summary.uri,
-                        crs=tms_summary.crs,
-                        dataType=DataType.MAP,
-                        links=[
-                            Link(
-                                href=f"./{tms_id}",
-                                rel="self",
-                                type="application/json",
-                                title=f"Tileset metadata for {tms_id}",
-                            ),
-                            Link(
-                                href=f"/tileMatrixSets/{tms_id}",
-                                rel="http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
-                                type="application/json",
-                                title=f"Definition of {tms_id}",
-                            ),
-                        ],
-                        tileMatrixSetLimits=tileMatrixSetLimits,
-                        layers=layers if layers else None,
-                        keywords=keywords if keywords else None,
-                        attribution=dataset_attrs.get("attribution"),
-                        license=dataset_attrs.get("license"),
-                        version=dataset_attrs.get("version"),
-                        pointOfContact=dataset_attrs.get("contact"),
-                        mediaTypes=["image/png", "image/jpeg"],
-                        styles=styles,
+            # Execute concurrently in the event loop
+            tileset_results = await asyncio.gather(
+                *[
+                    create_tileset_for_tms(
+                        dataset,
+                        tms_id,
+                        layer_extents,
+                        title,
+                        description,
+                        keywords,
+                        dataset_attrs,
+                        styles,
                     )
-                    tilesets.append(tileset)
+                    for tms_id in supported_tms
+                ]
+            )
+            tilesets = [ts for ts in tileset_results if ts is not None]
 
             return TilesetsList(tilesets=tilesets)
 
@@ -266,7 +209,7 @@ class TilesPlugin(Plugin):
         ):
             """Get tileset metadata for this dataset"""
             try:
-                return create_tileset_metadata(dataset, tileMatrixSetId)
+                return await async_run(create_tileset_metadata, dataset, tileMatrixSetId)
             except ValueError as e:
                 raise HTTPException(status_code=404, detail=str(e)) from e
 
