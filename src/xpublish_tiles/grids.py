@@ -287,7 +287,7 @@ class CellTreeIndex(xr.Index):
             # the line at 180, -180; calculate the neighbours of those faces; extract those vertices and pad those.
             # However this does not work if the boundary faces without padding don't intersect those bounding longitudes
             # e.g. consider if vertices are between -178.4 and +178.4, how do we connect the boundary without the convex hull approach?
-            boundary = np.unique(triangle.convex_hull(vertices))
+            boundary = pd.unique(triangle.convex_hull(vertices).ravel())
             nverts = vertices.shape[0]
             pos_verts = vertices[boundary, ...]
             neg_verts = pos_verts.copy()
@@ -320,8 +320,8 @@ class CellTreeIndex(xr.Index):
                 breakpt = breakpt[0] + 1
                 verts = faces[face_indices, ...]
                 self.antimeridian_vertices = {
-                    "pos": np.unique(verts[:breakpt]),
-                    "neg": np.unique(verts[breakpt:]),
+                    "pos": pd.unique(verts[:breakpt].ravel()),
+                    "neg": pd.unique(verts[breakpt:].ravel()),
                 }
         else:
             self.antimeridian_vertices = {"pos": np.array([]), "neg": np.array([])}
@@ -336,9 +336,10 @@ class CellTreeIndex(xr.Index):
         _, face_indices = self.tree.locate_boxes(
             np.array([[xidxr.start, xidxr.stop, yidxr.start, yidxr.stop]])
         )
-        vertex_indices, inverse = np.unique(
-            self.tree.faces[face_indices], return_inverse=True
+        inverse, vertex_indices = pd.factorize(
+            self.tree.faces[face_indices].ravel(), sort=True
         )
+        inverse = inverse.reshape(face_indices.size, self.tree.faces.shape[-1])
 
         # Check if selected faces intersect the anti-meridian
         # Figure out which of the anti-meridian faces we've ended up selecting, and save those
