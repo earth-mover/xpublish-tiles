@@ -8,6 +8,7 @@ from pyproj.aoi import BBox
 import xarray as xr
 from xpublish_tiles.grids import GridSystem, Triangular
 from xpublish_tiles.lib import transformer_from_crs
+from xpublish_tiles.logger import log_duration
 
 
 def get_max_zoom(grid: GridSystem, tms: morecantile.TileMatrixSet) -> int:
@@ -79,63 +80,64 @@ def get_min_zoom(
     """
     from xpublish_tiles.pipeline import check_data_is_renderable_size
 
-    tms_crs = CRS.from_wkt(tms.crs.to_wkt())
+    with log_duration(f"calculating min zoom for tms: {tms!r}", "🔎"):
+        tms_crs = CRS.from_wkt(tms.crs.to_wkt())
 
-    tms_to_wgs84 = transformer_from_crs(tms_crs, 4326)
-    tms_xy_bounds = tms.xy_bbox
-    geo_left, geo_bottom, geo_right, geo_top = tms_to_wgs84.transform_bounds(
-        tms_xy_bounds.left,
-        tms_xy_bounds.bottom,
-        tms_xy_bounds.right,
-        tms_xy_bounds.top,
-    )
-    tms_geo_bounds = morecantile.BoundingBox(
-        left=geo_left, bottom=geo_bottom, right=geo_right, top=geo_top
-    )
+        tms_to_wgs84 = transformer_from_crs(tms_crs, 4326)
+        tms_xy_bounds = tms.xy_bbox
+        geo_left, geo_bottom, geo_right, geo_top = tms_to_wgs84.transform_bounds(
+            tms_xy_bounds.left,
+            tms_xy_bounds.bottom,
+            tms_xy_bounds.right,
+            tms_xy_bounds.top,
+        )
+        tms_geo_bounds = morecantile.BoundingBox(
+            left=geo_left, bottom=geo_bottom, right=geo_right, top=geo_top
+        )
 
-    grid_to_wgs84 = transformer_from_crs(grid.crs, 4326)
+        grid_to_wgs84 = transformer_from_crs(grid.crs, 4326)
 
-    bbox_lons = [grid.bbox.west, grid.bbox.east, grid.bbox.west, grid.bbox.east]
-    bbox_lats = [grid.bbox.south, grid.bbox.south, grid.bbox.north, grid.bbox.north]
-    wgs84_lons, wgs84_lats = grid_to_wgs84.transform(bbox_lons, bbox_lats)
+        bbox_lons = [grid.bbox.west, grid.bbox.east, grid.bbox.west, grid.bbox.east]
+        bbox_lats = [grid.bbox.south, grid.bbox.south, grid.bbox.north, grid.bbox.north]
+        wgs84_lons, wgs84_lats = grid_to_wgs84.transform(bbox_lons, bbox_lats)
 
-    wgs84_west, wgs84_east = min(wgs84_lons), max(wgs84_lons)
-    wgs84_south, wgs84_north = min(wgs84_lats), max(wgs84_lats)
+        wgs84_west, wgs84_east = min(wgs84_lons), max(wgs84_lons)
+        wgs84_south, wgs84_north = min(wgs84_lats), max(wgs84_lats)
 
-    west = max(wgs84_west, tms_geo_bounds.left)
-    east = min(wgs84_east, tms_geo_bounds.right)
-    south = max(wgs84_south, tms_geo_bounds.bottom)
-    north = min(wgs84_north, tms_geo_bounds.top)
+        west = max(wgs84_west, tms_geo_bounds.left)
+        east = min(wgs84_east, tms_geo_bounds.right)
+        south = max(wgs84_south, tms_geo_bounds.bottom)
+        north = min(wgs84_north, tms_geo_bounds.top)
 
-    test_points = [
-        (west, south),
-        (east, south),
-        (west, north),
-        (east, north),
-        ((west + east) / 2, (south + north) / 2),
-    ]
+        test_points = [
+            # (west, south),
+            # (east, south),
+            # (west, north),
+            # (east, north),
+            ((west + east) / 2, (south + north) / 2),
+        ]
 
-    alternate = grid.pick_alternate_grid(tms_crs, coarsen_factors={})
-    transformer = transformer_from_crs(tms_crs, grid.crs)
+        alternate = grid.pick_alternate_grid(tms_crs, coarsen_factors={})
+        transformer = transformer_from_crs(tms_crs, grid.crs)
 
-    for zoom in range(tms.minzoom, tms.maxzoom + 1):
-        all_tiles_renderable = True
+        for zoom in range(tms.minzoom, tms.maxzoom + 1):
+            all_tiles_renderable = True
 
-        for lon, lat in test_points:
-            tile = tms.tile(lon, lat, zoom)
-            bounds = tms.xy_bounds(tile)
-            left, bottom, right, top = transformer.transform_bounds(
-                bounds.left, bounds.bottom, bounds.right, bounds.top
-            )
+            for lon, lat in test_points:
+                tile = tms.tile(lon, lat, zoom)
+                bounds = tms.xy_bounds(tile)
+                left, bottom, right, top = transformer.transform_bounds(
+                    bounds.left, bounds.bottom, bounds.right, bounds.top
+                )
 
-            tile_bbox = BBox(west=left, south=bottom, east=right, north=top)
-            slicers = grid.sel(bbox=tile_bbox)
+                tile_bbox = BBox(west=left, south=bottom, east=right, north=top)
+                slicers = grid.sel(bbox=tile_bbox)
 
-            if not check_data_is_renderable_size(slicers, da, grid, alternate):
-                all_tiles_renderable = False
-                break
+                if not check_data_is_renderable_size(slicers, da, grid, alternate):
+                    all_tiles_renderable = False
+                    break
 
-        if all_tiles_renderable:
-            return zoom
+            if all_tiles_renderable:
+                return zoom
 
     return tms.minzoom
