@@ -111,10 +111,10 @@ def get_min_zoom(
     north = min(wgs84_north, tms_geo_bounds.top)
 
     test_points = [
-        # (west, south),
-        # (east, south),
-        # (west, north),
-        # (east, north),
+        (west, south),
+        (east, south),
+        (west, north),
+        (east, north),
         ((west + east) / 2, (south + north) / 2),
     ]
 
