@@ -1,3 +1,4 @@
+import asyncio
 import functools
 from typing import Any, cast
 
@@ -224,7 +225,7 @@ def _calculate_temporal_resolution(values: xr.DataArray) -> str:
         return "PT1H"  # Default fallback
 
 
-def extract_variable_bounding_box(
+async def extract_variable_bounding_box(
     dataset: Dataset, variable_name: str, target_crs: str | morecantile.models.CRS
 ) -> BoundingBox | None:
     """Extract variable-specific bounding box and transform to target CRS
@@ -238,8 +239,8 @@ def extract_variable_bounding_box(
         BoundingBox object if bounds can be extracted, None otherwise
     """
     try:
-        # Get the grid system for this variable
-        grid = guess_grid_system(dataset, variable_name)
+        # Get the grid system for this variable (run in thread to avoid blocking)
+        grid = await asyncio.to_thread(guess_grid_system, dataset, variable_name)
 
         # Convert target CRS to string format for transformer
         if isinstance(target_crs, morecantile.models.CRS):
@@ -308,7 +309,7 @@ async def create_tileset_for_tms(
         extents = layer_extents[var_name]
 
         # Extract variable-specific bounding box, fallback to dataset bounds
-        var_bounding_box = extract_variable_bounding_box(
+        var_bounding_box = await extract_variable_bounding_box(
             dataset, var_name, tms_summary.crs
         )
 

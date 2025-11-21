@@ -396,7 +396,7 @@ async def test_create_tileset_metadata_no_extents():
     assert len(extents) == 0
 
 
-def test_extract_variable_bounding_box():
+async def test_extract_variable_bounding_box():
     """Test extract_variable_bounding_box function"""
     from xpublish_tiles.xpublish.tiles.metadata import extract_variable_bounding_box
 
@@ -423,7 +423,7 @@ def test_extract_variable_bounding_box():
     )
 
     # Test with EPSG:4326 (should be identity transform)
-    bbox = extract_variable_bounding_box(dataset, "temperature", "EPSG:4326")
+    bbox = await extract_variable_bounding_box(dataset, "temperature", "EPSG:4326")
 
     if bbox is not None:
         # Check that bounding box has correct structure
@@ -447,7 +447,7 @@ def test_extract_variable_bounding_box():
         assert bbox.crs == "EPSG:4326"
 
 
-def test_extract_variable_bounding_box_web_mercator():
+async def test_extract_variable_bounding_box_web_mercator():
     """Test extract_variable_bounding_box with Web Mercator transformation"""
     from xpublish_tiles.xpublish.tiles.metadata import extract_variable_bounding_box
 
@@ -474,7 +474,7 @@ def test_extract_variable_bounding_box_web_mercator():
     )
 
     # Test with EPSG:3857 (Web Mercator)
-    bbox = extract_variable_bounding_box(dataset, "temperature", "EPSG:3857")
+    bbox = await extract_variable_bounding_box(dataset, "temperature", "EPSG:3857")
 
     if bbox is not None:
         # Check that bounding box has correct structure
@@ -496,7 +496,7 @@ def test_extract_variable_bounding_box_web_mercator():
         assert bbox.crs == "EPSG:3857"
 
 
-def test_extract_variable_bounding_box_invalid_variable():
+async def test_extract_variable_bounding_box_invalid_variable():
     """Test extract_variable_bounding_box with invalid variable name"""
     from xpublish_tiles.xpublish.tiles.metadata import extract_variable_bounding_box
 
@@ -516,7 +516,7 @@ def test_extract_variable_bounding_box_invalid_variable():
 
     # Test with non-existent variable
     with pytest.raises(VariableNotFoundError):
-        extract_variable_bounding_box(dataset, "nonexistent", "EPSG:4326")
+        await extract_variable_bounding_box(dataset, "nonexistent", "EPSG:4326")
 
 
 def test_variable_bounding_boxes_in_tileset_metadata():
@@ -594,7 +594,7 @@ def test_variable_bounding_boxes_in_tileset_metadata():
             assert metadata.boundingBox.crs is not None
 
 
-def test_layers_use_variable_specific_bounding_boxes():
+async def test_layers_use_variable_specific_bounding_boxes():
     """Test that layers get variable-specific bounding boxes rather than dataset-wide bounds"""
 
     from xpublish_tiles.xpublish.tiles.metadata import extract_variable_bounding_box
@@ -642,8 +642,10 @@ def test_layers_use_variable_specific_bounding_boxes():
     )
 
     # Test variable-specific bounding boxes directly
-    global_bbox = extract_variable_bounding_box(dataset, "global_temp", "EPSG:4326")
-    regional_bbox = extract_variable_bounding_box(dataset, "regional_temp", "EPSG:4326")
+    global_bbox = await extract_variable_bounding_box(dataset, "global_temp", "EPSG:4326")
+    regional_bbox = await extract_variable_bounding_box(
+        dataset, "regional_temp", "EPSG:4326"
+    )
 
     if global_bbox and regional_bbox:
         # Ensure both bounding boxes are valid

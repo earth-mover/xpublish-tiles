@@ -242,7 +242,7 @@ class TilesPlugin(Plugin):
                 raise HTTPException(status_code=422, detail="No variables specified")
 
             try:
-                bounds = extract_variable_bounding_box(
+                bounds = await extract_variable_bounding_box(
                     dataset, query.variables[0], "EPSG:4326"
                 )
             except VariableNotFoundError as e:
