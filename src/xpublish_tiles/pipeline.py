@@ -43,7 +43,7 @@ from xpublish_tiles.types import (
     SelectionMethod,
     ValidatedArray,
 )
-from xpublish_tiles.utils import LOCK
+from xpublish_tiles.utils import NUMBA_THREADING_LOCK
 
 
 def round_bbox(bbox: BBox) -> BBox:
@@ -413,7 +413,7 @@ def coarsen_data_with_lock(
     da: xr.DataArray, coarsen_factors: dict[str, int]
 ) -> xr.DataArray:
     """Apply coarsening to the data array."""
-    with LOCK:
+    with NUMBA_THREADING_LOCK:
         return da.coarsen(coarsen_factors, boundary="pad").mean()  # type: ignore[unresolved-attribute]
 
 

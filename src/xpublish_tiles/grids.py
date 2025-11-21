@@ -31,7 +31,7 @@ from xpublish_tiles.lib import (
     pad_slicers,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
-from xpublish_tiles.utils import time_debug
+from xpublish_tiles.utils import NUMBA_THREADING_LOCK, time_debug
 
 GRID_DETECTION_LOCK = threading.Lock()
 
@@ -333,9 +333,10 @@ class CellTreeIndex(xr.Index):
         assert isinstance(xidxr, slice)
         assert isinstance(yidxr, slice)
 
-        _, face_indices = self.tree.locate_boxes(
-            np.array([[xidxr.start, xidxr.stop, yidxr.start, yidxr.stop]])
-        )
+        with NUMBA_THREADING_LOCK:
+            _, face_indices = self.tree.locate_boxes(
+                np.array([[xidxr.start, xidxr.stop, yidxr.start, yidxr.stop]])
+            )
         inverse, vertex_indices = pd.factorize(
             self.tree.faces[face_indices].ravel(), sort=True
         )

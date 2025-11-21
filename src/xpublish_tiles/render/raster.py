@@ -26,7 +26,7 @@ from xpublish_tiles.types import (
     PopulatedRenderContext,
     RenderContext,
 )
-from xpublish_tiles.utils import LOCK
+from xpublish_tiles.utils import NUMBA_THREADING_LOCK
 
 
 def nearest_on_uniform_grid_scipy(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.DataArray:
@@ -183,7 +183,7 @@ class DatashaderRasterRenderer(Renderer):
                 # the mode aggregation.
                 # https://github.com/holoviz/datashader/issues/1435
                 # Lock is only used when tbb is not available (e.g., on macOS)
-                with LOCK:
+                with NUMBA_THREADING_LOCK:
                     with log_duration(
                         f"nearest neighbour regridding (discrete) {data.shape}",
                         "⊞",
@@ -205,7 +205,7 @@ class DatashaderRasterRenderer(Renderer):
                 ):
                     # Lock is only used when tbb is not available (e.g., on macOS)
                     # AND if we use the rectilinear or raster code path
-                    with LOCK:
+                    with NUMBA_THREADING_LOCK:
                         mesh = cvs.quadmesh(
                             data.transpose(grid.Ydim, grid.Xdim), x=grid.X, y=grid.Y
                         )
