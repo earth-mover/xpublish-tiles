@@ -299,7 +299,7 @@ def check_transparent_pixels(image_bytes):
     return (transparent_count / total_pixels) * 100
 
 
-async def transform_coordinates(
+def transform_coordinates(
     subset: xr.DataArray,
     grid_x_name: str,
     grid_y_name: str,
@@ -367,8 +367,7 @@ async def transform_coordinates(
     chunk_size = get_transform_chunk_size(bx)
     # Choose transformation method based on data size
     if bx.size > math.prod(chunk_size):
-        newX, newY = await async_run(
-            transform_blocked,
+        newX, newY = transform_blocked(
             bx.data.copy(order="C"),
             by.data.copy(order="C"),
             transformer,

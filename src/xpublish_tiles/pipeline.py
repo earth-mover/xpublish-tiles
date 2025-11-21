@@ -1,6 +1,7 @@
 import asyncio
 import io
 import math
+from functools import partial
 from typing import Any, cast
 
 import numpy as np
@@ -371,7 +372,7 @@ async def apply_slicers(
     return subset_da
 
 
-async def coarsen(
+def coarsen(
     da: xr.DataArray, coarsen_factors: dict[str, int], *, grid: GridSystem2D
 ) -> xr.DataArray:
     # TODO: I am skipping padding to center the image here;
@@ -405,16 +406,9 @@ async def coarsen(
                 bbox=grid.bbox,
             )
             da = da.assign_coords({grid.X: da[grid.X].copy(data=newX)})
-        coarsened = await async_run(coarsen_data_with_lock, da, coarsen_factors)
+        with NUMBA_THREADING_LOCK:
+            coarsened = da.coarsen(coarsen_factors, boundary="pad").mean()  # type: ignore[unresolved-attribute]
     return coarsened
-
-
-def coarsen_data_with_lock(
-    da: xr.DataArray, coarsen_factors: dict[str, int]
-) -> xr.DataArray:
-    """Apply coarsening to the data array."""
-    with NUMBA_THREADING_LOCK:
-        return da.coarsen(coarsen_factors, boundary="pad").mean()  # type: ignore[unresolved-attribute]
 
 
 def has_coordinate_discontinuity(coordinates: np.ndarray, *, axis: int) -> bool:
@@ -606,15 +600,20 @@ def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool
 
 
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
-    validated = apply_query(ds, variables=query.variables, selectors=query.selectors)
+    validated = await async_run(
+        partial(apply_query, ds, variables=query.variables, selectors=query.selectors)
+    )
     pixel_factor = config.get("max_pixel_factor")
     max_shape = (pixel_factor * query.width, pixel_factor * query.height)
-    subsets = await subset_to_bbox(
-        validated, bbox=query.bbox, crs=query.crs, max_shape=max_shape
-    )
 
     # Capture the context logger before entering thread pool
     context_logger = get_context_logger()
+
+    subsets = await async_run(
+        partial(
+            subset_to_bbox, validated, bbox=query.bbox, crs=query.crs, max_shape=max_shape
+        )
+    )
 
     tasks = [
         async_run(
@@ -804,7 +803,7 @@ def apply_query(
     return validated
 
 
-async def subset_to_bbox(
+def subset_to_bbox(
     validated: dict[str, ValidatedArray],
     *,
     bbox: OutputBBox,
@@ -852,12 +851,14 @@ async def subset_to_bbox(
         )
         alternate = grid.pick_alternate_grid(crs, coarsen_factors=coarsen_factors)
 
-        subset = await apply_slicers(
-            da,
-            grid=grid,
-            alternate=alternate,
-            slicers=new_slicers,
-            datatype=array.datatype,
+        subset = asyncio.run(
+            apply_slicers(
+                da,
+                grid=grid,
+                alternate=alternate,
+                slicers=new_slicers,
+                datatype=array.datatype,
+            )
         )
 
         if grid.crs.is_geographic:
@@ -874,10 +875,10 @@ async def subset_to_bbox(
             has_discontinuity = False
 
         if coarsen_factors:
-            subset = await coarsen(subset, coarsen_factors, grid=grid)
+            subset = coarsen(subset, coarsen_factors, grid=grid)
 
         with log_duration("transform_coordinates", "🔄"):
-            newX, newY = await transform_coordinates(
+            newX, newY = transform_coordinates(
                 subset, alternate.X, alternate.Y, transformer_from_crs(alternate.crs, crs)
             )
 
