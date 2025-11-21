@@ -23,7 +23,6 @@ from xpublish_tiles.config import config
 if TYPE_CHECKING:
     from xpublish_tiles.grids import UgridIndexer
 from xpublish_tiles.logger import logger
-from xpublish_tiles.utils import async_time_debug
 
 WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)  # from proj
 M_PI = 3.14159265358979323846  # from proj
@@ -103,13 +102,25 @@ EXECUTOR = ThreadPoolExecutor(
     max_workers=THREAD_POOL_NUM_THREADS,
     thread_name_prefix="xpublish-tiles-pool",
 )
-SEMAPHORE = asyncio.Semaphore(config.get("num_threads"))
+
+# Dictionary to store semaphores per event loop
+_semaphores: dict[asyncio.AbstractEventLoop, asyncio.Semaphore] = {}
+
+
+def _get_semaphore(loop) -> asyncio.Semaphore:
+    """Get or create a semaphore for the current event loop."""
+    if loop is None:
+        loop = asyncio.get_event_loop()
+    if loop not in _semaphores:
+        _semaphores[loop] = asyncio.Semaphore(config.get("num_threads"))
+    return _semaphores[loop]
 
 
 async def async_run(func, *args, **kwargs):
     """Run a function in the thread pool executor with semaphore limiting."""
-    loop = asyncio.get_event_loop()
-    async with SEMAPHORE:
+    loop = asyncio.get_running_loop()
+    semaphore = _get_semaphore(loop)
+    async with semaphore:
         return await loop.run_in_executor(EXECUTOR, func, *args, **kwargs)
 
 
@@ -288,8 +299,7 @@ def check_transparent_pixels(image_bytes):
     return (transparent_count / total_pixels) * 100
 
 
-@async_time_debug
-async def transform_coordinates(
+def transform_coordinates(
     subset: xr.DataArray,
     grid_x_name: str,
     grid_y_name: str,
@@ -357,8 +367,7 @@ async def transform_coordinates(
     chunk_size = get_transform_chunk_size(bx)
     # Choose transformation method based on data size
     if bx.size > math.prod(chunk_size):
-        newX, newY = await async_run(
-            transform_blocked,
+        newX, newY = transform_blocked(
             bx.data.copy(order="C"),
             by.data.copy(order="C"),
             transformer,

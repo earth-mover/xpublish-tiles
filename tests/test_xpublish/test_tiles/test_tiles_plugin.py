@@ -379,7 +379,7 @@ def test_multi_dimensional_dataset():
     assert scenario_extent["interval"] == ["RCP45", "Historical"]
 
 
-def test_dimension_extraction_utilities():
+async def test_dimension_extraction_utilities():
     """Test the dimension extraction utility functions directly"""
 
     # Create test data array with various dimension types
@@ -415,7 +415,7 @@ def test_dimension_extraction_utilities():
 
     ds = data_array.to_dataset(name="foo")
     ds["scalar"] = ((), 0, {"foo": "bar"})
-    dimensions = extract_dimension_extents(ds, "foo")
+    dimensions = await extract_dimension_extents(ds, "foo")
 
     # Should extract time and depth, but not lat/lon (spatial)
     assert len(dimensions) == 2
@@ -485,7 +485,7 @@ def test_no_dimensions_dataset():
     assert dimensions is None or len(dimensions) == 0
 
 
-def test_cf_axis_detection():
+async def test_cf_axis_detection():
     """Test that CF axis detection works correctly"""
     # Create dataset with non-standard dimension names but proper CF attributes
     time_coords = pd.date_range("2022-01-01", periods=3, freq="ME")
@@ -515,7 +515,7 @@ def test_cf_axis_detection():
 
     ds = data_array.to_dataset(name="foo")
     ds["scalar"] = ((), 0, {"foo": "bar"})
-    dimensions = extract_dimension_extents(ds, "foo")
+    dimensions = await extract_dimension_extents(ds, "foo")
 
     # Should detect temporal and vertical dimensions despite non-standard names
     assert len(dimensions) == 2
@@ -534,7 +534,7 @@ def test_cf_axis_detection():
     assert level_dim.units == "hPa"
 
 
-def test_helper_functions(air_dataset):
+async def test_helper_functions(air_dataset):
     """Test the helper functions for extracting bounds and generating limits"""
     from xpublish_tiles.xpublish.tiles.tile_matrix import (
         get_all_tile_matrix_set_ids,
@@ -548,7 +548,9 @@ def test_helper_functions(air_dataset):
     assert len(tms_ids) >= 1
 
     # Test tile matrix limits generation with dataset
-    limits = get_tile_matrix_limits("WebMercatorQuad", air_dataset, range(3))  # Just 0-2
+    limits = await get_tile_matrix_limits(
+        "WebMercatorQuad", air_dataset, range(3)
+    )  # Just 0-2
     assert len(limits) == 3
     assert limits[0].tileMatrix == "0"
     assert limits[1].tileMatrix == "1"

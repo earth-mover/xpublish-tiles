@@ -7,22 +7,26 @@ import numpy as np
 import xarray as xr
 from xarray import Dataset
 from xpublish_tiles.grids import guess_grid_system
-from xpublish_tiles.lib import VariableNotFoundError
+from xpublish_tiles.lib import VariableNotFoundError, async_run
 from xpublish_tiles.logger import logger
 from xpublish_tiles.pipeline import transformer_from_crs
 from xpublish_tiles.render import RenderRegistry
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
+    TILE_MATRIX_SETS,
     extract_dimension_extents,
+    get_tile_matrix_limits,
 )
 from xpublish_tiles.xpublish.tiles.types import (
     AttributesMetadata,
     BoundingBox,
     DataType,
     DimensionType,
+    Layer,
     Link,
     Style,
     TileSetMetadata,
+    TilesetSummary,
 )
 
 
@@ -123,7 +127,7 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
     )
 
 
-def extract_dataset_extents(
+async def extract_dataset_extents(
     dataset: Dataset, variable_name: str | None
 ) -> dict[str, dict[str, Any]]:
     """Extract dimension extents from dataset and convert to OGC format"""
@@ -141,7 +145,7 @@ def extract_dataset_extents(
     for var, array in ds.data_vars.items():
         if array.ndim == 0:
             continue
-        dimensions = extract_dimension_extents(ds, var)
+        dimensions = await extract_dimension_extents(ds, var)
         for dim in dimensions:
             # Use the first occurrence of each dimension name
             if dim.name not in all_dimensions:
@@ -220,7 +224,7 @@ def _calculate_temporal_resolution(values: xr.DataArray) -> str:
         return "PT1H"  # Default fallback
 
 
-def extract_variable_bounding_box(
+async def extract_variable_bounding_box(
     dataset: Dataset, variable_name: str, target_crs: str | morecantile.models.CRS
 ) -> BoundingBox | None:
     """Extract variable-specific bounding box and transform to target CRS
@@ -234,8 +238,8 @@ def extract_variable_bounding_box(
         BoundingBox object if bounds can be extracted, None otherwise
     """
     try:
-        # Get the grid system for this variable
-        grid = guess_grid_system(dataset, variable_name)
+        # Get the grid system for this variable (run in thread to avoid blocking)
+        grid = await async_run(guess_grid_system, dataset, variable_name)
 
         # Convert target CRS to string format for transformer
         if isinstance(target_crs, morecantile.models.CRS):
@@ -263,3 +267,102 @@ def extract_variable_bounding_box(
     except Exception as e:
         logger.error(f"Failed to transform bounds: {e}")
         return None
+
+
+async def create_tileset_for_tms(
+    dataset: Dataset,
+    tms_id: str,
+    layer_extents: dict[str, dict[str, Any]],
+    title: str,
+    description: str,
+    keywords: list[str],
+    dataset_attrs: dict[str, Any],
+    styles: list[Style],
+) -> TilesetSummary | None:
+    """Create a tileset summary for a specific tile matrix set
+
+    Args:
+        dataset: xarray Dataset
+        tms_id: Tile matrix set identifier
+        layer_extents: Pre-computed layer extents for all variables
+        title: Dataset title
+        description: Dataset description
+        keywords: Dataset keywords
+        dataset_attrs: Dataset attributes
+        styles: Available styles
+
+    Returns:
+        TilesetSummary object if tile matrix set exists, None otherwise
+    """
+    if tms_id not in TILE_MATRIX_SETS:
+        return None
+
+    tms_summary = TILE_MATRIX_SET_SUMMARIES[tms_id]()
+
+    # Create layers for each data variable
+    layers = []
+    for var_name, var_data in dataset.data_vars.items():
+        # Skip scalar variables
+        if var_data.ndim == 0:
+            continue
+        extents = layer_extents[var_name]
+
+        # Extract variable-specific bounding box, fallback to dataset bounds
+        var_bounding_box = await extract_variable_bounding_box(
+            dataset, var_name, tms_summary.crs
+        )
+
+        layer = Layer(
+            id=var_name,
+            title=str(var_data.attrs.get("long_name", var_name)),
+            description=var_data.attrs.get("description", ""),
+            dataType=DataType.COVERAGE,
+            boundingBox=var_bounding_box,
+            crs=tms_summary.crs,
+            links=[
+                Link(
+                    href=f"./{tms_id}/{{tileMatrix}}/{{tileRow}}/{{tileCol}}?variables={var_name}",
+                    rel="item",
+                    type="image/png",
+                    title=f"Tiles for {var_name}",
+                    templated=True,
+                )
+            ],
+            extents=extents,
+        )
+        layers.append(layer)
+
+    # Define tile matrix limits
+    tileMatrixSetLimits = await get_tile_matrix_limits(tms_id, dataset)
+
+    tileset = TilesetSummary(
+        title=f"{title} - {tms_id}",
+        description=description or f"Tiles for {title} in {tms_id} projection",
+        tileMatrixSetURI=tms_summary.uri,
+        crs=tms_summary.crs,
+        dataType=DataType.MAP,
+        links=[
+            Link(
+                href=f"./{tms_id}",
+                rel="self",
+                type="application/json",
+                title=f"Tileset metadata for {tms_id}",
+            ),
+            Link(
+                href=f"/tileMatrixSets/{tms_id}",
+                rel="http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
+                type="application/json",
+                title=f"Definition of {tms_id}",
+            ),
+        ],
+        tileMatrixSetLimits=tileMatrixSetLimits,
+        layers=layers if layers else None,
+        keywords=keywords if keywords else None,
+        attribution=dataset_attrs.get("attribution"),
+        license=dataset_attrs.get("license"),
+        version=dataset_attrs.get("version"),
+        pointOfContact=dataset_attrs.get("contact"),
+        mediaTypes=["image/png", "image/jpeg"],
+        styles=styles,
+    )
+    return tileset

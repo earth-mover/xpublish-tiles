@@ -13,6 +13,7 @@ import pyproj.aoi
 
 import xarray as xr
 from xpublish_tiles.grids import guess_grid_system
+from xpublish_tiles.lib import async_run
 from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import OutputBBox, OutputCRS
 from xpublish_tiles.xpublish.tiles.types import (
@@ -163,7 +164,7 @@ def extract_tile_bbox_and_crs(
     return output_bbox, OutputCRS(crs)
 
 
-def get_tile_matrix_limits(
+async def get_tile_matrix_limits(
     tms_id: str, dataset: xr.Dataset, zoom_levels: range | None = None
 ) -> list[TileMatrixSetLimit]:
     """Generate tile matrix limits for the specified zoom levels based on dataset bounds.
@@ -184,11 +185,11 @@ def get_tile_matrix_limits(
     else:
         raise ValueError("Could not find a DataArray with at least one dimension.")
 
-    grid = guess_grid_system(dataset, first_data_var)
+    grid = await async_run(guess_grid_system, dataset, first_data_var)
     tms = morecantile.tms.get(tms_id)
 
     if zoom_levels is None:
-        min_zoom = get_min_zoom(grid, tms, dataset[first_data_var])
+        min_zoom = await async_run(get_min_zoom, grid, tms, dataset[first_data_var])
         zoom_levels = range(min_zoom, tms.maxzoom)
 
     limits = []
@@ -212,7 +213,7 @@ def get_all_tile_matrix_set_ids() -> list[str]:
     return list(TILE_MATRIX_SETS.keys())
 
 
-def extract_dimension_extents(
+async def extract_dimension_extents(
     ds: xr.Dataset, name: Hashable, max_actual_values: int = 50
 ) -> list[DimensionExtent]:
     """Extract dimension extent information from an xarray DataArray.
@@ -230,7 +231,7 @@ def extract_dimension_extents(
     """
     dimensions = []
 
-    grid = guess_grid_system(ds, name)
+    grid = await async_run(guess_grid_system, ds, name)
     data_array = ds[name]
 
     # Get CF axes information
