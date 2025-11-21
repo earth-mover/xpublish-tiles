@@ -3,14 +3,11 @@
 import asyncio
 import io
 import json
-import logging
-import time
 from enum import Enum
 from typing import Annotated
 from urllib.parse import quote
 
 import morecantile
-import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from xpublish import Dependencies, Plugin, hookimpl
@@ -25,10 +22,7 @@ from xpublish_tiles.lib import (
     async_run,
 )
 from xpublish_tiles.logger import (
-    CleanConsoleRenderer,
-    LogAccumulator,
     get_context_logger,
-    get_logger,
     logger,
     set_context_logger,
     with_accumulated_logs,
@@ -355,6 +349,26 @@ class TilesPlugin(Plugin):
             )
 
         @router.get("/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}")
+        @with_accumulated_logs(
+            log_message_fn=lambda request,
+            tileMatrixSetId,
+            tileMatrix,
+            tileRow,
+            tileCol,
+            query,
+            dataset: f"{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} {query.variables} {getattr(dataset, '_xpublish_id', 'unknown')}",
+            context_fn=lambda request,
+            tileMatrixSetId,
+            tileMatrix,
+            tileRow,
+            tileCol,
+            query,
+            dataset: {
+                "tile": f"{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}",
+                "variables": query.variables,
+                "dataset_id": getattr(dataset, "_xpublish_id", "unknown"),
+            },
+        )
         async def get_dataset_tile(
             request: Request,
             tileMatrixSetId: str,
@@ -365,107 +379,68 @@ class TilesPlugin(Plugin):
             dataset: Dataset = Depends(deps.dataset),
         ):
             """Get individual tile from this dataset"""
-            # Create log accumulator and configure structlog first
-            accumulator = LogAccumulator()
+            try:
+                bbox, crs = extract_tile_bbox_and_crs(
+                    tileMatrixSetId, tileMatrix, tileRow, tileCol
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=404, detail=str(e)) from e
 
-            # Configure structlog to use accumulator for this context
-            structlog.configure(
-                processors=[
-                    structlog.stdlib.filter_by_level,
-                    structlog.stdlib.add_logger_name,
-                    structlog.stdlib.add_log_level,
-                    structlog.processors.TimeStamper(fmt="iso"),
-                    accumulator,  # Place accumulator last in the chain
-                ],
-                context_class=dict,
-                logger_factory=structlog.stdlib.LoggerFactory(),
-                cache_logger_on_first_use=False,
-            )
+            # Extract dimension selectors from query parameters
+            selectors = {}
+            for param_name, param_value in request.query_params.items():
+                # Skip the standard tile query parameters
+                if param_name not in TILES_FILTERED_QUERY_PARAMS:
+                    # Check if this parameter corresponds to a dataset dimension
+                    if param_name in dataset.dims:
+                        selectors[param_name] = param_value
 
-            # Now create bound logger after configuration
-            bound_logger = get_logger().bind(
-                tile=f"{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}",
+            style = query.style[0] if query.style else "raster"
+            variant = query.style[1] if query.style else "default"
+
+            render_params = QueryParams(
                 variables=query.variables,
-                dataset_id=getattr(dataset, "_xpublish_id", "unknown"),
+                style=style,
+                colorscalerange=query.colorscalerange,
+                variant=variant,
+                crs=crs,
+                bbox=bbox,
+                width=query.width,
+                height=query.height,
+                format=query.f,
+                selectors=selectors,
+                colormap=query.colormap,
             )
-
-            # Set the context logger so all functions can access it
-            set_context_logger(bound_logger)
 
             try:
-                try:
-                    bbox, crs = extract_tile_bbox_and_crs(
-                        tileMatrixSetId, tileMatrix, tileRow, tileCol
-                    )
-                except ValueError as e:
-                    raise HTTPException(status_code=404, detail=str(e)) from e
-
-                # Extract dimension selectors from query parameters
-                selectors = {}
-                for param_name, param_value in request.query_params.items():
-                    # Skip the standard tile query parameters
-                    if param_name not in TILES_FILTERED_QUERY_PARAMS:
-                        # Check if this parameter corresponds to a dataset dimension
-                        if param_name in dataset.dims:
-                            selectors[param_name] = param_value
-
-                style = query.style[0] if query.style else "raster"
-                variant = query.style[1] if query.style else "default"
-
-                render_params = QueryParams(
-                    variables=query.variables,
-                    style=style,
-                    colorscalerange=query.colorscalerange,
-                    variant=variant,
-                    crs=crs,
-                    bbox=bbox,
-                    width=query.width,
-                    height=query.height,
-                    format=query.f,
-                    selectors=selectors,
-                    colormap=query.colormap,
-                )
-                # Track total tile processing time
-                tile_start_time = time.perf_counter()
-                tile_total_ms = -1
-                try:
-                    buffer = await pipeline(dataset, render_params)
-                    status_code = 200
-                    detail = "OK"
-                except TileTooBigError:
-                    status_code = 413
-                    detail = f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} request too big. Please choose a higher zoom level."
-                    bound_logger.error("TileTooBigError", message=detail)
-                except VariableNotFoundError as e:
-                    bound_logger.error("VariableNotFoundError", error=str(e))
-                    status_code = 422
-                    detail = f"Invalid variable name(s): {query.variables!r}."
-                except IndexingError as e:
-                    bound_logger.error("IndexingError", error=str(e))
-                    status_code = 422
-                    detail = f"Invalid indexer: {selectors!r}."
-                except MissingParameterError as e:
-                    bound_logger.error("MissingParameterError", error=str(e))
-                    status_code = 422
-                    detail = f"Missing parameter: {e!s}."
-                except Exception as e:
-                    status_code = 500
-                    bound_logger.error("Exception", error=str(e))
-                    detail = str(e)
-                tile_total_ms = (time.perf_counter() - tile_start_time) * 1000
-            finally:
-                # Print all log lines per tile if logger level allows
-                if accumulator.logs and bound_logger.isEnabledFor(logging.DEBUG):
-                    console_renderer = CleanConsoleRenderer()
-                    dataset_id = getattr(dataset, "_xpublish_id", "unknown")
-                    print(
-                        f"🔧 {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} {query.variables} {dataset_id} (total: {tile_total_ms:.0f}ms)"
-                    )
-                    for log_entry in accumulator.logs:
-                        # Render each log entry using our clean console renderer
-                        rendered = console_renderer(None, None, log_entry)
-                        print(f"   {rendered}")
-                    print()  # Empty line after each tile
+                buffer = await pipeline(dataset, render_params)
+                status_code = 200
+                detail = "OK"
+            except TileTooBigError:
+                status_code = 413
+                detail = f"Tile {tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} request too big. Please choose a higher zoom level."
+                bound_logger = get_context_logger()
+                bound_logger.error("TileTooBigError", message=detail)
+            except VariableNotFoundError as e:
+                bound_logger = get_context_logger()
+                bound_logger.error("VariableNotFoundError", error=str(e))
+                status_code = 422
+                detail = f"Invalid variable name(s): {query.variables!r}."
+            except IndexingError as e:
+                bound_logger = get_context_logger()
+                bound_logger.error("IndexingError", error=str(e))
+                status_code = 422
+                detail = f"Invalid indexer: {selectors!r}."
+            except MissingParameterError as e:
+                bound_logger = get_context_logger()
+                bound_logger.error("MissingParameterError", error=str(e))
+                status_code = 422
+                detail = f"Missing parameter: {e!s}."
+            except Exception as e:
+                status_code = 500
+                bound_logger = get_context_logger()
+                bound_logger.error("Exception", error=str(e))
+                detail = str(e)
 
             if status_code != 200:
                 if not query.render_errors:

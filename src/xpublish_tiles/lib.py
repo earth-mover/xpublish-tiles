@@ -23,7 +23,6 @@ from xpublish_tiles.config import config
 if TYPE_CHECKING:
     from xpublish_tiles.grids import UgridIndexer
 from xpublish_tiles.logger import logger
-from xpublish_tiles.utils import async_time_debug
 
 WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)  # from proj
 M_PI = 3.14159265358979323846  # from proj
@@ -300,7 +299,6 @@ def check_transparent_pixels(image_bytes):
     return (transparent_count / total_pixels) * 100
 
 
-@async_time_debug
 async def transform_coordinates(
     subset: xr.DataArray,
     grid_x_name: str,
