@@ -103,13 +103,25 @@ EXECUTOR = ThreadPoolExecutor(
     max_workers=THREAD_POOL_NUM_THREADS,
     thread_name_prefix="xpublish-tiles-pool",
 )
-SEMAPHORE = asyncio.Semaphore(config.get("num_threads"))
+
+# Dictionary to store semaphores per event loop
+_semaphores: dict[asyncio.AbstractEventLoop, asyncio.Semaphore] = {}
+
+
+def _get_semaphore(loop) -> asyncio.Semaphore:
+    """Get or create a semaphore for the current event loop."""
+    if loop is None:
+        loop = asyncio.get_event_loop()
+    if loop not in _semaphores:
+        _semaphores[loop] = asyncio.Semaphore(config.get("num_threads"))
+    return _semaphores[loop]
 
 
 async def async_run(func, *args, **kwargs):
     """Run a function in the thread pool executor with semaphore limiting."""
-    loop = asyncio.get_event_loop()
-    async with SEMAPHORE:
+    loop = asyncio.get_running_loop()
+    semaphore = _get_semaphore(loop)
+    async with semaphore:
         return await loop.run_in_executor(EXECUTOR, func, *args, **kwargs)
 
 
