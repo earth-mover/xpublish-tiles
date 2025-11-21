@@ -304,11 +304,11 @@ class TilesPlugin(Plugin):
             # Calculate optimal zoom levels based on grid and data characteristics
             # Get the first variable's grid system
             var_name = query.variables[0]
-            grid = guess_grid_system(dataset, var_name)
+            grid = await async_run(guess_grid_system, dataset, var_name)
             da = dataset.cf[var_name]
 
             # Calculate min/max zoom based on data characteristics
-            minzoom = get_min_zoom(grid, tms, da)
+            minzoom = await async_run(get_min_zoom, grid, tms, da)
             maxzoom = tms.maxzoom
 
             # Compose TileJSON

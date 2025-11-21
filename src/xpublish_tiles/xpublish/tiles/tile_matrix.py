@@ -1,6 +1,5 @@
 """Tile matrix set definitions for OGC Tiles API"""
 
-import asyncio
 from collections.abc import Hashable
 from typing import Union, cast
 
@@ -14,6 +13,7 @@ import pyproj.aoi
 
 import xarray as xr
 from xpublish_tiles.grids import guess_grid_system
+from xpublish_tiles.lib import async_run
 from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import OutputBBox, OutputCRS
 from xpublish_tiles.xpublish.tiles.types import (
@@ -185,11 +185,11 @@ async def get_tile_matrix_limits(
     else:
         raise ValueError("Could not find a DataArray with at least one dimension.")
 
-    grid = await asyncio.to_thread(guess_grid_system, dataset, first_data_var)
+    grid = await async_run(guess_grid_system, dataset, first_data_var)
     tms = morecantile.tms.get(tms_id)
 
     if zoom_levels is None:
-        min_zoom = get_min_zoom(grid, tms, dataset[first_data_var])
+        min_zoom = await async_run(get_min_zoom, grid, tms, dataset[first_data_var])
         zoom_levels = range(min_zoom, tms.maxzoom)
 
     limits = []
@@ -231,7 +231,7 @@ async def extract_dimension_extents(
     """
     dimensions = []
 
-    grid = await asyncio.to_thread(guess_grid_system, ds, name)
+    grid = await async_run(guess_grid_system, ds, name)
     data_array = ds[name]
 
     # Get CF axes information

@@ -1,4 +1,3 @@
-import asyncio
 import functools
 from typing import Any, cast
 
@@ -8,7 +7,7 @@ import numpy as np
 import xarray as xr
 from xarray import Dataset
 from xpublish_tiles.grids import guess_grid_system
-from xpublish_tiles.lib import VariableNotFoundError
+from xpublish_tiles.lib import VariableNotFoundError, async_run
 from xpublish_tiles.logger import logger
 from xpublish_tiles.pipeline import transformer_from_crs
 from xpublish_tiles.render import RenderRegistry
@@ -240,7 +239,7 @@ async def extract_variable_bounding_box(
     """
     try:
         # Get the grid system for this variable (run in thread to avoid blocking)
-        grid = await asyncio.to_thread(guess_grid_system, dataset, variable_name)
+        grid = await async_run(guess_grid_system, dataset, variable_name)
 
         # Convert target CRS to string format for transformer
         if isinstance(target_crs, morecantile.models.CRS):
