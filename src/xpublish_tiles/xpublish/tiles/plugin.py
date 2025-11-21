@@ -27,9 +27,11 @@ from xpublish_tiles.lib import (
 from xpublish_tiles.logger import (
     CleanConsoleRenderer,
     LogAccumulator,
+    get_context_logger,
     get_logger,
     logger,
     set_context_logger,
+    with_accumulated_logs,
 )
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.render import RenderRegistry
@@ -115,13 +117,17 @@ class TilesPlugin(Plugin):
         )
 
         @router.get("/", response_model=TilesetsList, response_model_exclude_none=True)
+        @with_accumulated_logs(
+            log_message_fn=lambda dataset: f"tiles_list {getattr(dataset, '_xpublish_id', 'unknown')}",
+            context_fn=lambda dataset: {
+                "endpoint": "tiles_list",
+                "dataset_id": getattr(dataset, "_xpublish_id", "unknown"),
+            },
+        )
         async def get_dataset_tiles_list(
             dataset: Dataset = Depends(deps.dataset),
         ):
             """List of available tilesets for this dataset"""
-            # Get dataset variables that can be tiled
-            tilesets = []
-
             # Get dataset metadata
             dataset_attrs = dataset.attrs
             title = dataset_attrs.get("title", "Dataset")
@@ -203,6 +209,14 @@ class TilesPlugin(Plugin):
             response_model=TileSetMetadata,
             response_model_exclude_none=True,
         )
+        @with_accumulated_logs(
+            log_message_fn=lambda tileMatrixSetId,
+            dataset: f"tileset_metadata {tileMatrixSetId} {getattr(dataset, '_xpublish_id', 'unknown')}",
+            context_fn=lambda tileMatrixSetId, dataset: {
+                "tileMatrixSetId": tileMatrixSetId,
+                "dataset_id": getattr(dataset, "_xpublish_id", "unknown"),
+            },
+        )
         async def get_dataset_tileset_metadata(
             tileMatrixSetId: str,
             dataset: Dataset = Depends(deps.dataset),
@@ -217,6 +231,17 @@ class TilesPlugin(Plugin):
             "/{tileMatrixSetId}/tilejson.json",
             response_model=TileJSON,
             response_model_exclude_none=True,
+        )
+        @with_accumulated_logs(
+            log_message_fn=lambda request,
+            tileMatrixSetId,
+            query,
+            dataset: f"tilejson {tileMatrixSetId} {query.variables} {getattr(dataset, '_xpublish_id', 'unknown')}",
+            context_fn=lambda request, tileMatrixSetId, query, dataset: {
+                "tileMatrixSetId": tileMatrixSetId,
+                "variables": query.variables,
+                "dataset_id": getattr(dataset, "_xpublish_id", "unknown"),
+            },
         )
         async def get_dataset_tilejson(
             request: Request,
@@ -306,6 +331,10 @@ class TilesPlugin(Plugin):
             var_name = query.variables[0]
             grid = await async_run(guess_grid_system, dataset, var_name)
             da = dataset.cf[var_name]
+
+            bound_logger = get_context_logger()
+            bound_logger = bound_logger.bind(tms=tms.id)
+            set_context_logger(bound_logger)
 
             # Calculate min/max zoom based on data characteristics
             minzoom = await async_run(get_min_zoom, grid, tms, da)
