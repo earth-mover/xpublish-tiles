@@ -5,11 +5,11 @@ import threading
 import time
 from typing import Any
 
-from xpublish_tiles.logger import logger
+from xpublish_tiles.logger import log_duration, logger
 
 # Only use lock if tbb is not available
 HAS_TBB = importlib.util.find_spec("tbb") is not None
-LOCK = contextlib.nullcontext() if HAS_TBB else threading.Lock()
+NUMBA_THREADING_LOCK = contextlib.nullcontext() if HAS_TBB else threading.Lock()
 
 
 def lower_case_keys(d: Any) -> dict[str, Any]:
@@ -24,18 +24,9 @@ def lower_case_keys(d: Any) -> dict[str, Any]:
 def time_debug(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        # Extract bound_logger from kwargs if present
         bound_logger = kwargs.get("bound_logger")
-        start_time = time.perf_counter()
-        result = func(*args, **kwargs)
-        end_time = time.perf_counter()
-        perf_time = (end_time - start_time) * 1000
-
-        if bound_logger:
-            bound_logger.debug(f"{func.__name__}", duration_ms=perf_time)
-        else:
-            logger.debug(f"{func.__name__}: {perf_time:.2f} ms")
-        return result
+        with log_duration(func.__name__, emoji="⏱️", logger=bound_logger):
+            return func(*args, **kwargs)
 
     return wrapper
 
@@ -43,18 +34,9 @@ def time_debug(func):
 def async_time_debug(func):
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
-        # Extract bound_logger from kwargs if present
         bound_logger = kwargs.get("bound_logger")
-        start_time = time.perf_counter()
-        result = await func(*args, **kwargs)
-        end_time = time.perf_counter()
-        perf_time = (end_time - start_time) * 1000
-
-        if bound_logger:
-            bound_logger.debug(f"{func.__name__}", duration_ms=perf_time)
-        else:
-            logger.debug(f"{func.__name__}: {perf_time:.2f} ms")
-        return result
+        with log_duration(func.__name__, emoji="⏱️", logger=bound_logger):
+            return await func(*args, **kwargs)
 
     return wrapper
 

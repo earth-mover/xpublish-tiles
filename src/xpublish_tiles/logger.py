@@ -4,8 +4,11 @@ Logging setup and shared logger for the xpublish_tiles package.
 
 import contextlib
 import contextvars
+import functools
 import logging
 import time
+from collections.abc import Callable
+from typing import Any
 
 import structlog
 
@@ -163,3 +166,87 @@ def log_duration(message: str, emoji: str = "⏱️", logger=None):
         duration_ms = (time.perf_counter() - start_time) * 1000
         logger.error(f"{emoji} ({duration_ms:.0f}ms) {message} (failed)", error=str(e))
         raise
+
+
+def with_accumulated_logs(
+    log_message_fn: Callable[..., str] | None = None,
+    context_fn: Callable[..., dict[str, Any]] | None = None,
+):
+    """
+    Decorator that sets up log accumulation and prints accumulated logs at the end.
+
+    Args:
+        log_message_fn: Optional function that takes the same args as the decorated function
+                       and returns a string for the summary log message.
+                       If None, a generic message will be used.
+        context_fn: Optional function that takes the same args as the decorated function
+                   and returns a dict of context to bind to the logger.
+
+    Usage:
+        @with_accumulated_logs(
+            log_message_fn=lambda tms, dataset: f"tilejson {tms} {dataset._xpublish_id}",
+            context_fn=lambda tms, dataset: {"tms": tms, "dataset_id": dataset._xpublish_id}
+        )
+        async def my_endpoint(tms: str, dataset: Dataset):
+            # Your code here
+            pass
+    """
+
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Create log accumulator and configure structlog
+            accumulator = LogAccumulator()
+
+            structlog.configure(
+                processors=[
+                    structlog.stdlib.filter_by_level,
+                    structlog.stdlib.add_logger_name,
+                    structlog.stdlib.add_log_level,
+                    structlog.processors.TimeStamper(fmt="iso"),
+                    accumulator,
+                ],
+                context_class=dict,
+                logger_factory=structlog.stdlib.LoggerFactory(),
+                cache_logger_on_first_use=False,
+            )
+
+            # Create bound logger with context if provided
+            bound_logger = get_logger()
+            if context_fn is not None:
+                context = context_fn(*args, **kwargs)
+                bound_logger = bound_logger.bind(**context)
+
+            set_context_logger(bound_logger)
+
+            # Track total processing time
+            start_time = time.perf_counter()
+            total_ms = -1
+
+            try:
+                result = await func(*args, **kwargs)
+                total_ms = (time.perf_counter() - start_time) * 1000
+                return result
+            except Exception:
+                total_ms = (time.perf_counter() - start_time) * 1000
+                raise
+            finally:
+                # Print all log lines if logger level allows
+                if accumulator.logs and bound_logger.isEnabledFor(logging.DEBUG):
+                    console_renderer = CleanConsoleRenderer()
+
+                    # Generate log message
+                    if log_message_fn is not None:
+                        log_msg = log_message_fn(*args, **kwargs)
+                    else:
+                        log_msg = func.__name__
+
+                    print(f"🔧 {log_msg} (total: {total_ms:.0f}ms)")
+                    for log_entry in accumulator.logs:
+                        rendered = console_renderer(None, None, log_entry)
+                        print(f"   {rendered}")
+                    print()  # Empty line after each request
+
+        return wrapper
+
+    return decorator

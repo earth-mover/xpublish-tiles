@@ -8,8 +8,10 @@ from pyproj.aoi import BBox
 import xarray as xr
 from xpublish_tiles.grids import GridSystem, Triangular
 from xpublish_tiles.lib import transformer_from_crs
+from xpublish_tiles.utils import time_debug
 
 
+@time_debug
 def get_max_zoom(grid: GridSystem, tms: morecantile.TileMatrixSet) -> int:
     """Calculate maximum zoom level based on grid spacing and TMS.
 
@@ -54,6 +56,7 @@ def get_max_zoom(grid: GridSystem, tms: morecantile.TileMatrixSet) -> int:
     return zoom
 
 
+@time_debug
 def get_min_zoom(
     grid: GridSystem, tms: morecantile.TileMatrixSet, da: xr.DataArray
 ) -> int:
