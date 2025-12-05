@@ -293,13 +293,13 @@ def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> Non
         pytest.param(HRRR, 0, 6, id="hrrr"),
         pytest.param(REDGAUSS_N320, 0, 24, id="redgauss_n320"),
         # data spacing: 120m; Zoom level 10: 152m spacing @ eq
-        pytest.param(EU3035_HIRES, 4, 10, id="eu3035_hires"),
+        pytest.param(EU3035_HIRES, 5, 10, id="eu3035_hires"),
         # data spacing: 30m; Zoom level 13: 38m spacing @ eq
         pytest.param(PARA_HIRES, 7, 13, id="para_hires"),
         # data spacing: 0.5m; Zoom level 19: 0.3m spacing @ eq
-        pytest.param(UTM33S_HIRES, 12, 19, id="utm33s_hires"),
+        pytest.param(UTM33S_HIRES, 13, 19, id="utm33s_hires"),
         # data spacing: 1m; Zoom level 18: 0.6m spacing @ eq
-        pytest.param(UTM50S_HIRES, 11, 18, id="utm50s_hires"),
+        pytest.param(UTM50S_HIRES, 12, 18, id="utm50s_hires"),
     ),
 )
 def test_unit_minmax_zoom_level(dataset: Dataset, minzoom, maxzoom):
@@ -865,7 +865,9 @@ class TestGridZoomMethods:
             array_size=pixels_per_tile,
             target_zoom_type="min",
         )
-        with config.set({"max_renderable_size": (pixels_per_tile - 1) ** 2}):
+        with config.set(
+            {"max_renderable_size": da.dtype.itemsize * (pixels_per_tile - 1) ** 2}
+        ):
             actual = get_min_zoom(grid, tms, da)
         expected = target_zoom + 1
         assert expected == actual, (

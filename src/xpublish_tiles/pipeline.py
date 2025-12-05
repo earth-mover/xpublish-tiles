@@ -75,6 +75,9 @@ def check_data_is_renderable_size(
     Check if given slicers produce data of renderable size without loading data.
 
     This replicates the logic from apply_slicers that checks for tile size limits.
+    But is less accurate because we aren't careful about coordinate variables.
+    We do *not* want to apply isel here because this function is used in a loop to determine
+    minzoom for many TMS-es on the metadata route.
 
     Parameters
     ----------
@@ -98,13 +101,15 @@ def check_data_is_renderable_size(
     # then we load that data from disk;
     # and double the limit to allow slightly larger tiles
     # = (1 data var + 2 coord vars) * 2
-    factor = 6 if has_alternate else 1
+    factor = 3 if has_alternate else 1
 
     # Calculate total shape using the same logic as apply_slicers
     total_shape = shape_from_slicers(slicers, da, grid)
 
     # Check if it's within the limit
-    return math.prod(total_shape) <= factor * config.get("max_renderable_size")
+    return math.prod(total_shape) * da.dtype.itemsize <= factor * config.get(
+        "max_renderable_size"
+    )
 
 
 def shape_from_slicers(
@@ -333,18 +338,25 @@ async def apply_slicers(
     # if we have crs matching the desired CRS,
     # then we load that data from disk;
     # and double the limit to allow slightly larger tiles
-    # = (1 data var + 2 coord vars) * 2
-    factor = 6 if has_alternate else 1
+    # = (1 data var + 2 coord vars)
+    # this memory estimate should be identical to loading two 1D coordinates
+    # & transforming to two 2D coordinates
+    factor = 3 if has_alternate else 1
     total_shape = sum_tuples(
         *(
             sum_tuples(*[var.shape for var in subset.data_vars.values()])
             for subset in subsets
         )
     )
-    if math.prod(total_shape) > factor * config.get("max_renderable_size"):
+    total_size = sum(
+        sum([var.size for var in subset.data_vars.values()]) for subset in subsets
+    )
+    if math.prod(total_shape) * da.dtype.itemsize > factor * config.get(
+        "max_renderable_size"
+    ):
         msg = (
-            f"Tile request too big, requires loading data of total shape: {total_shape!r}. "
-            "Please choose a higher zoom level."
+            f"Tile request too big, requires loading data of total shape: {total_shape!r} "
+            f"and total size: {total_size / 1024 / 1024}MB. Please choose a higher zoom level."
         )
         logger = get_context_logger()
         logger.error(
