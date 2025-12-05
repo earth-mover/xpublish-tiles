@@ -17,7 +17,8 @@ config = donfig.Config(
             # we might end up with the last grid cell of a global dataset ending very slightly before
             # the bounds of the Canvas. This then results in transparent pixels
             "default_pad": 2,
-            "max_renderable_size": 400_000_000,  # 10,000 * 10,000 pixels - this takes the pipeline ~ 1s
+            # in bytes; ~10,000 * 10,000 float64 pixels; takes the pipeline ~ 1s
+            "max_renderable_size": 1024**3,
             "max_pixel_factor": 4,  # coarsen down to this many input grid cells per output pixel
             "async_load": True,
             "grid_cache_max_size": 16,  # maximum number of grid systems to cache
