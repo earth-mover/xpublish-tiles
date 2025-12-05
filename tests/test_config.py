@@ -62,11 +62,11 @@ def test_detect_approx_rectilinear_config():
 def test_max_renderable_size_config():
     """Test that max_renderable_size configuration works correctly."""
     # Check default value (10,000 * 10,000 pixels)
-    assert config.get("max_renderable_size") == 400_000_000
+    assert config.get("max_renderable_size") == 1024**3
 
     # Test changing the value with context manager
     with config.set(max_renderable_size=50_000_000):
         assert config.get("max_renderable_size") == 50_000_000
 
     # Verify it reverts to default after context manager
-    assert config.get("max_renderable_size") == 400_000_000
+    assert config.get("max_renderable_size") == 1024**3
