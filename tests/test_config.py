@@ -13,7 +13,7 @@ def test_default_config_values():
     assert config.get("transform_chunk_size") == 1024
     assert config.get("detect_approx_rectilinear") is True
     assert config.get("default_pad") == 2
-    assert config.get("max_renderable_size") == 400_000_000
+    assert config.get("max_renderable_size") == 1024**3
 
 
 def test_config_with_context_manager():
