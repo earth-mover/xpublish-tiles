@@ -1185,14 +1185,20 @@ class Curvilinear(GridSystem):
             f"Expected CurvilinearCellIndex, got {type(index)}"
         )
 
-        # Use the pre-computed lon_spans_globe attribute
-        handle_wraparound = self.lon_spans_globe
         sel_result = index.sel({self.Xdim: bbox})
 
         # Get slicers for both dimensions (ensure they are lists of slices)
         # X dimension: CurvilinearCellIndex returns list[slice] for antimeridian crossing
         x_raw = sel_result.dim_indexers[self.Xdim]
         xslicers = x_raw if isinstance(x_raw, list) else list(x_raw)
+
+        # If CurvilinearCellIndex.sel() returned multiple slices, the bbox crosses
+        # the antimeridian and we need wraparound
+        if self.lon_spans_globe:
+            bbox_crosses_antimeridian = len(xslicers) > 1
+            handle_wraparound = bbox_crosses_antimeridian
+        else:
+            handle_wraparound = False
 
         # Y dimension: CurvilinearCellIndex always returns a single slice
         y_raw = sel_result.dim_indexers[self.Ydim]
