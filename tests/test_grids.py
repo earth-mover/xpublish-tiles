@@ -506,6 +506,52 @@ class TestLongitudeCellIndex:
 
 class TestFixCoordinateDiscontinuities:
     """Test coordinate discontinuity fixing functionality."""
+
+    @staticmethod
+    def _create_curvilinear_grid_like_hycom() -> xr.Dataset:
+        """Build a regional HYCOM-like curvilinear grid with wraparound at the western edge."""
+        ny, nx = 1307, 895
+        lat_1d = np.linspace(30.0408, 84.50372, ny, dtype=np.float32)
+
+        lat = np.repeat(lat_1d[:, np.newaxis], nx, axis=1)
+
+        start_lon = np.float32(175.92004)
+        lon_step = np.float32(0.07996)
+        lon_line = start_lon + lon_step * np.arange(nx, dtype=np.float32)
+        lon_line = ((lon_line + 180.0) % 360.0) - 180.0
+        wrap_points = np.where(np.diff(lon_line) < -100.0)[0]
+        if wrap_points.size > 0:
+            lon_line[wrap_points[0] + 1] = -180.0
+        lon = np.repeat(lon_line[np.newaxis, :], ny, axis=0)
+
+        data = 10.0 + 5.0 * np.sin(np.deg2rad(lat)) * np.cos(np.deg2rad(lon))
+
+        ds = xr.Dataset(
+            {
+                "foo": (["Y", "X"], data),
+            },
+            coords={
+                "Y": ("Y", np.arange(ny), {"standard_name": "projection_y_coordinate", "axis": "Y", "point_spacing": "even"}),
+                "X": ("X", np.arange(nx), {"standard_name": "projection_x_coordinate", "axis": "X", "point_spacing": "even"}),
+                "lat": (
+                    ["Y", "X"],
+                    lat,
+                    {"standard_name": "latitude", "units": "degrees_north"},
+                ),
+                "lon": (
+                    ["Y", "X"],
+                    lon,
+                    {
+                        "standard_name": "longitude",
+                        "units": "degrees_east",
+                        "modulo": "360 degrees",
+                    },
+                ),
+            },
+            attrs={"Conventions": "CF-1.6"},
+        )
+        return ds
+
     @staticmethod
     def _check_slicers(slicers, ds: xr.Dataset, lon_name: str):
         '''

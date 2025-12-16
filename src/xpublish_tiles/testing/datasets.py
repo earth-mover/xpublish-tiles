@@ -1059,38 +1059,46 @@ CURVILINEAR = Dataset(
 )
 
 def _create_curvilinear_grid_like_hycom() -> xr.Dataset:
-    """Build a HYCOM-like curvilinear grid with wraparound at the western edge."""
-    ny, nx = 1307, 895
-    lat_1d = np.linspace(30.0408, 84.50372, ny, dtype=np.float32)
+    """Build a global HYCOM-like curvilinear grid matching actual HYCOM/RTOFS dimensions.
 
-    lat = np.repeat(lat_1d[:, np.newaxis], nx, axis=1)
+    Creates a simplified curvilinear grid with:
+    - Full HYCOM dimensions: 4500 (lon) x 3298 (lat)
+    - Latitude range: -80° to 90°
+    - Longitude: -180° to 180° with wraparound at antimeridian
+    - 2D coordinate arrays (curvilinear)
+    """
+    ny, nx = 3298, 4500
 
-    start_lon = np.float32(175.92004)
-    lon_step = np.float32(0.07996)
-    lon_line = start_lon + lon_step * np.arange(nx, dtype=np.float32)
-    lon_line = ((lon_line + 180.0) % 360.0) - 180.0
-    wrap_points = np.where(np.diff(lon_line) < -100.0)[0]
-    if wrap_points.size > 0:
-        lon_line[wrap_points[0] + 1] = -180.0
-    lon = np.repeat(lon_line[np.newaxis, :], ny, axis=0)
+    lat_1d = np.linspace(-80.0, 90.0, ny, dtype=np.float32)
+    lon_1d = np.linspace(-180.0, 180.0, nx, dtype=np.float32)
+
+    lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+
+    lat_variation = 0.1 * np.sin(2 * np.pi * np.arange(nx) / nx)
+    lat = lat_2d + lat_variation[np.newaxis, :]
+
+    lon_variation = 0.5 * np.sin(2 * np.pi * np.arange(ny) / ny)
+    lon = lon_2d + lon_variation[:, np.newaxis]
+
+    lon = ((lon + 180.0) % 360.0) - 180.0
 
     data = 10.0 + 5.0 * np.sin(np.deg2rad(lat)) * np.cos(np.deg2rad(lon))
 
     ds = xr.Dataset(
         {
-            "foo": (["Y", "X"], data),
+            "foo": (["Y", "X"], data.astype(np.float32)),
         },
         coords={
             "Y": ("Y", np.arange(ny), {"standard_name": "projection_y_coordinate", "axis": "Y", "point_spacing": "even"}),
             "X": ("X", np.arange(nx), {"standard_name": "projection_x_coordinate", "axis": "X", "point_spacing": "even"}),
             "latitude": (
                 ["Y", "X"],
-                lat,
+                lat.astype(np.float32),
                 {"standard_name": "latitude", "units": "degrees_north"},
             ),
             "longitude": (
                 ["Y", "X"],
-                lon,
+                lon.astype(np.float32),
                 {
                     "standard_name": "longitude",
                     "units": "degrees_east",
