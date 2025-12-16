@@ -14,6 +14,7 @@ from xpublish_tiles.testing.datasets import (
     REDGAUSS_N320,
     UTM33S,
     create_global_dataset,
+    _create_curvilinear_grid_like_hycom,
 )
 from xpublish_tiles.testing.lib import compare_image_buffers, png_snapshot  # noqa: F401
 from xpublish_tiles.testing.tiles import CURVILINEAR_TILES
@@ -119,6 +120,8 @@ def repo(pytestconfig):
 @pytest.fixture(
     params=tuple(map(",".join, product(["-90->90", "90->-90"], ["-180->180", "0->360"])))
     + ("reduced_gaussian_n320",)
+    + ("curvilinear_hycom",)
+    + ("curvilinear_hycom_wrap",)
 )
 def global_datasets(request):
     param = request.param
@@ -129,6 +132,8 @@ def global_datasets(request):
 
     if param == "reduced_gaussian_n320":
         ds = REDGAUSS_N320.create()
+    elif param in {"curvilinear_hycom", "curvilinear_hycom_wrap"}:
+        ds = _create_curvilinear_grid_like_hycom()
     else:
         ds = create_global_dataset(lat_ascending=lat_ascending, lon_0_360=lon_0_360)
     ds.attrs["name"] = param

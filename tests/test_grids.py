@@ -350,6 +350,14 @@ def test_multiple_grid_mappings_detection() -> None:
 async def test_subset(global_datasets, tile, tms):
     """Test subsetting with tiles that span equator, anti-meridian, and poles."""
     ds = global_datasets
+    if (
+        ds.attrs.get("name") == "curvilinear_hycom_wrap"
+        and tms.id == "WorldMercatorWGS84Quad"
+        and tile.x == 2
+        and tile.y == 9
+        and tile.z == 5
+    ):
+        pytest.xfail("Known HYCOM curvilinear wraparound selection bug for Alaska bbox")
     grid = guess_grid_system(ds, "foo")
     geo_bounds = tms.bounds(tile)
     bbox_geo = BBox(
@@ -357,12 +365,13 @@ async def test_subset(global_datasets, tile, tms):
     )
 
     slicers = grid.sel(bbox=bbox_geo)
+    TestFixCoordinateDiscontinuities._check_slicers(slicers, ds, grid.Y)
     if isinstance(grid, Triangular):
         assert isinstance(slicers["point"], list)
         assert len(slicers["point"]) == 1
         slicer = next(iter(slicers["point"]))
         assert isinstance(slicer, UgridIndexer)
-    else:
+    elif ("latitude" in ds.dims) & ("longitude" in ds.dims):
         assert isinstance(slicers["latitude"], list)
         assert isinstance(slicers["longitude"], list)
         assert len(slicers["latitude"]) == 1  # Y dimension should always have one slice
@@ -497,7 +506,27 @@ class TestLongitudeCellIndex:
 
 class TestFixCoordinateDiscontinuities:
     """Test coordinate discontinuity fixing functionality."""
-
+    @staticmethod
+    def _check_slicers(slicers, ds: xr.Dataset, lon_name: str):
+        '''
+        Verify slicers are valid for datasets with 2-D longitude coordinates.
+        '''
+        if ds[lon_name].ndim == 1:
+            return
+        all_lon_values = []
+        for dim_name, dim_slices in slicers.items():
+            for dim_slice in dim_slices:
+                if isinstance(dim_slice, slice):
+                    all_lon_values.append(
+                        ds[lon_name].isel({dim_name: dim_slice}).values.ravel()
+                    )
+        combined_lon = np.concatenate(all_lon_values)
+        lon_span = float(np.nanmax(combined_lon) - np.nanmin(combined_lon))
+        # Currently fails: wraparound padding inflates longitude span beyond regional bounds
+        assert lon_span < 300.0, (
+            f"Wraparound incorrectly enabled for regional tile. "
+            f"Combined longitude span: {lon_span:.1f} degrees."
+        )
     def test_wrap_around_360_to_0_geographic(self):
         """Test fixing discontinuity when geographic coordinates wrap from 360 to 0 in 4326->4326 transform."""
         # This is the actual problematic array from the issue
@@ -570,6 +599,50 @@ class TestFixCoordinateDiscontinuities:
             transformed_x, transformer, axis=0, bbox=bbox
         )
         npt.assert_array_equal(fixed, expected)
+
+
+    @pytest.mark.xfail(
+        reason="Curvilinear HYCOM selection incorrectly triggers wraparound padding",
+        strict=True,
+    )
+    def test_curvilinear_hycom_wraparound_detection(self):
+        """Ensure HYCOM-like curvilinear grid selection currently fails the wraparound check."""
+        ds = self._create_curvilinear_grid_like_hycom()
+
+        # Validate constructed grid spans ±180° at western edge and stays regional eastward
+        assert float(ds.lon.isel(X=0).min().values) < -170.0
+        assert float(ds.lon.isel(X=0).max().values) > 170.0
+        assert abs(float(ds.lon.isel(X=-1).min().values) - (-110.0)) < 1.0
+
+        # Build curvilinear grid index mirroring HYCOM metadata
+        index = CurvilinearCellIndex(
+            X=ds.lon,
+            Y=ds.lat,
+            Xdim="X",
+            Ydim="Y",
+        )
+
+        grid = Curvilinear(
+            crs=CRS.from_user_input(4326),
+            bbox=BBox(
+                west=float(ds.lon.min()),
+                south=float(ds.lat.min()),
+                east=float(ds.lon.max()),
+                north=float(ds.lat.max()),
+            ),
+            X="lon",
+            Y="lat",
+            Xdim="X",
+            Ydim="Y",
+            indexes=(index,),
+        )
+
+        assert grid.lon_spans_globe
+
+        bbox = BBox(west=-157.5, south=58.0, east=-146.2, north=60.0)
+        # Regional selection should not require wraparound padding
+        slicers = grid.sel(bbox=bbox)
+        self._check_slicers(slicers, ds)
 
 
 def test_prevent_slice_overlap():
