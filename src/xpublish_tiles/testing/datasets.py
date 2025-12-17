@@ -1089,7 +1089,7 @@ def _create_curvilinear_grid_like_hycom() -> xr.Dataset:
             "foo": (
                 ["Y", "X"],
                 data.astype(np.float32),
-                {"valid_min": 5.0, "valid_max": 15.0},
+                {"valid_min": 5.0, "valid_max": 15.0, "coordinates": "latitude longitude"},
             ),
         },
         coords={

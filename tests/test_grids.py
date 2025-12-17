@@ -350,14 +350,6 @@ def test_multiple_grid_mappings_detection() -> None:
 async def test_subset(global_datasets, tile, tms):
     """Test subsetting with tiles that span equator, anti-meridian, and poles."""
     ds = global_datasets
-    if (
-        ds.attrs.get("name") == "curvilinear_hycom_wrap"
-        and tms.id == "WorldMercatorWGS84Quad"
-        and tile.x == 2
-        and tile.y == 9
-        and tile.z == 5
-    ):
-        pytest.xfail("Known HYCOM curvilinear wraparound selection bug for Alaska bbox")
     grid = guess_grid_system(ds, "foo")
     geo_bounds = tms.bounds(tile)
     bbox_geo = BBox(
@@ -508,55 +500,6 @@ class TestFixCoordinateDiscontinuities:
     """Test coordinate discontinuity fixing functionality."""
 
     @staticmethod
-    def _create_curvilinear_grid_like_hycom() -> xr.Dataset:
-        """Build a regional HYCOM-like curvilinear grid with wraparound at the western edge."""
-        ny, nx = 1307, 895
-        lat_1d = np.linspace(30.0408, 84.50372, ny, dtype=np.float32)
-
-        lat = np.repeat(lat_1d[:, np.newaxis], nx, axis=1)
-
-        start_lon = np.float32(175.92004)
-        lon_step = np.float32(0.07996)
-        lon_line = start_lon + lon_step * np.arange(nx, dtype=np.float32)
-        lon_line = ((lon_line + 180.0) % 360.0) - 180.0
-        wrap_points = np.where(np.diff(lon_line) < -100.0)[0]
-        if wrap_points.size > 0:
-            lon_line[wrap_points[0] + 1] = -180.0
-        lon = np.repeat(lon_line[np.newaxis, :], ny, axis=0)
-
-        data = 10.0 + 5.0 * np.sin(np.deg2rad(lat)) * np.cos(np.deg2rad(lon))
-
-        ds = xr.Dataset(
-            {
-                "foo": (
-                    ["Y", "X"],
-                    data,
-                    {"valid_min": 5.0, "valid_max": 15.0},
-                ),
-            },
-            coords={
-                "Y": ("Y", np.arange(ny), {"standard_name": "projection_y_coordinate", "axis": "Y", "point_spacing": "even"}),
-                "X": ("X", np.arange(nx), {"standard_name": "projection_x_coordinate", "axis": "X", "point_spacing": "even"}),
-                "lat": (
-                    ["Y", "X"],
-                    lat,
-                    {"standard_name": "latitude", "units": "degrees_north"},
-                ),
-                "lon": (
-                    ["Y", "X"],
-                    lon,
-                    {
-                        "standard_name": "longitude",
-                        "units": "degrees_east",
-                        "modulo": "360 degrees",
-                    },
-                ),
-            },
-            attrs={"Conventions": "CF-1.6"},
-        )
-        return ds
-
-    @staticmethod
     def _check_slicers(slicers, ds: xr.Dataset, lon_name: str):
         '''
         Verify slicers are valid for datasets with 2-D longitude coordinates.
@@ -657,7 +600,49 @@ class TestFixCoordinateDiscontinuities:
     )
     def test_curvilinear_hycom_wraparound_detection(self):
         """Ensure HYCOM-like curvilinear grid selection currently fails the wraparound check."""
-        ds = self._create_curvilinear_grid_like_hycom()
+        ny, nx = 1307, 895
+        lat_1d = np.linspace(30.0408, 84.50372, ny, dtype=np.float32)
+        lat = np.repeat(lat_1d[:, np.newaxis], nx, axis=1)
+
+        start_lon = np.float32(175.92004)
+        lon_step = np.float32(0.07996)
+        lon_line = start_lon + lon_step * np.arange(nx, dtype=np.float32)
+        lon_line = ((lon_line + 180.0) % 360.0) - 180.0
+        wrap_points = np.where(np.diff(lon_line) < -100.0)[0]
+        if wrap_points.size > 0:
+            lon_line[wrap_points[0] + 1] = -180.0
+        lon = np.repeat(lon_line[np.newaxis, :], ny, axis=0)
+
+        data = 10.0 + 5.0 * np.sin(np.deg2rad(lat)) * np.cos(np.deg2rad(lon))
+
+        ds = xr.Dataset(
+            {
+                "foo": (
+                    ["Y", "X"],
+                    data,
+                    {"valid_min": 5.0, "valid_max": 15.0, "coordinates": "lat lon"},
+                ),
+            },
+            coords={
+                "Y": ("Y", np.arange(ny), {"standard_name": "projection_y_coordinate", "axis": "Y", "point_spacing": "even"}),
+                "X": ("X", np.arange(nx), {"standard_name": "projection_x_coordinate", "axis": "X", "point_spacing": "even"}),
+                "lat": (
+                    ["Y", "X"],
+                    lat,
+                    {"standard_name": "latitude", "units": "degrees_north"},
+                ),
+                "lon": (
+                    ["Y", "X"],
+                    lon,
+                    {
+                        "standard_name": "longitude",
+                        "units": "degrees_east",
+                        "modulo": "360 degrees",
+                    },
+                ),
+            },
+            attrs={"Conventions": "CF-1.6"},
+        )
 
         # Validate constructed grid spans ±180° at western edge and stays regional eastward
         assert float(ds.lon.isel(X=0).min().values) < -170.0
