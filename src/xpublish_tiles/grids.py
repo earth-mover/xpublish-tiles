@@ -1198,7 +1198,7 @@ class Curvilinear(GridSystem):
             bbox_crosses_antimeridian = len(xslicers) > 1
             handle_wraparound = bbox_crosses_antimeridian
         else:
-            handle_wraparound = False
+            handle_wraparound = self.lon_spans_globe
 
         # Y dimension: CurvilinearCellIndex always returns a single slice
         y_raw = sel_result.dim_indexers[self.Ydim]
