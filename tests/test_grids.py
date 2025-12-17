@@ -528,7 +528,11 @@ class TestFixCoordinateDiscontinuities:
 
         ds = xr.Dataset(
             {
-                "foo": (["Y", "X"], data),
+                "foo": (
+                    ["Y", "X"],
+                    data,
+                    {"valid_min": 5.0, "valid_max": 15.0},
+                ),
             },
             coords={
                 "Y": ("Y", np.arange(ny), {"standard_name": "projection_y_coordinate", "axis": "Y", "point_spacing": "even"}),
