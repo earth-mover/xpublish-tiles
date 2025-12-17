@@ -239,9 +239,10 @@ def transform_chunk(
     x_transformed, y_transformed = transformer.transform(
         x_chunk, y_chunk, inplace=inplace
     )
-    if not inplace:
-        x_out[row_slice, col_slice] = x_transformed
-        y_out[row_slice, col_slice] = y_transformed
+    # Always write back to output arrays, even when inplace=True
+    # The inplace parameter only affects temporary memory usage in pyproj
+    x_out[row_slice, col_slice] = x_transformed
+    y_out[row_slice, col_slice] = y_transformed
 
 
 def transform_blocked(
