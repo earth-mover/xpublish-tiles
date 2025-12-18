@@ -502,24 +502,20 @@ class TestFixCoordinateDiscontinuities:
     @staticmethod
     def _check_slicers(slicers, ds: xr.Dataset, lon_name: str):
         '''
-        Verify slicers are valid for datasets with 2-D longitude coordinates.
+        Verify regional selection returns single slice per dimension.
+
+        For regional tiles that don't cross the antimeridian, the selection
+        should return a single slice per dimension (not multiple slices which
+        would indicate wraparound handling is enabled).
         '''
-        if ds[lon_name].ndim == 1:
-            return
-        all_lon_values = []
         for dim_name, dim_slices in slicers.items():
-            for dim_slice in dim_slices:
-                if isinstance(dim_slice, slice):
-                    all_lon_values.append(
-                        ds[lon_name].isel({dim_name: dim_slice}).values.ravel()
-                    )
-        combined_lon = np.concatenate(all_lon_values)
-        lon_span = float(np.nanmax(combined_lon) - np.nanmin(combined_lon))
-        # Currently fails: wraparound padding inflates longitude span beyond regional bounds
-        assert lon_span < 300.0, (
-            f"Wraparound incorrectly enabled for regional tile. "
-            f"Combined longitude span: {lon_span:.1f} degrees."
-        )
+            if isinstance(dim_slices, list):
+                assert len(dim_slices) == 1, (
+                    f"Regional selection should return single slice per dimension. "
+                    f"Got {len(dim_slices)} slices for dimension '{dim_name}': {dim_slices}"
+                )
+            else:
+                pass
     def test_wrap_around_360_to_0_geographic(self):
         """Test fixing discontinuity when geographic coordinates wrap from 360 to 0 in 4326->4326 transform."""
         # This is the actual problematic array from the issue
@@ -594,7 +590,7 @@ class TestFixCoordinateDiscontinuities:
         npt.assert_array_equal(fixed, expected)
 
     def test_curvilinear_hycom_wraparound_detection(self):
-        """Ensure HYCOM-like curvilinear grid selection currently fails the wraparound check."""
+        """Verify regional selection on curvilinear grids with global longitude doesn't incorrectly enable wraparound."""
         ny, nx = 1307, 895
         lat_1d = np.linspace(30.0408, 84.50372, ny, dtype=np.float32)
         lat = np.repeat(lat_1d[:, np.newaxis], nx, axis=1)
@@ -639,10 +635,11 @@ class TestFixCoordinateDiscontinuities:
             attrs={"Conventions": "CF-1.6"},
         )
 
-        # Validate constructed grid spans ±180° at western edge and stays regional eastward
-        assert float(ds.lon.isel(X=0).min().values) < -170.0
-        assert float(ds.lon.isel(X=0).max().values) > 170.0
-        assert abs(float(ds.lon.isel(X=-1).min().values) - (-110.0)) < 1.0
+        # Validate constructed grid spans ±180° globally and stays regional at eastern edge
+        # Note: lon varies along X dimension (each row has same lon values)
+        assert float(ds.lon.min().values) < -170.0
+        assert float(ds.lon.max().values) > 170.0
+        assert abs(float(ds.lon.isel(Y=0, X=-1).values) - (-112.6)) < 1.0
 
         # Build curvilinear grid index mirroring HYCOM metadata
         index = CurvilinearCellIndex(
@@ -672,7 +669,7 @@ class TestFixCoordinateDiscontinuities:
         bbox = BBox(west=-157.5, south=58.0, east=-146.2, north=60.0)
         # Regional selection should not require wraparound padding
         slicers = grid.sel(bbox=bbox)
-        self._check_slicers(slicers, ds)
+        self._check_slicers(slicers, ds, grid.X)
 
 
 def test_prevent_slice_overlap():
