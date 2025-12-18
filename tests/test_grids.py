@@ -593,11 +593,6 @@ class TestFixCoordinateDiscontinuities:
         )
         npt.assert_array_equal(fixed, expected)
 
-
-    @pytest.mark.xfail(
-        reason="Curvilinear HYCOM selection incorrectly triggers wraparound padding",
-        strict=True,
-    )
     def test_curvilinear_hycom_wraparound_detection(self):
         """Ensure HYCOM-like curvilinear grid selection currently fails the wraparound check."""
         ny, nx = 1307, 895
