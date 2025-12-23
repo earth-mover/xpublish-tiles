@@ -500,7 +500,7 @@ class TestFixCoordinateDiscontinuities:
     """Test coordinate discontinuity fixing functionality."""
 
     @staticmethod
-    def _check_slicers(slicers, ds: xr.Dataset, lon_name: str):
+    def _check_slicers2(slicers, ds: xr.Dataset, lon_name: str):
         '''
         Verify regional selection returns single slice per dimension.
 
@@ -516,6 +516,29 @@ class TestFixCoordinateDiscontinuities:
                 )
             else:
                 pass
+
+    @staticmethod
+    def _check_slicers(slicers, ds: xr.Dataset, lon_name: str):
+        '''
+        Verify slicers are valid for datasets with 2-D longitude coordinates.
+        '''
+        if ds[lon_name].ndim == 1:
+            return
+        all_lon_values = []
+        for dim_name, dim_slices in slicers.items():
+            for dim_slice in dim_slices:
+                if isinstance(dim_slice, slice):
+                    all_lon_values.append(
+                        ds[lon_name].isel({dim_name: dim_slice}).values.ravel()
+                    )
+        combined_lon = np.concatenate(all_lon_values)
+        lon_span = float(np.nanmax(combined_lon) - np.nanmin(combined_lon))
+        # Currently fails: wraparound padding inflates longitude span beyond regional bounds
+        assert lon_span < 300.0, (
+            f"Wraparound incorrectly enabled for regional tile. "
+            f"Combined longitude span: {lon_span:.1f} degrees."
+        )
+
     def test_wrap_around_360_to_0_geographic(self):
         """Test fixing discontinuity when geographic coordinates wrap from 360 to 0 in 4326->4326 transform."""
         # This is the actual problematic array from the issue
@@ -667,9 +690,18 @@ class TestFixCoordinateDiscontinuities:
         assert grid.lon_spans_globe
 
         bbox = BBox(west=-157.5, south=58.0, east=-146.2, north=60.0)
-        # Regional selection should not require wraparound padding
         slicers = grid.sel(bbox=bbox)
-        self._check_slicers(slicers, ds, grid.X)
+
+        # Verify wraparound is not enabled (single slice per dimension, not multiple)
+        assert isinstance(slicers[grid.Xdim], list), f"Expected list of slices for X dimension"
+        assert len(slicers[grid.Xdim]) == 1, (
+            f"Regional selection should not enable wraparound. "
+            f"Expected single slice for X dimension, got {len(slicers[grid.Xdim])} slices: {slicers[grid.Xdim]}"
+        )
+        assert isinstance(slicers[grid.Ydim], list), f"Expected list of slices for Y dimension"
+        assert len(slicers[grid.Ydim]) == 1, (
+            f"Expected single slice for Y dimension, got {len(slicers[grid.Ydim])} slices"
+        )
 
 
 def test_prevent_slice_overlap():
