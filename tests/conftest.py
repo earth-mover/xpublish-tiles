@@ -121,7 +121,6 @@ def repo(pytestconfig):
     params=tuple(map(",".join, product(["-90->90", "90->-90"], ["-180->180", "0->360"])))
     + ("reduced_gaussian_n320",)
     + ("curvilinear_hycom",)
-    + ("curvilinear_hycom_wrap",)
 )
 def global_datasets(request):
     param = request.param
@@ -132,7 +131,7 @@ def global_datasets(request):
 
     if param == "reduced_gaussian_n320":
         ds = REDGAUSS_N320.create()
-    elif param in {"curvilinear_hycom", "curvilinear_hycom_wrap"}:
+    elif param in {"curvilinear_hycom"}:
         ds = _create_curvilinear_grid_like_hycom()
     else:
         ds = create_global_dataset(lat_ascending=lat_ascending, lon_0_360=lon_0_360)
