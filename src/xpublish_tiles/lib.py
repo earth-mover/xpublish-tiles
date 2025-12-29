@@ -4,6 +4,7 @@ import asyncio
 import io
 import math
 import operator
+from collections.abc import Hashable, Sequence
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from functools import lru_cache, partial
@@ -518,3 +519,37 @@ def create_colormap_from_dict(colormap_dict: dict[str, str]) -> mcolors.Colormap
     return mcolors.LinearSegmentedColormap.from_list(
         "custom", list(zip(positions, colors, strict=True)), N=256
     )
+
+
+def create_listed_colormap_from_dict(
+    colormap_dict: dict[str, str], flag_values: Sequence[Hashable]
+) -> dict[Hashable, str]:
+    """Create a matplotlib ListedColormap from a dictionary of flag_value->color mappings.
+
+    For categorical data, the colormap must have exactly as many entries as flag_values.
+    Every key in the colormap must correspond to a flag_value.
+    Keys should be string representations of the flag values, and values should be hex colors.
+    """
+    # Validate that all colormap keys are in flag_values
+    flag_values_str = {str(v) for v in flag_values}
+    colormap_keys = set(colormap_dict.keys())
+
+    # Check for colormap keys that don't correspond to any flag_value
+    invalid_keys = colormap_keys - flag_values_str
+    if invalid_keys:
+        raise ValueError(
+            f"colormap contains keys not in flag_values: {sorted(invalid_keys)}. "
+            f"Valid flag_values: {sorted(flag_values_str)}"
+        )
+
+    # Check for flag_values that don't have colormap entries
+    missing_keys = flag_values_str - colormap_keys
+    if missing_keys:
+        raise ValueError(
+            f"colormap is missing entries for flag_values: {sorted(missing_keys)}. "
+            f"All flag_values must have corresponding colors."
+        )
+
+    # Build colormap in the order of flag_values
+    colors = {flag_value: colormap_dict[str(flag_value)] for flag_value in flag_values}
+    return colors
