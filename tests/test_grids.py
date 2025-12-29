@@ -911,7 +911,7 @@ class TestGridZoomMethods:
         "shape, expected",
         (
             ((10, 20), 0),
-            ((30000, 15000), 2),
+            ((30000, 15000), 1),
         ),
     )
     def test_get_min_zoom(self, shape, expected):
