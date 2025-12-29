@@ -76,6 +76,10 @@ def get_dataset_for_name(name: str,
         # these are mostly netCDF files and async loading does not work
         ds = xr.tutorial.load_dataset(tutorial_name).assign_attrs(
             _xpublish_id=name)
+    elif name.startswith("zarr://"):
+        # zarr dataset - format: zarr://path/to/data.zarr
+        zarr_path = name.removeprefix("zarr://")
+        ds = xr.open_zarr(zarr_path).assign_attrs(_xpublish_id=name)
     elif name.startswith("local://"):
         try:
             import icechunk
