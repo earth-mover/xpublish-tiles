@@ -296,14 +296,14 @@ class TestValidateColormap:
     def test_invalid_color_format(self):
         with pytest.raises(
             ValueError,
-            match="colormap value 'invalid' for key 0 must be a hex color \\(#RRGGBB\\)",
+            match="colormap value 'invalid' for key 0 must be a hex color \\(#RRGGBB or #RRGGBBAA\\)",
         ):
             validate_colormap({"0": "invalid"})
 
     def test_invalid_named_colors(self):
         with pytest.raises(
             ValueError,
-            match="colormap value 'white' for key 0 must be a hex color \\(#RRGGBB\\)",
+            match="colormap value 'white' for key 0 must be a hex color \\(#RRGGBB or #RRGGBBAA\\)",
         ):
             validate_colormap({"0": "white", "255": "black"})
 
@@ -315,6 +315,40 @@ class TestValidateColormap:
     def test_non_dict_json_input(self):
         with pytest.raises(ValueError, match="colormap must be a dictionary"):
             validate_colormap(["not", "a", "dict"])  # type: ignore  # this doesn't validate with the type checker
+
+    def test_valid_rgba_colors(self):
+        colormap = {"0": "#FFFFFFFF", "255": "#000000FF"}
+        result = validate_colormap(colormap)
+        assert result == {"0": "#FFFFFFFF", "255": "#000000FF"}
+
+    def test_mixed_rgb_rgba_colors(self):
+        colormap = {"0": "#FF0000", "128": "#00FF0080", "255": "#0000FFFF"}
+        result = validate_colormap(colormap)
+        assert result == {"0": "#FF0000", "128": "#00FF0080", "255": "#0000FFFF"}
+
+    def test_rgba_with_full_opacity(self):
+        colormap = {"0": "#FF0000FF", "255": "#0000FFFF"}
+        result = validate_colormap(colormap)
+        assert result == {"0": "#FF0000FF", "255": "#0000FFFF"}
+
+    def test_rgba_with_transparency(self):
+        colormap = {"0": "#FF000080", "128": "#00FF0040", "255": "#0000FF00"}
+        result = validate_colormap(colormap)
+        assert result == {"0": "#FF000080", "128": "#00FF0040", "255": "#0000FF00"}
+
+    def test_invalid_rgba_format_8_chars(self):
+        with pytest.raises(
+            ValueError,
+            match="colormap value '#FF00001' for key 0 must be a hex color \\(#RRGGBB or #RRGGBBAA\\)",
+        ):
+            validate_colormap({"0": "#FF00001", "255": "#000000"})
+
+    def test_invalid_rgba_format_10_chars(self):
+        with pytest.raises(
+            ValueError,
+            match="colormap value '#FF0000FFFF' for key 0 must be a hex color \\(#RRGGBB or #RRGGBBAA\\)",
+        ):
+            validate_colormap({"0": "#FF0000FFFF", "255": "#000000"})
 
 
 class TestCategoricalColormap:

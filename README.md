@@ -41,10 +41,13 @@ Custom colormaps can be provided using the `colormap` parameter. When using a cu
 
 The colormap is a JSON-encoded dictionary with:
 - **Keys**: String integers from "0" to "255" (not data values)
-- **Values**: Hex color codes in the format `#RRGGBB`
+- **Values**: Hex color codes in the format `#RRGGBB` or `#RRGGBBAA` (with optional alpha channel)
 
 > [!IMPORTANT]
 > Custom colormaps must include both "0" and "255" as keys. These colormaps must have keys that are "0" and "255", not data values. The data value is rescaled by `colorscalerange` to 0→1; the colormap is rescaled from 0→255 to 0→1 and then applied to the scaled 0→1 data.
+
+> [!TIP]
+> Custom colormaps support RGBA colors with alpha transparency (e.g., `#FF000080` for 50% transparent red). The alpha channel allows for creating semi-transparent color gradients or making specific values fully transparent.
 
 ### Dimension selection with methods
 
