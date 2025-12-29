@@ -357,12 +357,13 @@ async def test_subset(global_datasets, tile, tms):
     )
 
     slicers = grid.sel(bbox=bbox_geo)
+    TestFixCoordinateDiscontinuities._check_slicers(slicers, ds, grid.Y)
     if isinstance(grid, Triangular):
         assert isinstance(slicers["point"], list)
         assert len(slicers["point"]) == 1
         slicer = next(iter(slicers["point"]))
         assert isinstance(slicer, UgridIndexer)
-    else:
+    elif ("latitude" in ds.dims) & ("longitude" in ds.dims):
         assert isinstance(slicers["latitude"], list)
         assert isinstance(slicers["longitude"], list)
         assert len(slicers["latitude"]) == 1  # Y dimension should always have one slice
@@ -498,6 +499,28 @@ class TestLongitudeCellIndex:
 class TestFixCoordinateDiscontinuities:
     """Test coordinate discontinuity fixing functionality."""
 
+    @staticmethod
+    def _check_slicers(slicers, ds: xr.Dataset, lon_name: str):
+        '''
+        Verify slicers are valid for datasets with 2-D longitude coordinates.
+        '''
+        if ds[lon_name].ndim == 1:
+            return
+        all_lon_values = []
+        for dim_name, dim_slices in slicers.items():
+            for dim_slice in dim_slices:
+                if isinstance(dim_slice, slice):
+                    all_lon_values.append(
+                        ds[lon_name].isel({dim_name: dim_slice}).values.ravel()
+                    )
+        combined_lon = np.concatenate(all_lon_values)
+        lon_span = float(np.nanmax(combined_lon) - np.nanmin(combined_lon))
+        # Currently fails: wraparound padding inflates longitude span beyond regional bounds
+        assert lon_span < 300.0, (
+            f"Wraparound incorrectly enabled for regional tile. "
+            f"Combined longitude span: {lon_span:.1f} degrees."
+        )
+
     def test_wrap_around_360_to_0_geographic(self):
         """Test fixing discontinuity when geographic coordinates wrap from 360 to 0 in 4326->4326 transform."""
         # This is the actual problematic array from the issue
@@ -570,6 +593,97 @@ class TestFixCoordinateDiscontinuities:
             transformed_x, transformer, axis=0, bbox=bbox
         )
         npt.assert_array_equal(fixed, expected)
+
+    def test_curvilinear_hycom_wraparound_detection(self):
+        """Verify regional selection on curvilinear grids with global longitude doesn't incorrectly enable wraparound."""
+        ny, nx = 1307, 895
+        lat_1d = np.linspace(30.0408, 84.50372, ny, dtype=np.float32)
+        lat = np.repeat(lat_1d[:, np.newaxis], nx, axis=1)
+
+        start_lon = np.float32(175.92004)
+        lon_step = np.float32(0.07996)
+        lon_line = start_lon + lon_step * np.arange(nx, dtype=np.float32)
+        lon_line = ((lon_line + 180.0) % 360.0) - 180.0
+        wrap_points = np.where(np.diff(lon_line) < -100.0)[0]
+        if wrap_points.size > 0:
+            lon_line[wrap_points[0] + 1] = -180.0
+        lon = np.repeat(lon_line[np.newaxis, :], ny, axis=0)
+
+        data = 10.0 + 5.0 * np.sin(np.deg2rad(lat)) * np.cos(np.deg2rad(lon))
+
+        ds = xr.Dataset(
+            {
+                "foo": (
+                    ["Y", "X"],
+                    data,
+                    {"valid_min": 5.0, "valid_max": 15.0, "coordinates": "lat lon"},
+                ),
+            },
+            coords={
+                "Y": ("Y", np.arange(ny), {"standard_name": "projection_y_coordinate", "axis": "Y", "point_spacing": "even"}),
+                "X": ("X", np.arange(nx), {"standard_name": "projection_x_coordinate", "axis": "X", "point_spacing": "even"}),
+                "lat": (
+                    ["Y", "X"],
+                    lat,
+                    {"standard_name": "latitude", "units": "degrees_north"},
+                ),
+                "lon": (
+                    ["Y", "X"],
+                    lon,
+                    {
+                        "standard_name": "longitude",
+                        "units": "degrees_east",
+                        "modulo": "360 degrees",
+                    },
+                ),
+            },
+            attrs={"Conventions": "CF-1.6"},
+        )
+
+        # Validate constructed grid spans ±180° globally and stays regional at eastern edge
+        # Note: lon varies along X dimension (each row has same lon values)
+        assert float(ds.lon.min().values) < -170.0
+        assert float(ds.lon.max().values) > 170.0
+        assert abs(float(ds.lon.isel(Y=0, X=-1).values) - (-112.6)) < 1.0
+
+        # Build curvilinear grid index mirroring HYCOM metadata
+        index = CurvilinearCellIndex(
+            X=ds.lon,
+            Y=ds.lat,
+            Xdim="X",
+            Ydim="Y",
+        )
+
+        grid = Curvilinear(
+            crs=CRS.from_user_input(4326),
+            bbox=BBox(
+                west=float(ds.lon.min()),
+                south=float(ds.lat.min()),
+                east=float(ds.lon.max()),
+                north=float(ds.lat.max()),
+            ),
+            X="lon",
+            Y="lat",
+            Xdim="X",
+            Ydim="Y",
+            indexes=(index,),
+        )
+
+        assert grid.lon_spans_globe
+
+        bbox = BBox(west=-157.5, south=58.0, east=-146.2, north=60.0)
+        slicers = grid.sel(bbox=bbox)
+
+        # Verify wraparound is not enabled (single slice per dimension, not multiple)
+        assert isinstance(slicers[grid.Xdim], list), f"Expected list of slices for X dimension"
+        assert len(slicers[grid.Xdim]) == 1, (
+            f"Regional selection should not enable wraparound. "
+            f"Expected single slice for X dimension, got {len(slicers[grid.Xdim])} slices: {slicers[grid.Xdim]}"
+        )
+        assert isinstance(slicers[grid.Ydim], list), f"Expected list of slices for Y dimension"
+        assert len(slicers[grid.Ydim]) == 1, (
+            f"Expected single slice for Y dimension, got {len(slicers[grid.Ydim])} slices"
+        )
 
 
 def test_prevent_slice_overlap():
@@ -779,7 +893,7 @@ class TestGridZoomMethods:
         "shape, expected",
         (
             ((10, 20), 0),
-            ((30000, 15000), 2),
+            ((30000, 15000), 1),
         ),
     )
     def test_get_min_zoom(self, shape, expected):

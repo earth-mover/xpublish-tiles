@@ -122,6 +122,7 @@ WGS84_TILES_REGULAR = [
     pytest.param(Tile(x=3, y=1, z=2), WGS84_TMS, id="wgs84_prime_east(2/3/1)"),
     # Anti-meridian tiles (180/-180 degrees longitude)
     # At z=2, x=0 covers western edge near anti-meridian
+    pytest.param(Tile(x=2, y=9, z=5), WGS84_TMS, id="wgs84_antimeridian_north_z5(5/2/9)"),
     pytest.param(Tile(x=0, y=1, z=2), WGS84_TMS, id="wgs84_antimeridian_west(2/0/1)"),
 ]
 

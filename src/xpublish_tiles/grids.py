@@ -818,8 +818,29 @@ class RectilinearSelMixin:
 
         slicers = {self.X: x_indexers, self.Y: y_indexers}
 
+        # Smart wraparound detection: only enable wraparound if the bbox actually crosses
+        # the antimeridian or is near the edge of a global grid
+        if self.lon_spans_globe:
+            bbox_crosses_antimeridian = len(x_indexers) > 1
+            # Also check if we're selecting cells at the edge of the grid
+            # This handles tiles near the edge of global grids with endpoint=False
+            if isinstance(xindex, LongitudeCellIndex):
+                lon_min = xindex.index.left.min()
+                lon_max = xindex.index.right.max()
+                # Check if selecting rightmost or leftmost cells (within 1% of range)
+                lon_range = lon_max - lon_min
+                tolerance = lon_range * 0.01
+                bbox_at_right_edge = (bbox.west >= lon_max - tolerance) or (bbox.east > lon_max)
+                bbox_at_left_edge = (bbox.east <= lon_min + tolerance) or (bbox.west < lon_min)
+                bbox_needs_wraparound = bbox_at_right_edge or bbox_at_left_edge
+            else:
+                bbox_needs_wraparound = False
+            handle_wraparound = bbox_crosses_antimeridian or bbox_needs_wraparound
+        else:
+            handle_wraparound = False
+
         # Apply padding with PadDimension helpers
-        xdim = PadDimension(name=self.X, size=x_size, wraparound=self.lon_spans_globe)
+        xdim = PadDimension(name=self.X, size=x_size, wraparound=handle_wraparound)
         ydim = PadDimension(name=self.Y, size=y_size, wraparound=False)
 
         return pad_slicers(slicers, dimensions=[xdim, ydim])
@@ -1185,14 +1206,29 @@ class Curvilinear(GridSystem):
             f"Expected CurvilinearCellIndex, got {type(index)}"
         )
 
-        # Use the pre-computed lon_spans_globe attribute
-        handle_wraparound = self.lon_spans_globe
         sel_result = index.sel({self.Xdim: bbox})
 
         # Get slicers for both dimensions (ensure they are lists of slices)
         # X dimension: CurvilinearCellIndex returns list[slice] for antimeridian crossing
         x_raw = sel_result.dim_indexers[self.Xdim]
         xslicers = x_raw if isinstance(x_raw, list) else list(x_raw)
+
+        # If CurvilinearCellIndex.sel() returned multiple slices, the bbox crosses
+        # the antimeridian and we need wraparound
+        if self.lon_spans_globe:
+            bbox_crosses_antimeridian = len(xslicers) > 1
+            # Also check if we're selecting cells at the edge of the grid
+            # This handles tiles near the edge of global grids with endpoint=False
+            lon_min = numbagg.nanmin(index.left)
+            lon_max = numbagg.nanmax(index.right)
+            lon_range = lon_max - lon_min
+            tolerance = lon_range * 0.01
+            bbox_at_right_edge = (bbox.west >= lon_max - tolerance) or (bbox.east > lon_max)
+            bbox_at_left_edge = (bbox.east <= lon_min + tolerance) or (bbox.west < lon_min)
+            bbox_needs_wraparound = bbox_at_right_edge or bbox_at_left_edge
+            handle_wraparound = bbox_crosses_antimeridian or bbox_needs_wraparound
+        else:
+            handle_wraparound = False
 
         # Y dimension: CurvilinearCellIndex always returns a single slice
         y_raw = sel_result.dim_indexers[self.Ydim]
@@ -1251,6 +1287,7 @@ class Triangular(GridSystem):
             self.bbox = BBox(west=-180, east=180, south=ymin, north=ymax)
         else:
             self.bbox = BBox(west=xmin, east=xmax, south=ymin, north=ymax)
+
         self.indexes = (
             CellTreeIndex(
                 vertices,

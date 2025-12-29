@@ -1058,6 +1058,63 @@ CURVILINEAR = Dataset(
     setup=curvilinear_grid,
 )
 
+def _create_curvilinear_grid_like_hycom() -> xr.Dataset:
+    """Build a global HYCOM-like curvilinear grid matching actual HYCOM/RTOFS dimensions.
+
+    Creates a simplified curvilinear grid with:
+    - Full HYCOM dimensions: 4500 (lon) x 3298 (lat)
+    - Latitude range: -80° to 90°
+    - Longitude: -180° to 180° with wraparound at antimeridian
+    - 2D coordinate arrays (curvilinear)
+    """
+    ny, nx = 3298, 4500
+
+    lat_1d = np.linspace(-80.0, 90.0, ny, dtype=np.float32)
+    lon_1d = np.linspace(-180.0, 180.0, nx, dtype=np.float32)
+
+    lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+
+    lat_variation = 0.1 * np.sin(2 * np.pi * np.arange(nx) / nx)
+    lat = lat_2d + lat_variation[np.newaxis, :]
+
+    lon_variation = 0.5 * np.sin(2 * np.pi * np.arange(ny) / ny)
+    lon = lon_2d + lon_variation[:, np.newaxis]
+
+    lon = ((lon + 180.0) % 360.0) - 180.0
+
+    data = 10.0 + 5.0 * np.sin(np.deg2rad(lat)) * np.cos(np.deg2rad(lon))
+
+    ds = xr.Dataset(
+        {
+            "foo": (
+                ["Y", "X"],
+                data.astype(np.float32),
+                {"valid_min": 5.0, "valid_max": 15.0, "coordinates": "latitude longitude"},
+            ),
+        },
+        coords={
+            "Y": ("Y", np.arange(ny), {"standard_name": "projection_y_coordinate", "axis": "Y", "point_spacing": "even"}),
+            "X": ("X", np.arange(nx), {"standard_name": "projection_x_coordinate", "axis": "X", "point_spacing": "even"}),
+            "latitude": (
+                ["Y", "X"],
+                lat.astype(np.float32),
+                {"standard_name": "latitude", "units": "degrees_north"},
+            ),
+            "longitude": (
+                ["Y", "X"],
+                lon.astype(np.float32),
+                {
+                    "standard_name": "longitude",
+                    "units": "degrees_east",
+                    "modulo": "360 degrees",
+                },
+            ),
+        },
+        attrs={"Conventions": "CF-1.6"},
+    )
+    return ds
+
+
 
 POPDS = xr.Dataset(
     {
