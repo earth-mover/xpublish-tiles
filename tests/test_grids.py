@@ -500,24 +500,6 @@ class TestFixCoordinateDiscontinuities:
     """Test coordinate discontinuity fixing functionality."""
 
     @staticmethod
-    def _check_slicers2(slicers, ds: xr.Dataset, lon_name: str):
-        '''
-        Verify regional selection returns single slice per dimension.
-
-        For regional tiles that don't cross the antimeridian, the selection
-        should return a single slice per dimension (not multiple slices which
-        would indicate wraparound handling is enabled).
-        '''
-        for dim_name, dim_slices in slicers.items():
-            if isinstance(dim_slices, list):
-                assert len(dim_slices) == 1, (
-                    f"Regional selection should return single slice per dimension. "
-                    f"Got {len(dim_slices)} slices for dimension '{dim_name}': {dim_slices}"
-                )
-            else:
-                pass
-
-    @staticmethod
     def _check_slicers(slicers, ds: xr.Dataset, lon_name: str):
         '''
         Verify slicers are valid for datasets with 2-D longitude coordinates.
