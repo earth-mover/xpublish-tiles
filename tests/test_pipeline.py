@@ -291,7 +291,8 @@ async def test_categorical_data_with_rgba_colormap(png_snapshot, pytestconfig):
         "9": "#808080ff",  # gray, fully opaque
     }
 
-    tile, tms = PARA_TILES[0].values
+    # Use para_belem_z6 tile which is fully within PARA domain (Belém capital area)
+    tile, tms = PARA_TILES[6].values
     query_params = create_query_params(
         tile, tms, style="raster", variant="custom", colormap=rgba_colormap
     )
