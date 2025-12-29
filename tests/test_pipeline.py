@@ -36,6 +36,8 @@ from xpublish_tiles.testing.datasets import (
     PARA,
 )
 from xpublish_tiles.testing.lib import (
+    assert_has_opaque_pixels,
+    assert_has_transparent_pixels,
     assert_render_matches_snapshot,
     compare_image_buffers,
     compare_image_buffers_with_debug,
@@ -264,6 +266,46 @@ async def test_categorical_data_with_custom_colormap(png_snapshot, pytestconfig)
 
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
+    assert_render_matches_snapshot(
+        result, png_snapshot, tile=tile, tms=tms, dataset_bbox=ds.attrs["bbox"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_categorical_data_with_rgba_colormap(png_snapshot, pytestconfig):
+    """Test categorical data with RGBA colormap including transparency."""
+    ds = PARA.create().squeeze("time")
+
+    # PARA has 10 categories (flag_values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+    # Create a custom RGBA colormap with category 0 fully transparent
+    rgba_colormap = {
+        "0": "#ff000000",  # red, fully transparent
+        "1": "#00ff00ff",  # green, fully opaque
+        "2": "#0000ffff",  # blue, fully opaque
+        "3": "#ffff00ff",  # yellow, fully opaque
+        "4": "#ff00ffff",  # magenta, fully opaque
+        "5": "#00ffffff",  # cyan, fully opaque
+        "6": "#800000ff",  # maroon, fully opaque
+        "7": "#008000ff",  # dark green, fully opaque
+        "8": "#000080ff",  # navy, fully opaque
+        "9": "#808080ff",  # gray, fully opaque
+    }
+
+    tile, tms = PARA_TILES[0].values
+    query_params = create_query_params(
+        tile, tms, style="raster", variant="custom", colormap=rgba_colormap
+    )
+    result = await pipeline(ds, query_params)
+
+    # Verify that the result has transparent pixels (category 0 is fully transparent)
+    assert_has_transparent_pixels(result)
+    assert_has_opaque_pixels(result)
+
+    if pytestconfig.getoption("--visualize"):
+        result.seek(0)
+        visualize_tile(result, tile)
+
+    result.seek(0)
     assert_render_matches_snapshot(
         result, png_snapshot, tile=tile, tms=tms, dataset_bbox=ds.attrs["bbox"]
     )

@@ -628,6 +628,54 @@ def assert_render_matches_snapshot(
         )
 
 
+def assert_has_transparent_pixels(result: io.BytesIO | bytes) -> None:
+    """Assert that the image has at least some transparent pixels (alpha == 0).
+
+    Args:
+        result: BytesIO buffer or bytes containing PNG image data
+
+    Raises:
+        AssertionError: If no transparent pixels are found or image is not RGBA
+    """
+    if isinstance(result, io.BytesIO):
+        result.seek(0)
+        img = Image.open(result)
+    else:
+        img = Image.open(io.BytesIO(result))
+
+    assert img.mode == "RGBA", f"Expected RGBA mode, got {img.mode}"
+
+    img_array = np.array(img)
+    alpha_channel = img_array[:, :, 3]
+
+    transparent_pixels = np.sum(alpha_channel == 0)
+    assert transparent_pixels > 0, "Expected some fully transparent pixels but found none"
+
+
+def assert_has_opaque_pixels(result: io.BytesIO | bytes) -> None:
+    """Assert that the image has at least some opaque pixels (alpha == 255).
+
+    Args:
+        result: BytesIO buffer or bytes containing PNG image data
+
+    Raises:
+        AssertionError: If no opaque pixels are found or image is not RGBA
+    """
+    if isinstance(result, io.BytesIO):
+        result.seek(0)
+        img = Image.open(result)
+    else:
+        img = Image.open(io.BytesIO(result))
+
+    assert img.mode == "RGBA", f"Expected RGBA mode, got {img.mode}"
+
+    img_array = np.array(img)
+    alpha_channel = img_array[:, :, 3]
+
+    opaque_pixels = np.sum(alpha_channel == 255)
+    assert opaque_pixels > 0, "Expected some opaque pixels but found none"
+
+
 def visualize_tile(result: io.BytesIO, tile: Tile) -> None:
     """Visualize a rendered tile with matplotlib showing RGB and alpha channels.
 
@@ -664,6 +712,8 @@ def visualize_tile(result: io.BytesIO, tile: Tile) -> None:
 
 # Export the fixture name for easier importing
 __all__ = [
+    "assert_has_opaque_pixels",
+    "assert_has_transparent_pixels",
     "assert_render_matches_snapshot",
     "compare_image_buffers",
     "compare_image_buffers_with_debug",

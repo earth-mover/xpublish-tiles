@@ -83,7 +83,7 @@ class WMSGetMapQuery(WMSBaseQuery):
     )
     colormap: dict[str, str] | None = Field(
         None,
-        description="Custom colormap as JSON-encoded dictionary with numeric keys (0-255) and hex color values (#RRGGBB). When provided, overrides any colormap from the styles parameter.",
+        description="Custom colormap as JSON-encoded dictionary with numeric keys (0-255) and hex color values (#RRGGBB or #RRGGBBAA). When provided, overrides any colormap from the styles parameter.",
     )
     format: ImageFormat = Field(
         ImageFormat.PNG,
@@ -209,7 +209,7 @@ class WMSGetLegendGraphicQuery(WMSBaseQuery):
     )
     colormap: dict[str, str] | None = Field(
         None,
-        description="Custom colormap as JSON-encoded dictionary with numeric keys (0-255) and hex color values (#RRGGBB). When provided, overrides any colormap from the styles parameter.",
+        description="Custom colormap as JSON-encoded dictionary with numeric keys (0-255) and hex color values (#RRGGBB or #RRGGBBAA). When provided, overrides any colormap from the styles parameter.",
     )
     styles: tuple[str, str] = Field(
         ("raster", "default"),

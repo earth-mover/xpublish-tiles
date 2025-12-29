@@ -1302,7 +1302,7 @@ class TileQuery(BaseModel):
         Field(
             default=None,
             json_schema_extra={
-                "description": "Custom colormap as JSON-encoded dictionary with numeric keys (0-255) and hex color values (#RRGGBB). When provided, overrides any colormap from the style parameter.",
+                "description": "Custom colormap as JSON-encoded dictionary with numeric keys (0-255) and hex color values (#RRGGBB or #RRGGBBAA). When provided, overrides any colormap from the style parameter.",
             },
         ),
     ]

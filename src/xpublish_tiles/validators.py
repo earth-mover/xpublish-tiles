@@ -134,7 +134,7 @@ def validate_colormap(v: str | dict | None) -> dict[str, str] | None:
         v: Colormap input - can be None, a JSON string, or a dict
 
     Returns:
-        Parsed colormap dict with string keys (0-255) and hex color values (#RRGGBB) or None
+        Parsed colormap dict with string keys (0-255) and hex color values (#RRGGBB or #RRGGBBAA) or None
 
     Raises:
         ValueError: If colormap format is invalid
@@ -184,11 +184,11 @@ def validate_colormap(v: str | dict | None) -> dict[str, str] | None:
                 f"colormap values must be strings, got {type(value).__name__} for key {key}"
             )
 
-        # Validation for hex colors only (#RRGGBB)
+        # Validation for hex colors only (#RRGGBB or #RRGGBBAA)
         value = value.strip()
-        if not (value.startswith("#") and len(value) == 7):
+        if not (value.startswith("#") and len(value) in (7, 9)):
             raise ValueError(
-                f"colormap value '{value}' for key {key} must be a hex color (#RRGGBB)"
+                f"colormap value '{value}' for key {key} must be a hex color (#RRGGBB or #RRGGBBAA)"
             )
 
         validated_colormap[str_key] = value

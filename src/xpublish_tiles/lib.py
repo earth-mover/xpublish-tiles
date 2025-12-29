@@ -515,6 +515,8 @@ def create_colormap_from_dict(colormap_dict: dict[str, str]) -> mcolors.Colormap
         # this is a matplotlib requirement
         raise ValueError("Provided colormap keys must contain 0 and 255.")
 
+    # Note: matplotlib's LinearSegmentedColormap.from_list() supports both
+    # #RRGGBB and #RRGGBBAA hex color formats
     return mcolors.LinearSegmentedColormap.from_list(
         "custom", list(zip(positions, colors, strict=True)), N=256
     )
