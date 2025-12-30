@@ -1,5 +1,4 @@
 import io
-from collections.abc import Hashable, Sequence
 from typing import TYPE_CHECKING, cast
 
 import datashader as dsh  # type: ignore
@@ -15,7 +14,11 @@ from scipy.interpolate import NearestNDInterpolator
 
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, GridSystem2D, Triangular
-from xpublish_tiles.lib import MissingParameterError, create_colormap_from_dict
+from xpublish_tiles.lib import (
+    MissingParameterError,
+    create_colormap_from_dict,
+    create_listed_colormap_from_dict,
+)
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import Renderer, register_renderer, render_error_image
 from xpublish_tiles.types import (
@@ -80,41 +83,6 @@ def nearest_on_uniform_grid_quadmesh(
     )
     res = cvs.quadmesh(da, x=Xdim, y=Ydim, agg=dsh.reductions.first(cast(str, da.name)))
     return res
-
-
-def create_listed_colormap_from_dict(
-    colormap_dict: dict[str, str], flag_values: Sequence[Hashable]
-) -> mcolors.ListedColormap:
-    """Create a matplotlib ListedColormap from a dictionary of flag_value->color mappings.
-
-    For categorical data, the colormap must have exactly as many entries as flag_values.
-    Every key in the colormap must correspond to a flag_value.
-    Keys should be string representations of the flag values, and values should be hex colors.
-    """
-    # Validate that all colormap keys are in flag_values
-    flag_values_str = {str(v) for v in flag_values}
-    colormap_keys = set(colormap_dict.keys())
-
-    # Check for colormap keys that don't correspond to any flag_value
-    invalid_keys = colormap_keys - flag_values_str
-    if invalid_keys:
-        raise ValueError(
-            f"colormap contains keys not in flag_values: {sorted(invalid_keys)}. "
-            f"Valid flag_values: {sorted(flag_values_str)}"
-        )
-
-    # Check for flag_values that don't have colormap entries
-    missing_keys = flag_values_str - colormap_keys
-    if missing_keys:
-        raise ValueError(
-            f"colormap is missing entries for flag_values: {sorted(missing_keys)}. "
-            f"All flag_values must have corresponding colors."
-        )
-
-    # Build colormap in the order of flag_values
-    colors = [colormap_dict[str(flag_value)] for flag_value in flag_values]
-
-    return mcolors.ListedColormap(colors)
 
 
 @register_renderer
@@ -254,25 +222,23 @@ class DatashaderRasterRenderer(Renderer):
                 )
         elif isinstance(context.datatype, DiscreteData):
             kwargs = {}
+            flag_values = context.datatype.values
             # Custom colormap overrides flag_colors
             if colormap is not None:
-                kwargs["cmap"] = create_listed_colormap_from_dict(
-                    colormap, context.datatype.values
-                )
-                kwargs["span"] = (
-                    min(context.datatype.values),
-                    max(context.datatype.values),
+                kwargs["color_key"] = create_listed_colormap_from_dict(
+                    colormap, flag_values
                 )
             elif context.datatype.colors is not None:
                 kwargs["color_key"] = dict(
                     zip(context.datatype.values, context.datatype.colors, strict=True)
                 )
             else:
-                kwargs["cmap"] = mpl.colormaps.get_cmap(variant)
-                kwargs["span"] = (
-                    min(context.datatype.values),
-                    max(context.datatype.values),
-                )
+                minv = min(flag_values)
+                maxv = max(flag_values)
+                cmap = mpl.colormaps.get_cmap(variant)
+                kwargs["color_key"] = {
+                    v: mcolors.to_hex(cmap((v - minv) / maxv)) for v in flag_values
+                }
             with np.errstate(invalid="ignore"):
                 shaded = tf.shade(mesh, how="linear", **kwargs)
         else:

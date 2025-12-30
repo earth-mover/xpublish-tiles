@@ -20,7 +20,12 @@ from src.xpublish_tiles.render.raster import nearest_on_uniform_grid_quadmesh
 from tests import create_query_params
 from xarray.testing import assert_equal
 from xpublish_tiles import config
-from xpublish_tiles.lib import IndexingError, MissingParameterError, VariableNotFoundError
+from xpublish_tiles.lib import (
+    IndexingError,
+    MissingParameterError,
+    VariableNotFoundError,
+    check_transparent_pixels,
+)
 from xpublish_tiles.pipeline import (
     apply_query,
     bbox_overlap,
@@ -267,6 +272,54 @@ async def test_categorical_data_with_custom_colormap(png_snapshot, pytestconfig)
     assert_render_matches_snapshot(
         result, png_snapshot, tile=tile, tms=tms, dataset_bbox=ds.attrs["bbox"]
     )
+
+
+@pytest.mark.asyncio
+async def test_categorical_out_of_range_values_are_transparent(pytestconfig):
+    """Test that categorical values outside flag_values render as transparent with custom colormap."""
+    ds = PARA.create().squeeze("time")
+
+    # PARA has 10 categories (flag_values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+    # Create a custom colormap with only the valid flag_values
+    custom_colormap = {
+        "0": "#ff0000",
+        "1": "#00ff00",
+        "2": "#0000ff",
+        "3": "#ffff00",
+        "4": "#ff00ff",
+        "5": "#00ffff",
+        "6": "#800000",
+        "7": "#008000",
+        "8": "#000080",
+        "9": "#808080",
+    }
+
+    # Use the Belém tile (capital area) which should have good data coverage
+    tile, tms = Tile(x=22, y=31, z=6), WEBMERC_TMS
+    query_params = create_query_params(
+        tile, tms, style="raster", variant="custom", colormap=custom_colormap
+    )
+
+    # Render unmodified data and get baseline transparency
+    unmodified_result = await pipeline(ds, query_params)
+    baseline_transparent_percent = check_transparent_pixels(unmodified_result.getvalue())
+
+    # Replace all values > 2 with 99 (out of range)
+    ds_modified = ds.compute()
+    ds_modified["foo"].values[ds_modified["foo"].values > 2] = 99
+
+    # Render modified data
+    modified_result = await pipeline(ds_modified, query_params)
+    modified_transparent_percent = check_transparent_pixels(modified_result.getvalue())
+
+    # Assert that modified data has more transparent pixels than unmodified
+    assert modified_transparent_percent > baseline_transparent_percent, (
+        f"Expected transparency to increase with out-of-range values. "
+        f"Baseline: {baseline_transparent_percent:.1f}%, Modified: {modified_transparent_percent:.1f}%"
+    )
+
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(modified_result, tile)
 
 
 @pytest.mark.asyncio

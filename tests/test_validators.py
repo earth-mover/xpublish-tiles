@@ -1,6 +1,7 @@
 import pytest
 from pyproj import CRS
 
+from xpublish_tiles.lib import create_listed_colormap_from_dict
 from xpublish_tiles.types import ImageFormat
 from xpublish_tiles.validators import (
     validate_colormap,
@@ -319,23 +320,19 @@ class TestValidateColormap:
 
 class TestCategoricalColormap:
     def test_create_listed_colormap_valid(self):
-        """Test creating a ListedColormap with valid categorical colormap."""
-        from xpublish_tiles.render.raster import create_listed_colormap_from_dict
-
+        """Test creating a color_key dictionary with valid categorical colormap."""
         colormap_dict = {
             "0": "#ff0000",
             "1": "#00ff00",
             "2": "#0000ff",
         }
         flag_values = [0, 1, 2]
-        cmap = create_listed_colormap_from_dict(colormap_dict, flag_values)
-        assert cmap.N == 3
-        assert len(cmap.colors) == 3
+        color_key = create_listed_colormap_from_dict(colormap_dict, flag_values)
+        assert len(color_key) == 3
+        assert color_key == {0: "#ff0000", 1: "#00ff00", 2: "#0000ff"}
 
     def test_create_listed_colormap_missing_flag_value(self):
         """Test that missing flag_value raises error."""
-        from xpublish_tiles.render.raster import create_listed_colormap_from_dict
-
         colormap_dict = {
             "0": "#ff0000",
             "1": "#00ff00",
@@ -349,8 +346,6 @@ class TestCategoricalColormap:
 
     def test_create_listed_colormap_invalid_key(self):
         """Test that keys not in flag_values raise error."""
-        from xpublish_tiles.render.raster import create_listed_colormap_from_dict
-
         colormap_dict = {
             "0": "#ff0000",
             "1": "#00ff00",
@@ -365,8 +360,6 @@ class TestCategoricalColormap:
 
     def test_create_listed_colormap_non_consecutive_flag_values(self):
         """Test that non-consecutive flag_values work correctly."""
-        from xpublish_tiles.render.raster import create_listed_colormap_from_dict
-
         # flag_values don't have to be consecutive
         colormap_dict = {
             "0": "#ff0000",
@@ -374,6 +367,6 @@ class TestCategoricalColormap:
             "10": "#0000ff",
         }
         flag_values = [0, 5, 10]
-        cmap = create_listed_colormap_from_dict(colormap_dict, flag_values)
-        assert cmap.N == 3
-        assert len(cmap.colors) == 3
+        color_key = create_listed_colormap_from_dict(colormap_dict, flag_values)
+        assert len(color_key) == 3
+        assert color_key == {0: "#ff0000", 5: "#00ff00", 10: "#0000ff"}
