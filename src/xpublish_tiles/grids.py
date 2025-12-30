@@ -818,28 +818,8 @@ class RectilinearSelMixin:
 
         slicers = {self.X: x_indexers, self.Y: y_indexers}
 
-        # Smart wraparound detection: only enable wraparound if the bbox actually crosses
-        # the antimeridian or is near the edge of a global grid
         if self.lon_spans_globe:
-            bbox_crosses_antimeridian = len(x_indexers) > 1
-            # Also check if we're selecting cells at the edge of the grid
-            # This handles tiles near the edge of global grids with endpoint=False
-            if isinstance(xindex, LongitudeCellIndex):
-                lon_min = xindex.index.left.min()
-                lon_max = xindex.index.right.max()
-                # Check if selecting rightmost or leftmost cells (within 1% of range)
-                lon_range = lon_max - lon_min
-                tolerance = lon_range * 0.01
-                bbox_at_right_edge = (bbox.west >= lon_max - tolerance) or (
-                    bbox.east > lon_max
-                )
-                bbox_at_left_edge = (bbox.east <= lon_min + tolerance) or (
-                    bbox.west < lon_min
-                )
-                bbox_needs_wraparound = bbox_at_right_edge or bbox_at_left_edge
-            else:
-                bbox_needs_wraparound = False
-            handle_wraparound = bbox_crosses_antimeridian or bbox_needs_wraparound
+            handle_wraparound = len(x_indexers) > 1
         else:
             handle_wraparound = False
 
@@ -1217,24 +1197,8 @@ class Curvilinear(GridSystem):
         x_raw = sel_result.dim_indexers[self.Xdim]
         xslicers = x_raw if isinstance(x_raw, list) else list(x_raw)
 
-        # If CurvilinearCellIndex.sel() returned multiple slices, the bbox crosses
-        # the antimeridian and we need wraparound
         if self.lon_spans_globe:
-            bbox_crosses_antimeridian = len(xslicers) > 1
-            # Also check if we're selecting cells at the edge of the grid
-            # This handles tiles near the edge of global grids with endpoint=False
-            lon_min = numbagg.nanmin(index.left)
-            lon_max = numbagg.nanmax(index.right)
-            lon_range = lon_max - lon_min
-            tolerance = lon_range * 0.01
-            bbox_at_right_edge = (bbox.west >= lon_max - tolerance) or (
-                bbox.east > lon_max
-            )
-            bbox_at_left_edge = (bbox.east <= lon_min + tolerance) or (
-                bbox.west < lon_min
-            )
-            bbox_needs_wraparound = bbox_at_right_edge or bbox_at_left_edge
-            handle_wraparound = bbox_crosses_antimeridian or bbox_needs_wraparound
+            handle_wraparound = len(xslicers) > 1
         else:
             handle_wraparound = False
 
