@@ -1058,6 +1058,7 @@ CURVILINEAR = Dataset(
     setup=curvilinear_grid,
 )
 
+
 def _create_curvilinear_grid_like_hycom() -> xr.Dataset:
     """Build a global HYCOM-like curvilinear grid matching actual HYCOM/RTOFS dimensions.
 
@@ -1089,12 +1090,32 @@ def _create_curvilinear_grid_like_hycom() -> xr.Dataset:
             "foo": (
                 ["Y", "X"],
                 data.astype(np.float32),
-                {"valid_min": 5.0, "valid_max": 15.0, "coordinates": "latitude longitude"},
+                {
+                    "valid_min": 5.0,
+                    "valid_max": 15.0,
+                    "coordinates": "latitude longitude",
+                },
             ),
         },
         coords={
-            "Y": ("Y", np.arange(ny), {"standard_name": "projection_y_coordinate", "axis": "Y", "point_spacing": "even"}),
-            "X": ("X", np.arange(nx), {"standard_name": "projection_x_coordinate", "axis": "X", "point_spacing": "even"}),
+            "Y": (
+                "Y",
+                np.arange(ny),
+                {
+                    "standard_name": "projection_y_coordinate",
+                    "axis": "Y",
+                    "point_spacing": "even",
+                },
+            ),
+            "X": (
+                "X",
+                np.arange(nx),
+                {
+                    "standard_name": "projection_x_coordinate",
+                    "axis": "X",
+                    "point_spacing": "even",
+                },
+            ),
             "latitude": (
                 ["Y", "X"],
                 lat.astype(np.float32),
@@ -1113,7 +1134,6 @@ def _create_curvilinear_grid_like_hycom() -> xr.Dataset:
         attrs={"Conventions": "CF-1.6"},
     )
     return ds
-
 
 
 POPDS = xr.Dataset(

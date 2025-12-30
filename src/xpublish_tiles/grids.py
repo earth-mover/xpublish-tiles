@@ -830,8 +830,12 @@ class RectilinearSelMixin:
                 # Check if selecting rightmost or leftmost cells (within 1% of range)
                 lon_range = lon_max - lon_min
                 tolerance = lon_range * 0.01
-                bbox_at_right_edge = (bbox.west >= lon_max - tolerance) or (bbox.east > lon_max)
-                bbox_at_left_edge = (bbox.east <= lon_min + tolerance) or (bbox.west < lon_min)
+                bbox_at_right_edge = (bbox.west >= lon_max - tolerance) or (
+                    bbox.east > lon_max
+                )
+                bbox_at_left_edge = (bbox.east <= lon_min + tolerance) or (
+                    bbox.west < lon_min
+                )
                 bbox_needs_wraparound = bbox_at_right_edge or bbox_at_left_edge
             else:
                 bbox_needs_wraparound = False
@@ -1223,8 +1227,12 @@ class Curvilinear(GridSystem):
             lon_max = numbagg.nanmax(index.right)
             lon_range = lon_max - lon_min
             tolerance = lon_range * 0.01
-            bbox_at_right_edge = (bbox.west >= lon_max - tolerance) or (bbox.east > lon_max)
-            bbox_at_left_edge = (bbox.east <= lon_min + tolerance) or (bbox.west < lon_min)
+            bbox_at_right_edge = (bbox.west >= lon_max - tolerance) or (
+                bbox.east > lon_max
+            )
+            bbox_at_left_edge = (bbox.east <= lon_min + tolerance) or (
+                bbox.west < lon_min
+            )
             bbox_needs_wraparound = bbox_at_right_edge or bbox_at_left_edge
             handle_wraparound = bbox_crosses_antimeridian or bbox_needs_wraparound
         else:
