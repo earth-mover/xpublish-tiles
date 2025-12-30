@@ -35,16 +35,43 @@ Here `lat[lat]` means a coordinate variable named `lat` with one dimension named
 We attempt to require as little metadata as possible, and attempts to infer as much as possible. However, it is *always* better
 for you to annotate your dataset using the CF & ACDD conventions as well as possible.
 
+### Categorical Data support
+
+By default all data is treated as continuous. Discrete data are assumed to be encoded with the CF flag variable convention i.e., arrays with the `flag_values` and `flag_meanings`
+attributes are treated as discrete categorical data by the rendering pipeline.
+
 ### Custom Colormaps
 
+> [!IMPORTANT]
+> At the moment RGBA colors are not supported in colormaps because of this [upstream datashader issue](https://github.com/holoviz/datashader/issues/1404).
+
 Custom colormaps can be provided using the `colormap` parameter. When using a custom colormap, you must set `style=raster/custom`.
+
+**Continuous data**
 
 The colormap is a JSON-encoded dictionary with:
 - **Keys**: String integers from "0" to "255" (not data values)
 - **Values**: Hex color codes in the format `#RRGGBB`
 
 > [!IMPORTANT]
-> Custom colormaps must include both "0" and "255" as keys. These colormaps must have keys that are "0" and "255", not data values. The data value is rescaled by `colorscalerange` to 0→1; the colormap is rescaled from 0→255 to 0→1 and then applied to the scaled 0→1 data.
+> Custom colormaps for continuous data must include both "0" and "255" as keys. These colormaps must have keys that are "0" and "255", not data values. The data value is rescaled by `colorscalerange` to 0→1; the colormap is rescaled from 0→255 to 0→1 and then applied to the scaled 0→1 data.
+
+**Categorical data**
+
+The colormap is a JSON-encoded dictionary with:
+- **Keys**: Data values that match the values of the `flag_values` attribute of the array.
+- **Values**: Hex color codes in the format `#RRGGBB`
+
+Alternatively the `flag_colors` attribute can be set on the array. Its value must be a string containing space delimited hex colors of the same length
+as the corresponding `flag_meanings` and `flag_values` attributes. For example
+
+```
+land_cover:flag_values = 1, 2, 3, 4, 5, 6;
+land_cover:flag_meanings = "Broadleaf_Woodland Coniferous_Woodland Arable_and_Horticulture Improved_Grassland Rough_Grassland Neutral_Grassland" ;
+land_cover:flag_colors = "#FF0000 #006600 #732600 #00FF00 #FAAA00 #7FE57F" ;
+```
+
+See the [ncWMS convention docs on Categorical Data](https://web.archive.org/web/20240729161558/https://reading-escience-centre.gitbooks.io/ncwms-user-guide/content/05-data_formats.html#vector) for more.
 
 ### Dimension selection with methods
 
