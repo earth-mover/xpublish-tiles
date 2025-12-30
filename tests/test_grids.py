@@ -501,9 +501,9 @@ class TestFixCoordinateDiscontinuities:
 
     @staticmethod
     def _check_slicers(slicers, ds: xr.Dataset, lon_name: str):
-        '''
+        """
         Verify slicers are valid for datasets with 2-D longitude coordinates.
-        '''
+        """
         if ds[lon_name].ndim == 1:
             return
         all_lon_values = []
@@ -620,8 +620,24 @@ class TestFixCoordinateDiscontinuities:
                 ),
             },
             coords={
-                "Y": ("Y", np.arange(ny), {"standard_name": "projection_y_coordinate", "axis": "Y", "point_spacing": "even"}),
-                "X": ("X", np.arange(nx), {"standard_name": "projection_x_coordinate", "axis": "X", "point_spacing": "even"}),
+                "Y": (
+                    "Y",
+                    np.arange(ny),
+                    {
+                        "standard_name": "projection_y_coordinate",
+                        "axis": "Y",
+                        "point_spacing": "even",
+                    },
+                ),
+                "X": (
+                    "X",
+                    np.arange(nx),
+                    {
+                        "standard_name": "projection_x_coordinate",
+                        "axis": "X",
+                        "point_spacing": "even",
+                    },
+                ),
                 "lat": (
                     ["Y", "X"],
                     lat,
@@ -675,12 +691,16 @@ class TestFixCoordinateDiscontinuities:
         slicers = grid.sel(bbox=bbox)
 
         # Verify wraparound is not enabled (single slice per dimension, not multiple)
-        assert isinstance(slicers[grid.Xdim], list), f"Expected list of slices for X dimension"
+        assert isinstance(slicers[grid.Xdim], list), (
+            "Expected list of slices for X dimension"
+        )
         assert len(slicers[grid.Xdim]) == 1, (
             f"Regional selection should not enable wraparound. "
             f"Expected single slice for X dimension, got {len(slicers[grid.Xdim])} slices: {slicers[grid.Xdim]}"
         )
-        assert isinstance(slicers[grid.Ydim], list), f"Expected list of slices for Y dimension"
+        assert isinstance(slicers[grid.Ydim], list), (
+            "Expected list of slices for Y dimension"
+        )
         assert len(slicers[grid.Ydim]) == 1, (
             f"Expected single slice for Y dimension, got {len(slicers[grid.Ydim])} slices"
         )

@@ -138,11 +138,13 @@ def get_dataset_for_name(name: str,
             config = ICECHUNK_CONFIG
         repo = ic.Repository.open(storage, config=config)
         session = repo.readonly_session(branch=branch)
-        ds = xr.open_zarr(session.store,
-                          group=group or None,
-                          zarr_format=3,
-                          consolidated=False,
-                          chunks=None)
+        ds = xr.open_zarr(
+            session.store,
+            group=group or None,
+            zarr_format=3,
+            consolidated=False,
+            chunks=None,
+        )
         xpublish_id = f"s3:{bucket}:{key}:{branch}"
         ds.attrs["_xpublish_id"] = xpublish_id
     else:
@@ -565,8 +567,7 @@ def main():
     benchmarking = args.bench or args.spy
 
     # Load dataset and setup server
-    ds = get_dataset_for_name(dataset_name, args.branch, args.group,
-                              args.cache)
+    ds = get_dataset_for_name(dataset_name, args.branch, args.group, args.cache)
     xr.set_options(keep_attrs=True)
     if args.where == "local":
         rest = xpublish.SingleDatasetRest(

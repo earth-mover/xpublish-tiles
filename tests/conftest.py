@@ -13,6 +13,7 @@ from xpublish_tiles.testing.datasets import (
     HRRR,
     REDGAUSS_N320,
     UTM33S,
+    _create_curvilinear_grid_like_hycom,
     create_global_dataset,
     _create_curvilinear_grid_like_hycom,
 )
