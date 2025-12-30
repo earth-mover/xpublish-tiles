@@ -92,9 +92,19 @@ def get_dataset_for_name(
 
         try:
             if "s3://" in repo_path:
+                path_parts = repo_path.removeprefix("s3://").split("/")
                 storage = icechunk.s3_storage(
-                    bucket=repo_path.removeprefix("s3://").split("/")[0],
-                    prefix="/".join(repo_path.removeprefix("s3://").split("/")[1:]),
+                    bucket=path_parts[0],
+                    prefix="/".join(path_parts[1:]),
+                )
+            elif repo_path.startswith(("gs://", "gcs://")):
+                path_parts = (
+                    repo_path.removeprefix("gs://").removeprefix("gcs://").split("/")
+                )
+                storage = icechunk.gcs_storage(
+                    bucket=path_parts[0],
+                    prefix="/".join(path_parts[1:]),
+                    from_env=True,
                 )
             else:
                 storage = icechunk.local_filesystem_storage(repo_path)
