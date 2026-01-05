@@ -164,7 +164,6 @@ def _convert_longitude_slice(lon_slice: slice, *, uses_0_360) -> tuple[slice, ..
     # Determine breakpoints based on coordinate system
     left_break = 0 if uses_0_360 else -180
     right_break = 360 if uses_0_360 else 180
-    # breakpoint()
 
     # Handle different boundary crossing cases
     if start < left_break and stop < left_break:
@@ -468,7 +467,6 @@ class CurvilinearCellIndex(xr.Index):
             xs = _grab_edges(
                 left, right, slicer=sl, axis=xaxis, size=Xlen, increasing=True
             )
-            # breakpoint()
             # add 1 to account for slice upper end being exclusive
             indexer = slice(min(xs), max(xs) + 1)
             start, stop, _ = indexer.indices(X.shape[xaxis])
