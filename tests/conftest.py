@@ -8,6 +8,7 @@ import icechunk
 import xarray as xr
 from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
+    CURVILINEAR_HYCOM,
     EU3035,
     EU3035_HIRES,
     HRRR,
@@ -16,7 +17,7 @@ from xpublish_tiles.testing.datasets import (
     create_global_dataset,
 )
 from xpublish_tiles.testing.lib import compare_image_buffers, png_snapshot  # noqa: F401
-from xpublish_tiles.testing.tiles import CURVILINEAR_TILES
+from xpublish_tiles.testing.tiles import CURVILINEAR_TILES, CURVILINEAR_HYCOM_TILES
 
 # Disable numba, datashader, and PIL debug logs
 logging.getLogger("numba").setLevel(logging.WARNING)
@@ -119,6 +120,7 @@ def repo(pytestconfig):
 @pytest.fixture(
     params=tuple(map(",".join, product(["-90->90", "90->-90"], ["-180->180", "0->360"])))
     + ("reduced_gaussian_n320",)
+    # + ("curvilinear_hycom",)
 )
 def global_datasets(request):
     param = request.param
@@ -129,6 +131,8 @@ def global_datasets(request):
 
     if param == "reduced_gaussian_n320":
         ds = REDGAUSS_N320.create()
+    elif param in {"curvilinear_hycom"}:
+        ds = _create_curvilinear_grid_like_hycom(regional_subset = False)
     else:
         ds = create_global_dataset(lat_ascending=lat_ascending, lon_0_360=lon_0_360)
     ds.attrs["name"] = param
@@ -158,3 +162,8 @@ def projected_dataset_and_tile(request):
 def curvilinear_dataset_and_tile(request):
     tile, tms = request.param
     return (CURVILINEAR.create(), tile, tms)
+
+@pytest.fixture(params=CURVILINEAR_HYCOM_TILES)
+def curvilinear_hycom_dataset_and_tile(request):
+    tile, tms = request.param
+    return (CURVILINEAR_HYCOM.create(), tile, tms)

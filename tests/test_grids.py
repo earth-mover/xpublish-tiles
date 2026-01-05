@@ -35,6 +35,7 @@ from xpublish_tiles.lib import _prevent_slice_overlap, transformer_from_crs
 from xpublish_tiles.pipeline import apply_slicers, fix_coordinate_discontinuities
 from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
+    CURVILINEAR_HYCOM,
     ERA5,
     EU3035,
     EU3035_HIRES,
@@ -164,6 +165,32 @@ TRIANGULAR_SENTINEL = 1
                 ),
             ),
             id="roms",
+        ),
+        pytest.param(
+            CURVILINEAR_HYCOM.create(),
+            "foo",
+            Curvilinear(
+                crs=CRS.from_user_input(4326),
+                bbox=BBox(
+                    south=0,
+                    north=80,
+                    east=-120,
+                    west=-180,
+                ),
+                X="longitude",
+                Y="latitude",
+                Xdim="X",
+                Ydim="Y",
+                indexes=(
+                    CurvilinearCellIndex(
+                        X=CURVILINEAR_HYCOM.create().longitude,
+                        Y=CURVILINEAR_HYCOM.create().latitude,
+                        Xdim="X",
+                        Ydim="Y",
+                    ),
+                ),
+            ),
+            id="hycom",
         ),
         pytest.param(
             POPDS,
@@ -749,6 +776,17 @@ def _create_test_dataset(
             coords={"x": np.arange(array_size), "y": np.arange(array_size)},
         )
         grid = Curvilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
+    elif grid_type == "curvilinear_hycom":
+        lon, lat = np.meshgrid(lon_coords, lat_coords)
+        ds = xr.Dataset(
+            {
+                "temp": (["y", "x"], data),
+                "lon": (["y", "x"], lon),
+                "lat": (["y", "x"], lat),
+            },
+            coords={"x": np.arange(array_size), "y": np.arange(array_size)},
+        )
+        grid = Curvilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
     elif grid_type == "raster_affine":
         pixel_size_x = (
             (lon_coords[-1] - lon_coords[0]) / (array_size - 1) if array_size > 1 else 1.0
@@ -820,7 +858,7 @@ class TestGridZoomMethods:
     @pytest.mark.parametrize(
         "tms_id", ["WebMercatorQuad", "WGS1984Quad", "WorldCRS84Quad"]
     )
-    @pytest.mark.parametrize("grid_type", ["rectilinear", "curvilinear", "raster_affine"])
+    @pytest.mark.parametrize("grid_type", ["rectilinear", "curvilinear", "curvilinear_hycom", "raster_affine"])
     @given(data=st.data())
     @settings(deadline=None)
     def test_max_zoom_matches_dataset_resolution(self, tms_id, grid_type, data):
@@ -842,7 +880,7 @@ class TestGridZoomMethods:
     @pytest.mark.parametrize(
         "tms_id", ["WebMercatorQuad", "WGS1984Quad", "WorldCRS84Quad"]
     )
-    @pytest.mark.parametrize("grid_type", ["rectilinear", "curvilinear", "raster_affine"])
+    @pytest.mark.parametrize("grid_type", ["rectilinear", "curvilinear", "curvilinear_hycom", "raster_affine"])
     @given(data=st.data())
     @settings(deadline=None)
     def test_min_zoom_matches_renderable_size_limit(self, tms_id, grid_type, data):

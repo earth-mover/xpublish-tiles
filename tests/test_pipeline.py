@@ -33,6 +33,7 @@ from xpublish_tiles.pipeline import (
 )
 from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
+    CURVILINEAR_HYCOM,
     FORECAST,
     GLOBAL_6KM,
     GLOBAL_6KM_360,
@@ -388,6 +389,10 @@ def test_apply_query_selectors():
     curvilinear_ds = CURVILINEAR.create()
     result = apply_query(curvilinear_ds, variables=["foo"], selectors={})
     assert_equal(result["foo"].da, curvilinear_ds.foo.sel(s_rho=0, method="nearest"))
+
+    curvilinear_hycom_ds = CURVILINEAR_HYCOM.create()
+    result = apply_query(curvilinear_hycom_ds, variables=["foo"], selectors={})
+    assert_equal(result["foo"].da, curvilinear_hycom_ds.foo)
 
     hrrr = HRRR.create()
     hrrr.time.attrs = {"standard_name": "time"}

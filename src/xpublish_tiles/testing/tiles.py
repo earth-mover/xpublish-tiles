@@ -306,6 +306,13 @@ CURVILINEAR_TILES = [
     ),
 ]
 
+# Curvilinear HYCOM tiles - for testing curvilinear coordinate data
+CURVILINEAR_HYCOM_TILES = [
+    pytest.param(
+        (Tile(x=3, y=5, z=4), WEBMERC_TMS), id="curvilinear_hycom_east_z4(4/3/5)"
+    ),
+]
+
 # South America benchmark tiles (for Sentinel dataset)
 # Coverage area roughly: -82°W to -27°W, 13°N to -55°S
 # Focused on the region that's working in the logs (tiles 120-122, 72-73)

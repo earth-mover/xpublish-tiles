@@ -1058,6 +1058,109 @@ CURVILINEAR = Dataset(
     setup=curvilinear_grid,
 )
 
+def _create_curvilinear_grid_like_hycom(regional_subset: bool = True, **kwargs: Any) -> xr.Dataset:
+    """Build a global HYCOM-like curvilinear grid matching actual HYCOM/RTOFS dimensions.
+
+    Creates a simplified curvilinear grid with:
+    - Full HYCOM dimensions: 4500 (lon) x 3298 (lat)
+    - Latitude range: -80° to 90°
+    - Longitude: -180° to 180° with wraparound at antimeridian
+    - 2D coordinate arrays (curvilinear)
+    """
+    ny, nx = 3298, 4500
+
+    lat_1d = np.linspace(-80.0, 90.0, ny, dtype=np.float32)
+    lon_1d = np.linspace(-180.0, 180.0, nx, dtype=np.float32)
+
+    lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+
+    lat_variation = 0.1 * np.sin(2 * np.pi * np.arange(nx) / nx)
+    lat = lat_2d + lat_variation[np.newaxis, :]
+
+    lon_variation = 0.5 * np.sin(2 * np.pi * np.arange(ny) / ny)
+    lon = lon_2d + lon_variation[:, np.newaxis]
+
+    lon = ((lon + 180.0) % 360.0) - 180.0
+
+    data = 10.0 + 5.0 * np.sin(np.deg2rad(lat)) * np.cos(np.deg2rad(lon))
+
+    ds = xr.Dataset(
+        {
+            "foo": (
+                ["Y", "X"],
+                data.astype(np.float32),
+                {
+                    "valid_min": 5.0,
+                    "valid_max": 15.0,
+                    "coordinates": "latitude longitude",
+                },
+            ),
+        },
+        coords={
+            "Y": (
+                "Y",
+                np.arange(ny),
+                {
+                    "standard_name": "projection_y_coordinate",
+                    "axis": "Y",
+                    "point_spacing": "even",
+                },
+            ),
+            "X": (
+                "X",
+                np.arange(nx),
+                {
+                    "standard_name": "projection_x_coordinate",
+                    "axis": "X",
+                    "point_spacing": "even",
+                },
+            ),
+            "latitude": (
+                ["Y", "X"],
+                lat.astype(np.float32),
+                {"standard_name": "latitude", "units": "degrees_north"},
+            ),
+            "longitude": (
+                ["Y", "X"],
+                lon.astype(np.float32),
+                {
+                    "standard_name": "longitude",
+                    "units": "degrees_east",
+                    "modulo": "360 degrees",
+                },
+            ),
+        },
+        attrs={"Conventions": "CF-1.6"},
+    )
+    ds = ds.chunk({"X": -1, "Y": -1})
+    if regional_subset:
+        mask = ((ds.longitude > -180) &
+            (ds.longitude < -120) &
+            (ds.latitude > 0) &
+            (ds.latitude < 80)).compute()
+        return ds.where(mask, drop = True)
+    else:
+        return ds
+
+CURVILINEAR_HYCOM = Dataset(
+    name="hycom",
+    setup=_create_curvilinear_grid_like_hycom,
+    dims = (
+        Dim(
+            name = 'X',
+            size = 4500,
+            chunk_size = 4500,
+            data=None
+        ),
+        Dim(
+            name = 'Y',
+            size = 3298,
+            chunk_size = 3298,
+            data=None
+        )
+    ),
+    dtype=np.float64,
+)
 
 POPDS = xr.Dataset(
     {
@@ -1100,7 +1203,6 @@ POPDS = xr.Dataset(
         "nlat": ("nlat", np.arange(20), {"axis": "Y"}),
     },
 )
-
 
 def multiple_grid_mapping_dataset(
     *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
@@ -1295,6 +1397,7 @@ DATASET_LOOKUP = {
     "utm33s_hires": UTM33S_HIRES,
     "utm50s_hires": UTM50S_HIRES,
     "curvilinear": CURVILINEAR,
+    "curvilinear_hycom": CURVILINEAR_HYCOM,
     "hrrr_multiple": HRRR_MULTIPLE,
     "global_nans": GLOBAL_NANS,
     "redgauss_n320": REDGAUSS_N320,
