@@ -15,6 +15,7 @@ from xpublish_tiles.testing.datasets import (
     REDGAUSS_N320,
     UTM33S,
     create_global_dataset,
+    _create_curvilinear_grid_like_hycom,
 )
 from xpublish_tiles.testing.lib import compare_image_buffers, png_snapshot  # noqa: F401
 from xpublish_tiles.testing.tiles import CURVILINEAR_TILES, CURVILINEAR_HYCOM_TILES
