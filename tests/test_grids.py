@@ -858,7 +858,9 @@ class TestGridZoomMethods:
     @pytest.mark.parametrize(
         "tms_id", ["WebMercatorQuad", "WGS1984Quad", "WorldCRS84Quad"]
     )
-    @pytest.mark.parametrize("grid_type", ["rectilinear", "curvilinear", "curvilinear_hycom", "raster_affine"])
+    @pytest.mark.parametrize(
+        "grid_type", ["rectilinear", "curvilinear", "curvilinear_hycom", "raster_affine"]
+    )
     @given(data=st.data())
     @settings(deadline=None)
     def test_max_zoom_matches_dataset_resolution(self, tms_id, grid_type, data):
@@ -880,7 +882,9 @@ class TestGridZoomMethods:
     @pytest.mark.parametrize(
         "tms_id", ["WebMercatorQuad", "WGS1984Quad", "WorldCRS84Quad"]
     )
-    @pytest.mark.parametrize("grid_type", ["rectilinear", "curvilinear", "curvilinear_hycom", "raster_affine"])
+    @pytest.mark.parametrize(
+        "grid_type", ["rectilinear", "curvilinear", "curvilinear_hycom", "raster_affine"]
+    )
     @given(data=st.data())
     @settings(deadline=None)
     def test_min_zoom_matches_renderable_size_limit(self, tms_id, grid_type, data):

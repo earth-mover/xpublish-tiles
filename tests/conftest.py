@@ -14,11 +14,11 @@ from xpublish_tiles.testing.datasets import (
     HRRR,
     REDGAUSS_N320,
     UTM33S,
-    create_global_dataset,
     _create_curvilinear_grid_like_hycom,
+    create_global_dataset,
 )
 from xpublish_tiles.testing.lib import compare_image_buffers, png_snapshot  # noqa: F401
-from xpublish_tiles.testing.tiles import CURVILINEAR_TILES, CURVILINEAR_HYCOM_TILES
+from xpublish_tiles.testing.tiles import CURVILINEAR_HYCOM_TILES, CURVILINEAR_TILES
 
 # Disable numba, datashader, and PIL debug logs
 logging.getLogger("numba").setLevel(logging.WARNING)
@@ -133,7 +133,7 @@ def global_datasets(request):
     if param == "reduced_gaussian_n320":
         ds = REDGAUSS_N320.create()
     elif param in {"curvilinear_hycom"}:
-        ds = _create_curvilinear_grid_like_hycom(regional_subset = False)
+        ds = _create_curvilinear_grid_like_hycom(regional_subset=False)
     else:
         ds = create_global_dataset(lat_ascending=lat_ascending, lon_0_360=lon_0_360)
     ds.attrs["name"] = param
@@ -163,6 +163,7 @@ def projected_dataset_and_tile(request):
 def curvilinear_dataset_and_tile(request):
     tile, tms = request.param
     return (CURVILINEAR.create(), tile, tms)
+
 
 @pytest.fixture(params=CURVILINEAR_HYCOM_TILES)
 def curvilinear_hycom_dataset_and_tile(request):

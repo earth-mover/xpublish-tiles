@@ -1058,7 +1058,10 @@ CURVILINEAR = Dataset(
     setup=curvilinear_grid,
 )
 
-def _create_curvilinear_grid_like_hycom(regional_subset: bool = True, **kwargs: Any) -> xr.Dataset:
+
+def _create_curvilinear_grid_like_hycom(
+    regional_subset: bool = True, **kwargs: Any
+) -> xr.Dataset:
     """Build a global HYCOM-like curvilinear grid matching actual HYCOM/RTOFS dimensions.
 
     Creates a simplified curvilinear grid with:
@@ -1134,30 +1137,23 @@ def _create_curvilinear_grid_like_hycom(regional_subset: bool = True, **kwargs: 
     )
     ds = ds.chunk({"X": -1, "Y": -1})
     if regional_subset:
-        mask = ((ds.longitude > -180) &
-            (ds.longitude < -120) &
-            (ds.latitude > 0) &
-            (ds.latitude < 80)).compute()
-        return ds.where(mask, drop = True)
+        mask = (
+            (ds.longitude > -180)
+            & (ds.longitude < -120)
+            & (ds.latitude > 0)
+            & (ds.latitude < 80)
+        ).compute()
+        return ds.where(mask, drop=True)
     else:
         return ds
+
 
 CURVILINEAR_HYCOM = Dataset(
     name="hycom",
     setup=_create_curvilinear_grid_like_hycom,
-    dims = (
-        Dim(
-            name = 'X',
-            size = 4500,
-            chunk_size = 4500,
-            data=None
-        ),
-        Dim(
-            name = 'Y',
-            size = 3298,
-            chunk_size = 3298,
-            data=None
-        )
+    dims=(
+        Dim(name="X", size=4500, chunk_size=4500, data=None),
+        Dim(name="Y", size=3298, chunk_size=3298, data=None),
     ),
     dtype=np.float64,
 )
@@ -1203,6 +1199,7 @@ POPDS = xr.Dataset(
         "nlat": ("nlat", np.arange(20), {"axis": "Y"}),
     },
 )
+
 
 def multiple_grid_mapping_dataset(
     *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
