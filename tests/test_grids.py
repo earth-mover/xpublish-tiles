@@ -32,7 +32,12 @@ from xpublish_tiles.grids import (
     guess_grid_system,
 )
 from xpublish_tiles.lib import _prevent_slice_overlap, transformer_from_crs
-from xpublish_tiles.pipeline import apply_slicers, fix_coordinate_discontinuities
+from xpublish_tiles.pipeline import (
+    _iter_subset_shapes,
+    apply_slicers,
+    check_data_is_renderable_size,
+    fix_coordinate_discontinuities,
+)
 from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
     ERA5,
@@ -909,3 +914,49 @@ def test_qhull_error():
     ds["latitude"][:] = 0
     with pytest.raises(ValueError):
         guess_grid_system(ds, "foo")
+
+
+def test_memory_calculation_with_multiple_slices():
+    """Test memory calculation with multiple X slices (e.g., anti-meridian crossing).
+
+    When tiles cross the anti-meridian, we get multiple X slices. Memory should be
+    computed as sum of products: sum(x_i * y_i), not product of sums: (sum x_i) * (sum y_i).
+    """
+    from xpublish_tiles.grids import Curvilinear
+
+    ny, nx = 100, 200
+    lat_1d = np.linspace(-80.0, 80.0, ny, dtype=np.float32)
+    lon_1d = np.linspace(-180.0, 180.0, nx, dtype=np.float32)
+    lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+
+    ds = xr.Dataset(
+        {
+            "temp": (["y", "x"], np.random.rand(ny, nx).astype(np.float64)),
+            "latitude": (["y", "x"], lat_2d, {"standard_name": "latitude"}),
+            "longitude": (["y", "x"], lon_2d, {"standard_name": "longitude"}),
+        }
+    )
+
+    grid = Curvilinear.from_dataset(ds, CRS.from_epsg(4326), "longitude", "latitude")
+
+    # Two X slices with different sizes: 50 and 30 elements
+    # One Y slice: 40 elements
+    slicers = {
+        "x": [slice(150, 200), slice(0, 30)],
+        "y": [slice(30, 70)],
+    }
+
+    # Verify shapes are extracted correctly
+    shapes = list(_iter_subset_shapes(slicers, ds["temp"], grid))
+    assert shapes == [(50, 40), (30, 40)]
+
+    # Test memory check accepts this
+    result = check_data_is_renderable_size(slicers, ds["temp"], grid, grid.to_metadata())
+    assert result is True
+
+    # Test memory check rejects with restrictive limit
+    with config.set({"max_renderable_size": 10000}):
+        result = check_data_is_renderable_size(
+            slicers, ds["temp"], grid, grid.to_metadata()
+        )
+        assert result is False
