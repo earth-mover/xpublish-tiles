@@ -1,12 +1,15 @@
-#!/usr/bin/env python3
+from unittest.mock import patch
 
 import numpy as np
 import pyproj
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.extra import numpy as npst
 
-from xpublish_tiles.lib import epsg4326to3857
+import xarray as xr
+from xpublish_tiles.config import config
+from xpublish_tiles.lib import epsg4326to3857, transform_chunk, transform_coordinates
 
 
 @given(
@@ -72,3 +75,183 @@ def test_epsg4326to3857_handles_0_360_range():
     assert x_extremes[0] == -x_extremes[1], (
         "180° and -180° should map to opposite X coordinates"
     )
+
+
+def test_transform_chunk_inplace():
+    """Test that transform_chunk inplace option works correctly."""
+    # Use EPSG:3035 to EPSG:4326 transformation
+    transformer = pyproj.Transformer.from_crs("EPSG:3035", "EPSG:4326", always_xy=True)
+
+    # Create a simple 4x4 coordinate grid with EPSG:3035 coordinates
+    x_grid = np.array(
+        [
+            [2635840.0, 2735840.0, 2835840.0, 2935840.0],
+            [2635840.0, 2735840.0, 2835840.0, 2935840.0],
+            [2635840.0, 2735840.0, 2835840.0, 2935840.0],
+            [2635840.0, 2735840.0, 2835840.0, 2935840.0],
+        ],
+        dtype=np.float64,
+        order="C",
+    )
+    y_grid = np.array(
+        [
+            [5415940.0, 5415940.0, 5415940.0, 5415940.0],
+            [5315940.0, 5315940.0, 5315940.0, 5315940.0],
+            [5215940.0, 5215940.0, 5215940.0, 5215940.0],
+            [5115940.0, 5115940.0, 5115940.0, 5115940.0],
+        ],
+        dtype=np.float64,
+        order="C",
+    )
+
+    # Save original values
+    x_original = x_grid.copy()
+    y_original = y_grid.copy()
+
+    # Test inplace=False - should not modify input arrays
+    x_out_noninplace = np.empty_like(x_grid)
+    y_out_noninplace = np.empty_like(y_grid)
+    slices = (slice(0, 4), slice(0, 4))
+
+    transform_chunk(
+        x_grid,
+        y_grid,
+        slices,
+        transformer,
+        x_out_noninplace,
+        y_out_noninplace,
+        inplace=False,
+    )
+
+    # Original arrays should be unchanged
+    np.testing.assert_array_equal(x_grid, x_original)
+    np.testing.assert_array_equal(y_grid, y_original)
+
+    # Test inplace=True - should modify input arrays
+    x_grid_inplace = x_original.copy(order="C")
+    y_grid_inplace = y_original.copy(order="C")
+
+    # For inplace, the output arrays are the same as the input arrays
+    transform_chunk(
+        x_grid_inplace,
+        y_grid_inplace,
+        slices,
+        transformer,
+        x_grid_inplace,
+        y_grid_inplace,
+        inplace=True,
+    )
+
+    # Input arrays should be modified
+    assert not np.array_equal(x_grid_inplace, x_original)
+    assert not np.array_equal(y_grid_inplace, y_original)
+
+    # Both methods should produce the same transformed results
+    np.testing.assert_allclose(x_grid_inplace, x_out_noninplace)
+    np.testing.assert_allclose(y_grid_inplace, y_out_noninplace)
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_transform_coordinates_with_dtypes(dtype):
+    """Test transform_coordinates with different coordinate dtypes.
+
+    This tests the full pipeline which converts coordinates to float64 for
+    efficient transformations with pyproj's inplace optimization.
+    """
+    # Use EPSG:4326 to EPSG:3857 transformation
+    transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+    with config.set(transform_chunk_size=50):
+        ny, nx = 300, 400
+        lon_1d = np.linspace(-10, 10, nx, dtype=dtype)
+        lat_1d = np.linspace(40, 60, ny, dtype=dtype)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+
+        # Add some curvature
+        lon_2d = lon_2d + 0.1 * np.sin(
+            2 * np.pi * np.arange(ny, dtype=dtype)[:, None] / ny
+        )
+        lat_2d = lat_2d + 0.1 * np.cos(
+            2 * np.pi * np.arange(nx, dtype=dtype)[None, :] / nx
+        )
+
+        # Create a DataArray with coordinates of the specified dtype
+        data = np.zeros((ny, nx))
+        da = xr.DataArray(
+            data,
+            coords={
+                "lon": (("y", "x"), lon_2d.astype(dtype)),
+                "lat": (("y", "x"), lat_2d.astype(dtype)),
+            },
+            dims=["y", "x"],
+        )
+
+        # Verify input dtype
+        assert da.coords["lon"].dtype == dtype
+        assert da.coords["lat"].dtype == dtype
+
+        # Transform coordinates
+        with patch(
+            "xpublish_tiles.lib.transform_chunk", wraps=transform_chunk
+        ) as mock_transform_chunk:
+            x_transformed, y_transformed = transform_coordinates(
+                da, "lon", "lat", transformer
+            )
+
+            # Verify blocked transformation was used
+            assert mock_transform_chunk.call_count > 0, (
+                "transform_chunk should be called for large 2D grids"
+            )
+
+        # Verify output shape
+        assert x_transformed.shape == (ny, nx)
+        assert y_transformed.shape == (ny, nx)
+
+        # Verify the data was transformed (should be in EPSG:3857 meter units now)
+        # Original is in degrees (-10 to 10), transformed should be much larger (meters)
+        assert np.abs(x_transformed.data).max() > 1e6, "Should be transformed to meters"
+        assert np.abs(y_transformed.data).max() > 4e6, "Should be transformed to meters"
+
+        # transform_coordinates converts to float64 via np.asarray for efficient transforms
+        assert x_transformed.data.dtype == np.float64
+        assert y_transformed.data.dtype == np.float64
+
+
+def test_transform_coordinates_large_broadcast():
+    """Test transform_coordinates with 1D inputs that trigger blocked transformation."""
+    # Use EPSG:3035 (ETRS89-extended / LAEA Europe) to EPSG:4326
+    # This avoids the fast path for 4326->3857 with 1D coords
+    transformer = pyproj.Transformer.from_crs("EPSG:3035", "EPSG:4326", always_xy=True)
+
+    # Create 1D coordinates large enough to trigger blocked transformation
+    # Using 2000x2000 = 4,000,000 elements which is larger than chunk_size product
+    # EPSG:3035 uses meters, typical European extent
+    x_values = np.linspace(2635840.0, 3874240.0, 500)
+    y_values = np.linspace(5415940.0, 2042740.0, 500)
+
+    data = np.zeros((x_values.size, y_values.size))
+    da = xr.DataArray(
+        data,
+        coords={
+            "x": ("x", x_values),
+            "y": ("y", y_values),
+        },
+        dims=["y", "x"],
+    )
+
+    with patch(
+        "xpublish_tiles.lib.transform_chunk", wraps=transform_chunk
+    ) as mock_transform_chunk:
+        with config.set(transform_chunk_size=50):
+            x_transformed, y_transformed = transform_coordinates(
+                da, "x", "y", transformer
+            )
+
+        assert mock_transform_chunk.call_count > 0
+
+    assert x_transformed.shape == da.shape
+    assert y_transformed.shape == da.shape
+
+    # Verify the coordinates were transformed (not equal to original 1D inputs)
+    # Since x_values is 1D and x_transformed is 2D, we compare the first row
+    assert not np.array_equal(x_transformed.data[0, :], x_values)
+    assert not np.array_equal(y_transformed.data[:, 0], y_values)
