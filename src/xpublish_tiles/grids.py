@@ -1139,7 +1139,11 @@ class Curvilinear(GridSystem):
 
     @classmethod
     def from_dataset(cls, ds: xr.Dataset, crs: CRS, Xname: str, Yname: str) -> Self:
-        X, Y = ds[Xname], ds[Yname]
+        # Cast coordinates to float64 to avoid repeated conversions during transforms
+        # Note that pyproj requires float64 C-contiguous arrays for in-place transforms.
+        # Since Curvilinear grid transforms are quite expensive; we trade the memory cost
+        # here to avoid repeated allocations when transforming.
+        X, Y = ds[Xname].astype(np.float64), ds[Yname].astype(np.float64)
         Xdim, Ydim = Curvilinear._guess_dims(ds, X=X, Y=Y)
         index = CurvilinearCellIndex(X=X, Y=Y, Xdim=Xdim, Ydim=Ydim)
         bbox = BBox(

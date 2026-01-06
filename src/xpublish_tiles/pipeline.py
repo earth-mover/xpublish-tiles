@@ -104,52 +104,49 @@ def check_data_is_renderable_size(
     # = (1 data var + 2 coord vars) * 2
     factor = 3 if has_alternate else 1
 
-    # Calculate total shape using the same logic as apply_slicers
-    total_shape = shape_from_slicers(slicers, da, grid)
+    # Get individual shapes for each subset and compute sum of products (not product of sums)
+    total_size = sum(math.prod(shape) for shape in _iter_subset_shapes(slicers, da, grid))
 
     # Check if it's within the limit
-    return math.prod(total_shape) * da.dtype.itemsize <= factor * config.get(
-        "max_renderable_size"
-    )
+    return total_size * da.dtype.itemsize <= factor * config.get("max_renderable_size")
 
 
-def shape_from_slicers(
+def _get_indexer_size(
+    sl: slice | Fill | UgridIndexer, dim_size: int | None = None
+) -> int:
+    """Get the size of an indexer (slice, Fill, or UgridIndexer)."""
+    if isinstance(sl, Fill):
+        return sl.size
+    elif isinstance(sl, UgridIndexer):
+        return sl.vertices.size
+    elif isinstance(sl, slice):
+        start = sl.start if sl.start is not None else 0
+        if sl.stop is not None:
+            stop = sl.stop
+        elif dim_size is not None:
+            stop = dim_size
+        else:
+            raise ValueError("dim_size is required for open-ended slices")
+        return stop - start
+    else:
+        raise TypeError(f"Unknown indexer type: {type(sl)!r}")
+
+
+def _iter_subset_shapes(
     slicers: dict[str, list[slice | Fill | UgridIndexer]],
     da: xr.DataArray,
     grid: GridSystem,
-) -> tuple[int, ...]:
+):
     """
-    Calculate the total shape from slicers for X and Y dimensions.
+    Iterate over individual subset shapes from slicers.
 
-    Parameters
-    ----------
-    slicers : dict[str, list[slice | Fill]]
-        Slicers for data selection
-    ds : xr.Dataset
-        Dataset being processed
-    grid : GridSystem
-        Grid system information
-
-    Returns
-    -------
-    tuple[int, int]
-        Total shape (width, height) from all slicers
+    Yields tuple shapes for each subset that will be created.
+    For GridSystem2D, yields (x_size, y_size) for each X slice.
+    For Triangular, yields (size,) for the single slice.
     """
-
-    def get_size(sl, dim_size):
-        if isinstance(sl, Fill):
-            return sl.size
-        elif isinstance(sl, UgridIndexer):
-            return sl.vertices.size
-        elif isinstance(sl, slice):
-            start = sl.start if sl.start is not None else 0
-            stop = sl.stop if sl.stop is not None else dim_size
-            return stop - start
-        else:
-            raise TypeError(f"Unknown indexer type: {type(sl)!r}")
-
     if isinstance(grid, Triangular):
-        return (get_size(next(iter(slicers[grid.dim])), None),)
+        yield (_get_indexer_size(next(iter(slicers[grid.dim])), da.sizes[grid.dim]),)
+        return
 
     # Find the one Y slice that's actually a slice (not Fill)
     yslice = None
@@ -162,15 +159,36 @@ def shape_from_slicers(
         # If no slice found, take the first item (should be a Fill or slice)
         yslice = slicers[grid.Ydim][0]
 
-    return sum_tuples(
-        *(
-            (
-                get_size(sl, da.sizes[grid.Xdim]),
-                get_size(yslice, da.sizes[grid.Ydim]),
-            )
-            for sl in slicers[grid.Xdim]
-        )
-    )
+    y_size = _get_indexer_size(yslice, da.sizes[grid.Ydim])
+
+    for sl in slicers[grid.Xdim]:
+        x_size = _get_indexer_size(sl, da.sizes[grid.Xdim])
+        yield (x_size, y_size)
+
+
+def shape_from_slicers(
+    slicers: dict[str, list[slice | Fill | UgridIndexer]],
+    da: xr.DataArray,
+    grid: GridSystem,
+) -> tuple[int, ...]:
+    """
+    Calculate the total shape from slicers (element-wise sum of all subset shapes).
+
+    Parameters
+    ----------
+    slicers : dict[str, list[slice | Fill | UgridIndexer]]
+        Slicers for data selection
+    da : xr.DataArray
+        Data array (only metadata used, no data loaded)
+    grid : GridSystem
+        Grid system information
+
+    Returns
+    -------
+    tuple[int, ...]
+        Total shape from summing dimensions element-wise across all subsets
+    """
+    return sum_tuples(*_iter_subset_shapes(slicers, da, grid))
 
 
 def get_coarsen_factors(
@@ -352,9 +370,7 @@ async def apply_slicers(
     total_size = sum(
         sum([var.size for var in subset.data_vars.values()]) for subset in subsets
     )
-    if math.prod(total_shape) * da.dtype.itemsize > factor * config.get(
-        "max_renderable_size"
-    ):
+    if total_size * da.dtype.itemsize > factor * config.get("max_renderable_size"):
         msg = (
             f"Tile request too big, requires loading data of total shape: {total_shape!r} "
             f"and total size: {total_size / 1024 / 1024}MB. Please choose a higher zoom level."

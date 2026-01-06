@@ -366,14 +366,18 @@ def transform_coordinates(
     assert bx.dims == by.dims
 
     chunk_size = get_transform_chunk_size(bx)
-    # Choose transformation method based on data size
     if bx.size > math.prod(chunk_size):
-        newX, newY = transform_blocked(
-            bx.data.copy(order="C"),
-            by.data.copy(order="C"),
+        # Ensure we have C-contiguous float64 arrays (required by pyproj).
+        # np.asarray avoids copying if already float64 and C-contiguous.
+        # This is numpy 2.X behaviour
+        newX = np.asarray(bx.data, order="C", dtype=np.float64)
+        newY = np.asarray(by.data, order="C", dtype=np.float64)
+        transform_blocked(
+            newX,
+            newY,
             transformer,
             chunk_size,
-            True,  # inplace
+            inplace=True,
         )
     else:
         newX, newY = transformer.transform(bx.data, by.data)
