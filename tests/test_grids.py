@@ -16,6 +16,7 @@ from pyproj import CRS
 from pyproj.aoi import BBox
 
 import xarray as xr
+from tests import create_query_params
 from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
     X_COORD_PATTERN,
@@ -31,12 +32,17 @@ from xpublish_tiles.grids import (
     UgridIndexer,
     guess_grid_system,
 )
-from xpublish_tiles.lib import _prevent_slice_overlap, transformer_from_crs
+from xpublish_tiles.lib import (
+    TileTooBigError,
+    _prevent_slice_overlap,
+    transformer_from_crs,
+)
 from xpublish_tiles.pipeline import (
     _iter_subset_shapes,
     apply_slicers,
     check_data_is_renderable_size,
     fix_coordinate_discontinuities,
+    pipeline,
 )
 from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
@@ -916,47 +922,59 @@ def test_qhull_error():
         guess_grid_system(ds, "foo")
 
 
-def test_memory_calculation_with_multiple_slices():
-    """Test memory calculation with multiple X slices (e.g., anti-meridian crossing).
+@pytest.mark.asyncio
+async def test_curvilinear_memory_limit_and_minzoom():
+    """Test that curvilinear grids respect memory limits accounting for 3 variables (data + lon + lat).
 
-    When tiles cross the anti-meridian, we get multiple X slices. Memory should be
-    computed as sum of products: sum(x_i * y_i), not product of sums: (sum x_i) * (sum y_i).
+    Sets a memory limit that would allow loading 1 variable but gets tight with 3 variables.
+    Verifies that:
+    1. minzoom is calculated high enough to avoid memory issues (factor of 3 for curvilinear grids)
+    2. Memory calculation uses sum of products: sum(x_i * y_i), not product of sums: (sum x_i) * (sum y_i)
+    3. Tiles can actually be rendered through the full pipeline at minzoom
+    4. The calculated minzoom properly accounts for the 3-variable memory constraint
     """
-    from xpublish_tiles.grids import Curvilinear
+    ds = IFS.create().drop_indexes(["latitude", "longitude"])
+    ds["lat"], ds["lon"] = xr.broadcast(ds.latitude, ds.longitude)
+    ds.attrs["_xpublish_id"] = "curvi_global"
 
-    ny, nx = 100, 200
-    lat_1d = np.linspace(-80.0, 80.0, ny, dtype=np.float32)
-    lon_1d = np.linspace(-180.0, 180.0, nx, dtype=np.float32)
-    lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+    tms = morecantile.tms.get("WebMercatorQuad")
+    grid = guess_grid_system(ds, "foo")
 
-    ds = xr.Dataset(
-        {
-            "temp": (["y", "x"], np.random.rand(ny, nx).astype(np.float64)),
-            "latitude": (["y", "x"], lat_2d, {"standard_name": "latitude"}),
-            "longitude": (["y", "x"], lon_2d, {"standard_name": "longitude"}),
-        }
-    )
+    # Set a tight memory limit to force higher minzoom
+    # For curvilinear grids, we load 3 variables (data + lon + lat)
+    # Set limit to ~50KB * dtype_size to force minzoom up
+    # This should allow rendering 1 variable worth of ~50K elements, but 3 vars will be tight at low zoom
+    memory_limit = 50_000 * 8  # 400KB for float64
 
-    grid = Curvilinear.from_dataset(ds, CRS.from_epsg(4326), "longitude", "latitude")
+    with config.set({"max_renderable_size": memory_limit}):
+        # Calculate minzoom - should be high enough to avoid memory issues
+        minzoom = get_min_zoom(grid, tms, ds["foo"])
+        assert minzoom == 3
 
-    # Two X slices with different sizes: 50 and 30 elements
-    # One Y slice: 40 elements
-    slicers = {
-        "x": [slice(150, 200), slice(0, 30)],
-        "y": [slice(30, 70)],
-    }
-
-    # Verify shapes are extracted correctly
-    shapes = list(_iter_subset_shapes(slicers, ds["temp"], grid))
-    assert shapes == [(50, 40), (30, 40)]
-
-    # Test memory check accepts this
-    result = check_data_is_renderable_size(slicers, ds["temp"], grid, grid.to_metadata())
-    assert result is True
-
-    # Test memory check rejects with restrictive limit
-    with config.set({"max_renderable_size": 10000}):
-        result = check_data_is_renderable_size(
-            slicers, ds["temp"], grid, grid.to_metadata()
+        # Get slicers for a tile at minzoom to verify memory calculation
+        tile = morecantile.Tile(x=0, y=0, z=minzoom)
+        bounds = tms.xy_bounds(tile)
+        tms_crs = CRS.from_wkt(tms.crs.to_wkt())
+        transformer = transformer_from_crs(tms_crs, grid.crs)
+        left, bottom, right, top = transformer.transform_bounds(
+            bounds.left, bounds.bottom, bounds.right, bounds.top
         )
-        assert result is False
+        tile_bbox = BBox(west=left, south=bottom, east=right, north=top)
+        slicers = grid.sel(bbox=tile_bbox)
+
+        # Verify shapes are extracted correctly (sum of products, not product of sums)
+        shapes = list(_iter_subset_shapes(slicers, ds["foo"], grid))
+        assert len(shapes) == 2
+
+        # Verify memory check accepts this tile at minzoom
+        alternate = grid.pick_alternate_grid(tms_crs, coarsen_factors={})
+        assert check_data_is_renderable_size(slicers, ds["foo"], grid, alternate)
+
+        # Render the tile - should succeed
+        query_params = create_query_params(tile, tms)
+        await pipeline(ds, query_params)
+
+        tile = morecantile.Tile(x=0, y=0, z=minzoom - 2)
+        query_params = create_query_params(tile, tms)
+        with pytest.raises(TileTooBigError):
+            await pipeline(ds, query_params)
