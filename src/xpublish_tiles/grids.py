@@ -818,8 +818,13 @@ class RectilinearSelMixin:
 
         slicers = {self.X: x_indexers, self.Y: y_indexers}
 
+        if self.lon_spans_globe:
+            handle_wraparound = len(x_indexers) > 1
+        else:
+            handle_wraparound = False
+
         # Apply padding with PadDimension helpers
-        xdim = PadDimension(name=self.X, size=x_size, wraparound=self.lon_spans_globe)
+        xdim = PadDimension(name=self.X, size=x_size, wraparound=handle_wraparound)
         ydim = PadDimension(name=self.Y, size=y_size, wraparound=False)
 
         return pad_slicers(slicers, dimensions=[xdim, ydim])
@@ -1189,14 +1194,17 @@ class Curvilinear(GridSystem):
             f"Expected CurvilinearCellIndex, got {type(index)}"
         )
 
-        # Use the pre-computed lon_spans_globe attribute
-        handle_wraparound = self.lon_spans_globe
         sel_result = index.sel({self.Xdim: bbox})
 
         # Get slicers for both dimensions (ensure they are lists of slices)
         # X dimension: CurvilinearCellIndex returns list[slice] for antimeridian crossing
         x_raw = sel_result.dim_indexers[self.Xdim]
         xslicers = x_raw if isinstance(x_raw, list) else list(x_raw)
+
+        if self.lon_spans_globe:
+            handle_wraparound = len(xslicers) > 1
+        else:
+            handle_wraparound = False
 
         # Y dimension: CurvilinearCellIndex always returns a single slice
         y_raw = sel_result.dim_indexers[self.Ydim]
@@ -1255,6 +1263,7 @@ class Triangular(GridSystem):
             self.bbox = BBox(west=-180, east=180, south=ymin, north=ymax)
         else:
             self.bbox = BBox(west=xmin, east=xmax, south=ymin, north=ymax)
+
         self.indexes = (
             CellTreeIndex(
                 vertices,
