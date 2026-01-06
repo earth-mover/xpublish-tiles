@@ -110,7 +110,9 @@ def check_data_is_renderable_size(
     return total_size * da.dtype.itemsize <= factor * config.get("max_renderable_size")
 
 
-def _get_indexer_size(sl: slice | Fill | UgridIndexer, dim_size: int) -> int:
+def _get_indexer_size(
+    sl: slice | Fill | UgridIndexer, dim_size: int | None = None
+) -> int:
     """Get the size of an indexer (slice, Fill, or UgridIndexer)."""
     if isinstance(sl, Fill):
         return sl.size
@@ -118,7 +120,12 @@ def _get_indexer_size(sl: slice | Fill | UgridIndexer, dim_size: int) -> int:
         return sl.vertices.size
     elif isinstance(sl, slice):
         start = sl.start if sl.start is not None else 0
-        stop = sl.stop if sl.stop is not None else dim_size
+        if sl.stop is not None:
+            stop = sl.stop
+        elif dim_size is not None:
+            stop = dim_size
+        else:
+            raise ValueError("dim_size is required for open-ended slices")
         return stop - start
     else:
         raise TypeError(f"Unknown indexer type: {type(sl)!r}")
