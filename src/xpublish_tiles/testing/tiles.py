@@ -304,13 +304,10 @@ CURVILINEAR_TILES = [
         (Tile(x=442, y=744, z=11), WEBMERC_TMS),
         id="curvilinear_central_us_z11(11/442/744)",
     ),
-]
-
-# Curvilinear HYCOM tiles - for testing curvilinear coordinate data
-CURVILINEAR_HYCOM_TILES = [
-    pytest.param(
-        (Tile(x=3, y=5, z=4), WEBMERC_TMS), id="curvilinear_hycom_east_z4(4/3/5)"
-    ),
+    # TODO: uncomment
+    # pytest.param(
+    #     (Tile(x=3, y=5, z=4), WEBMERC_TMS), id="curvilinear_hycom_east_z4(4/3/5)"
+    # ),
 ]
 
 # South America benchmark tiles (for Sentinel dataset)

@@ -33,13 +33,14 @@ from xpublish_tiles.pipeline import (
 )
 from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
-    CURVILINEAR_HYCOM,
     FORECAST,
     GLOBAL_6KM,
     GLOBAL_6KM_360,
+    GLOBAL_HYCOM,
     GLOBAL_NANS,
     HRRR,
     PARA,
+    REGIONAL_HYCOM,
 )
 from xpublish_tiles.testing.lib import (
     assert_render_matches_snapshot,
@@ -390,7 +391,7 @@ def test_apply_query_selectors():
     result = apply_query(curvilinear_ds, variables=["foo"], selectors={})
     assert_equal(result["foo"].da, curvilinear_ds.foo.sel(s_rho=0, method="nearest"))
 
-    curvilinear_hycom_ds = CURVILINEAR_HYCOM.create()
+    curvilinear_hycom_ds = REGIONAL_HYCOM.create()
     result = apply_query(curvilinear_hycom_ds, variables=["foo"], selectors={})
     assert_equal(result["foo"].da, curvilinear_hycom_ds.foo)
 
@@ -685,4 +686,28 @@ async def test_hrrr_multiple_vs_hrrr_rendering(tile, tms, pytestconfig):
     assert images_similar, (
         f"HRRR_MULTIPLE should render identically to HRRR for tile {tile} "
         f"but images differ"
+    )
+
+
+@pytest.mark.parametrize(
+    "tile",
+    [
+        morecantile.Tile(x=0, y=0, z=0),
+        morecantile.Tile(x=1, y=1, z=1),
+        morecantile.Tile(x=2, y=3, z=2),
+        morecantile.Tile(x=0, y=2, z=2),
+    ],
+)
+async def test_hycom_like_grid(tile, png_snapshot, pytestconfig):
+    ds = GLOBAL_HYCOM.create()
+    query = create_query_params(tms=WEBMERC_TMS, tile=tile)
+    result = await pipeline(ds, query)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(
+        result,
+        png_snapshot,
+        tile=tile,
+        tms=WEBMERC_TMS,
+        dataset_bbox=ds.attrs.get("bbox"),
     )

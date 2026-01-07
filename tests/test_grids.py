@@ -46,7 +46,6 @@ from xpublish_tiles.pipeline import (
 )
 from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
-    CURVILINEAR_HYCOM,
     ERA5,
     EU3035,
     EU3035_HIRES,
@@ -58,6 +57,7 @@ from xpublish_tiles.testing.datasets import (
     PARA_HIRES,
     POPDS,
     REDGAUSS_N320,
+    REGIONAL_HYCOM,
     UTM33S_HIRES,
     UTM50S_HIRES,
     Dataset,
@@ -178,7 +178,7 @@ TRIANGULAR_SENTINEL = 1
             id="roms",
         ),
         pytest.param(
-            CURVILINEAR_HYCOM.create(),
+            REGIONAL_HYCOM.create(),
             "foo",
             Curvilinear(
                 crs=CRS.from_user_input(4326),
@@ -194,8 +194,8 @@ TRIANGULAR_SENTINEL = 1
                 Ydim="Y",
                 indexes=(
                     CurvilinearCellIndex(
-                        X=CURVILINEAR_HYCOM.create().longitude,
-                        Y=CURVILINEAR_HYCOM.create().latitude,
+                        X=REGIONAL_HYCOM.create().longitude,
+                        Y=REGIONAL_HYCOM.create().latitude,
                         Xdim="X",
                         Ydim="Y",
                     ),
@@ -401,9 +401,11 @@ async def test_subset(global_datasets, tile, tms):
         slicer = next(iter(slicers["point"]))
         assert isinstance(slicer, UgridIndexer)
     else:
-        assert isinstance(slicers["latitude"], list)
-        assert isinstance(slicers["longitude"], list)
-        assert len(slicers["latitude"]) == 1  # Y dimension should always have one slice
+        assert isinstance(slicers.get("latitude", slicers.get("Y")), list)
+        assert isinstance(slicers.get("longitude", slicers.get("X")), list)
+        y_slicers = slicers.get("latitude", slicers.get("Y"))
+        assert y_slicers is not None
+        assert len(y_slicers) == 1  # Y dimension should always have one slice
 
     # Check that coordinates are within expected bounds (exact matching with controlled grid)
     actual = await apply_slicers(

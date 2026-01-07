@@ -427,13 +427,22 @@ def coarsen(
         # a discontinuity at the anti-meridian; which we end up averaging over below.
         # So fix that here.
         if grid.lon_spans_globe:
-            newX = fix_coordinate_discontinuities(
-                da[grid.X].data,
-                # FIXME: test 0->360 also!
-                transformer_from_crs(grid.crs, grid.crs),
-                axis=da[grid.X].get_axis_num(grid.Xdim),
-                bbox=grid.bbox,
-            )
+            if grid.Xdim in coarsen_factors:
+                newX = fix_coordinate_discontinuities(
+                    da[grid.X].data,
+                    # FIXME: test 0->360 also!
+                    transformer_from_crs(grid.crs, grid.crs),
+                    axis=da[grid.X].get_axis_num(grid.Xdim),
+                    bbox=grid.bbox,
+                )
+            if grid.Ydim in coarsen_factors:
+                newX = fix_coordinate_discontinuities(
+                    da[grid.X].data,
+                    # FIXME: test 0->360 also!
+                    transformer_from_crs(grid.crs, grid.crs),
+                    axis=da[grid.X].get_axis_num(grid.Ydim),
+                    bbox=grid.bbox,
+                )
             da = da.assign_coords({grid.X: da[grid.X].copy(data=newX)})
         with NUMBA_THREADING_LOCK:
             coarsened = da.coarsen(coarsen_factors, boundary="pad").mean()  # type: ignore[unresolved-attribute]
