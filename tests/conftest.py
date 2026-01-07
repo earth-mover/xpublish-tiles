@@ -10,6 +10,7 @@ from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
     EU3035,
     EU3035_HIRES,
+    GLOBAL_HYCOM,
     HRRR,
     REDGAUSS_N320,
     UTM33S,
@@ -119,6 +120,8 @@ def repo(pytestconfig):
 @pytest.fixture(
     params=tuple(map(",".join, product(["-90->90", "90->-90"], ["-180->180", "0->360"])))
     + ("reduced_gaussian_n320",)
+    # TODO: uncomment later
+    # + ("global_hycom",)
 )
 def global_datasets(request):
     param = request.param
@@ -129,6 +132,8 @@ def global_datasets(request):
 
     if param == "reduced_gaussian_n320":
         ds = REDGAUSS_N320.create()
+    elif param in {"global_hycom"}:
+        ds = GLOBAL_HYCOM.create()
     else:
         ds = create_global_dataset(lat_ascending=lat_ascending, lon_0_360=lon_0_360)
     ds.attrs["name"] = param

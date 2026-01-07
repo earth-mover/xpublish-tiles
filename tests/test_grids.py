@@ -57,6 +57,7 @@ from xpublish_tiles.testing.datasets import (
     PARA_HIRES,
     POPDS,
     REDGAUSS_N320,
+    REGIONAL_HYCOM,
     UTM33S_HIRES,
     UTM50S_HIRES,
     Dataset,
@@ -175,6 +176,32 @@ TRIANGULAR_SENTINEL = 1
                 ),
             ),
             id="roms",
+        ),
+        pytest.param(
+            REGIONAL_HYCOM.create(),
+            "foo",
+            Curvilinear(
+                crs=CRS.from_user_input(4326),
+                bbox=BBox(
+                    south=0,
+                    north=80,
+                    east=-120,
+                    west=-180,
+                ),
+                X="longitude",
+                Y="latitude",
+                Xdim="X",
+                Ydim="Y",
+                indexes=(
+                    CurvilinearCellIndex(
+                        X=REGIONAL_HYCOM.create().longitude,
+                        Y=REGIONAL_HYCOM.create().latitude,
+                        Xdim="X",
+                        Ydim="Y",
+                    ),
+                ),
+            ),
+            id="hycom",
         ),
         pytest.param(
             POPDS,
@@ -374,9 +401,11 @@ async def test_subset(global_datasets, tile, tms):
         slicer = next(iter(slicers["point"]))
         assert isinstance(slicer, UgridIndexer)
     else:
-        assert isinstance(slicers["latitude"], list)
-        assert isinstance(slicers["longitude"], list)
-        assert len(slicers["latitude"]) == 1  # Y dimension should always have one slice
+        assert isinstance(slicers.get("latitude", slicers.get("Y")), list)
+        assert isinstance(slicers.get("longitude", slicers.get("X")), list)
+        y_slicers = slicers.get("latitude", slicers.get("Y"))
+        assert y_slicers is not None
+        assert len(y_slicers) == 1  # Y dimension should always have one slice
 
     # Check that coordinates are within expected bounds (exact matching with controlled grid)
     actual = await apply_slicers(
@@ -760,6 +789,17 @@ def _create_test_dataset(
             coords={"x": np.arange(array_size), "y": np.arange(array_size)},
         )
         grid = Curvilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
+    elif grid_type == "curvilinear_hycom":
+        lon, lat = np.meshgrid(lon_coords, lat_coords)
+        ds = xr.Dataset(
+            {
+                "temp": (["y", "x"], data),
+                "lon": (["y", "x"], lon),
+                "lat": (["y", "x"], lat),
+            },
+            coords={"x": np.arange(array_size), "y": np.arange(array_size)},
+        )
+        grid = Curvilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
     elif grid_type == "raster_affine":
         pixel_size_x = (
             (lon_coords[-1] - lon_coords[0]) / (array_size - 1) if array_size > 1 else 1.0
@@ -831,7 +871,9 @@ class TestGridZoomMethods:
     @pytest.mark.parametrize(
         "tms_id", ["WebMercatorQuad", "WGS1984Quad", "WorldCRS84Quad"]
     )
-    @pytest.mark.parametrize("grid_type", ["rectilinear", "curvilinear", "raster_affine"])
+    @pytest.mark.parametrize(
+        "grid_type", ["rectilinear", "curvilinear", "curvilinear_hycom", "raster_affine"]
+    )
     @given(data=st.data())
     @settings(deadline=None)
     def test_max_zoom_matches_dataset_resolution(self, tms_id, grid_type, data):
@@ -853,7 +895,9 @@ class TestGridZoomMethods:
     @pytest.mark.parametrize(
         "tms_id", ["WebMercatorQuad", "WGS1984Quad", "WorldCRS84Quad"]
     )
-    @pytest.mark.parametrize("grid_type", ["rectilinear", "curvilinear", "raster_affine"])
+    @pytest.mark.parametrize(
+        "grid_type", ["rectilinear", "curvilinear", "curvilinear_hycom", "raster_affine"]
+    )
     @given(data=st.data())
     @settings(deadline=None)
     def test_min_zoom_matches_renderable_size_limit(self, tms_id, grid_type, data):

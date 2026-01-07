@@ -88,6 +88,7 @@ dev = [
     "xpublish-tiles[testing]",
     "coiled>=1.118.3",
     "memray>=1.18.0",
+    "pre-commit>=4.5.1",
 ]
 
 [project.entry-points."xpublish.plugin"]
