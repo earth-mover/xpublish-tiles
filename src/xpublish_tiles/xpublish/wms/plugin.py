@@ -5,12 +5,13 @@ from io import BytesIO
 from typing import Annotated
 
 import cf_xarray  # noqa: F401
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from PIL import Image
 from xpublish import Dependencies, Plugin, hookimpl
 
 import xarray as xr
+from xpublish_tiles.lib import AsyncLoadTimeoutError
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.types import OutputBBox, OutputCRS, QueryParams
 from xpublish_tiles.utils import lower_case_keys
@@ -181,7 +182,10 @@ async def handle_get_map(
         selectors=selectors,
         colormap=query.colormap,
     )
-    buffer = await pipeline(dataset, render_params)
+    try:
+        buffer = await pipeline(dataset, render_params)
+    except AsyncLoadTimeoutError as e:
+        raise HTTPException(status_code=504, detail=str(e)) from None
 
     return Response(buffer.getbuffer(), media_type="image/png")
 

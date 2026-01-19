@@ -4,7 +4,7 @@ import asyncio
 import io
 import json
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Any
 from urllib.parse import quote
 
 import morecantile
@@ -15,6 +15,7 @@ from xpublish import Dependencies, Plugin, hookimpl
 from xarray import Dataset
 from xpublish_tiles.grids import guess_grid_system
 from xpublish_tiles.lib import (
+    AsyncLoadTimeoutError,
     IndexingError,
     MissingParameterError,
     TileTooBigError,
@@ -167,11 +168,12 @@ class TilesPlugin(Plugin):
 
             logger.info("loading extents for dataset vars")
 
-            layer_extents = {}
-            for var_name in dataset.data_vars.keys():
+            layer_extents: dict[str, dict[str, Any]] = {}
+            for var_name_ in dataset.data_vars.keys():
                 # Skip scalar variables
-                if dataset[var_name].ndim == 0:
+                if dataset[var_name_].ndim == 0:
                     continue
+                var_name = str(var_name_)
                 extents = await extract_dataset_extents(dataset, var_name)
                 layer_extents[var_name] = extents
 
@@ -436,6 +438,11 @@ class TilesPlugin(Plugin):
                 bound_logger.error("MissingParameterError", error=str(e))
                 status_code = 422
                 detail = f"Missing parameter: {e!s}."
+            except AsyncLoadTimeoutError as e:
+                bound_logger = get_context_logger()
+                bound_logger.error("AsyncLoadTimeoutError", exc_info=e)
+                status_code = 504
+                detail = str(e)
             except Exception as e:
                 status_code = 500
                 bound_logger = get_context_logger()

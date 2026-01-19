@@ -8,7 +8,6 @@ import subprocess
 import threading
 import time
 import warnings
-from typing import cast
 
 import cf_xarray  # noqa: F401
 import uvicorn
@@ -135,7 +134,7 @@ def get_dataset_for_name(
                 config = ICECHUNK_CONFIG
 
             client = Client()
-            repo = cast(icechunk.Repository, client.get_repo(name, config=config))
+            repo = client.get_repo(name, config=config)
             session = repo.readonly_session(branch=branch)
             ds = xr.open_zarr(
                 session.store,
