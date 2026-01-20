@@ -97,6 +97,12 @@ class MissingParameterError(Exception):
     pass
 
 
+class AsyncLoadTimeoutError(Exception):
+    """Raised when async data loading times out."""
+
+    pass
+
+
 THREAD_POOL_NUM_THREADS = config.get("num_threads")
 logger.info("setting up thread pool with num threads: %s", THREAD_POOL_NUM_THREADS)
 EXECUTOR = ThreadPoolExecutor(

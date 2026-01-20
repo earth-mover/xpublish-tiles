@@ -21,6 +21,7 @@ from tests import create_query_params
 from xarray.testing import assert_equal
 from xpublish_tiles import config
 from xpublish_tiles.lib import (
+    AsyncLoadTimeoutError,
     IndexingError,
     MissingParameterError,
     VariableNotFoundError,
@@ -681,3 +682,28 @@ async def test_hrrr_multiple_vs_hrrr_rendering(tile, tms, pytestconfig):
         f"HRRR_MULTIPLE should render identically to HRRR for tile {tile} "
         f"but images differ"
     )
+
+
+@pytest.mark.asyncio
+async def test_async_load_timeout():
+    """Test that async load timeout raises AsyncLoadTimeoutError."""
+    import asyncio
+    from unittest.mock import patch
+
+    ds = GLOBAL_6KM.create()
+    tile = Tile(x=0, y=0, z=1)
+    tms = morecantile.tms.get("WebMercatorQuad")
+    query_params = create_query_params(tile, tms)
+
+    original_load_async = xr.Dataset.load_async
+
+    async def slow_load_async(self, **kwargs):
+        await asyncio.sleep(2)
+        return await original_load_async(self, **kwargs)
+
+    with (
+        config.set(async_load_timeout_per_tile=0.5),
+        patch.object(xr.Dataset, "load_async", slow_load_async),
+    ):
+        with pytest.raises(AsyncLoadTimeoutError, match=r"timed out after 0\.5s"):
+            await pipeline(ds, query_params)

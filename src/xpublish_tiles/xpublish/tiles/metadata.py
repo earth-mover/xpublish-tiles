@@ -301,10 +301,11 @@ async def create_tileset_for_tms(
 
     # Create layers for each data variable
     layers = []
-    for var_name, var_data in dataset.data_vars.items():
+    for var_name_, var_data in dataset.data_vars.items():
         # Skip scalar variables
         if var_data.ndim == 0:
             continue
+        var_name = str(var_name_)
         extents = layer_extents[var_name]
 
         # Extract variable-specific bounding box, fallback to dataset bounds
