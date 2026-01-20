@@ -1035,13 +1035,10 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
         south, north = min(south, north), max(south, north)
 
         if crs.is_geographic:
-            # Handle global datasets
+            # Handle global datasets - always normalize to -180, 180 for consistency
             x_span = east - west
             if x_span >= 359.0:  # Nearly global in longitude
-                if west < -179.0:
-                    west, east = -180, 180
-                elif east > 181:
-                    west, east = 0, 360
+                west, east = -180, 180
             south = max(-90, south)
             north = min(90, north)
 
