@@ -166,40 +166,47 @@ def _convert_longitude_slice(
     # a good way to test is `tms.bounds(Tile(0,0,0))` which should
     # match the spec exactly: https://docs.ogc.org/is/17-083r4/17-083r4.html#toc48
     # Example: tests/test_pipeline.py::test_pipeline_tiles[-90->90,0->360-wgs84_prime_meridian(2/2/1)]
-    start, stop = lon_slice.start, lon_slice.stop
-    assert start <= stop, lon_slice
+
+    # Keep original values to preserve floating point precision when computing
+    # wrapped bounds. Doing start + 360 - 360 can lose precision (e.g.,
+    # 179.99999999999997 + 360 = 540.0, then 540.0 - 360 = 180.0, not 179.999...)
+    original_start, original_stop = lon_slice.start, lon_slice.stop
+    assert original_start <= original_stop, lon_slice
 
     # Normalize start and stop to be within or near the grid's coordinate range
     # by shifting them by multiples of 360
     # This is required to deal with cases where `np.unwrap` changed
     # the longitude coordinates to be continuous
     coord_center = (left_break + right_break) / 2
-    query_center = (start + stop) / 2
+    query_center = (original_start + original_stop) / 2
 
     # Calculate shift to align query center with coordinate center
     shift = round((coord_center - query_center) / 360) * 360
-    start = start + shift
-    stop = stop + shift
+    start = original_start + shift
+    stop = original_stop + shift
 
     # Now handle boundary crossing cases
     # Grid: [L=======R] where L=left_break, R=right_break
     if stop <= left_break:
         # Both below left boundary, shift up
         # [start,stop]  [L=======R]  →  [L===[start,stop]===R]
-        return (slice(start + 360, stop + 360),)
+        net_shift = shift + 360
+        return (slice(original_start + net_shift, original_stop + net_shift),)
 
     elif start >= right_break:
         # Both above right boundary, shift down
         # [L=======R]  [start,stop]  →  [L===[start,stop]===R]
-        return (slice(start - 360, stop - 360),)
+        net_shift = shift - 360
+        return (slice(original_start + net_shift, original_stop + net_shift),)
 
     elif start < left_break and stop <= right_break:
         # Crosses left boundary, split into two slices
         # [start,L=====stop,R]  →  [L,stop] + [start+360,R]
         slices = []
-        shifted_start = start + 360
-        if shifted_start <= right_break:
-            slices.append(slice(shifted_start, right_break))
+        # Use original + net_shift to preserve precision
+        wrapped_start = original_start + (shift + 360)
+        if wrapped_start <= right_break:
+            slices.append(slice(wrapped_start, right_break))
         if left_break <= stop:
             slices.append(slice(left_break, stop))
         return tuple(slices) if slices else (slice(left_break, right_break),)
@@ -210,9 +217,10 @@ def _convert_longitude_slice(
         slices = []
         if start <= right_break:
             slices.append(slice(start, right_break))
-        shifted_stop = stop - 360
-        if left_break <= shifted_stop:
-            slices.append(slice(left_break, shifted_stop))
+        # Use original + net_shift to preserve precision (compute shift-360 first!)
+        wrapped_stop = original_stop + (shift - 360)
+        if left_break <= wrapped_stop:
+            slices.append(slice(left_break, wrapped_stop))
         return tuple(slices) if slices else (slice(left_break, right_break),)
 
     else:
@@ -281,6 +289,11 @@ def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
     # First and last bounds: extrapolate using the spacing
     bounds[0] = centers[0] - (centers[1] - centers[0]) / 2
     bounds[-1] = centers[-1] + (centers[-1] - centers[-2]) / 2
+
+    # Round to eliminate floating point cancellation errors
+    # e.g., (-1.65 + 1.65)/2 produces 1.4e-14 instead of 0.0
+    # 12 decimal places preserves sub-millimeter precision for geographic coords
+    bounds = np.round(bounds, decimals=12)
 
     return bounds
 

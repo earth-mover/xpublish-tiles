@@ -1,4 +1,5 @@
 import io
+import math
 import uuid
 
 import hypothesis.strategies as st
@@ -39,14 +40,14 @@ from xpublish_tiles.testing.lib import (
 
 
 @st.composite
-def global_datasets(
+def global_rectilinear_datasets(
     draw: DrawFn,
     allow_decreasing_lat: bool = True,
     allow_categorical: bool = True,
     maxsize: int = 2000,
     perturb: bool = True,
 ) -> xr.Dataset:
-    """Strategy that generates global datasets using uniform_grid with random parameters.
+    """Strategy that generates global rectilinear datasets using uniform_grid with random parameters.
 
     Parameters
     ----------
@@ -128,6 +129,34 @@ def global_datasets(
 
 
 @st.composite
+def global_curvilinear_datasets(
+    draw: DrawFn,
+    allow_decreasing_lat: bool = True,
+    allow_categorical: bool = True,
+    maxsize: int = 2000,
+    perturb: bool = True,
+) -> xr.Dataset:
+    """Strategy that generates global curvilinear datasets by broadcasting rectilinear coordinates."""
+    rect = draw(
+        global_rectilinear_datasets(
+            allow_decreasing_lat=allow_decreasing_lat,
+            allow_categorical=allow_categorical,
+            maxsize=maxsize,
+            perturb=perturb,
+        )
+    )
+
+    curvi = rect.rename(latitude="nlat", longitude="nlon")
+    newlat, newlon = np.meshgrid(curvi.nlat.data, curvi.nlon.data, indexing="ij")
+    curvi = curvi.assign_coords(
+        longitude=(("nlon", "nlat"), newlon.T, {"standard_name": "longitude"}),
+        latitude=(("nlon", "nlat"), newlat.T, {"standard_name": "latitude"}),
+    )
+    curvi["foo"].attrs["coordinates"] = "longitude latitude"
+    return curvi
+
+
+@st.composite
 def global_unstructured_datasets(draw: DrawFn) -> xr.Dataset:
     """Strategy that returns global unstructured grid datasets.
 
@@ -163,7 +192,7 @@ def global_unstructured_datasets(draw: DrawFn) -> xr.Dataset:
 
 # Combine both regular and unstructured global datasets
 all_global_datasets = st.one_of(
-    global_datasets(allow_categorical=False), global_unstructured_datasets()
+    global_rectilinear_datasets(allow_categorical=False), global_unstructured_datasets()
 )
 
 
@@ -280,7 +309,7 @@ async def test_property_global_render_no_transparent_tile(
 
 
 @pytest.mark.asyncio
-@given(data=st.data(), rect=global_datasets(allow_categorical=False))
+@given(data=st.data(), rect=global_rectilinear_datasets(allow_categorical=False))
 @settings(max_examples=50)
 async def test_property_equivalent_grids_render_equivalently(
     rect: xr.Dataset, data: st.DataObject, pytestconfig
@@ -366,7 +395,7 @@ async def test_property_equivalent_grids_render_equivalently(
     data=st.data(),
     # disable perturbing the edges because for the triangular grid
     # we treat these as cell vertices, not centers
-    rect=global_datasets(allow_categorical=False, maxsize=720, perturb=False),
+    rect=global_rectilinear_datasets(allow_categorical=False, maxsize=720, perturb=False),
 )
 @settings(max_examples=20)
 async def test_rectilinear_triangular_equivalency(data, rect, pytestconfig):
@@ -579,7 +608,10 @@ async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig)
 
 
 @given(
-    ds=global_datasets(allow_categorical=False, maxsize=300, perturb=False),
+    ds=st.one_of(
+        global_rectilinear_datasets(allow_categorical=False, maxsize=300, perturb=False),
+        global_curvilinear_datasets(allow_categorical=False, maxsize=300, perturb=False),
+    ),
     roll_fraction=st.floats(min_value=0.1, max_value=0.9),
     data=st.data(),
 )
@@ -596,31 +628,66 @@ def test_roll_invariance(
     Rolling a dataset shifts the longitude coordinate system but doesn't
     change the physical data. A correct grid selection implementation
     should select the same physical data regardless of the coordinate offset.
+
+    This tests our ability to handle discontinuities in the *middle* of the dataset,
+    like tripolar grids used for global HYCOM and POP.
     """
-    nlon = ds.sizes["longitude"]
-    roll_amount = int(roll_fraction * nlon)
-    assume(roll_amount > 0 and roll_amount < nlon)
+    # Handle both rectilinear (longitude dim) and curvilinear (nlon dim) datasets
+    lon_dim = "longitude" if "longitude" in ds.sizes else "nlon"
+    nlon = ds.sizes[lon_dim]
+    roll_amount = math.ceil(roll_fraction * nlon) % nlon
 
     # Roll the dataset
-    ds_rolled = ds.roll(longitude=roll_amount, roll_coords=True)
-    ds_rolled.attrs["_xpublish_id"] = ds.attrs.get("_xpublish_id", "") + "_rolled"
+    ds_rolled = ds.roll({lon_dim: roll_amount}, roll_coords=True)
+    ds_rolled.attrs["_xpublish_id"] = (
+        ds.attrs.get("_xpublish_id", "") + f"_rolled_{roll_amount}"
+    )
+
+    # Determine coordinate names based on dataset type
+    # Curvilinear: dims are nlat/nlon, 1D coords are nlat/nlon
+    # Rectilinear: dims are latitude/longitude, coords are latitude/longitude
+    is_curvilinear = "nlon" in ds.sizes
+    x_coord = "nlon" if is_curvilinear else "longitude"
+    y_coord = "nlat" if is_curvilinear else "latitude"
 
     # Create grids for both datasets
-    grid_original = Rectilinear.from_dataset(
-        ds, CRS.from_epsg(4326), "longitude", "latitude"
-    )
+    grid_original = Rectilinear.from_dataset(ds, CRS.from_epsg(4326), x_coord, y_coord)
     grid_rolled = Rectilinear.from_dataset(
-        ds_rolled, CRS.from_epsg(4326), "longitude", "latitude"
+        ds_rolled, CRS.from_epsg(4326), x_coord, y_coord
     )
 
-    # Generate a random bbox that's within global bounds
-    west = data.draw(st.floats(min_value=-180, max_value=170))
-    width = data.draw(st.floats(min_value=5, max_value=60))
-    east = west + width
-    south = data.draw(st.floats(min_value=-85, max_value=75))
-    height = data.draw(st.floats(min_value=5, max_value=30))
-    north = south + height
+    # The detected bboxes should be identical for both grids
+    assert grid_original.bbox == grid_rolled.bbox, (
+        f"BBox mismatch: original {grid_original.bbox} vs rolled {grid_rolled.bbox}"
+    )
 
+    west, east = sorted(
+        data.draw(
+            st.lists(
+                st.floats(
+                    min_value=-180, max_value=180, allow_nan=False, allow_subnormal=False
+                ),
+                min_size=2,
+                max_size=2,
+            )
+        )
+    )
+    south, north = sorted(
+        data.draw(
+            st.lists(
+                st.floats(
+                    min_value=-90, max_value=90, allow_nan=False, allow_subnormal=False
+                ),
+                min_size=2,
+                max_size=2,
+            )
+        )
+    )
+    # Round to 12 decimal places to avoid float precision issues
+    west, east = round(west, 12), round(east, 12)
+    south, north = round(south, 12), round(north, 12)
+    assume(east - west >= 0.0001)
+    assume(north - south >= 0.0001)
     bbox = BBox(west=west, east=east, south=south, north=north)
 
     # Select from both grids
@@ -628,28 +695,32 @@ def test_roll_invariance(
     slicers_rolled = grid_rolled.sel(bbox=bbox)
 
     # Apply slicers to get subsets
-    def apply_slicers_simple(dataset, slicers):
-        lon_slices = slicers.get("longitude", [slice(None)])
-        lat_slice = slicers.get("latitude", [slice(None)])[0]
+    def apply_slicers_simple(dataset, slicers, x_coord, y_coord):
+        lon_slices = slicers.get(x_coord, [slice(None)])
+        lat_slice = slicers.get(y_coord, [slice(None)])[0]
 
         parts = []
         for lon_slice in lon_slices:
-            part = dataset.foo.isel(longitude=lon_slice, latitude=lat_slice)
+            part = dataset.foo.isel({x_coord: lon_slice, y_coord: lat_slice})
             parts.append(part)
 
         if len(parts) == 1:
             return parts[0]
-        return xr.concat(parts, dim="longitude")
+        return xr.concat(parts, dim=x_coord)
 
-    subset_original = apply_slicers_simple(ds, slicers_original)
-    subset_rolled = apply_slicers_simple(ds_rolled, slicers_rolled)
+    subset_original = apply_slicers_simple(ds, slicers_original, x_coord, y_coord)
+    subset_rolled = apply_slicers_simple(ds_rolled, slicers_rolled, x_coord, y_coord)
+
+    # Get longitude coordinate values for debug output (handle both 1D and 2D coords)
+    orig_lon = ds[x_coord] if is_curvilinear else ds.longitude
+    rolled_lon = ds_rolled[x_coord] if is_curvilinear else ds_rolled.longitude
 
     # Check that we selected the same number of elements
     assert subset_original.shape == subset_rolled.shape, (
         f"Shape mismatch: original {subset_original.shape} vs rolled {subset_rolled.shape}\n"
         f"bbox={bbox}, roll_amount={roll_amount}\n"
-        f"original coords: lon=[{float(ds.longitude.min()):.1f}, {float(ds.longitude.max()):.1f}]\n"
-        f"rolled coords: lon=[{float(ds_rolled.longitude.min()):.1f}, {float(ds_rolled.longitude.max()):.1f}]\n"
+        f"original coords: lon=[{float(orig_lon.min()):.1f}, {float(orig_lon.max()):.1f}]\n"
+        f"rolled coords: lon=[{float(rolled_lon.min()):.1f}, {float(rolled_lon.max()):.1f}]\n"
         f"grid_original breaks: [{grid_original.indexes[0].left_break:.1f}, {grid_original.indexes[0].right_break:.1f}]\n"
         f"grid_rolled breaks: [{grid_rolled.indexes[0].left_break:.1f}, {grid_rolled.indexes[0].right_break:.1f}]\n"
         f"slicers_original: {slicers_original}\n"
