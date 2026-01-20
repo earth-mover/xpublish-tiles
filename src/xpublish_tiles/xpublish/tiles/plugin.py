@@ -425,29 +425,29 @@ class TilesPlugin(Plugin):
                 bound_logger.error("TileTooBigError", message=detail)
             except VariableNotFoundError as e:
                 bound_logger = get_context_logger()
-                bound_logger.error("VariableNotFoundError", error=str(e))
+                bound_logger.error("VariableNotFoundError", exc_info=e)
                 status_code = 422
                 detail = f"Invalid variable name(s): {query.variables!r}."
             except IndexingError as e:
                 bound_logger = get_context_logger()
-                bound_logger.error("IndexingError", error=str(e))
+                bound_logger.error("IndexingError", exc_info=e)
                 status_code = 422
                 detail = f"Invalid indexer: {selectors!r}."
             except MissingParameterError as e:
                 bound_logger = get_context_logger()
-                bound_logger.error("MissingParameterError", error=str(e))
+                bound_logger.error("MissingParameterError", exc_info=e)
                 status_code = 422
                 detail = f"Missing parameter: {e!s}."
             except AsyncLoadTimeoutError as e:
                 bound_logger = get_context_logger()
                 bound_logger.error("AsyncLoadTimeoutError", exc_info=e)
                 status_code = 504
-                detail = str(e)
+                detail = "Data loading timed out."
             except Exception as e:
                 status_code = 500
                 bound_logger = get_context_logger()
-                bound_logger.error("Exception", error=str(e))
-                detail = str(e)
+                bound_logger.error("Exception", exc_info=e)
+                detail = "Invalid server error."
 
             if status_code != 200:
                 if not query.render_errors:
