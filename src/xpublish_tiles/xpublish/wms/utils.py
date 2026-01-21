@@ -220,9 +220,10 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
     # Extract dimensions
     dimensions = extract_dimensions(dataset)
 
-    for var_name, var in dataset.data_vars.items():
+    for var_name_, var in dataset.data_vars.items():
+        var_name = str(var_name_)
         # Extract variable metadata
-        title = getattr(var, "long_name", var_name)
+        title = str(getattr(var, "long_name", var_name))
         abstract = getattr(var, "description", getattr(var, "comment", None))
 
         # Extract variable attributes

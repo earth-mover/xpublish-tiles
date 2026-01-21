@@ -4,7 +4,7 @@ import asyncio
 import io
 import json
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Any
 from urllib.parse import quote
 
 import morecantile
@@ -15,6 +15,7 @@ from xpublish import Dependencies, Plugin, hookimpl
 from xarray import Dataset
 from xpublish_tiles.grids import guess_grid_system
 from xpublish_tiles.lib import (
+    AsyncLoadTimeoutError,
     IndexingError,
     MissingParameterError,
     TileTooBigError,
@@ -167,11 +168,12 @@ class TilesPlugin(Plugin):
 
             logger.info("loading extents for dataset vars")
 
-            layer_extents = {}
-            for var_name in dataset.data_vars.keys():
+            layer_extents: dict[str, dict[str, Any]] = {}
+            for var_name_ in dataset.data_vars.keys():
                 # Skip scalar variables
-                if dataset[var_name].ndim == 0:
+                if dataset[var_name_].ndim == 0:
                     continue
+                var_name = str(var_name_)
                 extents = await extract_dataset_extents(dataset, var_name)
                 layer_extents[var_name] = extents
 
@@ -423,24 +425,29 @@ class TilesPlugin(Plugin):
                 bound_logger.error("TileTooBigError", message=detail)
             except VariableNotFoundError as e:
                 bound_logger = get_context_logger()
-                bound_logger.error("VariableNotFoundError", error=str(e))
+                bound_logger.error("VariableNotFoundError", exc_info=e)
                 status_code = 422
                 detail = f"Invalid variable name(s): {query.variables!r}."
             except IndexingError as e:
                 bound_logger = get_context_logger()
-                bound_logger.error("IndexingError", error=str(e))
+                bound_logger.error("IndexingError", exc_info=e)
                 status_code = 422
                 detail = f"Invalid indexer: {selectors!r}."
             except MissingParameterError as e:
                 bound_logger = get_context_logger()
-                bound_logger.error("MissingParameterError", error=str(e))
+                bound_logger.error("MissingParameterError", exc_info=e)
                 status_code = 422
                 detail = f"Missing parameter: {e!s}."
+            except AsyncLoadTimeoutError as e:
+                bound_logger = get_context_logger()
+                bound_logger.error("AsyncLoadTimeoutError", exc_info=e)
+                status_code = 504
+                detail = "Data loading timed out."
             except Exception as e:
                 status_code = 500
                 bound_logger = get_context_logger()
-                bound_logger.error("Exception", error=str(e))
-                detail = str(e)
+                bound_logger.error("Exception", exc_info=e)
+                detail = "Invalid server error."
 
             if status_code != 200:
                 if not query.render_errors:

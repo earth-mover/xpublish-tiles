@@ -35,6 +35,7 @@ from xpublish_tiles.grids import (
 from xpublish_tiles.lib import (
     TileTooBigError,
     _prevent_slice_overlap,
+    apply_default_pad,
     transformer_from_crs,
 )
 from xpublish_tiles.pipeline import (
@@ -377,6 +378,10 @@ async def test_subset(global_datasets, tile, tms):
         assert isinstance(slicers["latitude"], list)
         assert isinstance(slicers["longitude"], list)
         assert len(slicers["latitude"]) == 1  # Y dimension should always have one slice
+
+        # Apply default_pad to match actual render pipeline behavior
+        grid = cast(GridSystem2D, grid)
+        slicers = apply_default_pad(slicers, ds.foo, grid)
 
     # Check that coordinates are within expected bounds (exact matching with controlled grid)
     actual = await apply_slicers(
@@ -963,6 +968,9 @@ async def test_curvilinear_memory_limit_and_minzoom():
         )
         tile_bbox = BBox(west=left, south=bottom, east=right, north=top)
         slicers = grid.sel(bbox=tile_bbox)
+
+        # Apply default_pad to match actual render pipeline behavior
+        slicers = apply_default_pad(slicers, ds["foo"], grid)
 
         # Verify shapes are extracted correctly (sum of products, not product of sums)
         shapes = list(_iter_subset_shapes(slicers, ds["foo"], grid))

@@ -503,8 +503,7 @@ async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig)
         where i, j ∈ [0, 2^n - 1]
 
     TODO:
-    1. Support coarsening, this might require symmetric padding
-    2. Support higher perceptual threshold, even without coarsening; This might require constructing appropriate datasets
+    1. Support higher perceptual threshold, even without coarsening; This might require constructing appropriate datasets
        with shapes and spacings that match the parent tile properly.
     """
     tile, tms = tile_tms
@@ -570,9 +569,7 @@ async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig)
 
         # Render the child tile
         child_query = create_query_params(child_tile, tms, size=child_size)
-        # Turn off coarsening
-        with config.set(max_pixel_factor=20000):
-            child_result = await pipeline(ds, child_query)
+        child_result = await pipeline(ds, child_query)
 
         # Extract corresponding region from parent
         pixel_x_start = child_x_offset * child_size

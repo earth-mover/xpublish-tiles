@@ -23,12 +23,10 @@ from xarray.core.indexing import IndexSelResult
 from xpublish_tiles.config import config
 from xpublish_tiles.lib import (
     Fill,
-    PadDimension,
     VariableNotFoundError,
     _prevent_slice_overlap,
     crs_repr,
     is_4326_like,
-    pad_slicers,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.utils import NUMBA_THREADING_LOCK, time_debug
@@ -893,11 +891,7 @@ class RectilinearSelMixin:
 
         slicers = {self.X: x_indexers, self.Y: y_indexers}
 
-        # Apply padding with PadDimension helpers
-        xdim = PadDimension(name=self.X, size=x_size, wraparound=self.lon_spans_globe)
-        ydim = PadDimension(name=self.Y, size=y_size, wraparound=False)
-
-        return pad_slicers(slicers, dimensions=[xdim, ydim])
+        return slicers
 
 
 @dataclass(kw_only=True, eq=False)
@@ -1293,8 +1287,6 @@ class Curvilinear(GridSystem):
             f"Expected CurvilinearCellIndex, got {type(index)}"
         )
 
-        # Use the pre-computed lon_spans_globe attribute
-        handle_wraparound = self.lon_spans_globe
         sel_result = index.sel({self.Xdim: bbox})
 
         # Get slicers for both dimensions (ensure they are lists of slices)
@@ -1306,18 +1298,7 @@ class Curvilinear(GridSystem):
         y_raw = sel_result.dim_indexers[self.Ydim]
         yslicers = [y_raw]  # Always a single slice
 
-        # Get sizes for both dimensions
-        xsize = index.X.sizes[self.Xdim]
-        ysize = index.Y.sizes[self.Ydim]
-
-        # Apply padding with PadDimension helpers
-        xdim = PadDimension(name=self.Xdim, size=xsize, wraparound=handle_wraparound)
-        ydim = PadDimension(name=self.Ydim, size=ysize, wraparound=False)
-
-        return pad_slicers(
-            {self.Xdim: xslicers, self.Ydim: yslicers},
-            dimensions=[xdim, ydim],
-        )
+        return {self.Xdim: xslicers, self.Ydim: yslicers}
 
 
 @dataclass(init=False, kw_only=True, eq=False)

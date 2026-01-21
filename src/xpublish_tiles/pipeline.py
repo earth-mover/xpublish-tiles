@@ -20,12 +20,14 @@ from xpublish_tiles.grids import (
     guess_grid_system,
 )
 from xpublish_tiles.lib import (
+    AsyncLoadTimeoutError,
     Fill,
     IndexingError,
     MissingParameterError,
     PadDimension,
     TileTooBigError,
     VariableNotFoundError,
+    apply_default_pad,
     async_run,
     pad_slicers,
     transform_coordinates,
@@ -228,39 +230,44 @@ def get_coarsen_factors(
     # After the isinstance check, we know grid is GridSystem2D
     grid = cast(GridSystem2D, grid)
 
-    def largest_even_le(a, b):
+    def largest_odd_ge(a, b):
+        """Return largest odd integer >= a/b (minimum 3), or None if < 2."""
         quotient = a // b
-        return quotient if quotient % 2 == 0 else quotient - 1
+        if quotient < 2:
+            return None
+        if quotient < 3:
+            return 3
+        return quotient if quotient % 2 == 1 else quotient - 1
 
     coarsen_factors = {
-        dim: largest_even_le(size, maxsize)
+        dim: factor
         for size, maxsize, dim in zip(shape, max_shape, dims, strict=True)
+        if size > maxsize and (factor := largest_odd_ge(size, maxsize)) is not None
     }
-    coarsen_factors = {k: v for k, v in coarsen_factors.items() if v >= 2}
 
+    # For global datasets, pad longitude with wraparound to make exactly divisible.
+    # Other dimensions use boundary="pad" in coarsen().
     sizes = dict(zip(dims, shape, strict=False))
-    padders = []
+    coarsen_padders = []
     for dim, factor in coarsen_factors.items():
-        if factor < 2:
+        if not (grid.lon_spans_globe and dim == grid.Xdim):
             continue
-        assert factor % 2 == 0
         size = sizes[dim]
-        remainder = factor - (size % factor)
-        left_pad = factor // 2
-        right_pad = remainder + factor // 2
-        padders.append(
+        remainder = size % factor
+        if remainder == 0:
+            continue
+        pad_needed = factor - remainder
+        coarsen_padders.append(
             PadDimension(
                 name=dim,
                 size=da.sizes[dim],
-                left_pad=left_pad,
-                right_pad=right_pad,
-                wraparound=grid.lon_spans_globe and dim == grid.Xdim,
-                # for coarsening we always want to increase the size,
-                # even if use of xr.pad is necessary
-                fill=True,
+                left_pad=0,
+                right_pad=pad_needed,
+                wraparound=True,
+                fill=False,
             )
         )
-    new_slicers = pad_slicers(slicers, dimensions=padders)
+    new_slicers = pad_slicers(slicers, dimensions=coarsen_padders)
 
     return coarsen_factors, new_slicers
 
@@ -268,7 +275,7 @@ def get_coarsen_factors(
 def estimate_coarsen_factors_and_slicers(
     da: xr.DataArray,
     *,
-    grid: GridSystem2D,
+    grid: GridSystem,
     slicers: dict[str, list[slice | Fill | UgridIndexer]],
     max_shape: tuple[int, int],
     datatype: DataType,
@@ -280,7 +287,7 @@ def estimate_coarsen_factors_and_slicers(
     ----------
     da : xr.DataArray
         Data array to process
-    grid : GridSystem2D
+    grid : GridSystem
         Grid system information
     slicers : dict[str, list[slice | Fill | UgridIndexer]]
         Original slicers for data selection
@@ -294,6 +301,10 @@ def estimate_coarsen_factors_and_slicers(
     tuple[dict[str, int], dict[str, list[slice | Fill | UgridIndexer]]]
         Coarsening factors and adjusted slicers
     """
+    # Triangular grids can't be coarsened and don't need default_pad
+    if not isinstance(grid, GridSystem2D):
+        return {}, slicers
+
     if isinstance(datatype, DiscreteData):
         # TODO: Implement coarsening for categorical data (DiscreteData)
         new_slicers = slicers
@@ -308,6 +319,10 @@ def estimate_coarsen_factors_and_slicers(
             da=da,
             grid=grid,
         )
+
+    # Always apply default_pad for edge safety (floating-point roundoff protection)
+    new_slicers = apply_default_pad(new_slicers, da, grid)
+
     return coarsen_factors, new_slicers
 
 
@@ -390,8 +405,24 @@ async def apply_slicers(
 
     if config.get("async_load"):
         with log_duration("async_load data subsets", "📥"):
-            coros = [subset.load_async() for subset in subsets]
-            results = await asyncio.gather(*coros)
+            timeout = config.get("async_load_timeout_per_tile")
+            try:
+                if timeout is not None:
+                    async with asyncio.timeout(timeout), asyncio.TaskGroup() as tg:
+                        tasks = [
+                            tg.create_task(subset.load_async()) for subset in subsets
+                        ]
+                else:
+                    async with asyncio.TaskGroup() as tg:
+                        tasks = [
+                            tg.create_task(subset.load_async()) for subset in subsets
+                        ]
+                results = [task.result() for task in tasks]
+            except TimeoutError as e:
+                logger.error("Async data loading timed out", timeout=timeout, exc_info=e)
+                raise AsyncLoadTimeoutError(
+                    f"Async data loading timed out after {timeout}s. Server may be overloaded."
+                ) from None
     else:
         with log_duration("load data subsets", "📥"):
             results = [subset.load() for subset in subsets]
@@ -403,40 +434,56 @@ async def apply_slicers(
 def coarsen(
     da: xr.DataArray, coarsen_factors: dict[str, int], *, grid: GridSystem2D
 ) -> xr.DataArray:
-    # TODO: I am skipping padding to center the image here;
-    # Note that we specify `boundary="pad"` to avoid missing pixels at the high end of the coordinate.
-    # 1. Avoiding explicit padding with DataArray.pad here also means we avoid the complexity of having to
-    #    extrapolate out possibly-2D coordinate variables to avoid introducing NaNs in coordinate variables.
-    # 2. We could solve this by adding support for `side="both"` upstream in Xarray.
-    #    This would simply pad in Variable.coarsen (as currently) and is unaffected by the complexities of NaNs
-    #    in indexed coordinate variables.
-    # This choice introduces a bias in spatial location of the plot but let's think about this:
-    # 1. Global datasets are unaffected. we can always pad in lon as much as we need.
-    # 2. the bottom left corner of a regional dataset:
-    #    coarsening will push the left boundary to the right, and the bottom boundary up,
-    #    introducing a few NaNs in the rendered output; but this doesn't matter visually
-    #    if we trigger coarsening only when quite zoomed out
-    # 3. the upper right corner of a regional dataset; similarly we may add NaNs at the boundaries
-    #    of the viewport, but like in (2) this should not matter as long as we trigger the coarsening
-    #    at appropriate zoom levels.
-    # if pad_instr := slicers_to_pad_instruction(new_slicers):
-    #     subset_da = subset_da.pad(**pad_instr)
+    """Coarsen data using odd integer factors with coordinate subselection.
+
+    Uses boundary='pad' to handle incomplete windows (NaN-padded).
+    For global datasets, longitude should already be padded via slicers
+    to be exactly divisible.
+
+    Coordinates are subselected at window centers rather than averaged.
+    With this approach, we preserve exact coordinate values as present
+    in the dataset. That in turn requires that coarsen_factors be odd.
+    """
     with log_duration(f"coarsen {da.shape} by {coarsen_factors!r}", "🔲"):
-        # a further complication: the padding for periodic longitude introduces
-        # a discontinuity at the anti-meridian; which we end up averaging over below.
-        # So fix that here.
-        if grid.lon_spans_globe:
-            newX = fix_coordinate_discontinuities(
-                da[grid.X].data,
-                # FIXME: test 0->360 also!
-                transformer_from_crs(grid.crs, grid.crs),
-                axis=da[grid.X].get_axis_num(grid.Xdim),
-                bbox=grid.bbox,
-            )
-            da = da.assign_coords({grid.X: da[grid.X].copy(data=newX)})
+        # Drop coordinates before coarsening to avoid extra work
+        coord_names = list(da.coords)
+        da_no_coords = da.drop_vars(coord_names)
+
         with NUMBA_THREADING_LOCK:
-            coarsened = da.coarsen(coarsen_factors, boundary="pad").mean()  # type: ignore[unresolved-attribute]
-    return coarsened
+            coarsened = da_no_coords.coarsen(coarsen_factors, boundary="pad").mean()
+
+        # Build indexers once for all coarsened dimensions
+        indexers = {}
+        for dim, factor in coarsen_factors.items():
+            assert factor % 2 == 1, f"{factor} should be odd."
+            center_offset = factor // 2
+            n_windows = coarsened.sizes[dim]
+            dim_size = da.sizes[dim]
+            indices = np.arange(n_windows) * factor + center_offset
+            # For incomplete last window: use midpoint if present, else last element
+            # 'midpoint' is the point that would've been used if the window was complete.
+            if indices[-1] >= dim_size:
+                last_window_start = (n_windows - 1) * factor
+                last_window_size = dim_size - last_window_start
+                if last_window_size > center_offset:
+                    # Midpoint exists, use it
+                    indices[-1] = last_window_start + center_offset
+                else:
+                    # Midpoint doesn't exist, use last element
+                    indices[-1] = dim_size - 1
+            indexers[dim] = indices
+
+        # Subselect coordinates using relevant indexers
+        new_coords = {}
+        for coord_name in coord_names:
+            coord = da.coords[coord_name]
+            coord_indexers = {dim: indexers[dim] for dim in coord.dims if dim in indexers}
+            if coord_indexers:
+                new_coords[coord_name] = coord.isel(coord_indexers)
+            else:
+                new_coords[coord_name] = coord
+
+    return coarsened.assign_coords(new_coords)
 
 
 def has_coordinate_discontinuity(coordinates: np.ndarray, *, axis: int) -> bool:

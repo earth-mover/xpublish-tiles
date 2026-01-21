@@ -97,6 +97,12 @@ class MissingParameterError(Exception):
     pass
 
 
+class AsyncLoadTimeoutError(Exception):
+    """Raised when async data loading times out."""
+
+    pass
+
+
 THREAD_POOL_NUM_THREADS = config.get("num_threads")
 logger.info("setting up thread pool with num threads: %s", THREAD_POOL_NUM_THREADS)
 EXECUTOR = ThreadPoolExecutor(
@@ -484,6 +490,35 @@ def pad_slicers(
             result[key] = value
 
     return result
+
+
+def apply_default_pad(slicers, da, grid):
+    """Apply default padding for edge safety (floating-point roundoff protection).
+
+    This is only necessary because we cannot provide cell edges to datashader.
+    Instead, it re-infers cell edges given cell centers as inputs.
+
+    Parameters
+    ----------
+    slicers : dict[str, list[slice | Fill | UgridIndexer]]
+        Raw slicers from grid.sel()
+    da : xr.DataArray
+        Data array (for dimension sizes)
+    grid : GridSystem2D
+        Grid system information
+
+    Returns
+    -------
+    dict[str, list[slice | Fill | UgridIndexer]]
+        Slicers with default_pad applied
+    """
+    default_padders = [
+        PadDimension(
+            name=grid.Xdim, size=da.sizes[grid.Xdim], wraparound=grid.lon_spans_globe
+        ),
+        PadDimension(name=grid.Ydim, size=da.sizes[grid.Ydim], wraparound=False),
+    ]
+    return pad_slicers(slicers, dimensions=default_padders)
 
 
 def slicers_to_pad_instruction(slicers, datatype) -> dict[str, Any]:
