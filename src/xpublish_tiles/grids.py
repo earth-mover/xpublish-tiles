@@ -685,6 +685,32 @@ def _is_raster_index_global(raster_index, grid_bbox, crs) -> bool:
     return lon_span >= 359.0
 
 
+def _indexes_equal(a: xr.Index, b: xr.Index) -> bool:
+    """Compare two xarray indexes for approximate equality.
+
+    For PandasIndex with IntervalIndex, uses np.allclose for floating point comparison.
+    For other index types, falls back to the index's equals() method.
+    """
+    if type(a) is not type(b):
+        return False
+
+    if isinstance(a, xr.indexes.PandasIndex) and isinstance(b, xr.indexes.PandasIndex):
+        if a.dim != b.dim:
+            return False
+        if len(a.index) != len(b.index):
+            return False
+        if isinstance(a.index, pd.IntervalIndex) and isinstance(
+            b.index, pd.IntervalIndex
+        ):
+            if a.index.closed != b.index.closed:
+                return False
+            return np.allclose(a.index.left.values, b.index.left.values) and np.allclose(
+                a.index.right.values, b.index.right.values
+            )
+
+    return a.equals(b)
+
+
 @dataclass(eq=False)
 class GridSystem(ABC):
     """
@@ -739,14 +765,21 @@ class GridSystem(ABC):
         if len(self.alternates) != len(other.alternates):
             return False
         if any(
-            not a.equals(b) for a, b in zip(self.indexes, other.indexes, strict=False)
+            not _indexes_equal(a, b)
+            for a, b in zip(self.indexes, other.indexes, strict=False)
         ):
             return False
         if any(a != b for a, b in zip(self.alternates, other.alternates, strict=False)):
             return False
-        if self.dXmin != other.dXmin:
+        if self.dXmin is None or other.dXmin is None:
+            if self.dXmin != other.dXmin:
+                return False
+        elif not np.isclose(self.dXmin, other.dXmin):
             return False
-        if self.dYmin != other.dYmin:
+        if self.dYmin is None or other.dYmin is None:
+            if self.dYmin != other.dYmin:
+                return False
+        elif not np.isclose(self.dYmin, other.dYmin):
             return False
         return True
 
@@ -985,15 +1018,21 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
         else:
             self.lon_spans_globe = False
 
-        # Calculate minimum grid spacing from indexes
+        # Calculate minimum grid spacing and coordinate bounds from indexes
         if self.indexes:
             x_index = self.indexes[0]
             if isinstance(x_index, LongitudeCellIndex):
                 self.dXmin = x_index.get_min_spacing()
+                self.left_break = x_index.left_break
+                self.right_break = x_index.right_break
             else:
                 assert isinstance(x_index, xr.indexes.PandasIndex)
-                widths = x_index.index.right.values - x_index.index.left.values
+                left_bounds = x_index.index.left.values
+                right_bounds = x_index.index.right.values
+                widths = right_bounds - left_bounds
                 self.dXmin = float(np.min(widths)) if len(widths) > 0 else None
+                self.left_break = float(left_bounds[0])
+                self.right_break = float(right_bounds[-1])
 
         if len(self.indexes) > 1:
             y_index = self.indexes[1]
