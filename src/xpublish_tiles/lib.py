@@ -459,10 +459,10 @@ def pad_slicers(
 
         # Apply wraparound if enabled for this dimension
         if dim.wraparound:
-            if dim.left_pad > 0 and indexers_with_fill[0].start == 0:
+            if indexers_with_fill[0].start == 0:
                 # Starts at beginning, add wraparound from end
                 indexers_with_fill = [slice(-dim.left_pad, None), *indexers_with_fill]
-            if dim.right_pad > 0 and indexers_with_fill[-1].stop >= dim.size - 1:
+            if indexers_with_fill[-1].stop >= dim.size - 1:
                 # Ends at end, add wraparound from beginning
                 indexers_with_fill = indexers_with_fill + [slice(0, dim.right_pad)]
         elif dim.fill:
@@ -482,6 +482,35 @@ def pad_slicers(
             result[key] = value
 
     return result
+
+
+def apply_default_pad(slicers, da, grid):
+    """Apply default padding for edge safety (floating-point roundoff protection).
+
+    This is only necessary because we cannot provide cell edges to datashader.
+    Instead, it re-infers cell edges given cell centers as inputs.
+
+    Parameters
+    ----------
+    slicers : dict[str, list[slice | Fill | UgridIndexer]]
+        Raw slicers from grid.sel()
+    da : xr.DataArray
+        Data array (for dimension sizes)
+    grid : GridSystem2D
+        Grid system information
+
+    Returns
+    -------
+    dict[str, list[slice | Fill | UgridIndexer]]
+        Slicers with default_pad applied
+    """
+    default_padders = [
+        PadDimension(
+            name=grid.Xdim, size=da.sizes[grid.Xdim], wraparound=grid.lon_spans_globe
+        ),
+        PadDimension(name=grid.Ydim, size=da.sizes[grid.Ydim], wraparound=False),
+    ]
+    return pad_slicers(slicers, dimensions=default_padders)
 
 
 def slicers_to_pad_instruction(slicers, datatype) -> dict[str, Any]:

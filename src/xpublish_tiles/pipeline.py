@@ -26,6 +26,7 @@ from xpublish_tiles.lib import (
     PadDimension,
     TileTooBigError,
     VariableNotFoundError,
+    apply_default_pad,
     async_run,
     pad_slicers,
     transform_coordinates,
@@ -120,12 +121,8 @@ def _get_indexer_size(
         return sl.vertices.size
     elif isinstance(sl, slice):
         start = sl.start if sl.start is not None else 0
-        if start < 0:
-            if dim_size is None:
-                raise ValueError("dim_size is required for negative start")
-            start = dim_size + start
         if sl.stop is not None:
-            stop = sl.stop if sl.stop >= 0 else dim_size + sl.stop
+            stop = sl.stop
         elif dim_size is not None:
             stop = dim_size
         else:
@@ -233,10 +230,12 @@ def get_coarsen_factors(
     grid = cast(GridSystem2D, grid)
 
     def largest_odd_ge(a, b):
-        """Return largest odd integer >= a/b, or None if < 3."""
+        """Return largest odd integer >= a/b (minimum 3), or None if < 2."""
         quotient = a // b
-        if quotient < 3:
+        if quotient < 2:
             return None
+        if quotient < 3:
+            return 3
         return quotient if quotient % 2 == 1 else quotient - 1
 
     coarsen_factors = {
@@ -248,7 +247,7 @@ def get_coarsen_factors(
     # For global datasets, pad longitude with wraparound to make exactly divisible.
     # Other dimensions use boundary="pad" in coarsen().
     sizes = dict(zip(dims, shape, strict=False))
-    padders = []
+    coarsen_padders = []
     for dim, factor in coarsen_factors.items():
         if not (grid.lon_spans_globe and dim == grid.Xdim):
             continue
@@ -257,7 +256,7 @@ def get_coarsen_factors(
         if remainder == 0:
             continue
         pad_needed = factor - remainder
-        padders.append(
+        coarsen_padders.append(
             PadDimension(
                 name=dim,
                 size=da.sizes[dim],
@@ -267,7 +266,7 @@ def get_coarsen_factors(
                 fill=False,
             )
         )
-    new_slicers = pad_slicers(slicers, dimensions=padders)
+    new_slicers = pad_slicers(slicers, dimensions=coarsen_padders)
 
     return coarsen_factors, new_slicers
 
@@ -275,7 +274,7 @@ def get_coarsen_factors(
 def estimate_coarsen_factors_and_slicers(
     da: xr.DataArray,
     *,
-    grid: GridSystem2D,
+    grid: GridSystem,
     slicers: dict[str, list[slice | Fill | UgridIndexer]],
     max_shape: tuple[int, int],
     datatype: DataType,
@@ -287,7 +286,7 @@ def estimate_coarsen_factors_and_slicers(
     ----------
     da : xr.DataArray
         Data array to process
-    grid : GridSystem2D
+    grid : GridSystem
         Grid system information
     slicers : dict[str, list[slice | Fill | UgridIndexer]]
         Original slicers for data selection
@@ -301,6 +300,10 @@ def estimate_coarsen_factors_and_slicers(
     tuple[dict[str, int], dict[str, list[slice | Fill | UgridIndexer]]]
         Coarsening factors and adjusted slicers
     """
+    # Triangular grids can't be coarsened and don't need default_pad
+    if not isinstance(grid, GridSystem2D):
+        return {}, slicers
+
     if isinstance(datatype, DiscreteData):
         # TODO: Implement coarsening for categorical data (DiscreteData)
         new_slicers = slicers
@@ -315,6 +318,10 @@ def estimate_coarsen_factors_and_slicers(
             da=da,
             grid=grid,
         )
+
+    # Always apply default_pad for edge safety (floating-point roundoff protection)
+    new_slicers = apply_default_pad(new_slicers, da, grid)
+
     return coarsen_factors, new_slicers
 
 
@@ -417,16 +424,10 @@ def coarsen(
     to be exactly divisible.
 
     Coordinates are subselected at window centers rather than averaged.
+    With this approach, we preserve exact coordinate values as present
+    in the dataset. That in turn requires that coarsen_factors be odd.
     """
     with log_duration(f"coarsen {da.shape} by {coarsen_factors!r}", "🔲"):
-        # For global datasets, longitude should be pre-padded to be exactly divisible
-        if grid.lon_spans_globe and grid.Xdim in coarsen_factors:
-            factor = coarsen_factors[grid.Xdim]
-            size = da.sizes[grid.Xdim]
-            assert size % factor == 0, (
-                f"Global dataset longitude size {size} not divisible by factor {factor}"
-            )
-
         # Drop coordinates before coarsening to avoid extra work
         coord_names = list(da.coords)
         da_no_coords = da.drop_vars(coord_names)
@@ -437,6 +438,7 @@ def coarsen(
         # Build indexers once for all coarsened dimensions
         indexers = {}
         for dim, factor in coarsen_factors.items():
+            assert factor % 2 == 1, f"{factor} should be odd."
             center_offset = factor // 2
             n_windows = coarsened.sizes[dim]
             dim_size = da.sizes[dim]
