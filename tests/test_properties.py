@@ -721,8 +721,8 @@ def test_roll_invariance(
         f"bbox={bbox}, roll_amount={roll_amount}\n"
         f"original coords: lon=[{float(orig_lon.min()):.1f}, {float(orig_lon.max()):.1f}]\n"
         f"rolled coords: lon=[{float(rolled_lon.min()):.1f}, {float(rolled_lon.max()):.1f}]\n"
-        f"grid_original breaks: [{grid_original.indexes[0].left_break:.1f}, {grid_original.indexes[0].right_break:.1f}]\n"
-        f"grid_rolled breaks: [{grid_rolled.indexes[0].left_break:.1f}, {grid_rolled.indexes[0].right_break:.1f}]\n"
+        f"grid_original breaks: [{grid_original.left_break:.1f}, {grid_original.right_break:.1f}]\n"
+        f"grid_rolled breaks: [{grid_rolled.left_break:.1f}, {grid_rolled.right_break:.1f}]\n"
         f"slicers_original: {slicers_original}\n"
         f"slicers_rolled: {slicers_rolled}"
     )
