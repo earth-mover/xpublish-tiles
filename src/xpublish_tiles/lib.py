@@ -459,10 +459,10 @@ def pad_slicers(
 
         # Apply wraparound if enabled for this dimension
         if dim.wraparound:
-            if indexers_with_fill[0].start == 0:
+            if dim.left_pad > 0 and indexers_with_fill[0].start == 0:
                 # Starts at beginning, add wraparound from end
                 indexers_with_fill = [slice(-dim.left_pad, None), *indexers_with_fill]
-            if indexers_with_fill[-1].stop >= dim.size - 1:
+            if dim.right_pad > 0 and indexers_with_fill[-1].stop >= dim.size - 1:
                 # Ends at end, add wraparound from beginning
                 indexers_with_fill = indexers_with_fill + [slice(0, dim.right_pad)]
         elif dim.fill:
