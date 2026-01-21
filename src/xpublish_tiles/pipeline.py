@@ -20,6 +20,7 @@ from xpublish_tiles.grids import (
     guess_grid_system,
 )
 from xpublish_tiles.lib import (
+    AsyncLoadTimeoutError,
     Fill,
     IndexingError,
     MissingParameterError,
@@ -404,8 +405,24 @@ async def apply_slicers(
 
     if config.get("async_load"):
         with log_duration("async_load data subsets", "📥"):
-            coros = [subset.load_async() for subset in subsets]
-            results = await asyncio.gather(*coros)
+            timeout = config.get("async_load_timeout_per_tile")
+            try:
+                if timeout is not None:
+                    async with asyncio.timeout(timeout), asyncio.TaskGroup() as tg:
+                        tasks = [
+                            tg.create_task(subset.load_async()) for subset in subsets
+                        ]
+                else:
+                    async with asyncio.TaskGroup() as tg:
+                        tasks = [
+                            tg.create_task(subset.load_async()) for subset in subsets
+                        ]
+                results = [task.result() for task in tasks]
+            except TimeoutError as e:
+                logger.error("Async data loading timed out", timeout=timeout, exc_info=e)
+                raise AsyncLoadTimeoutError(
+                    f"Async data loading timed out after {timeout}s. Server may be overloaded."
+                ) from None
     else:
         with log_duration("load data subsets", "📥"):
             results = [subset.load() for subset in subsets]
