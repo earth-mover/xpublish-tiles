@@ -123,6 +123,38 @@ def get_dataset_for_name(
             raise ValueError(
                 f"Error loading local dataset '{dataset_name}' from {repo_path}: {e}"
             ) from e
+    elif name.startswith("icechunk+file://"):
+        try:
+            import icechunk
+        except ImportError as ie:
+            raise ImportError("icechunk is not installed") from ie
+
+        repo_path = name.removeprefix("icechunk+file://")
+
+        try:
+            storage = icechunk.local_filesystem_storage(repo_path)
+
+            config: icechunk.RepositoryConfig | None = None
+            if icechunk_cache:
+                config = ICECHUNK_CONFIG
+            repo = icechunk.Repository.open(storage, config=config)
+
+            session = repo.readonly_session(branch=branch)
+            ds = xr.open_zarr(
+                session.store,
+                group=group or None,
+                zarr_format=3,
+                consolidated=False,
+                chunks=None,
+            )
+            xpublish_id = f"icechunk+file:{repo_path}:{branch}"
+            if group:
+                xpublish_id += f":{group}"
+            ds.attrs["_xpublish_id"] = xpublish_id
+        except Exception as e:
+            raise ValueError(
+                f"Error loading icechunk dataset from '{repo_path}': {e}"
+            ) from e
     else:
         try:
             from arraylake import Client
@@ -461,7 +493,7 @@ def main():
         "--dataset",
         type=str,
         default="global",
-        help="Dataset to serve (default: global). Options: global, air, hrrr, para, eu3035, ifs, curvilinear, sentinel, global-6km, xarray://<tutorial_name> (loads xarray tutorial dataset), local://<group_name> (loads group from /tmp/tiles-icechunk/), local:///custom/path::<group_name> (loads group from custom icechunk repo), or an arraylake dataset name",
+        help="Dataset to serve (default: global). Options: global, air, hrrr, para, eu3035, ifs, curvilinear, sentinel, global-6km, xarray://<tutorial_name> (loads xarray tutorial dataset), local://<group_name> (loads group from /tmp/tiles-icechunk/), local:///custom/path::<group_name> (loads group from custom icechunk repo), icechunk+file:///path/to/repo (loads icechunk repo from local filesystem, use --group to specify group), or an arraylake dataset name",
     )
     parser.add_argument(
         "--branch",
