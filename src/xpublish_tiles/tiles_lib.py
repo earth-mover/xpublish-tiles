@@ -84,14 +84,11 @@ def get_min_zoom(
 
     tms_crs = CRS.from_wkt(tms.crs.to_wkt())
 
-    tms_to_wgs84 = transformer_from_crs(tms_crs, 4326)
-    tms_xy_bounds = tms.xy_bbox
-    geo_left, geo_bottom, geo_right, geo_top = tms_to_wgs84.transform_bounds(
-        tms_xy_bounds.left,
-        tms_xy_bounds.bottom,
-        tms_xy_bounds.right,
-        tms_xy_bounds.top,
-    )
+    geo_left, geo_bottom, geo_right, geo_top = tms.bbox
+    if geo_left > geo_right:
+        # Handle antimeridian-crossing TMS where left > right
+        # e.g. NZTM2000
+        geo_right += 360
     tms_geo_bounds = morecantile.BoundingBox(
         left=geo_left, bottom=geo_bottom, right=geo_right, top=geo_top
     )
@@ -130,6 +127,9 @@ def get_min_zoom(
             left, bottom, right, top = transformer.transform_bounds(
                 bounds.left, bounds.bottom, bounds.right, bounds.top
             )
+            # Handle antimeridian-crossing tiles where left > right after transform
+            if grid.crs.is_geographic and left > right:
+                right += 360
 
             tile_bbox = BBox(west=left, south=bottom, east=right, north=top)
             slicers = grid.sel(bbox=tile_bbox)

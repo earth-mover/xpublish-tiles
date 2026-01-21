@@ -493,9 +493,11 @@ class TestLongitudeCellIndex:
         result = lon_index.sel({"longitude": slice(90, 220)})
         assert result.dim_indexers == {"longitude": [slice(1, 3)]}
 
+        # Query [-90, 0] maps to [270, 360) in [0, 360) system
         result = lon_index.sel({"longitude": slice(-90, 0)})
-        assert result.dim_indexers == {"longitude": [slice(3, 4), slice(0, 1)]}
+        assert result.dim_indexers == {"longitude": [slice(3, 4)]}
 
+        # Query [275, 365] crosses the boundary: [275, 360) + [0, 5)
         result = lon_index.sel({"longitude": slice(275, 365)})
         assert result.dim_indexers == {"longitude": [slice(3, 4), slice(0, 1)]}
 

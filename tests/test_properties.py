@@ -4,6 +4,7 @@ import uuid
 import hypothesis.strategies as st
 import morecantile
 import numpy as np
+import numpy.testing as npt
 import pytest
 from hypothesis import (
     assume,
@@ -14,10 +15,13 @@ from hypothesis import (
 from hypothesis.strategies import DrawFn
 from morecantile import Tile, TileMatrixSet
 from PIL import Image
+from pyproj import CRS
+from pyproj.aoi import BBox
 
 import xarray as xr
 from tests import create_query_params
 from xpublish_tiles import config
+from xpublish_tiles.grids import Rectilinear
 from xpublish_tiles.lib import TileTooBigError, check_transparent_pixels
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.testing.datasets import (
@@ -572,3 +576,93 @@ async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig)
         assert images_similar, (
             f"Child tile {child_tile} (zoom {child_zoom}, delta +{zoom_delta}) doesn't match parent tile {tile} (zoom {tile.z}) region (SSIM: {ssim_score:.4f})"
         )
+
+
+@given(
+    ds=global_datasets(allow_categorical=False, maxsize=300, perturb=False),
+    roll_fraction=st.floats(min_value=0.1, max_value=0.9),
+    data=st.data(),
+)
+@settings(max_examples=100)
+def test_roll_invariance(
+    ds: xr.Dataset,
+    roll_fraction: float,
+    data: st.DataObject,
+):
+    """
+    Property test: selecting from original and rolled datasets should
+    return equivalent data values.
+
+    Rolling a dataset shifts the longitude coordinate system but doesn't
+    change the physical data. A correct grid selection implementation
+    should select the same physical data regardless of the coordinate offset.
+    """
+    nlon = ds.sizes["longitude"]
+    roll_amount = int(roll_fraction * nlon)
+    assume(roll_amount > 0 and roll_amount < nlon)
+
+    # Roll the dataset
+    ds_rolled = ds.roll(longitude=roll_amount, roll_coords=True)
+    ds_rolled.attrs["_xpublish_id"] = ds.attrs.get("_xpublish_id", "") + "_rolled"
+
+    # Create grids for both datasets
+    grid_original = Rectilinear.from_dataset(
+        ds, CRS.from_epsg(4326), "longitude", "latitude"
+    )
+    grid_rolled = Rectilinear.from_dataset(
+        ds_rolled, CRS.from_epsg(4326), "longitude", "latitude"
+    )
+
+    # Generate a random bbox that's within global bounds
+    west = data.draw(st.floats(min_value=-180, max_value=170))
+    width = data.draw(st.floats(min_value=5, max_value=60))
+    east = west + width
+    south = data.draw(st.floats(min_value=-85, max_value=75))
+    height = data.draw(st.floats(min_value=5, max_value=30))
+    north = south + height
+
+    bbox = BBox(west=west, east=east, south=south, north=north)
+
+    # Select from both grids
+    slicers_original = grid_original.sel(bbox=bbox)
+    slicers_rolled = grid_rolled.sel(bbox=bbox)
+
+    # Apply slicers to get subsets
+    def apply_slicers_simple(dataset, slicers):
+        lon_slices = slicers.get("longitude", [slice(None)])
+        lat_slice = slicers.get("latitude", [slice(None)])[0]
+
+        parts = []
+        for lon_slice in lon_slices:
+            part = dataset.foo.isel(longitude=lon_slice, latitude=lat_slice)
+            parts.append(part)
+
+        if len(parts) == 1:
+            return parts[0]
+        return xr.concat(parts, dim="longitude")
+
+    subset_original = apply_slicers_simple(ds, slicers_original)
+    subset_rolled = apply_slicers_simple(ds_rolled, slicers_rolled)
+
+    # Check that we selected the same number of elements
+    assert subset_original.shape == subset_rolled.shape, (
+        f"Shape mismatch: original {subset_original.shape} vs rolled {subset_rolled.shape}\n"
+        f"bbox={bbox}, roll_amount={roll_amount}\n"
+        f"original coords: lon=[{float(ds.longitude.min()):.1f}, {float(ds.longitude.max()):.1f}]\n"
+        f"rolled coords: lon=[{float(ds_rolled.longitude.min()):.1f}, {float(ds_rolled.longitude.max()):.1f}]\n"
+        f"grid_original breaks: [{grid_original.indexes[0].left_break:.1f}, {grid_original.indexes[0].right_break:.1f}]\n"
+        f"grid_rolled breaks: [{grid_rolled.indexes[0].left_break:.1f}, {grid_rolled.indexes[0].right_break:.1f}]\n"
+        f"slicers_original: {slicers_original}\n"
+        f"slicers_rolled: {slicers_rolled}"
+    )
+
+    # Compare data values sorted by their values (coordinate-independent comparison)
+    # Since the same physical locations should be selected, the sorted data values should match
+    original_flat = np.sort(subset_original.values.ravel())
+    rolled_flat = np.sort(subset_rolled.values.ravel())
+
+    npt.assert_array_almost_equal(
+        original_flat,
+        rolled_flat,
+        err_msg=f"Data differs for bbox={bbox}, roll_amount={roll_amount}",
+    )
