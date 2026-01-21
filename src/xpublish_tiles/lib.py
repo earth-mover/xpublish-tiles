@@ -465,12 +465,14 @@ def pad_slicers(
 
         # Apply wraparound if enabled for this dimension
         if dim.wraparound:
-            if indexers_with_fill[0].start == 0:
-                # Starts at beginning, add wraparound from end
-                indexers_with_fill = [slice(-dim.left_pad, None), *indexers_with_fill]
-            if indexers_with_fill[-1].stop >= dim.size - 1:
-                # Ends at end, add wraparound from beginning
-                indexers_with_fill = indexers_with_fill + [slice(0, dim.right_pad)]
+            if left_edge < 0:
+                # Padding would extend below 0, wrap from end
+                indexers_with_fill = [slice(left_edge, None), *indexers_with_fill]
+            if right_edge > dim.size:
+                # Padding would extend beyond size, wrap from beginning
+                indexers_with_fill = indexers_with_fill + [
+                    slice(0, right_edge - dim.size)
+                ]
         elif dim.fill:
             # Note: This is unused at the moment since we skip padding for coarsening
             left_over = left_edge if left_edge < 0 else 0

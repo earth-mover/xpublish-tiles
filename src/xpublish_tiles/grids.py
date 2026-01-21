@@ -104,7 +104,7 @@ def _grab_edges(
     increasing: bool,
 ) -> list:
     # bottom edge is inclusive; similar to IntervalIndex used in Rectilinear grids
-    assert slicer.start <= slicer.stop
+    assert slicer.start <= slicer.stop, slicer
     if increasing:
         ys = [
             np.append(np.nonzero(left <= slicer.stop)[axis], 0).max(),
@@ -128,73 +128,102 @@ def _get_xy_pad(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
     return x_pad, y_pad
 
 
-def _convert_longitude_slice(lon_slice: slice, *, uses_0_360) -> tuple[slice, ...]:
+def _convert_longitude_slice(
+    lon_slice: slice, *, left_break: float, right_break: float
+) -> tuple[slice, ...]:
     """
-        Convert longitude slice to match the coordinate system of the dataset.
+    Convert longitude slice to match the coordinate system of the dataset.
 
-    Handles conversion between -180→180 and 0→360 coordinate systems.
-    May return multiple slices when selection crosses longitude boundaries.
+    Handles conversion between arbitrary longitude coordinate systems with different
+    offsets (e.g., -180→180, 0→360, or rolled systems like 90→450).
+    May return multiple slices when selection crosses dataset boundaries
+    defined by `left_break` and `right_break`.
 
     Parameters
     ----------
     lon_slice : slice
         Input longitude slice (potentially in different coordinate system)
+    left_break : float
+        Left boundary of the coordinate system (e.g., -180, 0)
+    right_break : float
+        Right boundary of the coordinate system (e.g., 180, 360)
 
     Returns
     -------
-    slice or tuple[slice, ...]
+    tuple[slice, ...]
         Converted slice(s) that match dataset's coordinate system.
         Returns tuple of slices when selection crosses boundaries.
     """
     if lon_slice.start is None or lon_slice.stop is None:
         raise ValueError("start and stop should not be None")
 
-    assert lon_slice.step is None
-    # start, stop = lon_slice.start, lon_slice.stop
+    assert lon_slice.step is None, lon_slice.step
 
     # https://github.com/developmentseed/morecantile/issues/175
     # the precision in morecantile tile bounds isn't perfect,
     # a good way to test is `tms.bounds(Tile(0,0,0))` which should
     # match the spec exactly: https://docs.ogc.org/is/17-083r4/17-083r4.html#toc48
     # Example: tests/test_pipeline.py::test_pipeline_tiles[-90->90,0->360-wgs84_prime_meridian(2/2/1)]
-    start, stop = lon_slice.start, lon_slice.stop
 
-    # Determine breakpoints based on coordinate system
-    left_break = 0 if uses_0_360 else -180
-    right_break = 360 if uses_0_360 else 180
+    # Keep original values to preserve floating point precision when computing
+    # wrapped bounds. Doing start + 360 - 360 can lose precision (e.g.,
+    # 179.99999999999997 + 360 = 540.0, then 540.0 - 360 = 180.0, not 179.999...)
+    original_start, original_stop = lon_slice.start, lon_slice.stop
+    assert original_start <= original_stop, lon_slice
 
-    # Handle different boundary crossing cases
-    if start < left_break and stop < left_break:
-        # Both below left boundary
-        # e.g., -370 to -350 or -190 to -170
-        return (slice(start + 360, stop + 360),)
+    # Normalize start and stop to be within or near the grid's coordinate range
+    # by shifting them by multiples of 360
+    # This is required to deal with cases where `np.unwrap` changed
+    # the longitude coordinates to be continuous
+    coord_center = (left_break + right_break) / 2
+    query_center = (original_start + original_stop) / 2
 
-    elif start >= right_break and stop > right_break:
-        # Both above right boundary
-        # e.g., 370 to 390 or 190 to 210
-        return (slice(start - 360, stop - 360),)
+    # Calculate shift to align query center with coordinate center
+    shift = round((coord_center - query_center) / 360) * 360
+    start = original_start + shift
+    stop = original_stop + shift
 
-    elif start < left_break and ((left_break == stop) or (stop < right_break)):
-        # Crosses left boundary from below
-        # e.g., -185 to 1 or -10 to 10
-        # For 0→360: slice(-10, 10) becomes slice(350, 360) + slice(0, 10)
-        # remember this is left-inclusive intervals
-        return (slice(start + 360, right_break), slice(left_break, stop))
-
-    elif start >= left_break and stop > right_break:
-        # Crosses right boundary from within
-        # e.g., 170 to 190 or 350 to 370
-        # For 0→360: slice(350, 370) becomes slice(350, 360) + slice(0, 10)
-        # For -180→180: slice(170, 190) becomes slice(170, -170)
-        return (slice(start, right_break), slice(left_break, stop - 360))
+    # Now handle boundary crossing cases
+    # Grid: [L=======R] where L=left_break, R=right_break
+    if stop <= left_break:
+        # Both below left boundary, shift up
+        # [start,stop]  [L=======R]  →  [L===[start,stop]===R]
+        net_shift = shift + 360
+        return (slice(original_start + net_shift, original_stop + net_shift),)
 
     elif start >= right_break:
-        # Only start is above right boundary
-        # e.g., 370 to 10 or 190 to 10
-        return (slice(start - 360, stop),)
+        # Both above right boundary, shift down
+        # [L=======R]  [start,stop]  →  [L===[start,stop]===R]
+        net_shift = shift - 360
+        return (slice(original_start + net_shift, original_stop + net_shift),)
+
+    elif start < left_break and stop <= right_break:
+        # Crosses left boundary, split into two slices
+        # [start,L=====stop,R]  →  [L,stop] + [start+360,R]
+        slices = []
+        # Use original + net_shift to preserve precision
+        wrapped_start = original_start + (shift + 360)
+        if wrapped_start <= right_break:
+            slices.append(slice(wrapped_start, right_break))
+        if left_break <= stop:
+            slices.append(slice(left_break, stop))
+        return tuple(slices) if slices else (slice(left_break, right_break),)
+
+    elif start >= left_break and stop > right_break:
+        # Crosses right boundary, split into two slices
+        # [L,start=====R,stop]  →  [start,R] + [L,stop-360]
+        slices = []
+        if start <= right_break:
+            slices.append(slice(start, right_break))
+        # Use original + net_shift to preserve precision (compute shift-360 first!)
+        wrapped_stop = original_stop + (shift - 360)
+        if left_break <= wrapped_stop:
+            slices.append(slice(left_break, wrapped_stop))
+        return tuple(slices) if slices else (slice(left_break, right_break),)
 
     else:
         # Both within valid range
+        # [L===[start,stop]===R]
         return (slice(start, stop),)
 
 
@@ -258,6 +287,11 @@ def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
     # First and last bounds: extrapolate using the spacing
     bounds[0] = centers[0] - (centers[1] - centers[0]) / 2
     bounds[-1] = centers[-1] + (centers[-1] - centers[-2]) / 2
+
+    # Round to eliminate floating point cancellation errors
+    # e.g., (-1.65 + 1.65)/2 produces 1.4e-14 instead of 0.0
+    # 12 decimal places preserves sub-millimeter precision for geographic coords
+    bounds = np.round(bounds, decimals=12)
 
     return bounds
 
@@ -381,7 +415,8 @@ class CellTreeIndex(xr.Index):
 
 
 class CurvilinearCellIndex(xr.Index):
-    uses_0_360: bool
+    left_break: float
+    right_break: float
     Xdim: str
     Ydim: str
     X: xr.DataArray
@@ -402,14 +437,20 @@ class CurvilinearCellIndex(xr.Index):
                 f"Coordinate variables {X.name!r} and {Y.name!r} are too big to load in to memory!"
             )
         self.X, self.Y = X.reset_coords(drop=True), Y.reset_coords(drop=True)
-        self.uses_0_360 = (X.data > 180).any()
         self.Xdim, self.Ydim = Xdim, Ydim
 
         # derived quantities
         X, Y = self.X.data, self.Y.data
         xaxis = self.X.get_axis_num(self.Xdim)
         yaxis = self.Y.get_axis_num(self.Ydim)
+
+        # Store actual coordinate bounds for longitude slice conversion
+        # Use overall min/max of X coordinates after unwrapping
+        self.left_break = float(X.min())
+        self.right_break = float(X.max())
         dX, dY = _padded_diff(X, axis=xaxis), _padded_diff(Y, axis=yaxis)
+        self.dX = dX
+        self.dY = dY
         self.left, self.right = X - dX / 2, X + dX / 2
         self.bottom, self.top = Y - dY / 2, Y + dY / 2
         self.y_is_increasing = True
@@ -449,7 +490,9 @@ class CurvilinearCellIndex(xr.Index):
         assert isinstance(bbox, BBox)
 
         slices = _convert_longitude_slice(
-            slice(bbox.west, bbox.east), uses_0_360=self.uses_0_360
+            slice(bbox.west, bbox.east),
+            left_break=self.left_break,
+            right_break=self.right_break,
         )
 
         ys = _grab_edges(
@@ -509,12 +552,14 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         self._xrindex = xr.indexes.PandasIndex(interval_index, dim)
         self._is_global = self._determine_global_coverage()
 
-        # Determine if dataset uses 0→360 or -180→180 coordinate system
-        coord_centers = self.cell_centers
-        self._uses_0_360 = coord_centers.max() > 180
+        # Store the actual coordinate bounds (left_break, right_break)
+        left_bounds = self.index.left.values
+        right_bounds = self.index.right.values
+        self.left_break = float(left_bounds[0])
+        self.right_break = float(right_bounds[-1])
 
         # Calculate and store minimum cell width
-        widths = self.index.right.values - self.index.left.values
+        widths = right_bounds - left_bounds
         self._dXmin = float(np.min(widths)) if len(widths) > 0 else None
 
     @property
@@ -531,11 +576,6 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
     def is_global(self) -> bool:
         """Check if this longitude index covers the full globe."""
         return self._is_global
-
-    @property
-    def uses_0_360(self) -> bool:
-        """Check if this longitude index uses 0→360 coordinate system (vs -180→180)."""
-        return self._uses_0_360
 
     def get_min_spacing(self) -> float | None:
         """Get minimum cell width (right - left).
@@ -590,7 +630,9 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         if not isinstance(value, slice):
             raise NotImplementedError
 
-        converted_slices = _convert_longitude_slice(value, uses_0_360=self.uses_0_360)
+        converted_slices = _convert_longitude_slice(
+            value, left_break=self.left_break, right_break=self.right_break
+        )
 
         # If we got multiple slices (for boundary crossing), create multiple indexers
         # Handle multiple slices by selecting each and creating multiple indexers
@@ -639,6 +681,32 @@ def _is_raster_index_global(raster_index, grid_bbox, crs) -> bool:
     # Check if longitude span is nearly 360 degrees
     lon_span = grid_bbox.east - grid_bbox.west
     return lon_span >= 359.0
+
+
+def _indexes_equal(a: xr.Index, b: xr.Index) -> bool:
+    """Compare two xarray indexes for approximate equality.
+
+    For PandasIndex with IntervalIndex, uses np.allclose for floating point comparison.
+    For other index types, falls back to the index's equals() method.
+    """
+    if type(a) is not type(b):
+        return False
+
+    if isinstance(a, xr.indexes.PandasIndex) and isinstance(b, xr.indexes.PandasIndex):
+        if a.dim != b.dim:
+            return False
+        if len(a.index) != len(b.index):
+            return False
+        if isinstance(a.index, pd.IntervalIndex) and isinstance(
+            b.index, pd.IntervalIndex
+        ):
+            if a.index.closed != b.index.closed:
+                return False
+            return np.allclose(a.index.left.values, b.index.left.values) and np.allclose(
+                a.index.right.values, b.index.right.values
+            )
+
+    return a.equals(b)
 
 
 @dataclass(eq=False)
@@ -695,14 +763,21 @@ class GridSystem(ABC):
         if len(self.alternates) != len(other.alternates):
             return False
         if any(
-            not a.equals(b) for a, b in zip(self.indexes, other.indexes, strict=False)
+            not _indexes_equal(a, b)
+            for a, b in zip(self.indexes, other.indexes, strict=False)
         ):
             return False
         if any(a != b for a, b in zip(self.alternates, other.alternates, strict=False)):
             return False
-        if self.dXmin != other.dXmin:
+        if self.dXmin is None or other.dXmin is None:
+            if self.dXmin != other.dXmin:
+                return False
+        elif not np.isclose(self.dXmin, other.dXmin):
             return False
-        if self.dYmin != other.dYmin:
+        if self.dYmin is None or other.dYmin is None:
+            if self.dYmin != other.dYmin:
+                return False
+        elif not np.isclose(self.dYmin, other.dYmin):
             return False
         return True
 
@@ -921,6 +996,8 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
     lon_spans_globe: bool = field(init=False)
     dXmin: float = field(init=False)
     dYmin: float = field(init=False)
+    left_break: float = field(init=False)
+    right_break: float = field(init=False)
 
     def __post_init__(self) -> None:
         self.Xdim = self.X
@@ -935,15 +1012,21 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
         else:
             self.lon_spans_globe = False
 
-        # Calculate minimum grid spacing from indexes
+        # Calculate minimum grid spacing and coordinate bounds from indexes
         if self.indexes:
             x_index = self.indexes[0]
             if isinstance(x_index, LongitudeCellIndex):
                 self.dXmin = x_index.get_min_spacing()
+                self.left_break = x_index.left_break
+                self.right_break = x_index.right_break
             else:
                 assert isinstance(x_index, xr.indexes.PandasIndex)
-                widths = x_index.index.right.values - x_index.index.left.values
+                left_bounds = x_index.index.left.values
+                right_bounds = x_index.index.right.values
+                widths = right_bounds - left_bounds
                 self.dXmin = float(np.min(widths)) if len(widths) > 0 else None
+                self.left_break = float(left_bounds[0])
+                self.right_break = float(right_bounds[-1])
 
         if len(self.indexes) > 1:
             y_index = self.indexes[1]
@@ -968,7 +1051,14 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
         X = ds[Xname]
         Y = ds[Yname]
 
-        x_bounds = _compute_interval_bounds(X.data)
+        x_data = X.data
+        if crs.is_geographic:
+            # Use np.unwrap to fix longitude discontinuities without centering
+            # This ensures datasets with the meridian discontinuitiy in the "middle"
+            # of the dataset maintain a continuous coordinate system
+            x_data = np.unwrap(x_data, period=360)
+
+        x_bounds = _compute_interval_bounds(x_data)
         x_intervals = pd.IntervalIndex.from_breaks(x_bounds, closed="left")
         if crs.is_geographic:
             x_index = LongitudeCellIndex(x_intervals, Xname)
@@ -991,13 +1081,10 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
         south, north = min(south, north), max(south, north)
 
         if crs.is_geographic:
-            # Handle global datasets
+            # Handle global datasets - always normalize to -180, 180 for consistency
             x_span = east - west
             if x_span >= 359.0:  # Nearly global in longitude
-                if west < -179.0:
-                    west, east = -180, 180
-                elif east > 181:
-                    west, east = 0, 360
+                west, east = -180, 180
             south = max(-90, south)
             north = min(90, north)
 
@@ -1050,12 +1137,17 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
             return False
 
 
+_CURVILINEAR_BBOX_SENTINEL = BBox(west=0, east=0, south=0, north=0)
+
+
 @dataclass(kw_only=True, eq=False)
 class Curvilinear(GridSystem):
     """2D horizontal grid defined by two 2D arrays."""
 
     crs: CRS
-    bbox: BBox
+    # This sentinel is purely so that I don't use BBox | None on the type
+    # and so we can provide "expected" values in tests
+    bbox: BBox = field(default_factory=lambda: _CURVILINEAR_BBOX_SENTINEL)
     X: str
     Y: str
     Xdim: str
@@ -1067,18 +1159,30 @@ class Curvilinear(GridSystem):
     dYmin: float = field(init=False)
 
     def __post_init__(self) -> None:
-        # Determine if this curvilinear grid spans the globe in longitude
         index = next(iter(self.indexes))
         assert isinstance(index, CurvilinearCellIndex)
 
-        if self.crs.is_geographic:
-            # Use cell edges instead of cell centers for more accurate global coverage detection
-            min_edge = numbagg.nanmin(index.left)
-            max_edge = numbagg.nanmax(index.right)
-            lon_span = max_edge - min_edge
-            self.lon_spans_globe = lon_span >= 350
+        # Compute bbox from index if not provided (sentinel)
+        if self.bbox is _CURVILINEAR_BBOX_SENTINEL:
+            west = numbagg.nanmin(index.left)
+            east = numbagg.nanmax(index.right)
+            south = numbagg.nanmin(index.bottom)
+            north = numbagg.nanmax(index.top)
+
+            if self.crs.is_geographic:
+                lon_span = east - west
+                self.lon_spans_globe = lon_span >= 350
+                # Normalize bbox to -180->180 for global grids
+                if self.lon_spans_globe:
+                    west, east = -180, 180
+            else:
+                self.lon_spans_globe = False
+
+            self.bbox = BBox(west=west, east=east, south=south, north=north)
         else:
-            self.lon_spans_globe = False
+            self.lon_spans_globe = (
+                self.crs.is_geographic and (self.bbox.west - self.bbox.east) >= 350
+            )
 
         # Calculate minimum grid spacing using index method
         self.dXmin, self.dYmin = index.get_min_spacing()
@@ -1138,21 +1242,21 @@ class Curvilinear(GridSystem):
         # Since Curvilinear grid transforms are quite expensive; we trade the memory cost
         # here to avoid repeated allocations when transforming.
         X, Y = ds[Xname].astype(np.float64), ds[Yname].astype(np.float64)
+
+        if crs.is_geographic:
+            # Use np.unwrap to fix longitude discontinuities without centering
+            # This ensures datasets with the meridian discontinuity in the "middle"
+            # of the dataset maintain a continuous coordinate system
+            X = X.copy(data=np.unwrap(X.data, period=360))
+
         Xdim, Ydim = Curvilinear._guess_dims(ds, X=X, Y=Y)
         index = CurvilinearCellIndex(X=X, Y=Y, Xdim=Xdim, Ydim=Ydim)
-        bbox = BBox(
-            west=numbagg.nanmin(index.left),
-            east=numbagg.nanmax(index.right),
-            south=numbagg.nanmin(index.bottom),
-            north=numbagg.nanmax(index.top),
-        )
         return cls(
             crs=crs,
             X=Xname,
             Y=Yname,
             Xdim=Xdim,
             Ydim=Ydim,
-            bbox=bbox,
             indexes=(index,),
         )
 
