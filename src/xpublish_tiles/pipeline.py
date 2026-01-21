@@ -12,7 +12,6 @@ from pyproj.aoi import BBox
 import xarray as xr
 from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
-    Curvilinear,
     GridMetadata,
     GridSystem,
     GridSystem2D,
@@ -427,24 +426,13 @@ def coarsen(
         # a discontinuity at the anti-meridian; which we end up averaging over below.
         # So fix that here.
         if grid.lon_spans_globe:
-            newX = da[grid.X].data
-            if grid.Xdim in coarsen_factors:
-                newX = fix_coordinate_discontinuities(
-                    newX,
-                    # FIXME: test 0->360 also!
-                    transformer_from_crs(grid.crs, grid.crs),
-                    axis=da[grid.X].get_axis_num(grid.Xdim),
-                    bbox=grid.bbox,
-                )
-            # For 2D coordinates (curvilinear grids), also fix discontinuities along Y axis
-            if grid.Ydim in coarsen_factors and grid.Ydim in da[grid.X].dims:
-                newX = fix_coordinate_discontinuities(
-                    newX,
-                    # FIXME: test 0->360 also!
-                    transformer_from_crs(grid.crs, grid.crs),
-                    axis=da[grid.X].get_axis_num(grid.Ydim),
-                    bbox=grid.bbox,
-                )
+            newX = fix_coordinate_discontinuities(
+                da[grid.X].data,
+                # FIXME: test 0->360 also!
+                transformer_from_crs(grid.crs, grid.crs),
+                axis=da[grid.X].get_axis_num(grid.Xdim),
+                bbox=grid.bbox,
+            )
             da = da.assign_coords({grid.X: da[grid.X].copy(data=newX)})
         with NUMBA_THREADING_LOCK:
             coarsened = da.coarsen(coarsen_factors, boundary="pad").mean()  # type: ignore[unresolved-attribute]
@@ -869,7 +857,6 @@ def subset_to_bbox(
             left=bbox.west, right=bbox.east, top=bbox.north, bottom=bbox.south
         )
         if grid.crs.is_geographic:
-            # Handle antimeridian crossing: west > east means bbox crosses -180/180
             west = west - 360 if west > east else west
 
         input_bbox = BBox(west=west, south=south, east=east, north=north)
@@ -905,21 +892,11 @@ def subset_to_bbox(
             )
         )
 
-        has_discontinuity_x = False
-        has_discontinuity_y = False
         if grid.crs.is_geographic:
             if isinstance(grid, GridSystem2D):
-                # Check for discontinuities along X dimension
-                has_discontinuity_x = has_coordinate_discontinuity(
+                has_discontinuity = has_coordinate_discontinuity(
                     subset[grid.X].data, axis=subset[grid.X].get_axis_num(grid.Xdim)
                 )
-                # For curvilinear grids (2D coordinates), also check along Y dimension
-                # (e.g., HYCOM grids can have discontinuities along Y at certain X indices)
-                if isinstance(grid, Curvilinear):
-                    has_discontinuity_y = has_coordinate_discontinuity(
-                        subset[grid.X].data, axis=subset[grid.X].get_axis_num(grid.Ydim)
-                    )
-                has_discontinuity = has_discontinuity_x or has_discontinuity_y
             elif isinstance(grid, Triangular):
                 anti = next(iter(slicers[grid.Xdim])).antimeridian_vertices
                 has_discontinuity = anti["pos"].size > 0 or anti["neg"].size > 0
@@ -939,25 +916,13 @@ def subset_to_bbox(
         # Fix coordinate discontinuities in transformed coordinates if detected
         if has_discontinuity:
             if isinstance(grid, GridSystem2D):
-                # Fix discontinuities along X dimension
-                if has_discontinuity_x:
-                    fixed = fix_coordinate_discontinuities(
-                        newX.data,
-                        input_to_output,
-                        axis=newX.get_axis_num(grid.Xdim),
-                        bbox=bbox,
-                    )
-                    newX = newX.copy(data=fixed)
-
-                # For curvilinear grids, also fix discontinuities along Y dimension
-                if has_discontinuity_y and isinstance(grid, Curvilinear):
-                    fixed = fix_coordinate_discontinuities(
-                        newX.data,
-                        input_to_output,
-                        axis=newX.get_axis_num(grid.Ydim),
-                        bbox=bbox,
-                    )
-                    newX = newX.copy(data=fixed)
+                fixed = fix_coordinate_discontinuities(
+                    newX.data,
+                    input_to_output,
+                    axis=newX.get_axis_num(grid.Xdim),
+                    bbox=bbox,
+                )
+                newX = newX.copy(data=fixed)
             elif isinstance(grid, Triangular):
                 anti = next(iter(slicers[grid.dim])).antimeridian_vertices
                 for verts in [anti["pos"], anti["neg"]]:
