@@ -1151,13 +1151,15 @@ class Curvilinear(GridSystem):
     """2D horizontal grid defined by two 2D arrays."""
 
     crs: CRS
+    # This sentinel is purely so that I don't use BBox | None on the type
+    # and so we can provide "expected" values in tests
+    bbox: BBox = field(default_factory=lambda: _CURVILINEAR_BBOX_SENTINEL)
     X: str
     Y: str
     Xdim: str
     Ydim: str
     indexes: tuple[xr.Index, ...]
     Z: str | None = None
-    bbox: BBox = field(default_factory=lambda: _CURVILINEAR_BBOX_SENTINEL)
     lon_spans_globe: bool = field(init=False)
     dXmin: float = field(init=False)
     dYmin: float = field(init=False)
@@ -1184,12 +1186,9 @@ class Curvilinear(GridSystem):
 
             self.bbox = BBox(west=west, east=east, south=south, north=north)
         else:
-            # bbox provided explicitly, still compute lon_spans_globe
-            if self.crs.is_geographic:
-                lon_span = numbagg.nanmax(index.right) - numbagg.nanmin(index.left)
-                self.lon_spans_globe = lon_span >= 350
-            else:
-                self.lon_spans_globe = False
+            self.lon_spans_globe = (
+                self.crs.is_geographic and (self.bbox.west - self.bbox.east) >= 350
+            )
 
         # Calculate minimum grid spacing using index method
         self.dXmin, self.dYmin = index.get_min_spacing()
