@@ -6,7 +6,7 @@ from pyproj import CRS
 from pyproj.aoi import BBox
 
 import xarray as xr
-from xpublish_tiles.grids import GridSystem, Triangular
+from xpublish_tiles.grids import GridSystem, GridSystem2D, Triangular
 from xpublish_tiles.lib import transformer_from_crs
 from xpublish_tiles.utils import time_debug
 
@@ -133,6 +133,12 @@ def get_min_zoom(
 
             tile_bbox = BBox(west=left, south=bottom, east=right, north=top)
             slicers = grid.sel(bbox=tile_bbox)
+
+            # Apply default_pad to match actual render pipeline behavior
+            if isinstance(grid, GridSystem2D):
+                from xpublish_tiles.lib import apply_default_pad
+
+                slicers = apply_default_pad(slicers, da, grid)
 
             if not check_data_is_renderable_size(slicers, da, grid, alternate):
                 all_tiles_renderable = False
