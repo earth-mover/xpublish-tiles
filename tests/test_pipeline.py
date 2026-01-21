@@ -37,6 +37,7 @@ from xpublish_tiles.testing.datasets import (
     FORECAST,
     GLOBAL_6KM,
     GLOBAL_6KM_360,
+    GLOBAL_HYCOM,
     GLOBAL_NANS,
     HRRR,
     IFS,
@@ -753,3 +754,27 @@ async def test_async_load_timeout():
     ):
         with pytest.raises(AsyncLoadTimeoutError, match=r"timed out after 0\.5s"):
             await pipeline(ds, query_params)
+
+
+@pytest.mark.parametrize(
+    "tile",
+    [
+        morecantile.Tile(x=0, y=0, z=0),
+        morecantile.Tile(x=1, y=1, z=1),
+        morecantile.Tile(x=2, y=3, z=2),
+        morecantile.Tile(x=0, y=2, z=2),
+    ],
+)
+async def test_hycom_like_grid(tile, png_snapshot, pytestconfig):
+    ds = GLOBAL_HYCOM.create()
+    query = create_query_params(tms=WEBMERC_TMS, tile=tile)
+    result = await pipeline(ds, query)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(
+        result,
+        png_snapshot,
+        tile=tile,
+        tms=WEBMERC_TMS,
+        dataset_bbox=ds.attrs.get("bbox"),
+    )
