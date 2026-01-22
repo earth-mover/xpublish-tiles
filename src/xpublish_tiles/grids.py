@@ -94,6 +94,22 @@ Y_COORD_PATTERN = re.compile(
 _GRID_CACHE = cachetools.LRUCache(maxsize=config["grid_cache_max_size"])
 
 
+def _last_true_along_axis(mask: np.ndarray, axis: int, default: int) -> int:
+    """Find the last True index along axis, or default if no True values."""
+    reduced = mask.any(axis=1 - axis)
+    if not reduced.any():
+        return default
+    return reduced.size - 1 - np.argmax(reduced[::-1])
+
+
+def _first_true_along_axis(mask: np.ndarray, axis: int, default: int) -> int:
+    """Find the first True index along axis, or default if no True values."""
+    reduced = mask.any(axis=1 - axis)
+    if not reduced.any():
+        return default
+    return int(np.argmax(reduced))
+
+
 def _grab_edges(
     left: np.ndarray,
     right: np.ndarray,
@@ -107,17 +123,17 @@ def _grab_edges(
     assert slicer.start <= slicer.stop, slicer
     if increasing:
         ys = [
-            np.append(np.nonzero(left <= slicer.stop)[axis], 0).max(),
-            np.append(np.nonzero(right > slicer.stop)[axis], size).min(),
-            np.append(np.nonzero(left <= slicer.start)[axis], 0).max(),
-            np.append(np.nonzero(right > slicer.start)[axis], size).min(),
+            _last_true_along_axis(left <= slicer.stop, axis, 0),
+            _first_true_along_axis(right > slicer.stop, axis, size),
+            _last_true_along_axis(left <= slicer.start, axis, 0),
+            _first_true_along_axis(right > slicer.start, axis, size),
         ]
     else:
         ys = [
-            np.append(np.nonzero(left < slicer.stop)[axis], size).min(),
-            np.append(np.nonzero(right >= slicer.stop)[axis], 0).max(),
-            np.append(np.nonzero(left < slicer.start)[axis], size).min(),
-            np.append(np.nonzero(right >= slicer.start)[axis], 0).max(),
+            _first_true_along_axis(left < slicer.stop, axis, size),
+            _last_true_along_axis(right >= slicer.stop, axis, 0),
+            _first_true_along_axis(left < slicer.start, axis, size),
+            _last_true_along_axis(right >= slicer.start, axis, 0),
         ]
     return ys
 
@@ -449,8 +465,6 @@ class CurvilinearCellIndex(xr.Index):
         self.left_break = float(X.min())
         self.right_break = float(X.max())
         dX, dY = _padded_diff(X, axis=xaxis), _padded_diff(Y, axis=yaxis)
-        self.dX = dX
-        self.dY = dY
         self.left, self.right = X - dX / 2, X + dX / 2
         self.bottom, self.top = Y - dY / 2, Y + dY / 2
         self.y_is_increasing = True
@@ -459,15 +473,16 @@ class CurvilinearCellIndex(xr.Index):
             self.top, self.bottom = self.bottom, self.top
         self.xaxis, self.yaxis = xaxis, yaxis
 
-        # Calculate and store minimum spacing
-        x_diffs = np.abs(dX)
-        y_diffs = np.abs(dY)
+        # Calculate minimum spacing using in-place ops (dX/dY no longer needed)
+        np.abs(dX, out=dX)
+        dX[dX == 0] = np.inf
+        result = numbagg.nanmin(dX)
+        self._dXmin = None if np.isinf(result) else float(result)
 
-        x_positive = x_diffs[x_diffs > 0]
-        y_positive = y_diffs[y_diffs > 0]
-
-        self._dXmin = float(numbagg.nanmin(x_positive)) if x_positive.size > 0 else None
-        self._dYmin = float(numbagg.nanmin(y_positive)) if y_positive.size > 0 else None
+        np.abs(dY, out=dY)
+        dY[dY == 0] = np.inf
+        result = numbagg.nanmin(dY)
+        self._dYmin = None if np.isinf(result) else float(result)
 
     def get_min_spacing(self) -> tuple[float, float]:
         """Get minimum spacing in X and Y directions.
