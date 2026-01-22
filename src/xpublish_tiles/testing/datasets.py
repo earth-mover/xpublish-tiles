@@ -1389,6 +1389,116 @@ REDGAUSS_N320 = Dataset(
     tiles=GLOBAL_BENCHMARK_TILES,
 )
 
+
+def create_tripolar_hycom(
+    *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
+) -> xr.Dataset:
+    """Create a tripolar HYCOM grid dataset using real grid coordinates.
+
+    This dataset uses actual HYCOM grid coordinates (2x downsampled) that capture
+    the tripolar structure:
+    - Rectilinear region (Y=0 to Y=1085): Standard lat/lon grid
+    - Curvilinear region (Y=1086 to Y=1648): Bipolar patch avoiding polar singularity
+
+    The grid coordinates are loaded from CSV (rectilinear 1D arrays) and NPZ
+    (curvilinear 2D arrays) files extracted from real HYCOM data.
+    """
+    grids_dir = Path(__file__).parent / "grids"
+
+    # Load rectilinear 1D coordinate arrays
+    lat_1d = pd.read_csv(grids_dir / "tripolar_hycom_lat_1d.csv")["latitude"].values
+    lon_1d = pd.read_csv(grids_dir / "tripolar_hycom_lon_1d.csv")["longitude"].values
+
+    # Load curvilinear 2D coordinate arrays and metadata
+    curv_data = np.load(grids_dir / "tripolar_hycom_curvilinear.npz")
+    lat_curv = curv_data["latitude"]
+    lon_curv = curv_data["longitude"]
+    transition_row = int(curv_data["transition_row"])
+    ny = int(curv_data["ny"])
+    nx = int(curv_data["nx"])
+
+    # Generate rectilinear 2D coordinates via meshgrid
+    lon_rect_2d, lat_rect_2d = np.meshgrid(lon_1d, lat_1d)
+
+    # Concatenate rectilinear and curvilinear regions
+    lat_full = np.concatenate([lat_rect_2d, lat_curv], axis=0).astype(np.float32)
+    lon_full = np.concatenate([lon_rect_2d, lon_curv], axis=0).astype(np.float32)
+
+    # Generate tanh wave data
+    data_array = generate_tanh_wave_data(
+        coords=(lat_full, lon_full),
+        sizes=(ny, nx),
+        chunks=(dims[0].chunk_size, dims[1].chunk_size),
+        dtype=dtype,
+        use_meshgrid=False,
+    )
+
+    attrs["valid_min"] = -1
+    attrs["valid_max"] = 1
+
+    y_dim, x_dim = dims[0], dims[1]
+    ds = xr.Dataset(
+        {
+            "foo": ((y_dim.name, x_dim.name), data_array, attrs),
+        },
+        coords={
+            y_dim.name: (y_dim.name, np.arange(ny), y_dim.attrs),
+            x_dim.name: (x_dim.name, np.arange(nx), x_dim.attrs),
+            "Latitude": (
+                (y_dim.name, x_dim.name),
+                lat_full,
+                {"standard_name": "latitude", "units": "degrees_north"},
+            ),
+            "Longitude": (
+                (y_dim.name, x_dim.name),
+                lon_full,
+                {"standard_name": "longitude", "units": "degrees_east"},
+            ),
+        },
+    )
+
+    ds["foo"].attrs["coordinates"] = "Latitude Longitude"
+    ds["foo"].encoding["chunks"] = (y_dim.chunk_size, x_dim.chunk_size)
+    ds["Latitude"].encoding["chunks"] = (y_dim.chunk_size, x_dim.chunk_size)
+    ds["Longitude"].encoding["chunks"] = (y_dim.chunk_size, x_dim.chunk_size)
+
+    ds.attrs["bbox"] = BBox(west=-180.0, south=-80.0, east=180.0, north=90.0)
+    ds.attrs["tripolar_transition_row"] = transition_row
+
+    return ds
+
+
+TRIPOLAR_HYCOM = Dataset(
+    name="tripolar_hycom",
+    setup=create_tripolar_hycom,
+    dims=(
+        Dim(
+            name="Y",
+            size=1649,
+            chunk_size=412,
+            attrs={
+                "standard_name": "projection_y_coordinate",
+                "axis": "Y",
+            },
+        ),
+        Dim(
+            name="X",
+            size=2250,
+            chunk_size=562,
+            attrs={
+                "standard_name": "projection_x_coordinate",
+                "axis": "X",
+            },
+        ),
+    ),
+    dtype=np.float32,
+    attrs={
+        "coordinates": "Latitude Longitude",
+    },
+    tiles=GLOBAL_BENCHMARK_TILES,
+)
+
+
 # Lookup dictionary for all available datasets
 DATASET_LOOKUP = {
     "hrrr": HRRR,
@@ -1409,4 +1519,5 @@ DATASET_LOOKUP = {
     "redgauss_n320": REDGAUSS_N320,
     "global_hycom": GLOBAL_HYCOM,
     "regional_hycom": REGIONAL_HYCOM,
+    "tripolar_hycom": TRIPOLAR_HYCOM,
 }
