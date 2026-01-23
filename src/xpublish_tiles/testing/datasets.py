@@ -1068,6 +1068,10 @@ def _create_curvilinear_grid_like_hycom(
 ) -> xr.Dataset:
     """Build a global HYCOM-like curvilinear grid matching actual HYCOM/RTOFS dimensions.
 
+    Note: this doesn't properly work; the `TRIPOLAR_HYCOM` test case uses
+    actual coordinate values from the real model. That said; this dataset is still wonky
+    and its useful for testing.
+
     Creates a simplified curvilinear grid with:
     - Full HYCOM dimensions: 4500 (lon) x 3298 (lat)
     - Latitude range: -80° to 90°
