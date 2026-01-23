@@ -96,10 +96,10 @@ _GRID_CACHE = cachetools.LRUCache(maxsize=config["grid_cache_max_size"])
 
 def _last_true_along_axis(mask: np.ndarray, axis: int, default: int) -> int:
     """Find the last True index along axis, or default if no True values."""
-    reduced = mask.any(axis=1 - axis)
+    reduced = cast(np.ndarray, mask.any(axis=1 - axis))
     if not reduced.any():
         return default
-    return reduced.size - 1 - np.argmax(reduced[::-1])
+    return int(reduced.size - 1 - np.argmax(reduced[::-1]))
 
 
 def _first_true_along_axis(mask: np.ndarray, axis: int, default: int) -> int:

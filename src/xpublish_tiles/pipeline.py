@@ -567,7 +567,7 @@ def fix_coordinate_discontinuities(
     # Calculate coordinate space width using ±180° transform
     # This is unavoidable since AreaOfUse for a CRS is always in lat/lon
     # We are assuming that the "from" CRS for the transformer is geographic.
-    assert transformer.source_crs.is_geographic
+    assert transformer.source_crs is not None and transformer.source_crs.is_geographic
     # transform_bounds works better than transform for this job
     left, _, right, _ = transformer.transform_bounds(-180, -90, 180, 90)
     coordinate_space_width = abs(right - left)
