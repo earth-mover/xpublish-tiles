@@ -4505,7 +4505,7 @@ requires-dist = [
     { name = "titiler", marker = "extra == 'testing'", specifier = ">=0.24.0" },
     { name = "toolz", specifier = ">=1.0.0" },
     { name = "triangle", specifier = ">=20250106" },
-    { name = "xarray", specifier = "==2025.12.0" },
+    { name = "xarray", specifier = ">=2025.12.0" },
     { name = "xpublish", specifier = ">=0.3.0" },
     { name = "zarr", specifier = ">=3.1.2" },
 ]
