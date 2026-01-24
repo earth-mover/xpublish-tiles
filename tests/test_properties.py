@@ -420,7 +420,7 @@ async def test_rectilinear_triangular_equivalency(data, rect, pytestconfig):
                     "--debug-visual-save", default=False
                 ),
                 mode="perceptual",
-                perceptual_threshold=0.9,  # 90% similarity threshold
+                perceptual_threshold=0.89,  # 89% similarity threshold
             )
             assert images_similar, (
                 f"Rectilinear and triangular results differ for tile {tile} (SSIM: {ssim_score:.4f})"

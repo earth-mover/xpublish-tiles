@@ -29,6 +29,7 @@ from xpublish_tiles.lib import (
     VariableNotFoundError,
     apply_default_pad,
     async_run,
+    coarsen_mean_pad,
     pad_slicers,
     transform_coordinates,
     transformer_from_crs,
@@ -46,7 +47,6 @@ from xpublish_tiles.types import (
     SelectionMethod,
     ValidatedArray,
 )
-from xpublish_tiles.utils import NUMBA_THREADING_LOCK
 
 
 def round_bbox(bbox: BBox) -> BBox:
@@ -449,8 +449,7 @@ def coarsen(
         coord_names = list(da.coords)
         da_no_coords = da.drop_vars(coord_names)
 
-        with NUMBA_THREADING_LOCK:
-            coarsened = da_no_coords.coarsen(coarsen_factors, boundary="pad").mean()
+        coarsened = coarsen_mean_pad(da_no_coords, coarsen_factors)
 
         # Build indexers once for all coarsened dimensions
         indexers = {}

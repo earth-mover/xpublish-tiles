@@ -12,6 +12,7 @@ from itertools import product
 from typing import TYPE_CHECKING, Any
 
 import matplotlib.colors as mcolors
+import numba
 import numpy as np
 import pyproj
 import toolz as tlz
@@ -20,6 +21,7 @@ from pyproj import CRS
 
 import xarray as xr
 from xpublish_tiles.config import config
+from xpublish_tiles.utils import NUMBA_THREADING_LOCK
 
 if TYPE_CHECKING:
     from xpublish_tiles.grids import UgridIndexer
@@ -594,3 +596,42 @@ def create_listed_colormap_from_dict(
     # Build colormap in the order of flag_values
     colors = {flag_value: colormap_dict[str(flag_value)] for flag_value in flag_values}
     return colors
+
+
+@numba.jit(nopython=True, parallel=True, cache=True)
+def _coarsen_nanmean_2d(arr, fy, fx, out):
+    """Coarsen with nanmean, handling incomplete edge windows."""
+    ny_out, nx_out = out.shape
+    H, W = arr.shape
+
+    for i in numba.prange(ny_out):  # type: ignore[not-iterable]
+        y_start = i * fy
+        y_end = min((i + 1) * fy, H)
+
+        for j in range(nx_out):
+            x_start = j * fx
+            x_end = min((j + 1) * fx, W)
+
+            total = 0.0
+            count = 0
+            for y in range(y_start, y_end):
+                for x in range(x_start, x_end):
+                    val = arr[y, x]
+                    if not np.isnan(val):
+                        total += val
+                        count += 1
+
+            out[i, j] = total / count if count > 0 else np.nan
+
+
+def coarsen_mean_pad(da: xr.DataArray, factors: dict[str, int]) -> xr.DataArray:
+    """Memory-efficient coarsen with boundary='pad' and nanmean."""
+    dims = da.dims
+    arr = da.data
+    H, W = arr.shape
+
+    fy, fx = tuple(factors.get(str(dim), 1) for dim in dims)
+    out = np.empty((math.ceil(H / fy), math.ceil(W / fx)), dtype=np.float64)
+    with NUMBA_THREADING_LOCK:
+        _coarsen_nanmean_2d(arr, fy, fx, out)
+    return xr.DataArray(out, dims=dims, name=da.name)
