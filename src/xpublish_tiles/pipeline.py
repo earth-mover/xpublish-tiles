@@ -384,7 +384,12 @@ async def apply_slicers(
     total_size = sum(
         sum([var.size for var in subset.data_vars.values()]) for subset in subsets
     )
-    if total_size * da.dtype.itemsize > factor * config.get("max_renderable_size"):
+    # Slightly larger just in case the subset required for some tiles at the advertised minzoom
+    # is just slightly too big
+    fudge_factor = 1.1
+    if total_size * da.dtype.itemsize > fudge_factor * factor * config.get(
+        "max_renderable_size"
+    ):
         msg = (
             f"Tile request too big, requires loading data of total shape: {total_shape!r} "
             f"and total size: {total_size / 1024 / 1024}MB. Please choose a higher zoom level."
