@@ -5,7 +5,7 @@ import io
 import math
 import operator
 from collections.abc import Hashable, Sequence
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import lru_cache, partial
 from itertools import product
@@ -251,7 +251,7 @@ def transform_chunk(
         y_out[row_slice, col_slice] = y_transformed
 
 
-def transform_blocked(
+async def transform_blocked(
     x_grid: np.ndarray,
     y_grid: np.ndarray,
     transformer: pyproj.Transformer,
@@ -274,9 +274,9 @@ def transform_blocked(
     col_chunks = [min(chunk_cols, shape[1] - j) for j in range(0, shape[1], chunk_cols)]
 
     chunks = (row_chunks, col_chunks)
-    wait(
-        [
-            EXECUTOR.submit(
+    await asyncio.gather(
+        *[
+            async_run(
                 transform_chunk,
                 x_grid,
                 y_grid,
@@ -306,7 +306,7 @@ def check_transparent_pixels(image_bytes):
     return (transparent_count / total_pixels) * 100
 
 
-def transform_coordinates(
+async def transform_coordinates(
     subset: xr.DataArray,
     grid_x_name: str,
     grid_y_name: str,
@@ -378,7 +378,7 @@ def transform_coordinates(
         # This is numpy 2.X behaviour
         newX = np.asarray(bx.data, order="C", dtype=np.float64)
         newY = np.asarray(by.data, order="C", dtype=np.float64)
-        transform_blocked(
+        await transform_blocked(
             newX,
             newY,
             transformer,
@@ -386,7 +386,7 @@ def transform_coordinates(
             inplace=True,
         )
     else:
-        newX, newY = transformer.transform(bx.data, by.data)
+        newX, newY = await async_run(transformer.transform, bx.data, by.data)
 
     return bx.copy(data=newX), by.copy(data=newY)
 
