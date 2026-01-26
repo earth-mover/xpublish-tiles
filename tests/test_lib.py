@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import patch
 
 import numpy as np
@@ -193,8 +194,8 @@ def test_transform_coordinates_with_dtypes(dtype):
         with patch(
             "xpublish_tiles.lib.transform_chunk", wraps=transform_chunk
         ) as mock_transform_chunk:
-            x_transformed, y_transformed = transform_coordinates(
-                da, "lon", "lat", transformer
+            x_transformed, y_transformed = asyncio.run(
+                transform_coordinates(da, "lon", "lat", transformer)
             )
 
             # Verify blocked transformation was used
@@ -242,8 +243,8 @@ def test_transform_coordinates_large_broadcast():
         "xpublish_tiles.lib.transform_chunk", wraps=transform_chunk
     ) as mock_transform_chunk:
         with config.set(transform_chunk_size=50):
-            x_transformed, y_transformed = transform_coordinates(
-                da, "x", "y", transformer
+            x_transformed, y_transformed = asyncio.run(
+                transform_coordinates(da, "x", "y", transformer)
             )
 
         assert mock_transform_chunk.call_count > 0
