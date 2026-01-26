@@ -114,6 +114,7 @@ EXECUTOR = ThreadPoolExecutor(
 
 # Dictionary to store semaphores per event loop
 _semaphores: dict[asyncio.AbstractEventLoop, asyncio.Semaphore] = {}
+_data_load_semaphores: dict[asyncio.AbstractEventLoop, asyncio.Semaphore] = {}
 
 
 def _get_semaphore(loop) -> asyncio.Semaphore:
@@ -123,6 +124,16 @@ def _get_semaphore(loop) -> asyncio.Semaphore:
     if loop not in _semaphores:
         _semaphores[loop] = asyncio.Semaphore(config.get("num_threads"))
     return _semaphores[loop]
+
+
+def get_data_load_semaphore() -> asyncio.Semaphore:
+    """Get or create a data load semaphore for the current event loop."""
+    loop = asyncio.get_running_loop()
+    if loop not in _data_load_semaphores:
+        _data_load_semaphores[loop] = asyncio.Semaphore(
+            config.get("num_concurrent_data_loads")
+        )
+    return _data_load_semaphores[loop]
 
 
 async def async_run(func, *args, **kwargs):

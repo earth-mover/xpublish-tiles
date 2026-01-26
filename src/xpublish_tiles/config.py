@@ -22,6 +22,7 @@ config = donfig.Config(
             "max_pixel_factor": 3,  # coarsen down to this many input grid cells per output pixel
             "async_load": True,
             "async_load_timeout_per_tile": 20,  # seconds; None to disable
+            "num_concurrent_data_loads": 4,  # max concurrent tile data loads; None to disable
             "grid_cache_max_size": 16,  # maximum number of grid systems to cache
         }
     ],
