@@ -568,6 +568,10 @@ def main():
     dataset_name = args.dataset
     benchmarking = args.bench or args.spy
 
+    # For local benchmarks with known datasets, load from icechunk store (created by pytest --setup)
+    if args.where == "local" and dataset_name in DATASET_LOOKUP:
+        dataset_name = f"local://{dataset_name}"
+
     # Load dataset and setup server
     ds = get_dataset_for_name(dataset_name, args.branch, args.group, args.cache)
 
