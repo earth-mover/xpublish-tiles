@@ -691,10 +691,8 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     # Capture the context logger before entering thread pool
     context_logger = get_context_logger()
 
-    subsets = await async_run(
-        partial(
-            subset_to_bbox, validated, bbox=query.bbox, crs=query.crs, max_shape=max_shape
-        )
+    subsets = await subset_to_bbox(
+        validated, bbox=query.bbox, crs=query.crs, max_shape=max_shape
     )
 
     tasks = [
@@ -885,7 +883,7 @@ def apply_query(
     return validated
 
 
-def subset_to_bbox(
+async def subset_to_bbox(
     validated: dict[str, ValidatedArray],
     *,
     bbox: OutputBBox,
@@ -933,14 +931,12 @@ def subset_to_bbox(
         )
         alternate = grid.pick_alternate_grid(crs, coarsen_factors=coarsen_factors)
 
-        subset = asyncio.run(
-            apply_slicers(
-                da,
-                grid=grid,
-                alternate=alternate,
-                slicers=new_slicers,
-                datatype=array.datatype,
-            )
+        subset = await apply_slicers(
+            da,
+            grid=grid,
+            alternate=alternate,
+            slicers=new_slicers,
+            datatype=array.datatype,
         )
 
         if grid.crs.is_geographic:
@@ -957,10 +953,10 @@ def subset_to_bbox(
             has_discontinuity = False
 
         if coarsen_factors:
-            subset = coarsen(subset, coarsen_factors, grid=grid)
+            subset = await async_run(partial(coarsen, subset, coarsen_factors, grid=grid))
 
         with log_duration("transform_coordinates", "🔄"):
-            newX, newY = transform_coordinates(
+            newX, newY = await transform_coordinates(
                 subset, alternate.X, alternate.Y, transformer_from_crs(alternate.crs, crs)
             )
 
