@@ -30,6 +30,7 @@ from xpublish_tiles.lib import (
     apply_default_pad,
     async_run,
     coarsen_mean_pad,
+    get_data_load_semaphore,
     pad_slicers,
     transform_coordinates,
     transformer_from_crs,
@@ -408,29 +409,32 @@ async def apply_slicers(
         logger.error("Tile request resulted in insufficient data for rendering.")
         raise AssertionError("Tile request resulted in insufficient data for rendering.")
 
-    if config.get("async_load"):
-        with log_duration("async_load data subsets", "📥"):
-            timeout = config.get("async_load_timeout_per_tile")
-            try:
-                if timeout is not None:
-                    async with asyncio.timeout(timeout), asyncio.TaskGroup() as tg:
-                        tasks = [
-                            tg.create_task(subset.load_async()) for subset in subsets
-                        ]
-                else:
-                    async with asyncio.TaskGroup() as tg:
-                        tasks = [
-                            tg.create_task(subset.load_async()) for subset in subsets
-                        ]
-                results = [task.result() for task in tasks]
-            except TimeoutError as e:
-                logger.error("Async data loading timed out", timeout=timeout, exc_info=e)
-                raise AsyncLoadTimeoutError(
-                    f"Async data loading timed out after {timeout}s. Server may be overloaded."
-                ) from None
-    else:
-        with log_duration("load data subsets", "📥"):
-            results = [subset.load() for subset in subsets]
+    async with get_data_load_semaphore():
+        if config.get("async_load"):
+            with log_duration("async_load data subsets", "📥"):
+                timeout = config.get("async_load_timeout_per_tile")
+                try:
+                    if timeout is not None:
+                        async with asyncio.timeout(timeout), asyncio.TaskGroup() as tg:
+                            tasks = [
+                                tg.create_task(subset.load_async()) for subset in subsets
+                            ]
+                    else:
+                        async with asyncio.TaskGroup() as tg:
+                            tasks = [
+                                tg.create_task(subset.load_async()) for subset in subsets
+                            ]
+                    results = [task.result() for task in tasks]
+                except TimeoutError as e:
+                    logger.error(
+                        "Async data loading timed out", timeout=timeout, exc_info=e
+                    )
+                    raise AsyncLoadTimeoutError(
+                        f"Async data loading timed out after {timeout}s. Server may be overloaded."
+                    ) from None
+        else:
+            with log_duration("load data subsets", "📥"):
+                results = [subset.load() for subset in subsets]
     subset = xr.concat(results, dim=grid.Xdim) if len(results) > 1 else results[0]
     subset_da = subset.set_coords(pick)[da.name]
     return subset_da
