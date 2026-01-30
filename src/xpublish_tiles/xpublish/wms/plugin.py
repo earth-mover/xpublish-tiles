@@ -181,6 +181,8 @@ async def handle_get_map(
         format=query.format,
         selectors=selectors,
         colormap=query.colormap,
+        abovemaxcolor=query.abovemaxcolor,
+        belowmincolor=query.belowmincolor,
     )
     try:
         buffer = await pipeline(dataset, render_params)

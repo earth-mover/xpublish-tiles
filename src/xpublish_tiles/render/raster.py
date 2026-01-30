@@ -16,6 +16,7 @@ import xarray as xr
 from xpublish_tiles.grids import Curvilinear, GridSystem2D, Triangular
 from xpublish_tiles.lib import (
     MissingParameterError,
+    apply_range_colors,
     create_colormap_from_dict,
     create_listed_colormap_from_dict,
 )
@@ -111,6 +112,8 @@ class DatashaderRasterRenderer(Renderer):
         format: ImageFormat = ImageFormat.PNG,
         context_logger=None,
         colormap: dict[str, str] | None = None,
+        abovemaxcolor: str | None = None,
+        belowmincolor: str | None = None,
     ):
         # Use the passed context logger or fallback to get_context_logger
         logger = context_logger if context_logger is not None else get_context_logger()
@@ -212,6 +215,9 @@ class DatashaderRasterRenderer(Renderer):
                 cmap = create_colormap_from_dict(colormap)
             else:
                 cmap = mpl.colormaps.get_cmap(variant)
+
+            # Apply over/under colors for out-of-range values
+            cmap = apply_range_colors(cmap, abovemaxcolor, belowmincolor)
 
             with np.errstate(invalid="ignore"):
                 shaded = tf.shade(

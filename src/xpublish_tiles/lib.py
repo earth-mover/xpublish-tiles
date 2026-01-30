@@ -552,6 +552,44 @@ def slicers_to_pad_instruction(slicers, datatype) -> dict[str, Any]:
     return pad_kwargs
 
 
+def apply_range_colors(
+    cmap: mcolors.Colormap,
+    abovemaxcolor: str | None,
+    belowmincolor: str | None,
+) -> mcolors.Colormap:
+    """Apply over/under colors to a colormap for out-of-range values.
+
+    Args:
+        cmap: The colormap to modify
+        abovemaxcolor: Color for values above colorscalerange max.
+            "extend" or None = use max palette color (default behavior)
+            "transparent" = fully transparent
+            Otherwise = color value (hex or named)
+        belowmincolor: Color for values below colorscalerange min.
+            "extend" or None = use min palette color (default behavior)
+            "transparent" = fully transparent
+            Otherwise = color value (hex or named)
+
+    Returns:
+        A copy of the colormap with over/under colors applied
+    """
+    cmap = cmap.copy()
+
+    if abovemaxcolor is not None and abovemaxcolor != "extend":
+        if abovemaxcolor == "transparent":
+            cmap.set_over((0, 0, 0, 0))
+        else:
+            cmap.set_over(abovemaxcolor)
+
+    if belowmincolor is not None and belowmincolor != "extend":
+        if belowmincolor == "transparent":
+            cmap.set_under((0, 0, 0, 0))
+        else:
+            cmap.set_under(belowmincolor)
+
+    return cmap
+
+
 def create_colormap_from_dict(colormap_dict: dict[str, str]) -> mcolors.Colormap:
     """Create a matplotlib colormap from a dictionary of index->color mappings."""
     # Sort by numeric keys to ensure proper order
