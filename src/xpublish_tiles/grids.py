@@ -27,6 +27,7 @@ from xpublish_tiles.lib import (
     _prevent_slice_overlap,
     crs_repr,
     is_4326_like,
+    unwrap,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.utils import NUMBA_THREADING_LOCK, time_debug
@@ -189,7 +190,7 @@ def _convert_longitude_slice(
 
     # Normalize start and stop to be within or near the grid's coordinate range
     # by shifting them by multiples of 360
-    # This is required to deal with cases where `np.unwrap` changed
+    # This is required to deal with cases where unwrapping changed
     # the longitude coordinates to be continuous
     coord_center = (left_break + right_break) / 2
     query_center = (original_start + original_stop) / 2
@@ -1139,7 +1140,7 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
             # Use np.unwrap to fix longitude discontinuities without centering
             # This ensures datasets with the meridian discontinuitiy in the "middle"
             # of the dataset maintain a continuous coordinate system
-            x_data = np.unwrap(x_data, period=360)
+            x_data = unwrap(x_data, width=360)
 
         x_bounds = _compute_interval_bounds(x_data)
         x_intervals = pd.IntervalIndex.from_breaks(x_bounds, closed="left")
@@ -1342,8 +1343,7 @@ class Curvilinear(GridSystem):
             # Use np.unwrap to fix longitude discontinuities without centering
             # This ensures datasets with the meridian discontinuity in the "middle"
             # of the dataset maintain a continuous coordinate system
-            xaxis = X.get_axis_num(Xdim)
-            X = X.copy(data=np.unwrap(X.data, period=360, axis=xaxis))
+            X = X.copy(data=unwrap(X.data, width=360))
 
         index = CurvilinearCellIndex(
             X=X,

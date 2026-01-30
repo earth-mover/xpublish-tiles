@@ -35,6 +35,7 @@ from xpublish_tiles.lib import (
     pad_slicers,
     transform_coordinates,
     transformer_from_crs,
+    unwrap,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.types import (
@@ -581,7 +582,7 @@ def fix_coordinate_discontinuities(
     intelligent offset corrections to make coordinates continuous.
 
     The algorithm:
-    1. Uses np.unwrap to fix coordinate discontinuities automatically
+    1. Uses skimage.restoration.unwrap_phase to fix coordinate discontinuities automatically
     2. Calculates the expected coordinate space width using transformer bounds
     3. Shifts the result to maximize overlap with the bbox
 
@@ -604,8 +605,8 @@ def fix_coordinate_discontinuities(
         # we ignore such things for now
         return coordinates
 
-    # Step 1: Use np.unwrap to fix discontinuities
-    unwrapped_coords = np.unwrap(coordinates, axis=axis, period=coordinate_space_width)
+    # Step 1: Use unwrap to fix discontinuities
+    unwrapped_coords = unwrap(coordinates, width=coordinate_space_width)
 
     # Step 2: Determine optimal shift based on coordinate and bbox bounds
     coord_min, coord_max = unwrapped_coords.min(), unwrapped_coords.max()

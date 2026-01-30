@@ -18,6 +18,7 @@ import pyproj
 import toolz as tlz
 from PIL import Image
 from pyproj import CRS
+from skimage.restoration import unwrap_phase
 
 import xarray as xr
 from xpublish_tiles.config import config
@@ -30,6 +31,13 @@ from xpublish_tiles.logger import logger
 WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)  # from proj
 M_PI = 3.14159265358979323846  # from proj
 M_2_PI = 6.28318530717958647693  # from proj
+
+
+def unwrap(data: np.ndarray, *, width: float) -> np.ndarray:
+    factor = 2 * np.pi / width
+    un = unwrap_phase(data * factor)
+    un /= factor
+    return un
 
 
 @dataclass(frozen=True)
