@@ -20,6 +20,7 @@ from xpublish_tiles.validators import (
     validate_colorscalerange,
     validate_crs,
     validate_image_format,
+    validate_range_color,
     validate_style,
 )
 
@@ -85,6 +86,14 @@ class WMSGetMapQuery(WMSBaseQuery):
         None,
         description="Custom colormap as JSON-encoded dictionary with numeric keys (0-255) and hex color values (#RRGGBB). When provided, overrides any colormap from the styles parameter.",
     )
+    abovemaxcolor: str | None = Field(
+        None,
+        description="Color for values above the max of colorscalerange. Accepted values: 'extend' (use max palette color), 'transparent', hex color (#RRGGBB or #RRGGBBAA), or named color.",
+    )
+    belowmincolor: str | None = Field(
+        None,
+        description="Color for values below the min of colorscalerange. Accepted values: 'extend' (use min palette color), 'transparent', hex color (#RRGGBB or #RRGGBBAA), or named color.",
+    )
     format: ImageFormat = Field(
         ImageFormat.PNG,
         description="The format of the image to return",
@@ -122,6 +131,16 @@ class WMSGetMapQuery(WMSBaseQuery):
     @classmethod
     def validate_format(cls, v: str | None) -> ImageFormat | None:
         return validate_image_format(v)
+
+    @field_validator("abovemaxcolor", mode="before")
+    @classmethod
+    def validate_abovemaxcolor(cls, v: str | None) -> str | None:
+        return validate_range_color(v)
+
+    @field_validator("belowmincolor", mode="before")
+    @classmethod
+    def validate_belowmincolor(cls, v: str | None) -> str | None:
+        return validate_range_color(v)
 
     @model_validator(mode="after")
     def validate_colormap_requires_custom_style(self):
@@ -367,6 +386,8 @@ WMS_FILTERED_QUERY_PARAMS = {
     "height",
     "colorscalerange",
     "colormap",
+    "abovemaxcolor",
+    "belowmincolor",
     "autoscale",
     "vertical",
     "item",

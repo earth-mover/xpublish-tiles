@@ -11,6 +11,7 @@ from xpublish_tiles.validators import (
     validate_colormap,
     validate_colorscalerange,
     validate_image_format,
+    validate_range_color,
     validate_style,
 )
 
@@ -1306,6 +1307,24 @@ class TileQuery(BaseModel):
             },
         ),
     ]
+    abovemaxcolor: Annotated[
+        str | None,
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "Color for values above the max of colorscalerange. Accepted values: 'extend' (use max palette color), 'transparent', hex color (#RRGGBB or #RRGGBBAA), or named color.",
+            },
+        ),
+    ]
+    belowmincolor: Annotated[
+        str | None,
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "Color for values below the min of colorscalerange. Accepted values: 'extend' (use min palette color), 'transparent', hex color (#RRGGBB or #RRGGBBAA), or named color.",
+            },
+        ),
+    ]
 
     @field_validator("style", mode="before")
     @classmethod
@@ -1336,6 +1355,16 @@ class TileQuery(BaseModel):
     @classmethod
     def validate_colormap(cls, v: str | dict | None) -> dict[str, str] | None:
         return validate_colormap(v)
+
+    @field_validator("abovemaxcolor", mode="before")
+    @classmethod
+    def validate_abovemaxcolor(cls, v: str | None) -> str | None:
+        return validate_range_color(v)
+
+    @field_validator("belowmincolor", mode="before")
+    @classmethod
+    def validate_belowmincolor(cls, v: str | None) -> str | None:
+        return validate_range_color(v)
 
     def model_post_init(self, __context) -> None:
         """Validate colormap usage constraints."""
@@ -1518,5 +1547,7 @@ TILES_FILTERED_QUERY_PARAMS: list[str] = [
     "width",
     "height",
     "colormap",
+    "abovemaxcolor",
+    "belowmincolor",
     "render_errors",
 ]

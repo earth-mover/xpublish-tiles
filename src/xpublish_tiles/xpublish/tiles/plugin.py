@@ -412,6 +412,8 @@ class TilesPlugin(Plugin):
                 format=query.f,
                 selectors=selectors,
                 colormap=query.colormap,
+                abovemaxcolor=query.abovemaxcolor,
+                belowmincolor=query.belowmincolor,
             )
 
             try:
