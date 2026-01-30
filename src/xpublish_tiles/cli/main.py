@@ -155,6 +155,37 @@ def get_dataset_for_name(
             raise ValueError(
                 f"Error loading icechunk dataset from '{repo_path}': {e}"
             ) from e
+    elif name.startswith("zarr+file://"):
+        zarr_path = name.removeprefix("zarr+file://")
+
+        try:
+            ds = xr.open_zarr(
+                zarr_path,
+                group=group or None,
+                consolidated=False,
+                chunks=None,
+            )
+            xpublish_id = f"zarr+file:{zarr_path}"
+            if group:
+                xpublish_id += f":{group}"
+            ds.attrs["_xpublish_id"] = xpublish_id
+        except Exception as e:
+            raise ValueError(f"Error loading zarr dataset from '{zarr_path}': {e}") from e
+    elif name.startswith("netcdf+file://"):
+        nc_path = name.removeprefix("netcdf+file://")
+
+        try:
+            ds = xr.open_dataset(
+                nc_path,
+                group=group or None,
+                chunks=None,
+            )
+            xpublish_id = f"netcdf+file:{nc_path}"
+            if group:
+                xpublish_id += f":{group}"
+            ds.attrs["_xpublish_id"] = xpublish_id
+        except Exception as e:
+            raise ValueError(f"Error loading NetCDF dataset from '{nc_path}': {e}") from e
     else:
         try:
             from arraylake import Client
@@ -493,7 +524,7 @@ def main():
         "--dataset",
         type=str,
         default="global",
-        help="Dataset to serve (default: global). Options: global, air, hrrr, para, eu3035, ifs, curvilinear, sentinel, global-6km, xarray://<tutorial_name> (loads xarray tutorial dataset), local://<group_name> (loads group from /tmp/tiles-icechunk/), local:///custom/path::<group_name> (loads group from custom icechunk repo), icechunk+file:///path/to/repo (loads icechunk repo from local filesystem, use --group to specify group), or an arraylake dataset name",
+        help="Dataset to serve (default: global). Options: global, air, hrrr, para, eu3035, ifs, curvilinear, sentinel, global-6km, xarray://<tutorial_name> (loads xarray tutorial dataset), local://<group_name> (loads group from /tmp/tiles-icechunk/), local:///custom/path::<group_name> (loads group from custom icechunk repo), icechunk+file:///path/to/repo (loads icechunk repo from local filesystem, use --group to specify group), zarr+file:///path/to/zarr (loads zarr store from local filesystem, use --group to specify group), netcdf+file:///path/to/file.nc (loads NetCDF file from local filesystem, use --group to specify group), or an arraylake dataset name",
     )
     parser.add_argument(
         "--branch",
