@@ -511,14 +511,15 @@ class CurvilinearCellIndex(xr.Index):
         # For geographic CRS, X coordinates are already unwrapped by Curvilinear.from_dataset,
         # so left_break/right_break represent the continuous range (e.g., 74° to 434°).
         # _convert_longitude_slice uses these to map tile requests to grid indices.
+        # Use first/last columns along x-axis for the breaks.
         # For tripolar grids, exclude the fold row since it has distorted coordinates.
+        first_col = np.take(X, 0, axis=xaxis)
+        last_col = np.take(X, -1, axis=xaxis)
         if tripolar_fold_row is not None:
-            X_valid = X[:tripolar_fold_row] if yaxis == 0 else X[:, :tripolar_fold_row]
-        else:
-            X_valid = X
-
-        self.left_break = float(X_valid.min())
-        self.right_break = float(X_valid.max())
+            first_col = first_col[:tripolar_fold_row]
+            last_col = last_col[:tripolar_fold_row]
+        self.left_break = float(np.min(first_col))
+        self.right_break = float(np.max(last_col))
 
         # Compute cell bounds from coordinate diffs. For geographic CRS, X coordinates
         # are already unwrapped, so diffs are continuous (no 360° jumps at antimeridian).
