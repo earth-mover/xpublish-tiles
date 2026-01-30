@@ -168,6 +168,8 @@ uv run xpublish-tiles [OPTIONS]
   - `global-6km`: Global dataset at 6km resolution
   - `xarray://<tutorial_name>`: Load any xarray tutorial dataset (e.g., `xarray://rasm`)
   - `zarr:///path/to/zarr/store`: Load standard Zarr store (use `--group` for nested groups)
+  - `zarr+file:///path/to/zarr/store`: Alternative syntax for local Zarr stores (use `--group` for nested groups)
+  - `netcdf+file:///path/to/file.nc`: Load local NetCDF file (use `--group` for groups)
   - `icechunk:///path/to/repo`: Load Icechunk repository (use `--group` for groups, `--branch` for branches)
   - `local://<dataset_name>`: Convenience alias for `icechunk:///tmp/tiles-icechunk --group <dataset_name>` (datasets created with `uv run pytest --setup`)
   - For Arraylake datasets: specify the dataset name in {arraylake_org}/{arraylake_dataset} format (requires Arraylake credentials)
@@ -217,6 +219,15 @@ xpublish-tiles --dataset zarr:///path/to/data.zarr
 
 # Serve Zarr store with a specific group
 xpublish-tiles --dataset zarr:///path/to/data.zarr --group subgroup
+
+# Serve local Zarr store using zarr+file protocol
+xpublish-tiles --dataset zarr+file:///path/to/data.zarr
+
+# Serve local NetCDF file
+xpublish-tiles --dataset netcdf+file:///path/to/data.nc
+
+# Serve NetCDF file with a specific group
+xpublish-tiles --dataset netcdf+file:///path/to/data.nc --group subgroup
 
 # Serve Icechunk repository
 xpublish-tiles --dataset icechunk:///path/to/icechunk/repo --group my_dataset
