@@ -711,6 +711,10 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
         validated, bbox=query.bbox, crs=query.crs, max_shape=max_shape
     )
 
+    # Transform coordinates to output CRS
+    subsets = await transform_for_render(subsets, bbox=query.bbox, crs=query.crs)
+    renderer = query.get_renderer()
+
     tasks = [
         async_run(
             lambda s=subset: asyncio.run(
@@ -725,7 +729,6 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     new_subsets = dict(zip(subsets.keys(), results, strict=False))
 
     buffer = io.BytesIO()
-    renderer = query.get_renderer()
 
     await async_run(
         lambda: renderer.render(
@@ -917,7 +920,6 @@ async def subset_to_bbox(
         if min(array.da.shape) < 2:
             raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
 
-        input_to_output = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
         output_to_input = transformer_from_crs(crs_from=crs, crs_to=grid.crs)
 
         west, south, east, north = output_to_input.transform_bounds(
@@ -962,6 +964,49 @@ async def subset_to_bbox(
         if isinstance(grid, Polar):
             subset = grid.assign_index(subset)
 
+        if coarsen_factors:
+            subset = await async_run(partial(coarsen, subset, coarsen_factors, grid=grid))
+
+        result[var_name] = PopulatedRenderContext(
+            da=subset,
+            grid=grid,
+            datatype=array.datatype,
+            bbox=bbox,
+            ugrid_indexer=next(iter(slicers[grid.Xdim]))
+            if isinstance(grid, Triangular)
+            else None,
+            alternate=alternate,
+        )
+    return result
+
+
+async def transform_for_render(
+    contexts: dict[str, PopulatedRenderContext | NullRenderContext],
+    *,
+    bbox: OutputBBox,
+    crs: OutputCRS,
+) -> dict[str, PopulatedRenderContext | NullRenderContext]:
+    """Transform coordinates based on rendering style.
+
+    For raster styles: transform X/Y coordinates to output CRS.
+    For polygon styles: transform cell boundary geometries to output CRS.
+    """
+    # Raster-style coordinate transformation
+    result = {}
+    for var_name, context in contexts.items():
+        if isinstance(context, NullRenderContext):
+            result[var_name] = context
+            continue
+
+        grid = context.grid
+        alternate = context.alternate
+        subset = context.da
+
+        if alternate is None:
+            result[var_name] = context
+            continue
+
+        # Detect discontinuity for geographic CRS
         if grid.crs.is_geographic:
             if isinstance(grid, Polar):
                 has_discontinuity = False
@@ -977,16 +1022,13 @@ async def subset_to_bbox(
                     check_antimeridian=True,
                 )
             elif isinstance(grid, Triangular):
-                ugrid = cast(UgridIndexer, next(iter(slicers[grid.Xdim])))
-                anti = ugrid.antimeridian_vertices
+                assert context.ugrid_indexer is not None
+                anti = context.ugrid_indexer.antimeridian_vertices
                 has_discontinuity = anti["pos"].size > 0 or anti["neg"].size > 0
             else:
                 raise NotImplementedError
         else:
             has_discontinuity = False
-
-        if coarsen_factors:
-            subset = await async_run(partial(coarsen, subset, coarsen_factors, grid=grid))
 
         with log_duration("transform_coordinates", "🔄"):
             newX, newY = await transform_coordinates(
@@ -999,6 +1041,7 @@ async def subset_to_bbox(
         # discontinuity is in the tile; it will be preserved by the transformation,
         # regardless of how we may modify the coordinates *before* transforming.
         if has_discontinuity:
+            input_to_output = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
             if isinstance(grid, GridSystem2D):
                 fixed = fix_coordinate_discontinuities(
                     newX.data,
@@ -1008,8 +1051,8 @@ async def subset_to_bbox(
                 newX = newX.copy(data=fixed)
 
             elif isinstance(grid, Triangular):
-                ugrid = cast(UgridIndexer, next(iter(slicers[grid.dim])))
-                anti = ugrid.antimeridian_vertices
+                assert context.ugrid_indexer is not None
+                anti = context.ugrid_indexer.antimeridian_vertices
                 for verts in [anti["pos"], anti["neg"]]:
                     if verts.size > 0:
                         newX.data[verts] = fix_coordinate_discontinuities(
@@ -1021,10 +1064,9 @@ async def subset_to_bbox(
         result[var_name] = PopulatedRenderContext(
             da=newda,
             grid=grid,
-            datatype=array.datatype,
+            datatype=context.datatype,
             bbox=bbox,
-            ugrid_indexer=cast(UgridIndexer, next(iter(slicers[grid.Xdim])))
-            if isinstance(grid, Triangular)
-            else None,
+            ugrid_indexer=context.ugrid_indexer,
+            alternate=alternate,
         )
     return result
