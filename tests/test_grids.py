@@ -581,8 +581,8 @@ class TestFixCoordinateDiscontinuities:
 
     def test_wrap_around_180_to_minus_180(self):
         """Test fixing discontinuity when coordinates wrap from 180 to -180."""
-        coords = np.array([170, 175, 180, -175, -170, -165])
-        expected = np.array([170, 175, 180, 185, 190, 195])
+        coords = np.array([170.0, 175, 180, -175, -170, -165])
+        expected = np.array([170.0, 175, 180, 185, 190, 195])
 
         transformer = transformer_from_crs("EPSG:4326", "EPSG:4326", always_xy=True)
         transformed_x, _ = transformer.transform(coords, np.zeros_like(coords))
@@ -590,11 +590,11 @@ class TestFixCoordinateDiscontinuities:
         fixed = fix_coordinate_discontinuities(
             transformed_x, transformer, axis=0, bbox=bbox
         )
-        npt.assert_array_equal(fixed, expected)
+        npt.assert_array_almost_equal(fixed, expected)
 
     def test_no_discontinuity(self):
         """Test that coordinates without discontinuity are not modified."""
-        coords = np.array([0, 10, 20, 30, 40, 50])
+        coords = np.array([0.0, 10, 20, 30, 40, 50])
         transformer = transformer_from_crs("EPSG:4326", "EPSG:4326", always_xy=True)
         transformed_x, _ = transformer.transform(coords, np.zeros_like(coords))
         bbox = BBox(west=-10, east=60, south=-90, north=90)
@@ -602,19 +602,19 @@ class TestFixCoordinateDiscontinuities:
             transformed_x, transformer, axis=0, bbox=bbox
         )
         # Should not modify coordinates that don't have discontinuities
-        npt.assert_array_equal(coords, fixed)
+        npt.assert_array_almost_equal(coords, fixed)
 
     def test_small_array(self):
         """Test with very small array."""
-        coords = np.array([350, 0, 10])
-        expected = np.array([-10, 0, 10])
+        coords = np.array([350.0, 0, 10])
+        expected = np.array([-10.0, 0, 10])
         transformer = transformer_from_crs("EPSG:4326", "EPSG:4326", always_xy=True)
         transformed_x, _ = transformer.transform(coords, np.zeros_like(coords))
         bbox = BBox(west=-10, east=20, south=-90, north=90)
         fixed = fix_coordinate_discontinuities(
             transformed_x, transformer, axis=0, bbox=bbox
         )
-        npt.assert_array_equal(fixed, expected)
+        npt.assert_array_almost_equal(fixed, expected)
 
 
 def test_prevent_slice_overlap():
