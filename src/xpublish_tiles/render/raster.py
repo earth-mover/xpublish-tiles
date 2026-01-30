@@ -66,7 +66,7 @@ def _range_color_to_rgba(color: str) -> tuple[int, int, int, int]:
     if color == "transparent":
         return (0, 0, 0, 0)
     rgba = mcolors.to_rgba(color)
-    return tuple(int(round(channel * 255)) for channel in rgba)
+    return tuple(round(channel * 255) for channel in rgba)
 
 
 def _apply_out_of_range_colors(
@@ -89,12 +89,8 @@ def _apply_out_of_range_colors(
         return image
 
     finite_mask = np.isfinite(mesh_values)
-    under_mask = (
-        finite_mask & (mesh_values < colorscalerange[0]) if apply_under else None
-    )
-    over_mask = (
-        finite_mask & (mesh_values > colorscalerange[1]) if apply_over else None
-    )
+    under_mask = finite_mask & (mesh_values < colorscalerange[0]) if apply_under else None
+    over_mask = finite_mask & (mesh_values > colorscalerange[1]) if apply_over else None
 
     if under_mask is None or not np.any(under_mask):
         under_mask = None
