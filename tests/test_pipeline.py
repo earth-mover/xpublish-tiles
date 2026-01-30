@@ -358,7 +358,15 @@ async def test_continuous_data_with_range_colors(
 
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
-    assert_render_matches_snapshot(result, png_snapshot, tile=tile, tms=tms)
+    assert_render_matches_snapshot(
+        result,
+        png_snapshot,
+        tile=tile,
+        tms=tms,
+        skip_transparency_check=(
+            abovemaxcolor == "transparent" or belowmincolor == "transparent"
+        ),
+    )
 
 
 @pytest.mark.asyncio
