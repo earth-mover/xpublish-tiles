@@ -609,8 +609,8 @@ class CurvilinearCellIndex(xr.Index):
 
     def equals(self, other: Self) -> bool:
         return (
-            self.X.equals(other.X)
-            and self.Y.equals(other.Y)
+            np.allclose(self.X.data, other.X.data)
+            and np.allclose(self.Y.data, other.Y.data)
             and self.Xdim == other.Xdim
             and self.Ydim == other.Ydim
         )
@@ -1371,8 +1371,10 @@ class Curvilinear(GridSystem):
         return {self.Xdim, self.Ydim}
 
     def equals(self, other: Self) -> bool:
-        if (self.crs == other.crs and self.bbox == other.bbox) or (
-            self.X == other.X and self.Y == other.Y
+        if (
+            (self.crs == other.crs and self.bbox == other.bbox)
+            and (self.X == other.X and self.Y == other.Y)
+            and self.indexes[0].equals(other.indexes[0])
         ):
             return super().equals(other)
         else:

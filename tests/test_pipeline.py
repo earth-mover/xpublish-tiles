@@ -823,7 +823,7 @@ class TestFixCoordinateDiscontinuities:
         )
 
         fixed = fix_coordinate_discontinuities(
-            x_merc.copy(), transformer, axis=1, bbox=western_hemisphere_bbox
+            x_merc.copy(), transformer, bbox=western_hemisphere_bbox
         )
 
         max_gap_x = np.abs(np.diff(fixed, axis=1)).max()
@@ -873,7 +873,7 @@ class TestFixCoordinateDiscontinuities:
         )
 
         fixed = fix_coordinate_discontinuities(
-            x_merc.copy(), transformer, axis=1, bbox=western_hemisphere_bbox
+            x_merc.copy(), transformer, bbox=western_hemisphere_bbox
         )
 
         # After fix, both rows should be shifted to western hemisphere and stay aligned
