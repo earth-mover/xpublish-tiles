@@ -1254,7 +1254,11 @@ class Curvilinear(GridSystem):
             north = numbagg.nanmax(index.top)
 
             if self.crs.is_geographic:
-                lon_span = east - west
+                # This handling is necessary for subsets of tripolar grids;
+                # where the anti-meridian discontinuity is not present in some, but not all, rows.
+                lon_span = (
+                    index.right.max(axis=index.xaxis) - index.left.min(axis=index.xaxis)
+                ).max()
                 self.lon_spans_globe = lon_span >= 350
                 # Normalize bbox to -180->180 for global grids
                 if self.lon_spans_globe:
