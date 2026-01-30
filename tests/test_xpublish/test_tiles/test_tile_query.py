@@ -19,6 +19,8 @@ class TestTileQueryColormap:
             style="raster/custom",  # type: ignore  # Pydantic converts string to tuple
             f=ImageFormat.PNG,
             render_errors=False,
+            abovemaxcolor=None,
+            belowmincolor=None,
         )
         assert query.colormap == colormap
         assert query.style == ("raster", "custom")
@@ -34,6 +36,8 @@ class TestTileQueryColormap:
             colormap=None,
             f=ImageFormat.PNG,
             render_errors=False,
+            abovemaxcolor=None,
+            belowmincolor=None,
         )
         assert query.colormap is None
 
@@ -54,6 +58,8 @@ class TestTileQueryColormap:
             colorscalerange=None,
             f=ImageFormat.PNG,
             render_errors=False,
+            abovemaxcolor=None,
+            belowmincolor=None,
         )
         assert query.colormap == colormap
         assert query.style == ("raster", "custom")
@@ -69,6 +75,8 @@ class TestTileQueryColormap:
                 colorscalerange=None,
                 f=ImageFormat.PNG,
                 render_errors=False,
+                abovemaxcolor=None,
+                belowmincolor=None,
             )
 
         # Test that raster/viridis fails
@@ -82,4 +90,6 @@ class TestTileQueryColormap:
                 colorscalerange=None,
                 f=ImageFormat.PNG,
                 render_errors=False,
+                abovemaxcolor=None,
+                belowmincolor=None,
             )

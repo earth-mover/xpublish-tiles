@@ -511,6 +511,7 @@ def validate_transparency(
     tile=None,
     tms=None,
     dataset_bbox=None,
+    skip_transparency_check: bool = False,
 ):
     """Validate transparency of rendered content based on tile/dataset overlap.
 
@@ -536,7 +537,7 @@ def validate_transparency(
     # TODO: Consider figuring out a better way to do this, but I suspect it's just too hard.
     # TODO: We could instead just keep separate lists of fully contained and partially intersecting tiles;
     #       and add an explicit check.
-    skip_transparency_check = (
+    skip_transparency_check = skip_transparency_check or (
         tile is not None
         and tms is not None
         and tile.x == 0
@@ -574,6 +575,7 @@ def assert_render_matches_snapshot(
     tms=None,
     dataset_bbox=None,
     perceptual_threshold: float | None = None,
+    skip_transparency_check: bool = False,
 ):
     """Helper function to validate PNG content against snapshot.
 
@@ -594,7 +596,13 @@ def assert_render_matches_snapshot(
     result.seek(0)
     content = result.read()
     assert len(content) > 0
-    validate_transparency(content, tile=tile, tms=tms, dataset_bbox=dataset_bbox)
+    validate_transparency(
+        content,
+        tile=tile,
+        tms=tms,
+        dataset_bbox=dataset_bbox,
+        skip_transparency_check=skip_transparency_check,
+    )
 
     if perceptual_threshold is None:
         # Use exact comparison

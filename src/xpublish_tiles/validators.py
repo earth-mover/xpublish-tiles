@@ -127,6 +127,43 @@ def validate_crs(v: str | None) -> CRS | None:
         ) from e
 
 
+def validate_range_color(v: str | None) -> str | None:
+    """Validate abovemaxcolor or belowmincolor parameter.
+
+    Accepted values:
+    - None: Return None (use default behavior)
+    - "extend": Use the max/min palette color (current default behavior)
+    - "transparent": Fully transparent
+    - Hex color (#RRGGBB or #RRGGBBAA)
+    - Named color (any matplotlib-recognized color name)
+
+    Returns:
+        Normalized lowercase string or None
+
+    Raises:
+        ValueError: If the color value is invalid
+    """
+    if v is None:
+        return None
+
+    v_lower = v.lower().strip()
+
+    if v_lower in ("extend", "transparent"):
+        return v_lower
+
+    # Try to validate as a color using matplotlib
+    from matplotlib.colors import to_rgba
+
+    try:
+        to_rgba(v_lower)
+        return v_lower
+    except ValueError:
+        raise ValueError(
+            f"Invalid color value '{v}'. Must be 'extend', 'transparent', "
+            "a hex color (#RRGGBB or #RRGGBBAA), or a valid named color."
+        ) from None
+
+
 def validate_colormap(v: str | dict | None) -> dict[str, str] | None:
     """Validate and parse custom colormap parameter.
 

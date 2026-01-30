@@ -16,6 +16,7 @@ import xarray as xr
 from xpublish_tiles.grids import Curvilinear, GridSystem2D, Triangular
 from xpublish_tiles.lib import (
     MissingParameterError,
+    apply_range_colors,
     create_colormap_from_dict,
     create_listed_colormap_from_dict,
 )
@@ -59,6 +60,70 @@ def nearest_on_uniform_grid_scipy(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.
         coords=dict(x=("x", newX), y=("y", newY)),
     )
     return new
+
+
+def _range_color_to_rgba(color: str) -> tuple[int, int, int, int]:
+    if color == "transparent":
+        return (0, 0, 0, 0)
+    rgba = mcolors.to_rgba(color)
+    return tuple(round(channel * 255) for channel in rgba)
+
+
+def _apply_out_of_range_colors(
+    image: Image.Image,
+    mesh: xr.DataArray,
+    colorscalerange: tuple[float, float] | None,
+    abovemaxcolor: str | None,
+    belowmincolor: str | None,
+) -> Image.Image:
+    if colorscalerange is None:
+        return image
+
+    apply_over = abovemaxcolor not in (None, "extend")
+    apply_under = belowmincolor not in (None, "extend")
+    if not apply_over and not apply_under:
+        return image
+
+    mesh_values = np.asarray(mesh)
+    if mesh_values.size == 0:
+        return image
+
+    finite_mask = np.isfinite(mesh_values)
+    under_mask = finite_mask & (mesh_values < colorscalerange[0]) if apply_under else None
+    over_mask = finite_mask & (mesh_values > colorscalerange[1]) if apply_over else None
+
+    if under_mask is None or not np.any(under_mask):
+        under_mask = None
+    if over_mask is None or not np.any(over_mask):
+        over_mask = None
+    if under_mask is None and over_mask is None:
+        return image
+
+    should_flip = False
+    if mesh.dims:
+        y_dim = mesh.dims[0]
+        if y_dim in mesh.coords:
+            y_vals = np.asarray(mesh.coords[y_dim])
+            if y_vals.size >= 2 and y_vals[0] < y_vals[-1]:
+                # Datashader's PIL output is top-down; flip if y increases upward.
+                should_flip = True
+
+    if should_flip:
+        if under_mask is not None:
+            under_mask = np.flipud(under_mask)
+        if over_mask is not None:
+            over_mask = np.flipud(over_mask)
+
+    if image.mode != "RGBA":
+        image = image.convert("RGBA")
+    img_array = np.array(image)
+
+    if under_mask is not None and belowmincolor is not None:
+        img_array[under_mask] = _range_color_to_rgba(belowmincolor)
+    if over_mask is not None and abovemaxcolor is not None:
+        img_array[over_mask] = _range_color_to_rgba(abovemaxcolor)
+
+    return Image.fromarray(img_array, mode="RGBA")
 
 
 def nearest_on_uniform_grid_quadmesh(
@@ -111,6 +176,8 @@ class DatashaderRasterRenderer(Renderer):
         format: ImageFormat = ImageFormat.PNG,
         context_logger=None,
         colormap: dict[str, str] | None = None,
+        abovemaxcolor: str | None = None,
+        belowmincolor: str | None = None,
     ):
         # Use the passed context logger or fallback to get_context_logger
         logger = context_logger if context_logger is not None else get_context_logger()
@@ -213,6 +280,9 @@ class DatashaderRasterRenderer(Renderer):
             else:
                 cmap = mpl.colormaps.get_cmap(variant)
 
+            # Apply over/under colors for out-of-range values
+            cmap = apply_range_colors(cmap, abovemaxcolor, belowmincolor)
+
             with np.errstate(invalid="ignore"):
                 shaded = tf.shade(
                     mesh,
@@ -220,6 +290,10 @@ class DatashaderRasterRenderer(Renderer):
                     how="linear",
                     span=colorscalerange,
                 )
+            im = shaded.to_pil()
+            im = _apply_out_of_range_colors(
+                im, mesh, colorscalerange, abovemaxcolor, belowmincolor
+            )
         elif isinstance(context.datatype, DiscreteData):
             kwargs = {}
             flag_values = context.datatype.values
@@ -241,10 +315,10 @@ class DatashaderRasterRenderer(Renderer):
                 }
             with np.errstate(invalid="ignore"):
                 shaded = tf.shade(mesh, how="linear", **kwargs)
+            im = shaded.to_pil()
         else:
             raise NotImplementedError(f"Unsupported datatype: {type(context.datatype)}")
 
-        im = shaded.to_pil()
         im.save(buffer, format=str(format))
 
     def render_error(

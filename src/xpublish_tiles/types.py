@@ -106,6 +106,8 @@ class QueryParams:
     format: ImageFormat
     colorscalerange: tuple[float, float] | None = None
     colormap: dict[str, str] | None = None
+    abovemaxcolor: str | None = None
+    belowmincolor: str | None = None
 
     def get_renderer(self):
         from xpublish_tiles.render import RenderRegistry

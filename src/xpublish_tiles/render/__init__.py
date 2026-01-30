@@ -86,6 +86,8 @@ class Renderer(ABC):
         format: ImageFormat = ImageFormat.PNG,
         context_logger=None,
         colormap: dict[str, str] | None = None,
+        abovemaxcolor: str | None = None,
+        belowmincolor: str | None = None,
     ):
         pass
 
