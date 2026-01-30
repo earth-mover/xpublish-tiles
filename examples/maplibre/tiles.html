@@ -8,10 +8,10 @@
             content="initial-scale=1,maximum-scale=1,user-scalable=no"
         />
         <link
-            href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+            href="https://unpkg.com/maplibre-gl@5.1/dist/maplibre-gl.css"
             rel="stylesheet"
         />
-        <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+        <script src="https://unpkg.com/maplibre-gl@5.1/dist/maplibre-gl.js"></script>
         <style>
             body {
                 margin: 0;
@@ -29,7 +29,7 @@
                 right: 10px;
                 z-index: 1000;
             }
-            #tile-boundaries-toggle {
+            .toggle-button {
                 padding: 8px 12px;
                 background: white;
                 border: 1px solid #ccc;
@@ -37,8 +37,10 @@
                 cursor: pointer;
                 font-family: Arial, sans-serif;
                 font-size: 12px;
+                margin-bottom: 5px;
+                display: block;
             }
-            #tile-boundaries-toggle:hover {
+            .toggle-button:hover {
                 background: #f0f0f0;
             }
         </style>
@@ -46,7 +48,8 @@
     <body>
         <div id="map"></div>
         <div id="toggle-container">
-            <button id="tile-boundaries-toggle">Show Tile Boundaries</button>
+            <button id="globe-toggle" class="toggle-button">Disable Globe</button>
+            <button id="tile-boundaries-toggle" class="toggle-button">Show Tile Boundaries</button>
         </div>
         <script>
             const map = new maplibregl.Map({
@@ -54,6 +57,12 @@
                 style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
                 zoom: 2,
                 center: [-71.0367, 42.3739],
+            });
+
+            let globeEnabled = true;
+
+            map.on("style.load", () => {
+                map.setProjection({ type: globeEnabled ? "globe" : "mercator" });
             });
 
             map.on("load", () => {
@@ -70,20 +79,30 @@
                         type: "raster",
                         source: "tiles-test-source",
                         paint: {
-                            "raster-opacity": 0.5,
+                            "raster-opacity": 0.75,
                         },
                     },
                     // 'building' // Place layer under labels, roads and buildings.
                 );
                 map.showTileBoundaries = false;
 
+                // Toggle globe projection
+                const globeToggle = document.getElementById("globe-toggle");
+                globeToggle.addEventListener("click", () => {
+                    globeEnabled = !globeEnabled;
+                    map.setProjection({ type: globeEnabled ? "globe" : "mercator" });
+                    globeToggle.textContent = globeEnabled
+                        ? "Disable Globe"
+                        : "Enable Globe";
+                });
+
                 // Toggle tile boundaries functionality
-                const toggleButton = document.getElementById(
+                const tileBoundariesToggle = document.getElementById(
                     "tile-boundaries-toggle",
                 );
-                toggleButton.addEventListener("click", () => {
+                tileBoundariesToggle.addEventListener("click", () => {
                     map.showTileBoundaries = !map.showTileBoundaries;
-                    toggleButton.textContent = map.showTileBoundaries
+                    tileBoundariesToggle.textContent = map.showTileBoundaries
                         ? "Hide Tile Boundaries"
                         : "Show Tile Boundaries";
                 });
