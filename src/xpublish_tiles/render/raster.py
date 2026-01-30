@@ -99,6 +99,21 @@ def _apply_out_of_range_colors(
     if under_mask is None and over_mask is None:
         return image
 
+    should_flip = False
+    if mesh.dims:
+        y_dim = mesh.dims[0]
+        if y_dim in mesh.coords:
+            y_vals = np.asarray(mesh.coords[y_dim])
+            if y_vals.size >= 2 and y_vals[0] < y_vals[-1]:
+                # Datashader's PIL output is top-down; flip if y increases upward.
+                should_flip = True
+
+    if should_flip:
+        if under_mask is not None:
+            under_mask = np.flipud(under_mask)
+        if over_mask is not None:
+            over_mask = np.flipud(over_mask)
+
     if image.mode != "RGBA":
         image = image.convert("RGBA")
     img_array = np.array(image)
