@@ -15,6 +15,8 @@ def create_query_params(
     style="raster",
     variant="viridis",
     colormap=None,
+    abovemaxcolor=None,
+    belowmincolor=None,
 ):
     """Create QueryParams instance using test tiles and TMS."""
     epsg_code = tms.crs.to_epsg()
@@ -42,5 +44,7 @@ def create_query_params(
         variant=variant,
         colorscalerange=colorscalerange,
         colormap=colormap,
+        abovemaxcolor=abovemaxcolor,
+        belowmincolor=belowmincolor,
         format=ImageFormat.PNG,
     )

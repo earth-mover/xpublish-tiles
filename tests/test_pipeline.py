@@ -39,6 +39,7 @@ from xpublish_tiles.testing.datasets import (
     GLOBAL_6KM_360,
     GLOBAL_NANS,
     HRRR,
+    IFS,
     PARA,
 )
 from xpublish_tiles.testing.lib import (
@@ -51,6 +52,7 @@ from xpublish_tiles.testing.tiles import (
     PARA_TILES,
     TILES,
     WEBMERC_TMS,
+    WGS84_TMS,
 )
 from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
 
@@ -321,6 +323,42 @@ async def test_categorical_out_of_range_values_are_transparent(pytestconfig):
 
     if pytestconfig.getoption("--visualize"):
         visualize_tile(modified_result, tile)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "abovemaxcolor,belowmincolor",
+    [
+        pytest.param("transparent", "transparent", id="transparent"),
+        pytest.param("#ff0000", "#0000ff", id="red_blue"),
+        pytest.param("extend", "extend", id="extend"),
+    ],
+)
+async def test_continuous_data_with_range_colors(
+    abovemaxcolor, belowmincolor, png_snapshot, pytestconfig
+):
+    """Test continuous data with abovemaxcolor/belowmincolor parameters.
+
+    Note: This test verifies that the abovemaxcolor/belowmincolor parameters
+    are passed through the pipeline correctly. The IFS dataset has data in
+    the range [-0.92, 0.92], and we set colorscalerange=(-0.5, 0.5) so that
+    ~25% of values are above max and ~25% are below min.
+    """
+    ds = IFS.create().isel(time=0, step=0)
+
+    tile, tms = Tile(x=2, y=1, z=2), WGS84_TMS
+    query_params = create_query_params(
+        tile,
+        tms,
+        colorscalerange=(-0.5, 0.5),
+        abovemaxcolor=abovemaxcolor,
+        belowmincolor=belowmincolor,
+    )
+    result = await pipeline(ds, query_params)
+
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(result, png_snapshot, tile=tile, tms=tms)
 
 
 @pytest.mark.asyncio

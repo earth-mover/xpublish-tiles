@@ -1,6 +1,7 @@
 import asyncio
 from unittest.mock import patch
 
+import matplotlib as mpl
 import numpy as np
 import pyproj
 import pytest
@@ -10,7 +11,12 @@ from hypothesis.extra import numpy as npst
 
 import xarray as xr
 from xpublish_tiles.config import config
-from xpublish_tiles.lib import epsg4326to3857, transform_chunk, transform_coordinates
+from xpublish_tiles.lib import (
+    apply_range_colors,
+    epsg4326to3857,
+    transform_chunk,
+    transform_coordinates,
+)
 
 
 @given(
@@ -256,3 +262,97 @@ def test_transform_coordinates_large_broadcast():
     # Since x_values is 1D and x_transformed is 2D, we compare the first row
     assert not np.array_equal(x_transformed.data[0, :], x_values)
     assert not np.array_equal(y_transformed.data[:, 0], y_values)
+
+
+def _get_over_color(cmap):
+    """Get the over color from a colormap (for testing)."""
+    return cmap._rgba_over  # type: ignore[attr-defined]
+
+
+def _get_under_color(cmap):
+    """Get the under color from a colormap (for testing)."""
+    return cmap._rgba_under  # type: ignore[attr-defined]
+
+
+class TestApplyRangeColors:
+    """Tests for the apply_range_colors function."""
+
+    def test_apply_range_colors_sets_over_color(self):
+        """Test that apply_range_colors sets the over color correctly."""
+        cmap = mpl.colormaps.get_cmap("viridis")
+        result = apply_range_colors(cmap, "#ff0000", None)
+
+        # Over color should be set to red
+        assert _get_over_color(result) == pytest.approx((1.0, 0.0, 0.0, 1.0), rel=0.01)
+        # Under color should be unchanged from original
+        assert _get_under_color(result) == _get_under_color(cmap)
+
+    def test_apply_range_colors_sets_under_color(self):
+        """Test that apply_range_colors sets the under color correctly."""
+        cmap = mpl.colormaps.get_cmap("viridis")
+        result = apply_range_colors(cmap, None, "#0000ff")
+
+        # Under color should be set to blue
+        assert _get_under_color(result) == pytest.approx((0.0, 0.0, 1.0, 1.0), rel=0.01)
+        # Over color should be unchanged from original
+        assert _get_over_color(result) == _get_over_color(cmap)
+
+    def test_apply_range_colors_sets_both_colors(self):
+        """Test that apply_range_colors sets both over and under colors."""
+        cmap = mpl.colormaps.get_cmap("viridis")
+        result = apply_range_colors(cmap, "#ff0000", "#0000ff")
+
+        assert _get_over_color(result) == pytest.approx((1.0, 0.0, 0.0, 1.0), rel=0.01)
+        assert _get_under_color(result) == pytest.approx((0.0, 0.0, 1.0, 1.0), rel=0.01)
+
+    def test_apply_range_colors_transparent(self):
+        """Test that apply_range_colors handles transparent correctly."""
+        cmap = mpl.colormaps.get_cmap("viridis")
+        result = apply_range_colors(cmap, "transparent", "transparent")
+
+        assert _get_over_color(result) == (0, 0, 0, 0)
+        assert _get_under_color(result) == (0, 0, 0, 0)
+
+    def test_apply_range_colors_extend_leaves_unchanged(self):
+        """Test that apply_range_colors with 'extend' leaves colors unchanged."""
+        cmap = mpl.colormaps.get_cmap("viridis")
+        original_over = _get_over_color(cmap)
+        original_under = _get_under_color(cmap)
+
+        result = apply_range_colors(cmap, "extend", "extend")
+
+        assert _get_over_color(result) == original_over
+        assert _get_under_color(result) == original_under
+
+    def test_apply_range_colors_none_leaves_unchanged(self):
+        """Test that apply_range_colors with None leaves colors unchanged."""
+        cmap = mpl.colormaps.get_cmap("viridis")
+        original_over = _get_over_color(cmap)
+        original_under = _get_under_color(cmap)
+
+        result = apply_range_colors(cmap, None, None)
+
+        assert _get_over_color(result) == original_over
+        assert _get_under_color(result) == original_under
+
+    def test_apply_range_colors_does_not_modify_original(self):
+        """Test that apply_range_colors returns a copy and doesn't modify original."""
+        cmap = mpl.colormaps.get_cmap("viridis")
+        original_over = _get_over_color(cmap)
+        original_under = _get_under_color(cmap)
+
+        result = apply_range_colors(cmap, "#ff0000", "#0000ff")
+
+        # Original should be unchanged
+        assert _get_over_color(cmap) == original_over
+        assert _get_under_color(cmap) == original_under
+        # Result should be different
+        assert result is not cmap
+
+    def test_apply_range_colors_named_colors(self):
+        """Test that apply_range_colors handles named colors correctly."""
+        cmap = mpl.colormaps.get_cmap("viridis")
+        result = apply_range_colors(cmap, "red", "blue")
+
+        assert _get_over_color(result) == pytest.approx((1.0, 0.0, 0.0, 1.0), rel=0.01)
+        assert _get_under_color(result) == pytest.approx((0.0, 0.0, 1.0, 1.0), rel=0.01)
