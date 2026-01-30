@@ -432,6 +432,13 @@ async def apply_slicers(
                     raise AsyncLoadTimeoutError(
                         f"Async data loading timed out after {timeout}s. Server may be overloaded."
                     ) from None
+                except ExceptionGroup as eg:
+                    logger.error(
+                        "Unhandled errors in TaskGroup",
+                        error_count=len(eg.exceptions),
+                        errors=[str(e) for e in eg.exceptions],
+                    )
+                    raise
         else:
             with log_duration("load data subsets", "📥"):
                 results = [subset.load() for subset in subsets]
