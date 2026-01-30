@@ -12,7 +12,6 @@ from pyproj.aoi import BBox
 import xarray as xr
 from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
-    Curvilinear,
     GridMetadata,
     GridSystem,
     GridSystem2D,
@@ -503,16 +502,6 @@ def coarsen(
     return coarsened.assign_coords(new_coords)
 
 
-def get_coordinate_space_width(transformer: pyproj.Transformer) -> float:
-    """Get the X coordinate space width from a transformer (source CRS must be geographic)."""
-    # Calculate coordinate space width using ±180° transform
-    # This is unavoidable since AreaOfUse for a CRS is always in lat/lon
-    # We are assuming that the "from" CRS for the transformer is geographic.
-    assert transformer.source_crs is not None and transformer.source_crs.is_geographic
-    left, _, right, _ = transformer.transform_bounds(-180, -90, 180, 90)
-    return abs(right - left)
-
-
 def has_coordinate_discontinuity(
     coordinates: np.ndarray,
     coordinate_space_width: float,
@@ -571,7 +560,7 @@ def has_coordinate_discontinuity(
 
 
 def fix_coordinate_discontinuities(
-    coordinates: np.ndarray, transformer: pyproj.Transformer, *, axis: int, bbox: BBox
+    coordinates: np.ndarray, transformer: pyproj.Transformer, *, bbox: BBox
 ) -> np.ndarray:
     """
     Fix coordinate discontinuities that occur during coordinate transformation.
@@ -594,11 +583,17 @@ def fix_coordinate_discontinuities(
     >>> coords = np.array([350, 355, 360, 0, 5, 10])  # Wrap from 360 to 0
     >>> transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:4326", always_xy=True)
     >>> bbox = BBox(west=-10, east=20, south=-90, north=90)
-    >>> fixed = fix_coordinate_discontinuities(coords, transformer, axis=0, bbox=bbox)
+    >>> fixed = fix_coordinate_discontinuities(coords, transformer, bbox=bbox)
     >>> gaps = np.diff(fixed)
     >>> assert np.all(np.abs(gaps) < 20), f"Large gap remains: {gaps}"
     """
-    coordinate_space_width = get_coordinate_space_width(transformer)
+    # Calculate coordinate space width using ±180° transform
+    # This is unavoidable since AreaOfUse for a CRS is always in lat/lon
+    # We are assuming that the "from" CRS for the transformer is geographic.
+    assert transformer.source_crs is not None and transformer.source_crs.is_geographic
+    left, _, right, _ = transformer.transform_bounds(-180, -90, 180, 90)
+    coordinate_space_width = abs(right - left)
+
     if coordinate_space_width == 0:
         # ETRS89 returns +N for both -180 & 180
         # it's area of use is (-35.58, 24.6, 44.83, 84.73)
@@ -1000,31 +995,13 @@ async def subset_to_bbox(
         # regardless of how we may modify the coordinates *before* transforming.
         if has_discontinuity:
             if isinstance(grid, GridSystem2D):
-                # Fix discontinuities along X dimension
                 fixed = fix_coordinate_discontinuities(
                     newX.data,
                     input_to_output,
-                    axis=newX.get_axis_num(grid.Xdim),
                     bbox=bbox,
                 )
                 newX = newX.copy(data=fixed)
 
-                # For tripolar grids, check if Y discontinuity remains after X fix
-                # FYI, this is a bit fragile but is also the cleanest solution
-                # I have found to date.
-                if isinstance(grid, Curvilinear) and grid.is_tripolar:
-                    projected_width = get_coordinate_space_width(input_to_output)
-                    still_has_discontinuity_y = has_coordinate_discontinuity(
-                        newX.data, projected_width, axis=newX.get_axis_num(grid.Ydim)
-                    )
-                    if still_has_discontinuity_y:
-                        fixed = fix_coordinate_discontinuities(
-                            newX.data,
-                            input_to_output,
-                            axis=newX.get_axis_num(grid.Ydim),
-                            bbox=bbox,
-                        )
-                        newX = newX.copy(data=fixed)
             elif isinstance(grid, Triangular):
                 anti = next(iter(slicers[grid.dim])).antimeridian_vertices
                 for verts in [anti["pos"], anti["neg"]]:
@@ -1032,7 +1009,6 @@ async def subset_to_bbox(
                         newX.data[verts] = fix_coordinate_discontinuities(
                             newX.data[verts],
                             input_to_output,
-                            axis=newX.get_axis_num(grid.dim),
                             bbox=bbox,
                         )
         newda = subset.assign_coords({grid.X: newX, grid.Y: newY})
