@@ -241,6 +241,7 @@ def test_one_dimensional_dataset():
     assert layer["extents"] == {
         "time": {
             "default": "2001-01-05T00:00:00",
+            "resolution": "P1D",
             "interval": ["2001-01-01T00:00:00", "2001-01-05T00:00:00"],
         }
     }
