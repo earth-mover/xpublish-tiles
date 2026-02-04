@@ -73,6 +73,21 @@ land_cover:flag_colors = "#FF0000 #006600 #732600 #00FF00 #FAAA00 #7FE57F" ;
 
 See the [ncWMS convention docs on Categorical Data](https://web.archive.org/web/20240729161558/https://reading-escience-centre.gitbooks.io/ncwms-user-guide/content/05-data_formats.html#vector) for more.
 
+### Out-of-Range Colors
+
+For continuous data, you can control how values outside the `colorscalerange` are rendered using the `abovemaxcolor` and `belowmincolor` parameters.
+
+**Accepted values:**
+- `extend` (default): Use the max/min color from the palette
+- `transparent`: Render as fully transparent
+- Hex color: e.g., `#FF0000` or `#FF0000AA` (with alpha)
+- Named color: Any matplotlib-recognized color name (e.g., `red`, `blue`)
+
+**Example:**
+```
+http://localhost:8080/tiles/WebMercatorQuad/4/4/14?variables=temperature&colorscalerange=280,300&abovemaxcolor=red&belowmincolor=transparent
+```
+
 ### Dimension selection with methods
 
 `xpublish-tiles` supports flexible dimension selection using a DSL that allows you to specify selection methods. This is particularly useful for temporal and vertical coordinates where you may want to select the nearest value, or use forward/backward fill.
