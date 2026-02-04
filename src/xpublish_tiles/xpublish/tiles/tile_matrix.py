@@ -234,20 +234,9 @@ async def extract_dimension_extents(
     grid = await async_run(guess_grid_system, ds, name)
     data_array = ds[name]
 
-    # Get CF axes information
-    try:
-        cf_axes = data_array.cf.axes
-    except Exception:
-        # Fallback if cf_xarray fails
-        cf_axes = {}
-
     # Identify spatial and temporal dimensions using CF conventions
     spatial_dims = {grid.Xdim, grid.Ydim}
-    temporal_dims = set()
     vertical_dims = {grid.Z} if grid.Z else set()
-
-    # Add CF-detected temporal dimensions (T axis)
-    temporal_dims.update(cf_axes.get("T", []))
 
     for dim_name in data_array.dims:
         # Skip spatial dimensions (X, Y axes)
@@ -260,9 +249,7 @@ async def extract_dimension_extents(
 
         # Determine dimension type using CF axes
         dim_type = DimensionType.CUSTOM
-        if dim_name in temporal_dims:
-            dim_type = DimensionType.TEMPORAL
-        elif dim_name in vertical_dims:
+        if dim_name in vertical_dims:
             dim_type = DimensionType.VERTICAL
 
         # Extract coordinate values
@@ -275,17 +262,21 @@ async def extract_dimension_extents(
         if len(values) == 0:
             extent = []
         elif np.issubdtype(values.dtype, np.timedelta64):
+            dim_type = DimensionType.TEMPORAL
             extent = [str(values[0]), str(values[-1])]
             if len(values) <= max_actual_values:
                 actual_values = [str(value) for value in values]
         elif np.issubdtype(values.dtype, np.datetime64):
-            dt_values = cast(list[pd.Timestamp], pd.to_datetime(values))
+            dim_type = DimensionType.TEMPORAL
             # Convert datetime to ISO strings - only get first and last values for extent
-            first_datetime = dt_values[0].isoformat()
-            last_datetime = dt_values[-1].isoformat()
+            first_datetime = pd.to_datetime(values[0]).isoformat()
+            last_datetime = pd.to_datetime(values[-1]).isoformat()
             extent = [first_datetime, last_datetime]
             if len(values) <= max_actual_values:
-                actual_values = [value.isoformat() for value in dt_values]
+                actual_values = [
+                    value.isoformat()
+                    for value in cast(list[pd.Timestamp], pd.to_datetime(values))
+                ]
         elif np.issubdtype(values.dtype, np.number):
             # Numeric coordinates
             extent = [values.min(), values.max()]
