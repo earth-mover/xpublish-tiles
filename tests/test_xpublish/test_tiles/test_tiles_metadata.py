@@ -6,14 +6,15 @@ import pytest
 
 import xarray as xr
 from xpublish_tiles.lib import VariableNotFoundError
+from xpublish_tiles.xpublish.tiles.metadata import (
+    _calculate_temporal_resolution,
+    _pandas_freq_to_iso8601,
+    extract_dataset_extents,
+)
 
 
 async def test_extract_dataset_extents():
     """Test the extract_dataset_extents function directly"""
-    import pandas as pd
-
-    from xpublish_tiles.xpublish.tiles.metadata import extract_dataset_extents
-
     # Create a dataset with multiple dimensions
     time_coords = pd.date_range("2023-01-01", periods=3, freq="h")
     elevation_coords = [0, 100, 500]
@@ -96,8 +97,6 @@ async def test_extract_dataset_extents():
 
 async def test_extract_dataset_extents_empty():
     """Test extract_dataset_extents with dataset containing no non-spatial dimensions"""
-    from xpublish_tiles.xpublish.tiles.metadata import extract_dataset_extents
-
     # Create a dataset with only spatial dimensions
     dataset = xr.Dataset(
         {
@@ -126,17 +125,14 @@ async def test_extract_dataset_extents_empty():
 
 async def test_extract_dataset_extents_multiple_variables():
     """Test extract_dataset_extents with multiple variables having different dimensions"""
-    import pandas as pd
 
-    from xpublish_tiles.xpublish.tiles.metadata import extract_dataset_extents
-
-    time_coords = pd.date_range("2023-01-01", periods=2, freq="D")
+    time_coords = pd.date_range("2023-01-01", periods=4, freq="D")
     depth_coords = [0, 10]
 
     dataset = xr.Dataset(
         {
             "surface_temp": xr.DataArray(
-                np.random.randn(2, 5, 10),
+                np.random.randn(4, 5, 10),
                 dims=["time", "lat", "lon"],
                 coords={
                     "time": (
@@ -157,7 +153,7 @@ async def test_extract_dataset_extents_multiple_variables():
                 },
             ),
             "ocean_temp": xr.DataArray(
-                np.random.randn(2, 2, 5, 10),
+                np.random.randn(4, 2, 5, 10),
                 dims=["time", "depth", "lat", "lon"],
                 coords={
                     "time": (
@@ -199,7 +195,8 @@ async def test_extract_dataset_extents_multiple_variables():
     # Time should be from the ocean_temp variable
     time_extent = extents_ocean["time"]
     assert time_extent["interval"][0] == "2023-01-01T00:00:00"
-    assert time_extent["interval"][1] == "2023-01-02T00:00:00"
+    assert time_extent["interval"][1] == "2023-01-04T00:00:00"
+    assert time_extent["resolution"] == "P1D"  # Daily resolution
 
     # Depth should be from the ocean_temp variable
     depth_extent = extents_ocean["depth"]
@@ -208,80 +205,108 @@ async def test_extract_dataset_extents_multiple_variables():
 
 
 @pytest.mark.parametrize("use_cftime", [True, False])
-def test_calculate_temporal_resolution(use_cftime):
-    """Test the _calculate_temporal_resolution function directly"""
-    from xpublish_tiles.xpublish.tiles.metadata import _calculate_temporal_resolution
-
-    # Test hourly resolution
-    hourly_values = xr.DataArray(
-        xr.date_range("2023-01-01T00:00:00", periods=4, freq="h", use_cftime=use_cftime),
+@pytest.mark.parametrize(
+    "freq,expected",
+    [
+        ("h", "PT1H"),
+        ("6h", "PT6H"),
+        ("15min", "PT15M"),
+        ("30s", "PT30S"),
+        ("D", "P1D"),
+        ("7D", "P7D"),
+        ("MS", "P1M"),
+        ("QS", "P3M"),
+        ("YS", "P1Y"),
+        ("5YS", "P5Y"),
+        ("10YS", "P10Y"),
+    ],
+)
+def test_calculate_temporal_resolution(use_cftime, freq, expected):
+    """Test _calculate_temporal_resolution with various frequencies"""
+    values = xr.DataArray(
+        xr.date_range("2000-01-01T00:00:00", periods=4, freq=freq, use_cftime=use_cftime),
         dims="time",
         name="time",
     )
-    assert _calculate_temporal_resolution(hourly_values) == "PT1H"
+    assert _calculate_temporal_resolution(values) == expected
 
-    # Test daily resolution
-    daily_values = xr.DataArray(
-        xr.date_range(
-            "2023-01-01T00:00:00", periods=4, freq="24h", use_cftime=use_cftime
-        ),
-        dims="time",
-        name="time",
-    )
-    assert _calculate_temporal_resolution(daily_values) == "P1D"
 
-    # Test monthly resolution (approximately)
-    monthly_values = xr.DataArray(
-        xr.date_range("2023-01-01T00:00:00", periods=4, freq="MS", use_cftime=use_cftime),
-        dims="time",
-        name="time",
-    )
-
-    result = _calculate_temporal_resolution(monthly_values)
-    assert result.startswith("P") and result.endswith("D")  # Should be in days
-
-    # Test 15-minute resolution
-    minute_values = xr.DataArray(
-        xr.date_range(
-            "2023-01-01T00:00:00", periods=4, freq="15min", use_cftime=use_cftime
-        ),
-        dims="time",
-        name="time",
-    )
-
-    assert _calculate_temporal_resolution(minute_values) == "PT15M"
-
-    # Test 30-second resolution
-    second_values = xr.DataArray(
-        xr.date_range(
-            "2023-01-01T00:00:00", periods=4, freq="30s", use_cftime=use_cftime
-        ),
-        dims="time",
-        name="time",
-    )
-
-    assert _calculate_temporal_resolution(second_values) == "PT30S"
+@pytest.mark.parametrize(
+    "pandas_freq,expected_iso",
+    [
+        # Hours
+        ("h", "PT1H"),
+        ("H", "PT1H"),
+        ("3h", "PT3H"),
+        ("6H", "PT6H"),
+        # Minutes
+        ("min", "PT1M"),
+        ("T", "PT1M"),
+        ("15min", "PT15M"),
+        ("30T", "PT30M"),
+        # Seconds
+        ("s", "PT1S"),
+        ("S", "PT1S"),
+        ("30s", "PT30S"),
+        # Days
+        ("D", "P1D"),
+        ("7D", "P7D"),
+        # Weeks
+        ("W", "P7D"),
+        ("W-SUN", "P7D"),
+        ("2W", "P14D"),
+        # Months
+        ("MS", "P1M"),
+        ("ME", "P1M"),
+        ("M", "P1M"),
+        ("3MS", "P3M"),
+        # Quarters
+        ("QS", "P3M"),
+        ("QE", "P3M"),
+        ("QS-OCT", "P3M"),
+        ("2QS", "P6M"),
+        # Years
+        ("YS", "P1Y"),
+        ("YE", "P1Y"),
+        ("Y", "P1Y"),
+        ("YS-JAN", "P1Y"),
+        ("AS", "P1Y"),
+        ("10YS", "P10Y"),
+        ("5YS-JAN", "P5Y"),
+        # Unknown
+        ("unknown", None),
+        ("", None),
+    ],
+)
+def test_pandas_freq_to_iso8601(pandas_freq, expected_iso):
+    """Test conversion of pandas frequency strings to ISO 8601 durations"""
+    assert _pandas_freq_to_iso8601(pandas_freq) == expected_iso
 
 
 def test_calculate_temporal_resolution_edge_cases():
     """Test _calculate_temporal_resolution with edge cases"""
-    from xpublish_tiles.xpublish.tiles.metadata import _calculate_temporal_resolution
-
-    # Test edge cases
-    assert (
-        _calculate_temporal_resolution(xr.DataArray([], dims="time")) == "PT1H"
-    )  # Empty list
+    # Edge cases return None (not a guessed default)
+    assert _calculate_temporal_resolution(xr.DataArray([], dims="time")) is None  # Empty
     assert (
         _calculate_temporal_resolution(
             xr.DataArray(pd.DatetimeIndex(["2023-01-01T00:00:00"]), dims="time")
         )
-        == "PT1H"
+        is None
     )  # Single value
     assert (
-        _calculate_temporal_resolution(xr.DataArray([1, 2, 3], dims="time")) == "PT1H"
-    )  # Non-string values
+        _calculate_temporal_resolution(
+            xr.DataArray(
+                pd.DatetimeIndex(["2023-01-01T00:00:00", "2023-01-01T01:00:00"]),
+                dims="time",
+            )
+        )
+        is None
+    )  # Two values (need at least 3 for xr.infer_freq)
+    assert (
+        _calculate_temporal_resolution(xr.DataArray([1, 2, 3], dims="time")) is None
+    )  # Non-datetime values
 
-    # Test irregular intervals (should use average)
+    # Irregular intervals return None (no consistent frequency)
     irregular_values = xr.DataArray(
         pd.DatetimeIndex(
             [
@@ -293,14 +318,13 @@ def test_calculate_temporal_resolution_edge_cases():
         dims="time",
         name="time",
     )
-    result = _calculate_temporal_resolution(irregular_values)
-    assert result == "PT2H"  # Average of 1 and 3 hours
+    assert _calculate_temporal_resolution(irregular_values) is None
 
-    # Test with invalid datetime strings (should fallback)
+    # Invalid datetime strings return None
     invalid_values = xr.DataArray(
-        ["not-a-date", "also-not-a-date"], dims="time", name="time"
+        ["not-a-date", "also-not-a-date", "still-not-a-date"], dims="time", name="time"
     )
-    assert _calculate_temporal_resolution(invalid_values) == "PT1H"
+    assert _calculate_temporal_resolution(invalid_values) is None
 
 
 async def test_create_tileset_metadata_with_extents():

@@ -1,4 +1,5 @@
 import functools
+import re
 from typing import Any, cast
 
 import morecantile.models
@@ -160,7 +161,9 @@ async def extract_dataset_extents(
         if len(values) > 1:
             if dim_extent.type == DimensionType.TEMPORAL:
                 # For temporal dimensions, try to calculate time resolution
-                extent_dict["resolution"] = _calculate_temporal_resolution(values)
+                temporal_resolution = _calculate_temporal_resolution(values)
+                if temporal_resolution is not None:
+                    extent_dict["resolution"] = temporal_resolution
             elif np.issubdtype(values.data.dtype, np.integer) or np.issubdtype(
                 values.data.dtype, np.floating
             ):
@@ -191,37 +194,75 @@ async def extract_dataset_extents(
     return extents
 
 
-def _calculate_temporal_resolution(values: xr.DataArray) -> str:
-    """Calculate temporal resolution from datetime values"""
-    if hasattr(values, "size"):
-        if values.size < 2:
-            return "PT1H"  # Default to hourly
-    elif not bool(values):
-        return "PT1H"  # Default to hourly
+def _pandas_freq_to_iso8601(freq: str) -> str | None:
+    """Convert pandas frequency string to ISO 8601 duration format.
+
+    Args:
+        freq: Pandas frequency string (e.g., 'h', 'D', 'MS', 'YS-JAN')
+
+    Returns:
+        ISO 8601 duration string (e.g., 'PT1H', 'P1D', 'P1M', 'P1Y') or None if unknown
+    """
+    # Extract numeric prefix (e.g., '3' from '3h', '10' from '10YS')
+    match = re.match(r"^(\d*)(.+)$", freq)
+    if not match:
+        return None
+
+    count_str, base = match.groups()
+    count = int(count_str) if count_str else 1
+
+    # Normalize base by removing anchors (e.g., 'YS-JAN' -> 'YS', 'W-SUN' -> 'W')
+    base_normalized = base.split("-")[0]
+
+    # Map pandas aliases to ISO 8601
+    # Time-based (use PT prefix)
+    if base_normalized in ("h", "H"):
+        return f"PT{count}H"
+    if base_normalized in ("min", "T"):
+        return f"PT{count}M"
+    if base_normalized in ("s", "S"):
+        return f"PT{count}S"
+
+    # Date-based (use P prefix)
+    if base_normalized == "D":
+        return f"P{count}D"
+    if base_normalized == "W":
+        return f"P{count * 7}D"
+    if base_normalized in ("MS", "ME", "M"):
+        return f"P{count}M"
+    if base_normalized in ("QS", "QE", "Q"):
+        return f"P{count * 3}M"
+    if base_normalized in ("YS", "YE", "Y", "A", "AS", "AE"):
+        return f"P{count}Y"
+
+    return None
+
+
+def _calculate_temporal_resolution(values: xr.DataArray) -> str | None:
+    """Calculate temporal resolution from datetime values.
+
+    Uses xr.infer_freq() which supports both numpy datetime64 and cftime types.
+    Returns ISO 8601 duration format for regular frequencies, None for irregular
+    or undeterminable frequencies.
+
+    Args:
+        values: xarray DataArray with datetime-like values
+
+    Returns:
+        ISO 8601 duration string (e.g., 'PT1H', 'P1D', 'P1M', 'P1Y') or None
+    """
+    # Need at least 3 values for xr.infer_freq
+    if not hasattr(values, "size") or values.size < 3:
+        return None
 
     try:
-        # Calculate differences
-        diffs = values[:10].diff(values.name).dt.total_seconds().data
-
-        # Get the most common difference
-        avg_diff = diffs.mean()
-
-        # Convert to ISO 8601 duration format
-        if avg_diff >= 86400:  # >= 1 day
-            days = int(avg_diff / 86400)
-            return f"P{days}D"
-        elif avg_diff >= 3600:  # >= 1 hour
-            hours = int(avg_diff / 3600)
-            return f"PT{hours}H"
-        elif avg_diff >= 60:  # >= 1 minute
-            minutes = int(avg_diff / 60)
-            return f"PT{minutes}M"
-        else:
-            seconds = int(avg_diff)
-            return f"PT{seconds}S"
-
+        freq = xr.infer_freq(values)
+        if freq is None:
+            return None
+        return _pandas_freq_to_iso8601(freq)
     except Exception:
-        return "PT1H"  # Default fallback
+        # TypeError: not datetime-like, ValueError: not enough values or not 1D
+        return None
 
 
 async def extract_variable_bounding_box(
