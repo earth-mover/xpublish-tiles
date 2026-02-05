@@ -34,6 +34,7 @@ from xpublish_tiles.lib import (
     pad_slicers,
     transform_coordinates,
     transformer_from_crs,
+    unwrap,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.types import (
@@ -501,17 +502,27 @@ def coarsen(
     return coarsened.assign_coords(new_coords)
 
 
-def has_coordinate_discontinuity(coordinates: np.ndarray, *, axis: int) -> bool:
+def has_coordinate_discontinuity(
+    coordinates: np.ndarray,
+    coordinate_space_width: float,
+    *,
+    axis: int,
+    check_antimeridian: bool = False,
+) -> bool:
     """
-    Detect coordinate discontinuities in geographic longitude coordinates.
-
-    This function analyzes longitude coordinates to detect antimeridian crossings
-    that will cause discontinuities when transformed to projected coordinate systems.
+    Detect coordinate discontinuities by checking for gaps > half the coordinate space width.
 
     Parameters
     ----------
     coordinates : np.ndarray
-        Geographic longitude coordinates to analyze
+        Coordinates to analyze (geographic or projected)
+    coordinate_space_width : float
+        Width of the coordinate space (360.0 for geographic degrees,
+        ~40M meters for Web Mercator, etc.)
+    axis : int
+        Axis along which to check for discontinuities
+    check_antimeridian : bool
+        If True, also check for 0→360 data spanning the antimeridian (180°).
 
     Returns
     -------
@@ -529,30 +540,27 @@ def has_coordinate_discontinuity(coordinates: np.ndarray, *, axis: int) -> bool:
     - [350°, 351°, ..., 10°, 11°] → Crosses 0°/360° boundary
     - [180°, 181°, ..., 190°] → Crosses antimeridian in 0→360 system
     """
-    if len(coordinates) == 0:
+    if coordinates.size == 0 or coordinate_space_width == 0:
         return False
 
-    x_min, x_max = coordinates.min(), coordinates.max()
     gaps = np.abs(np.diff(coordinates, axis=axis))
-
-    if len(gaps) == 0:
+    if gaps.size == 0:
         return False
 
-    max_gap = gaps.max()
+    if gaps.max() > coordinate_space_width / 2:
+        return True
 
-    # Detect antimeridian crossing in different coordinate systems:
-    # 1. For -180→180: look for gaps > 180°
-    # 2. For 0→360: look for data crossing 180° longitude (antimeridian)
-    if max_gap > 180.0:
-        return True
-    elif x_min <= 180.0 <= x_max:  # Data crosses the antimeridian (180°/-180°)
-        return True
+    # For 0→360 geographic data, also check if data spans the antimeridian (180°)
+    if check_antimeridian:
+        x_min, x_max = coordinates.min(), coordinates.max()
+        if x_min <= 180.0 <= x_max:
+            return True
 
     return False
 
 
 def fix_coordinate_discontinuities(
-    coordinates: np.ndarray, transformer: pyproj.Transformer, *, axis: int, bbox: BBox
+    coordinates: np.ndarray, transformer: pyproj.Transformer, *, bbox: BBox
 ) -> np.ndarray:
     """
     Fix coordinate discontinuities that occur during coordinate transformation.
@@ -563,7 +571,7 @@ def fix_coordinate_discontinuities(
     intelligent offset corrections to make coordinates continuous.
 
     The algorithm:
-    1. Uses np.unwrap to fix coordinate discontinuities automatically
+    1. Uses skimage.restoration.unwrap_phase to fix coordinate discontinuities automatically
     2. Calculates the expected coordinate space width using transformer bounds
     3. Shifts the result to maximize overlap with the bbox
 
@@ -575,7 +583,7 @@ def fix_coordinate_discontinuities(
     >>> coords = np.array([350, 355, 360, 0, 5, 10])  # Wrap from 360 to 0
     >>> transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:4326", always_xy=True)
     >>> bbox = BBox(west=-10, east=20, south=-90, north=90)
-    >>> fixed = fix_coordinate_discontinuities(coords, transformer, axis=0, bbox=bbox)
+    >>> fixed = fix_coordinate_discontinuities(coords, transformer, bbox=bbox)
     >>> gaps = np.diff(fixed)
     >>> assert np.all(np.abs(gaps) < 20), f"Large gap remains: {gaps}"
     """
@@ -583,7 +591,6 @@ def fix_coordinate_discontinuities(
     # This is unavoidable since AreaOfUse for a CRS is always in lat/lon
     # We are assuming that the "from" CRS for the transformer is geographic.
     assert transformer.source_crs is not None and transformer.source_crs.is_geographic
-    # transform_bounds works better than transform for this job
     left, _, right, _ = transformer.transform_bounds(-180, -90, 180, 90)
     coordinate_space_width = abs(right - left)
 
@@ -593,8 +600,8 @@ def fix_coordinate_discontinuities(
         # we ignore such things for now
         return coordinates
 
-    # Step 1: Use np.unwrap to fix discontinuities
-    unwrapped_coords = np.unwrap(coordinates, axis=axis, period=coordinate_space_width)
+    # Step 1: Use unwrap to fix discontinuities
+    unwrapped_coords = unwrap(coordinates, width=coordinate_space_width)
 
     # Step 2: Determine optimal shift based on coordinate and bbox bounds
     coord_min, coord_max = unwrapped_coords.min(), unwrapped_coords.max()
@@ -919,6 +926,7 @@ async def subset_to_bbox(
             left=bbox.west, right=bbox.east, top=bbox.north, bottom=bbox.south
         )
         if grid.crs.is_geographic:
+            # Handle antimeridian crossing: west > east means bbox crosses -180/180
             west = west - 360 if west > east else west
 
         input_bbox = BBox(west=west, south=south, east=east, north=north)
@@ -954,8 +962,15 @@ async def subset_to_bbox(
 
         if grid.crs.is_geographic:
             if isinstance(grid, GridSystem2D):
+                # Check for discontinuities on geographic coords before projection.
+                # This is an optimization - we could also detect after projecting to the target CRS.
+                # However, that would be a tax on every render. So instead we look for
+                # the anti-meridian discontinuity specifically.
                 has_discontinuity = has_coordinate_discontinuity(
-                    subset[grid.X].data, axis=subset[grid.X].get_axis_num(grid.Xdim)
+                    subset[grid.X].data,
+                    360.0,
+                    axis=subset[grid.X].get_axis_num(grid.Xdim),
+                    check_antimeridian=True,
                 )
             elif isinstance(grid, Triangular):
                 anti = next(iter(slicers[grid.Xdim])).antimeridian_vertices
@@ -974,15 +989,19 @@ async def subset_to_bbox(
             )
 
         # Fix coordinate discontinuities in transformed coordinates if detected
+        # For example, when transforming to WebMercator pyproj will always return values
+        # in the approximate range -20e6 -> 20e6 m range. So if the dataset's anti-meridian
+        # discontinuity is in the tile; it will be preserved by the transformation,
+        # regardless of how we may modify the coordinates *before* transforming.
         if has_discontinuity:
             if isinstance(grid, GridSystem2D):
                 fixed = fix_coordinate_discontinuities(
                     newX.data,
                     input_to_output,
-                    axis=newX.get_axis_num(grid.Xdim),
                     bbox=bbox,
                 )
                 newX = newX.copy(data=fixed)
+
             elif isinstance(grid, Triangular):
                 anti = next(iter(slicers[grid.dim])).antimeridian_vertices
                 for verts in [anti["pos"], anti["neg"]]:
@@ -990,7 +1009,6 @@ async def subset_to_bbox(
                         newX.data[verts] = fix_coordinate_discontinuities(
                             newX.data[verts],
                             input_to_output,
-                            axis=newX.get_axis_num(grid.dim),
                             bbox=bbox,
                         )
         newda = subset.assign_coords({grid.X: newX, grid.Y: newY})

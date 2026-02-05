@@ -58,6 +58,7 @@ from xpublish_tiles.testing.datasets import (
     PARA_HIRES,
     POPDS,
     REDGAUSS_N320,
+    REGIONAL_HYCOM,
     UTM33S_HIRES,
     UTM50S_HIRES,
     Dataset,
@@ -156,10 +157,10 @@ TRIANGULAR_SENTINEL = 1
             Curvilinear(
                 crs=CRS.from_user_input(4326),
                 bbox=BBox(
-                    south=-6.723446318626612,
-                    north=12.551367116112495,
-                    east=120.83720198174792,
-                    west=115.1422776195327,
+                    south=20.752128720086883,
+                    north=59.74090498966864,
+                    east=-82.20037103061796,
+                    west=-117.87869841416263,
                 ),
                 X="lon",
                 Y="lat",
@@ -168,8 +169,8 @@ TRIANGULAR_SENTINEL = 1
                 Z="s_rho",
                 indexes=(
                     CurvilinearCellIndex(
-                        X=CURVILINEAR.create().lon,
-                        Y=CURVILINEAR.create().lat,
+                        X=CURVILINEAR.create().lon.astype(np.float64),
+                        Y=CURVILINEAR.create().lat.astype(np.float64),
                         Xdim="xi_rho",
                         Ydim="eta_rho",
                     ),
@@ -195,6 +196,32 @@ TRIANGULAR_SENTINEL = 1
                 ),
             ),
             id="pop",
+        ),
+        pytest.param(
+            REGIONAL_HYCOM.create(),
+            "foo",
+            Curvilinear(
+                crs=CRS.from_user_input(4326),
+                bbox=BBox(
+                    south=-0.1121322438120842,
+                    north=80.11212921142578,
+                    east=-119.49333190917969,
+                    west=-180.5066680908203,
+                ),
+                X="longitude",
+                Y="latitude",
+                Xdim="X",
+                Ydim="Y",
+                indexes=(
+                    CurvilinearCellIndex(
+                        X=REGIONAL_HYCOM.create().longitude.astype(np.float64),
+                        Y=REGIONAL_HYCOM.create().latitude.astype(np.float64),
+                        Xdim="X",
+                        Ydim="Y",
+                    ),
+                ),
+            ),
+            id="hycom",
         ),
         # pytest.param(
         #     cfxr.datasets.rotds,
@@ -533,9 +560,7 @@ class TestFixCoordinateDiscontinuities:
         transformer = transformer_from_crs("EPSG:4326", "EPSG:4326", always_xy=True)
         transformed_x, _ = transformer.transform(coords, np.zeros_like(coords))
         bbox = BBox(west=-180, east=180, south=-90, north=90)
-        fixed = fix_coordinate_discontinuities(
-            transformed_x, transformer, axis=0, bbox=bbox
-        )
+        fixed = fix_coordinate_discontinuities(transformed_x, transformer, bbox=bbox)
         npt.assert_array_almost_equal(fixed, expected)
 
     def test_wrap_around_web_mercator(self):
@@ -544,9 +569,7 @@ class TestFixCoordinateDiscontinuities:
         transformer = transformer_from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
         transformed_x, _ = transformer.transform(coords, np.zeros_like(coords))
         bbox = BBox(west=170, east=-170, south=-90, north=90)
-        fixed = fix_coordinate_discontinuities(
-            transformed_x, transformer, axis=0, bbox=bbox
-        )
+        fixed = fix_coordinate_discontinuities(transformed_x, transformer, bbox=bbox)
         WIDTH = 40075016.68557849  # SHOULD BE 20037508.34 * 2
         expected = transformed_x.copy()
         expected[:3] -= WIDTH
@@ -554,40 +577,34 @@ class TestFixCoordinateDiscontinuities:
 
     def test_wrap_around_180_to_minus_180(self):
         """Test fixing discontinuity when coordinates wrap from 180 to -180."""
-        coords = np.array([170, 175, 180, -175, -170, -165])
-        expected = np.array([170, 175, 180, 185, 190, 195])
+        coords = np.array([170.0, 175, 180, -175, -170, -165])
+        expected = np.array([170.0, 175, 180, 185, 190, 195])
 
         transformer = transformer_from_crs("EPSG:4326", "EPSG:4326", always_xy=True)
         transformed_x, _ = transformer.transform(coords, np.zeros_like(coords))
         bbox = BBox(west=170, east=180, south=-90, north=90)
-        fixed = fix_coordinate_discontinuities(
-            transformed_x, transformer, axis=0, bbox=bbox
-        )
-        npt.assert_array_equal(fixed, expected)
+        fixed = fix_coordinate_discontinuities(transformed_x, transformer, bbox=bbox)
+        npt.assert_array_almost_equal(fixed, expected)
 
     def test_no_discontinuity(self):
         """Test that coordinates without discontinuity are not modified."""
-        coords = np.array([0, 10, 20, 30, 40, 50])
+        coords = np.array([0.0, 10, 20, 30, 40, 50])
         transformer = transformer_from_crs("EPSG:4326", "EPSG:4326", always_xy=True)
         transformed_x, _ = transformer.transform(coords, np.zeros_like(coords))
         bbox = BBox(west=-10, east=60, south=-90, north=90)
-        fixed = fix_coordinate_discontinuities(
-            transformed_x, transformer, axis=0, bbox=bbox
-        )
+        fixed = fix_coordinate_discontinuities(transformed_x, transformer, bbox=bbox)
         # Should not modify coordinates that don't have discontinuities
-        npt.assert_array_equal(coords, fixed)
+        npt.assert_array_almost_equal(coords, fixed)
 
     def test_small_array(self):
         """Test with very small array."""
-        coords = np.array([350, 0, 10])
-        expected = np.array([-10, 0, 10])
+        coords = np.array([350.0, 0, 10])
+        expected = np.array([-10.0, 0, 10])
         transformer = transformer_from_crs("EPSG:4326", "EPSG:4326", always_xy=True)
         transformed_x, _ = transformer.transform(coords, np.zeros_like(coords))
         bbox = BBox(west=-10, east=20, south=-90, north=90)
-        fixed = fix_coordinate_discontinuities(
-            transformed_x, transformer, axis=0, bbox=bbox
-        )
-        npt.assert_array_equal(fixed, expected)
+        fixed = fix_coordinate_discontinuities(transformed_x, transformer, bbox=bbox)
+        npt.assert_array_almost_equal(fixed, expected)
 
 
 def test_prevent_slice_overlap():
@@ -767,6 +784,17 @@ def _create_test_dataset(
             coords={"x": np.arange(array_size), "y": np.arange(array_size)},
         )
         grid = Curvilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
+    elif grid_type == "curvilinear_hycom":
+        lon, lat = np.meshgrid(lon_coords, lat_coords)
+        ds = xr.Dataset(
+            {
+                "temp": (["y", "x"], data),
+                "lon": (["y", "x"], lon),
+                "lat": (["y", "x"], lat),
+            },
+            coords={"x": np.arange(array_size), "y": np.arange(array_size)},
+        )
+        grid = Curvilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
     elif grid_type == "raster_affine":
         pixel_size_x = (
             (lon_coords[-1] - lon_coords[0]) / (array_size - 1) if array_size > 1 else 1.0
@@ -838,7 +866,9 @@ class TestGridZoomMethods:
     @pytest.mark.parametrize(
         "tms_id", ["WebMercatorQuad", "WGS1984Quad", "WorldCRS84Quad"]
     )
-    @pytest.mark.parametrize("grid_type", ["rectilinear", "curvilinear", "raster_affine"])
+    @pytest.mark.parametrize(
+        "grid_type", ["rectilinear", "curvilinear", "curvilinear_hycom", "raster_affine"]
+    )
     @given(data=st.data())
     @settings(deadline=None)
     def test_max_zoom_matches_dataset_resolution(self, tms_id, grid_type, data):
@@ -860,7 +890,9 @@ class TestGridZoomMethods:
     @pytest.mark.parametrize(
         "tms_id", ["WebMercatorQuad", "WGS1984Quad", "WorldCRS84Quad"]
     )
-    @pytest.mark.parametrize("grid_type", ["rectilinear", "curvilinear", "raster_affine"])
+    @pytest.mark.parametrize(
+        "grid_type", ["rectilinear", "curvilinear", "curvilinear_hycom", "raster_affine"]
+    )
     @given(data=st.data())
     @settings(deadline=None)
     def test_min_zoom_matches_renderable_size_limit(self, tms_id, grid_type, data):

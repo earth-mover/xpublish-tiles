@@ -7,6 +7,7 @@ import cf_xarray  # noqa: F401 - Enable cf accessor
 import morecantile
 import numpy as np
 import pandas as pd
+import pyproj
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
@@ -30,6 +31,7 @@ from xpublish_tiles.lib import (
 from xpublish_tiles.pipeline import (
     apply_query,
     bbox_overlap,
+    fix_coordinate_discontinuities,
     pipeline,
 )
 from xpublish_tiles.testing.datasets import (
@@ -41,6 +43,7 @@ from xpublish_tiles.testing.datasets import (
     HRRR,
     IFS,
     PARA,
+    TRIPOLAR_HYCOM,
 )
 from xpublish_tiles.testing.lib import (
     assert_render_matches_snapshot,
@@ -753,3 +756,129 @@ async def test_async_load_timeout():
     ):
         with pytest.raises(AsyncLoadTimeoutError, match=r"timed out after 0\.5s"):
             await pipeline(ds, query_params)
+
+
+@pytest.mark.parametrize(
+    "tile",
+    [
+        morecantile.Tile(x=0, y=0, z=0),
+        morecantile.Tile(x=1, y=1, z=1),
+        morecantile.Tile(x=2, y=3, z=2),
+        morecantile.Tile(x=0, y=2, z=2),
+        morecantile.Tile(x=2, y=2, z=2),
+        morecantile.Tile(x=9, y=3, z=4),
+        morecantile.Tile(x=5, y=1, z=3),
+    ],
+)
+@pytest.mark.parametrize(
+    "dataset",
+    [
+        # pytest.param(GLOBAL_HYCOM, id="global_hycom"),
+        pytest.param(TRIPOLAR_HYCOM, id="tripolar_hycom"),
+    ],
+)
+async def test_hycom_like_grid(tile, dataset, png_snapshot, pytestconfig):
+    ds = dataset.create()
+    query = create_query_params(tms=WEBMERC_TMS, tile=tile)
+    result = await pipeline(ds, query)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(
+        result,
+        png_snapshot,
+        tile=tile,
+        tms=WEBMERC_TMS,
+        dataset_bbox=ds.attrs.get("bbox"),
+    )
+
+
+class TestFixCoordinateDiscontinuities:
+    """Tests for fix_coordinate_discontinuities function."""
+
+    @pytest.fixture
+    def transformer(self):
+        return pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+
+    @pytest.fixture
+    def western_hemisphere_bbox(self):
+        """Bbox entirely in western hemisphere (negative X in Web Mercator)."""
+        return BBox(west=-20037508, south=0, east=-10018754, north=10018754)
+
+    def test_diagonal_discontinuity_pattern(self, transformer, western_hemisphere_bbox):
+        """Test that diagonal discontinuity pattern is fixed correctly.
+
+        When the antimeridian crossing shifts position across rows (diagonal pattern),
+        np.unwrap should still produce continuous coordinates.
+        """
+        grid_spacing = 0.1e6  # 100km grid spacing
+
+        x_merc = np.array(
+            [
+                [20e6, 20e6, 20e6, -20e6, -20e6],
+                [20e6, 20e6, 20e6, -20e6, -20e6],
+                [20e6, 20e6, -20e6, -20e6, -20e6],  # crossing moved left
+                [20e6, 20e6, -20e6, -20e6, -20e6],
+            ],
+            dtype=np.float64,
+        )
+
+        fixed = fix_coordinate_discontinuities(
+            x_merc.copy(), transformer, bbox=western_hemisphere_bbox
+        )
+
+        max_gap_x = np.abs(np.diff(fixed, axis=1)).max()
+        max_gap_y = np.abs(np.diff(fixed, axis=0)).max()
+        assert max_gap_x < grid_spacing, (
+            f"X gap {max_gap_x / 1e6:.1f}M exceeds grid spacing"
+        )
+        assert max_gap_y < grid_spacing, (
+            f"Y gap {max_gap_y / 1e6:.1f}M exceeds grid spacing"
+        )
+
+    def test_per_row_shift_boundary(self, transformer, western_hemisphere_bbox):
+        """Test that adjacent rows with slightly different unwrap results stay consistent.
+
+        After np.unwrap, adjacent rows may have slightly different centers. A naive
+        per-row shift (based on each row's center) could assign different shift_multiples
+        if the centers fall on opposite sides of the rounding boundary. The propagation
+        approach ensures adjacent rows get compatible shifts.
+
+        This test uses rows with discontinuities that unwrap to slightly different ranges,
+        testing that the propagation keeps them aligned.
+        """
+        grid_spacing = 1e6
+
+        # Both rows wrap around: values jump from +19M to -19M (38M gap > 20M threshold)
+        # Row 0: discontinuity at col 2/3
+        # Row 1: discontinuity at col 2/3 but values slightly different
+        # After unwrap, they should stay aligned despite different centers
+        x_merc = np.array(
+            [
+                [
+                    19e6,
+                    19e6,
+                    19e6,
+                    -19e6,
+                    -19e6,
+                ],  # unwraps to ~[19,19,19,21,21], center=20
+                [
+                    18e6,
+                    18e6,
+                    18e6,
+                    -18e6,
+                    -18e6,
+                ],  # unwraps to ~[18,18,18,22,22], center=20
+            ],
+            dtype=np.float64,
+        )
+
+        fixed = fix_coordinate_discontinuities(
+            x_merc.copy(), transformer, bbox=western_hemisphere_bbox
+        )
+
+        # After fix, both rows should be shifted to western hemisphere and stay aligned
+        max_gap_y = np.abs(np.diff(fixed, axis=0)).max()
+        # Y gaps: should be small (1M difference between rows, which matches input)
+        assert max_gap_y <= grid_spacing, (
+            f"Y gap {max_gap_y / 1e6:.1f}M exceeds grid spacing"
+        )
