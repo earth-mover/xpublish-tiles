@@ -154,6 +154,8 @@ class PopulatedRenderContext(RenderContext):
     bbox: OutputBBox
     ugrid_indexer: UgridIndexer | None = None
     alternate: GridMetadata | None = None
+    cell_boundaries: np.ndarray | None = None
+    slicers: dict[str, list] | None = None
 
     async def maybe_rewrite_to_rectilinear(
         self, *, width: int, height: int, logger=None

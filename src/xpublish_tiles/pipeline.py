@@ -712,7 +712,9 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     )
 
     # Transform coordinates to output CRS
-    subsets = await transform_for_render(subsets, bbox=query.bbox, crs=query.crs)
+    subsets = await transform_for_render(
+        subsets, bbox=query.bbox, crs=query.crs, style=query.style
+    )
     renderer = query.get_renderer()
 
     tasks = [
@@ -976,6 +978,7 @@ async def subset_to_bbox(
             if isinstance(grid, Triangular)
             else None,
             alternate=alternate,
+            slicers=new_slicers,
         )
     return result
 
@@ -985,13 +988,16 @@ async def transform_for_render(
     *,
     bbox: OutputBBox,
     crs: OutputCRS,
+    style: str,
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:
-    """Transform coordinates based on rendering style.
+    """Transform coordinates to output CRS.
 
-    For raster styles: transform X/Y coordinates to output CRS.
-    For polygon styles: transform cell boundary geometries to output CRS.
+    For raster style: transform X/Y coordinates to output CRS.
+    For polygons style: transform cell boundary geometries to output CRS.
     """
-    # Raster-style coordinate transformation
+    if style == "polygons":
+        return await _transform_polygons(contexts, crs=crs)
+
     result = {}
     for var_name, context in contexts.items():
         if isinstance(context, NullRenderContext):
@@ -1068,5 +1074,42 @@ async def transform_for_render(
             bbox=bbox,
             ugrid_indexer=context.ugrid_indexer,
             alternate=alternate,
+        )
+    return result
+
+
+async def _transform_polygons(
+    contexts: dict[str, PopulatedRenderContext | NullRenderContext],
+    *,
+    crs: OutputCRS,
+) -> dict[str, PopulatedRenderContext | NullRenderContext]:
+    """Transform cell boundary polygons to output CRS."""
+    import geopandas as gpd
+
+    result = {}
+    for var_name, context in contexts.items():
+        if isinstance(context, NullRenderContext):
+            result[var_name] = context
+            continue
+
+        grid = context.grid
+
+        with log_duration("transform_polygons", "⬡"):
+            boundaries = grid.cell_boundaries(context.da, slicers=context.slicers)
+            gdf = gpd.GeoDataFrame(geometry=boundaries, crs=grid.crs)
+            gdf_transformed = gdf.to_crs(crs)
+
+        da = context.da
+        if da.values.ndim > 1:
+            da = xr.DataArray(da.values.ravel(), dims=["cell"])
+
+        result[var_name] = PopulatedRenderContext(
+            da=da,
+            grid=grid,
+            datatype=context.datatype,
+            bbox=context.bbox,
+            ugrid_indexer=context.ugrid_indexer,
+            alternate=context.alternate,
+            cell_boundaries=gdf_transformed.geometry.values,
         )
     return result

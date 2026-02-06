@@ -279,6 +279,27 @@ async def test_radar_data(radar_dataset_and_tile, png_snapshot, pytestconfig):
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tile",
+    [
+        Tile(x=16, y=23, z=6),
+        Tile(x=17, y=23, z=6),
+        Tile(x=14, y=23, z=6),
+        Tile(x=3, y=5, z=4),
+    ],
+)
+async def test_curvilinear_polygons(tile, png_snapshot, pytestconfig):
+    ds = CURVILINEAR.create()
+    query_params = create_query_params(tile, WEBMERC_TMS, style="polygons")
+    result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(
+        result, png_snapshot, tile=tile, tms=WEBMERC_TMS, skip_transparency_check=True
+    )
+
+
 @pytest.mark.parametrize("tile,tms", as_pytestparams(PARA_TILES))
 async def test_categorical_data(tile, tms, png_snapshot, pytestconfig):
     ds = PARA.create().squeeze("time")

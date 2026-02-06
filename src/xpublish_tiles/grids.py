@@ -679,11 +679,33 @@ class CurvilinearCellIndex(xr.Index):
         self.left_break = float(np.min(first_col))
         self.right_break = float(np.max(last_col))
 
-        # Compute cell bounds from coordinate diffs. For geographic CRS, X coordinates
-        # are already unwrapped, so diffs are continuous (no 360° jumps at antimeridian).
-        dX, dY = _padded_diff(X, axis=xaxis), _padded_diff(Y, axis=yaxis)
-        self.left, self.right = X - dX / 2, X + dX / 2
-        self.bottom, self.top = Y - dY / 2, Y + dY / 2
+        # Compute cell bounds using shared edges (midpoints between adjacent centers).
+        # This ensures right[j] == left[j+1] and top[i] == bottom[i+1], eliminating
+        # gaps between adjacent cells. For geographic CRS, X coordinates are already
+        # unwrapped so diffs are continuous (no 360° jumps at antimeridian).
+        from datashader.resampling import infer_interval_breaks
+
+        X_breaks = infer_interval_breaks(X, axis=xaxis)
+        Y_breaks = infer_interval_breaks(Y, axis=yaxis)
+
+        left_sl = tuple(
+            slice(None, -1) if i == xaxis else slice(None) for i in range(X.ndim)
+        )
+        right_sl = tuple(
+            slice(1, None) if i == xaxis else slice(None) for i in range(X.ndim)
+        )
+        self.left = X_breaks[left_sl]
+        self.right = X_breaks[right_sl]
+
+        bottom_sl = tuple(
+            slice(None, -1) if i == yaxis else slice(None) for i in range(Y.ndim)
+        )
+        top_sl = tuple(
+            slice(1, None) if i == yaxis else slice(None) for i in range(Y.ndim)
+        )
+        self.bottom = Y_breaks[bottom_sl]
+        self.top = Y_breaks[top_sl]
+
         # Determine if Y is increasing by checking the first row.
         # Don't use .all() because tripolar grids have dY=0 in the fold region
         # which would cause the swap to trigger incorrectly.
@@ -694,13 +716,13 @@ class CurvilinearCellIndex(xr.Index):
             self.top, self.bottom = self.bottom, self.top
         self.xaxis, self.yaxis = xaxis, yaxis
 
-        # Calculate minimum spacing using in-place ops (dX/dY no longer needed)
-        np.abs(dX, out=dX)
+        # Calculate minimum spacing
+        dX = np.abs(np.diff(X, axis=xaxis))
         dX[dX == 0] = np.inf
         result = numbagg.nanmin(dX)
         self._dXmin = 0.0 if np.isinf(result) else float(result)
 
-        np.abs(dY, out=dY)
+        dY = np.abs(np.diff(Y, axis=yaxis))
         dY[dY == 0] = np.inf
         result = numbagg.nanmin(dY)
         self._dYmin = 0.0 if np.isinf(result) else float(result)
@@ -1568,6 +1590,55 @@ class Curvilinear(GridSystem):
         yslicers = [y_raw]  # Always a single slice
 
         return {self.Xdim: xslicers, self.Ydim: yslicers}
+
+    def cell_boundaries(
+        self,
+        da: xr.DataArray,
+        *,
+        slicers: dict[str, list] | None = None,
+    ) -> np.ndarray:
+        """Get cell boundary polygons for curvilinear grid cells.
+
+        Uses the index's precomputed left/right/bottom/top bounds (which have
+        shared edges via infer_interval_breaks) sliced via the integer slicers.
+        Returns a 1D array of shapely Polygon objects (raveled from the 2D grid).
+        """
+        import shapely
+
+        index = next(iter(self.indexes))
+        assert isinstance(index, CurvilinearCellIndex)
+        assert slicers is not None
+
+        y_slice = next(s for s in slicers[self.Ydim] if isinstance(s, slice))
+        x_slices = [s for s in slicers[self.Xdim] if isinstance(s, slice)]
+
+        pieces = []
+        for x_slice in x_slices:
+            slc = [slice(None)] * 2
+            slc[index.yaxis] = y_slice
+            slc[index.xaxis] = x_slice
+            slc = tuple(slc)
+
+            left = index.left[slc]
+            right = index.right[slc]
+            bottom = index.bottom[slc]
+            top = index.top[slc]
+
+            m, n = left.shape
+            rings = np.empty((m, n, 5, 2), dtype=np.float64)
+            rings[:, :, 0, 0] = left
+            rings[:, :, 0, 1] = bottom
+            rings[:, :, 1, 0] = right
+            rings[:, :, 1, 1] = bottom
+            rings[:, :, 2, 0] = right
+            rings[:, :, 2, 1] = top
+            rings[:, :, 3, 0] = left
+            rings[:, :, 3, 1] = top
+            rings[:, :, 4] = rings[:, :, 0]
+
+            pieces.append(shapely.polygons(rings.reshape(-1, 5, 2)))
+
+        return np.concatenate(pieces) if len(pieces) > 1 else pieces[0]
 
 
 @dataclass(kw_only=True, eq=False)
