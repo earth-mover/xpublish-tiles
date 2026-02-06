@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import lru_cache, partial
 from itertools import product
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import matplotlib.colors as mcolors
 import numba
@@ -25,7 +25,12 @@ from xpublish_tiles.config import config
 from xpublish_tiles.utils import NUMBA_THREADING_LOCK
 
 if TYPE_CHECKING:
-    from xpublish_tiles.grids import GridMetadata, GridSystem, UgridIndexer
+    from xpublish_tiles.grids import (
+        GridMetadata,
+        GridSystem,
+        HealpixIndexer,
+        UgridIndexer,
+    )
 from xpublish_tiles.logger import logger
 
 WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)  # from proj
@@ -519,10 +524,10 @@ def _prevent_slice_overlap(indexers: list[slice]) -> list[slice]:
 
 
 def pad_slicers(
-    slicers: "dict[str, list[slice | Fill | UgridIndexer]]",
+    slicers: "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]",
     *,
     dimensions: list[PadDimension] | None = None,
-) -> "dict[str, list[slice | Fill | UgridIndexer]]":
+) -> "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]":
     """
     Apply padding to slicers for specified dimensions.
 
@@ -547,12 +552,8 @@ def pad_slicers(
         if dim.name not in slicers:
             continue
 
-        dim_slicers = slicers[dim.name]
-        # Convert to proper slice objects with dimension size
-        indexers = [
-            slice(*idxr.indices(dim.size))  # ty: ignore[unresolved-attribute]
-            for idxr in dim_slicers
-        ]
+        dim_slicers = cast(list[slice], slicers[dim.name])
+        indexers = [slice(*idxr.indices(dim.size)) for idxr in dim_slicers]
 
         # Prevent overlap if requested (before padding)
         if dim.prevent_overlap:
@@ -603,9 +604,9 @@ def pad_slicers(
 
 
 def normalize_slicers(
-    slicers: "dict[str, list[slice | Fill | UgridIndexer]]",
+    slicers: "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]",
     dim_sizes: "Mapping[Hashable, int]",
-) -> "dict[str, list[slice | Fill | UgridIndexer]]":
+) -> "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]":
     return {
         dim: [
             slice(*s.indices(dim_sizes[dim])) if isinstance(s, slice) else s
@@ -623,7 +624,7 @@ def apply_default_pad(slicers, da, grid):
 
     Parameters
     ----------
-    slicers : dict[str, list[slice | Fill | UgridIndexer]]
+    slicers : dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]
         Raw slicers from grid.sel()
     da : xr.DataArray
         Data array (for dimension sizes)
@@ -632,7 +633,7 @@ def apply_default_pad(slicers, da, grid):
 
     Returns
     -------
-    dict[str, list[slice | Fill | UgridIndexer]]
+    dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]
         Slicers with default_pad applied
     """
     default_padders = [
@@ -861,15 +862,16 @@ def coarsen_mean_pad(da: xr.DataArray, factors: dict[str, int]) -> xr.DataArray:
 
 
 def _get_indexer_size(
-    sl: "slice | Fill | UgridIndexer", dim_size: int | None = None
+    sl: "slice | Fill | UgridIndexer | HealpixIndexer",
+    dim_size: int | None = None,
 ) -> int:
-    """Get the size of an indexer (slice, Fill, or UgridIndexer)."""
-    from xpublish_tiles.grids import UgridIndexer
+    """Get the size of an indexer (slice, Fill, UgridIndexer, or ndarray)."""
+    from xpublish_tiles.grids import HealpixIndexer, UgridIndexer
 
-    if isinstance(sl, Fill):
+    if isinstance(sl, Fill | UgridIndexer):
         return sl.size
-    elif isinstance(sl, UgridIndexer):
-        return sl.vertices.size
+    elif isinstance(sl, HealpixIndexer):
+        return sl.size(dim_size)
     elif isinstance(sl, slice):
         start = sl.start if sl.start is not None else 0
         if sl.stop is not None:
@@ -884,7 +886,7 @@ def _get_indexer_size(
 
 
 def _iter_subset_shapes(
-    slicers: "dict[str, list[slice | Fill | UgridIndexer]]",
+    slicers: "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]",
     da: xr.DataArray,
     grid: "GridSystem",
 ):
@@ -917,7 +919,7 @@ def _iter_subset_shapes(
 
 
 def check_data_is_renderable_size(
-    slicers: "dict[str, list[slice | Fill | UgridIndexer]]",
+    slicers: "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]",
     da: xr.DataArray,
     grid: "GridSystem",
     alternate: "GridMetadata",
@@ -928,7 +930,7 @@ def check_data_is_renderable_size(
 
     Parameters
     ----------
-    slicers : dict[str, list[slice | Fill | UgridIndexer]]
+    slicers : dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]
         Slicers for data selection
     da : xr.DataArray
         Data array (only metadata used, no data loaded)

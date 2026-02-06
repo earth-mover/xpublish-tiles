@@ -119,9 +119,17 @@ def get_dataset_for_name(
             if dataset_name == "utm50s_hires_onecrs":
                 ds = create_onecrs_dataset(ds)
         except Exception as e:
-            raise ValueError(
-                f"Error loading local dataset '{dataset_name}' from {repo_path}: {e}"
-            ) from e
+            # Fall back to DATASET_LOOKUP if icechunk loading fails
+            if dataset_name in DATASET_LOOKUP:
+                ds = (
+                    DATASET_LOOKUP[dataset_name]
+                    .create()
+                    .assign_attrs(_xpublish_id=dataset_name)
+                )
+            else:
+                raise ValueError(
+                    f"Error loading local dataset '{dataset_name}' from {repo_path}: {e}"
+                ) from e
     elif name.startswith("icechunk+file://"):
         try:
             import icechunk

@@ -5,7 +5,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Hashable
 from dataclasses import dataclass, field
-from typing import Any, Self, cast
+from typing import TYPE_CHECKING, Any, Self, cast
 
 import cachetools
 import cf_xarray  # noqa: F401
@@ -36,6 +36,9 @@ from xpublish_tiles.lib import (
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.utils import NUMBA_THREADING_LOCK, time_debug, xarray_object_key
 
+if TYPE_CHECKING:
+    from xdggs.healpix import HealpixIndex
+
 GRID_DETECTION_LOCK = threading.Lock()
 
 DEFAULT_CRS = CRS.from_epsg(4326)
@@ -50,6 +53,39 @@ class UgridIndexer:
     connectivity: np.ndarray
     # face indices that intersect the anti-meridian
     antimeridian_vertices: dict[str, np.ndarray]
+
+    @property
+    def size(self) -> int:
+        return self.vertices.size
+
+
+@dataclass
+class HealpixIndexer:
+    """Dataclass for Healpix indexing results from Healpix.sel."""
+
+    indices: np.ndarray | slice
+    # boolean mask aligned with `indices`, marking cells that touch the anti-meridian
+    antimeridian_mask: np.ndarray
+
+    @property
+    def is_empty(self) -> bool:
+        idx = self.indices
+        if isinstance(idx, slice):
+            return idx == slice(0, 0)
+        return len(idx) == 0
+
+    def size(self, dim_size: int | None = None) -> int:
+        idx = self.indices
+        if isinstance(idx, np.ndarray):
+            return idx.size
+        start = idx.start if idx.start is not None else 0
+        if idx.stop is not None:
+            stop = idx.stop
+        elif dim_size is not None:
+            stop = dim_size
+        else:
+            raise ValueError("dim_size is required for open-ended slices")
+        return stop - start
 
 
 @dataclass
@@ -1065,7 +1101,9 @@ class GridSystem(ABC):
         return self.equals(other)
 
     @abstractmethod
-    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill | UgridIndexer]]:
+    def sel(
+        self, *, bbox: BBox
+    ) -> dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]:
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("Subclasses must implement sel method")
 
@@ -1159,7 +1197,7 @@ class RectilinearMixin:
 
     def _rectilinear_sel(
         self, *, bbox: BBox, y_is_increasing: bool, x_size: int, y_size: int
-    ) -> dict[str, list[slice | Fill | UgridIndexer]]:
+    ) -> dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]:
         """
         This method handles coordinate selection for rectilinear grids, automatically
         converting between different longitude conventions (0→360 vs -180→180).
@@ -1273,7 +1311,9 @@ class RasterAffine(RectilinearMixin, GridSystem):
         (index,) = self.indexes
         return da.assign_coords(xr.Coordinates.from_xindex(index))
 
-    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill | UgridIndexer]]:
+    def sel(
+        self, *, bbox: BBox
+    ) -> dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]:
         (index,) = self.indexes
         affine = index.transform()
 
@@ -1439,7 +1479,9 @@ class Rectilinear(RectilinearMixin, GridSystem):
             indexes=(x_index, y_index),
         )
 
-    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill | UgridIndexer]]:
+    def sel(
+        self, *, bbox: BBox
+    ) -> dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]:
         """
         Select a subset of the data array using a bounding box.
         """
@@ -1662,7 +1704,9 @@ class Curvilinear(GridSystem):
         else:
             return False
 
-    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill | UgridIndexer]]:
+    def sel(
+        self, *, bbox: BBox
+    ) -> dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]:
         """
         Select a subset of the data array using a bounding box.
 
@@ -1816,7 +1860,9 @@ class Polar(GridSystem):
     def dims(self) -> set[str]:
         return {self.Xdim, self.Ydim}
 
-    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill | UgridIndexer]]:
+    def sel(
+        self, *, bbox: BBox
+    ) -> dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]:
         index = self.indexes[0]
         sel_result = index.sel({self.Xdim: bbox})
         az_slices = sel_result.dim_indexers[self.Xdim]
@@ -1952,7 +1998,9 @@ class Triangular(GridSystem):
     def dims(self) -> set[str]:
         return {self.dim}
 
-    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill | UgridIndexer]]:
+    def sel(
+        self, *, bbox: BBox
+    ) -> dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]:
         index = next(iter(self.indexes))
         result = index.sel(
             {self.X: slice(bbox.west, bbox.east), self.Y: slice(bbox.south, bbox.north)}
@@ -2026,6 +2074,247 @@ class Triangular(GridSystem):
             Yname=Yname,
             dim=dim,
             fill_value=-1,
+        )
+
+
+@dataclass(init=False, kw_only=True, eq=False)
+class Healpix(GridSystem):
+    """Grid system for HealPix discrete global grid."""
+
+    crs: CRS
+    bbox: BBox
+    X: str
+    Y: str
+    dim: str
+    cell_ids_name: str
+    index: "HealpixIndex"
+    indexes: tuple[xr.Index, ...]
+    cell_ids: np.ndarray
+
+    npoints_per_geometry: int = field(init=False, default=5)
+    dXmin: float = 0
+    dYmin: float = 0
+
+    def __init__(
+        self,
+        *,
+        crs: CRS,
+        dim: str,
+        Xname: str,
+        Yname: str,
+        index: "HealpixIndex",
+        cell_ids_name: str,
+        cell_ids: np.ndarray,
+        bbox: BBox,
+    ):
+        from healpix_geo.nested import zone_coverage
+
+        self.crs = crs
+        self.X, self.Y = Xname, Yname
+        self.dim = dim
+        self.cell_ids_name = cell_ids_name
+        self.index = index
+        self.indexes = ()
+        self.bbox = bbox
+        self.alternates = ()
+        self.cell_ids = cell_ids
+
+        depth = int(index.grid_info.level)
+        # straddle the 180° antimeridian with a hairline zone.
+        eps = 1e-6
+        am_all, _, _ = zone_coverage(
+            (180.0 - eps, -90.0, 180.0 + eps, 90.0), depth, flat=True
+        )
+        self.antimeridian_cells = np.intersect1d(am_all, cell_ids)
+
+    @property
+    def Xdim(self) -> str:
+        return self.dim
+
+    @property
+    def Ydim(self) -> str:
+        return self.dim
+
+    @property
+    def dims(self) -> set[str]:
+        return {self.dim}
+
+    def sel(
+        self, *, bbox: BBox
+    ) -> dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]:
+        """Select cells within the bounding box.
+
+        Uses healpix_geo to find HEALPix cells that intersect the bbox,
+        then returns the indices of those cells in our dataset.
+        """
+        from healpix_geo.nested import kth_neighbourhood, zone_coverage
+
+        if self.index.grid_info.indexing_scheme != "nested":
+            raise NotImplementedError(
+                f"Healpix sel() only supports nested indexing, got {self.index.grid_info.indexing_scheme!r}"
+            )
+
+        # For very large bboxes covering most of the globe, return all cells
+        width_lon = bbox.east - bbox.west
+        width_lat = bbox.north - bbox.south
+        if width_lon >= 360 or width_lat >= 180:
+            am_mask = np.isin(self.cell_ids, self.antimeridian_cells)
+            return {
+                self.dim: [HealpixIndexer(indices=slice(None), antimeridian_mask=am_mask)]
+            }
+
+        depth = int(self.index.grid_info.level)
+
+        # ``zone_coverage`` takes degrees with lon_min ∈ [0, 360),
+        # 0 < lon_max < 360 (exactly 360 panics), lat ∈ [-90, 90].
+        # Also: cells whose boundary lies exactly on the zone edge are handled
+        # inconsistently, so we nudge west/east outward by a small epsilon to
+        # guarantee boundary cells are included.
+        EPS = 1e-6
+        MAX_LON = 360.0 - 1e-9
+        west = (bbox.west - EPS) % 360.0
+        east = (bbox.east + EPS) % 360.0
+        if east == 0:
+            east = MAX_LON
+        south = max(bbox.south, -90.0)
+        north = min(bbox.north, 90.0)
+        if west < east:
+            bbox_cell_ids, _, _ = zone_coverage(
+                (west, south, east, north), depth, flat=True
+            )
+        else:
+            # spans the anti-meridian
+            # Normalize west/east into [0, 360) and split into two.
+            left, _, _ = zone_coverage((west, south, MAX_LON, north), depth, flat=True)
+            right, _, _ = zone_coverage((0.0, south, east, north), depth, flat=True)
+            bbox_cell_ids = np.concatenate([left, right])
+
+        # Dilate by one ring so neighbor cells covering tile-edge gaps are
+        # included. This pads the selection in the same spirit as
+        # ``apply_default_pad`` for 2D grids.
+        neighbors = kth_neighbourhood(bbox_cell_ids.astype(np.uint64), depth, ring=1)
+        bbox_cell_ids = np.unique(neighbors.ravel()).astype(bbox_cell_ids.dtype)
+
+        _, _, indices = np.intersect1d(
+            bbox_cell_ids, self.cell_ids, assume_unique=True, return_indices=True
+        )
+
+        if len(indices) == 0:
+            return {
+                self.dim: [
+                    HealpixIndexer(
+                        indices=slice(0, 0),
+                        antimeridian_mask=np.array([], dtype=bool),
+                    )
+                ]
+            }
+
+        am_mask = np.isin(self.cell_ids[indices], self.antimeridian_cells)
+        return {self.dim: [HealpixIndexer(indices=indices, antimeridian_mask=am_mask)]}
+
+    def cell_corners(
+        self,
+        *,
+        slicers: dict[str, list],
+        coarsen_factors: dict[str, int],
+    ) -> xr.DataArray:
+        """Return a 1D DataArray with flattened (n_cells * 4,) corner lon/lat coords."""
+        import healpix_geo
+
+        parts = [np.asarray(self.cell_ids[sl.indices]) for sl in slicers[self.dim]]
+        subset_cell_ids = parts[0] if len(parts) == 1 else np.concatenate(parts)
+        info = self.index.grid_info
+        lon, lat = healpix_geo.nested.vertices(
+            subset_cell_ids, depth=info.level, ellipsoid=info._format_ellipsoid()
+        )
+        lon = np.asarray(lon).ravel()
+        lat = np.asarray(lat).ravel()
+        corner_dim = "_corner"
+        return xr.DataArray(
+            np.empty(lon.shape),
+            dims=(corner_dim,),
+            coords={self.X: ((corner_dim,), lon), self.Y: ((corner_dim,), lat)},
+        )
+
+    def corners_to_rings(
+        self,
+        corner_x: np.ndarray,
+        corner_y: np.ndarray,
+        *,
+        ugrid_indexer: "UgridIndexer | None" = None,
+    ) -> np.ndarray:
+        """Assemble a ``(n_cells, 5, 2)`` ring buffer from flattened 4-corner arrays."""
+        assert corner_x.ndim == 1 and corner_x.size % 4 == 0
+        n = corner_x.size // 4
+        cx = corner_x.reshape(n, 4)
+        cy = corner_y.reshape(n, 4)
+        rings = np.empty((n, 5, 2), dtype=np.float64)
+        rings[:, :4, 0] = cx
+        rings[:, :4, 1] = cy
+        rings[:, 4, :] = rings[:, 0, :]
+        return rings
+
+    @classmethod
+    def from_dataset(
+        cls,
+        ds: xr.Dataset,
+        crs: CRS,
+        Xname: str,
+        Yname: str,
+    ) -> Self:
+        import xdggs
+        from xdggs.healpix import HealpixIndex
+
+        # FIXME: upstream to xdggs
+        name = ds.cf.standard_names["healpix_index"][0]
+        info = xdggs.HealpixInfo(
+            level=ds["healpix"].attrs["refinement_level"],
+            indexing_scheme=ds["healpix"].attrs["indexing_scheme"],
+        )
+        ds = xdggs.decode(ds, info, name=name)
+
+        # Find the HealpixIndex in the dataset
+        healpix_index = None
+        cell_dim = None
+        cell_ids_name = None
+        for name, idx in ds.xindexes.items():
+            if isinstance(idx, HealpixIndex):
+                healpix_index = idx
+                cell_ids_name = str(name)
+                cell_dim = ds[name].dims[0]
+                break
+
+        if healpix_index is None or cell_ids_name is None or cell_dim is None:
+            raise ValueError("No HealpixIndex found in dataset.")
+
+        cell_ids = ds[cell_ids_name].data
+        info = healpix_index.grid_info
+        if cell_ids.size == 12 * 4**info.level:
+            bbox = BBox(west=-180, south=-90, east=180, north=90)
+        else:
+            import healpix_geo.nested as hpn
+
+            lon, lat = hpn.healpix_to_lonlat(
+                np.asarray(cell_ids), depth=info.level, ellipsoid=info._format_ellipsoid()
+            )
+            lon = ((np.asarray(lon) + 180) % 360) - 180
+            lat = np.asarray(lat)
+            bbox = BBox(
+                west=float(lon.min()),
+                south=float(lat.min()),
+                east=float(lon.max()),
+                north=float(lat.max()),
+            )
+
+        return cls(
+            crs=crs,
+            Xname=Xname,
+            Yname=Yname,
+            dim=cell_dim,
+            index=healpix_index,
+            cell_ids_name=cell_ids_name,
+            cell_ids=cell_ids,
+            bbox=bbox,
         )
 
 
@@ -2257,6 +2546,13 @@ def _detect_grid_metadata(
     assert mapping.crs is not None, "CRS must not be None"
 
     Xname, Yname = _guess_coordinates_for_mapping(ds, mapping, skip_coordinates)
+
+    if (
+        mapping.grid_mapping is not None
+        and mapping.grid_mapping.attrs.get("grid_mapping_name") == "healpix"
+    ):
+        assert Xname is not None and Yname is not None
+        return GridMetadata(X=Xname, Y=Yname, grid_cls=Healpix, crs=mapping.crs)
 
     if Xname is None or Yname is None:
         # Handle the fallback case where coordinates can't be determined normally

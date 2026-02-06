@@ -29,7 +29,6 @@ from xpublish_tiles.logger import (
     with_accumulated_logs,
 )
 from xpublish_tiles.pipeline import pipeline
-from xpublish_tiles.render import RenderRegistry
 from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import QueryParams
 from xpublish_tiles.utils import normalize_tilejson_bounds
@@ -38,6 +37,7 @@ from xpublish_tiles.xpublish.tiles.metadata import (
     create_tileset_metadata,
     extract_dataset_extents,
     extract_variable_bounding_box,
+    get_styles,
 )
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
@@ -48,7 +48,6 @@ from xpublish_tiles.xpublish.tiles.tile_matrix import (
 from xpublish_tiles.xpublish.tiles.types import (
     TILES_FILTERED_QUERY_PARAMS,
     ConformanceDeclaration,
-    Style,
     TileJSON,
     TileMatrixSet,
     TileMatrixSets,
@@ -136,35 +135,7 @@ class TilesPlugin(Plugin):
             # Get available styles from registered renderers
             logger.info(f"Getting available styles for dataset '{title}'")
 
-            styles = []
-            for renderer_cls in RenderRegistry.all().values():
-                # Add default variant alias
-                default_variant = renderer_cls.default_variant()
-                default_style_info = renderer_cls.describe_style("default")
-                default_style_info["title"] = (
-                    f"{renderer_cls.style_id().title()} - Default ({default_variant.title()})"
-                )
-                default_style_info["description"] = (
-                    f"Default {renderer_cls.style_id()} rendering (alias for {default_variant})"
-                )
-                styles.append(
-                    Style(
-                        id=default_style_info["id"],
-                        title=default_style_info["title"],
-                        description=default_style_info["description"],
-                    )
-                )
-
-                # Add all actual variants
-                for variant in renderer_cls.supported_variants():
-                    style_info = renderer_cls.describe_style(variant)
-                    styles.append(
-                        Style(
-                            id=style_info["id"],
-                            title=style_info["title"],
-                            description=style_info["description"],
-                        )
-                    )
+            styles = get_styles(dataset)
 
             logger.info("loading extents for dataset vars")
 

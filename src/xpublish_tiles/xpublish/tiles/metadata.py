@@ -7,7 +7,7 @@ import numpy as np
 
 import xarray as xr
 from xarray import Dataset
-from xpublish_tiles.grids import guess_grid_system
+from xpublish_tiles.grids import Healpix, guess_grid_system
 from xpublish_tiles.lib import VariableNotFoundError, async_run
 from xpublish_tiles.logger import logger
 from xpublish_tiles.pipeline import transformer_from_crs
@@ -31,38 +31,64 @@ from xpublish_tiles.xpublish.tiles.types import (
 )
 
 
+def allowed_styles(dataset: Dataset | None = None) -> list[str]:
+    """Return the style IDs supported by ``dataset``'s grid.
+
+    Healpix grids only support ``polygons``; every other grid supports both
+    ``raster`` and ``polygons``.
+    """
+    if dataset is not None:
+        for var_name, var_data in dataset.data_vars.items():
+            if var_data.ndim == 0:
+                continue
+            try:
+                grid = guess_grid_system(dataset, str(var_name))
+            except Exception:
+                continue
+            if isinstance(grid, Healpix):
+                return ["polygons"]
+    return ["raster", "polygons"]
+
+
+def get_styles(dataset: Dataset | None = None) -> list[Style]:
+    """Return supported styles for ``dataset``'s grid."""
+    allowed = set(allowed_styles(dataset))
+    styles: list[Style] = []
+    for style_id in RenderRegistry.all():
+        if style_id not in allowed:
+            continue
+        styles.extend(_styles_for_renderer(style_id))
+    return styles
+
+
 @functools.cache
-def get_styles():
-    styles = []
-    for renderer_cls in RenderRegistry.all().values():
-        # Add default variant alias
-        default_variant = renderer_cls.default_variant()
-        default_style_info = renderer_cls.describe_style("default")
-        default_style_info["title"] = (
-            f"{renderer_cls.style_id().title()} - Default ({default_variant.title()})"
+def _styles_for_renderer(style_id: str) -> tuple[Style, ...]:
+    renderer_cls = RenderRegistry.all()[style_id]
+    default_variant = renderer_cls.default_variant()
+    default_style_info = renderer_cls.describe_style("default")
+    default_style_info["title"] = (
+        f"{renderer_cls.style_id().title()} - Default ({default_variant.title()})"
+    )
+    default_style_info["description"] = (
+        f"Default {renderer_cls.style_id()} rendering (alias for {default_variant})"
+    )
+    styles = [
+        Style(
+            id=default_style_info["id"],
+            title=default_style_info["title"],
+            description=default_style_info["description"],
         )
-        default_style_info["description"] = (
-            f"Default {renderer_cls.style_id()} rendering (alias for {default_variant})"
-        )
+    ]
+    for variant in renderer_cls.supported_variants():
+        style_info = renderer_cls.describe_style(variant)
         styles.append(
             Style(
-                id=default_style_info["id"],
-                title=default_style_info["title"],
-                description=default_style_info["description"],
+                id=style_info["id"],
+                title=style_info["title"],
+                description=style_info["description"],
             )
         )
-
-        # Add all actual variants
-        for variant in renderer_cls.supported_variants():
-            style_info = renderer_cls.describe_style(variant)
-            styles.append(
-                Style(
-                    id=style_info["id"],
-                    title=style_info["title"],
-                    description=style_info["description"],
-                )
-            )
-    return styles
+    return tuple(styles)
 
 
 def extract_attributes_metadata(
@@ -124,7 +150,7 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
                 title=f"Definition of {tile_matrix_set_id}",
             ),
         ],
-        styles=get_styles(),
+        styles=get_styles(dataset),
     )
 
 

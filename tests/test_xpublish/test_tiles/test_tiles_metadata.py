@@ -3,13 +3,27 @@
 import numpy as np
 import pandas as pd
 import pytest
+import xpublish
+from fastapi.testclient import TestClient
+from syrupy.extensions.json import JSONSnapshotExtension
 
 import xarray as xr
 from xpublish_tiles.lib import VariableNotFoundError
+from xpublish_tiles.testing.datasets import (
+    ERA5,
+    GLOBAL_HEALPIX_L3,
+    HRRR,
+    IFS,
+    REGIONAL_HEALPIX_NA,
+)
+from xpublish_tiles.xpublish.tiles import TilesPlugin
 from xpublish_tiles.xpublish.tiles.metadata import (
     _calculate_temporal_resolution,
     _pandas_freq_to_iso8601,
+    allowed_styles,
+    create_tileset_metadata,
     extract_dataset_extents,
+    get_styles,
 )
 
 
@@ -795,3 +809,86 @@ def test_extract_attributes_metadata_single_variable():
     assert "temperature" in attrs_meta.variable_attrs
     assert "pressure" not in attrs_meta.variable_attrs
     assert attrs_meta.variable_attrs["temperature"]["long_name"] == "Temperature"
+
+
+def test_allowed_styles_healpix_only_polygons():
+    """Healpix datasets must advertise only the polygons style."""
+    for fixture in (GLOBAL_HEALPIX_L3, REGIONAL_HEALPIX_NA):
+        ds = fixture.create()
+        assert allowed_styles(ds) == ["polygons"]
+        style_ids = {s.id.split("/")[0] for s in get_styles(ds)}
+        assert style_ids == {"polygons"}
+
+
+def test_allowed_styles_default_grid():
+    """Non-Healpix grids advertise both raster and polygons."""
+    dataset = xr.Dataset(
+        {
+            "t": (
+                ["lat", "lon"],
+                np.zeros((3, 4)),
+                {"grid_mapping": ""},
+            )
+        },
+        coords={
+            "lat": ("lat", np.linspace(-1, 1, 3), {"standard_name": "latitude"}),
+            "lon": ("lon", np.linspace(-2, 2, 4), {"standard_name": "longitude"}),
+        },
+    )
+    assert set(allowed_styles(dataset)) == {"raster", "polygons"}
+    style_ids = {s.id.split("/")[0] for s in get_styles(dataset)}
+    assert style_ids == {"raster", "polygons"}
+
+
+def test_healpix_tileset_metadata_styles():
+    """The tileset metadata response for a Healpix dataset lists only polygon styles."""
+    ds = GLOBAL_HEALPIX_L3.create()
+    metadata = create_tileset_metadata(ds, "WebMercatorQuad")
+    assert metadata.styles is not None
+    style_ids = {s.id.split("/")[0] for s in metadata.styles}
+    assert style_ids == {"polygons"}
+
+
+def _summarize_tilesets_list(data: dict) -> dict:
+    """Reduce a /tiles/ response to the stable, grid-relevant bits."""
+    tilesets = data.get("tilesets", [])
+    # Styles are defined at the root level on every tileset; they're identical
+    # across TMS entries. Pull from the first tileset.
+    first_styles = tilesets[0].get("styles", []) if tilesets else []
+    layers = (tilesets[0].get("layers") if tilesets else None) or []
+    layer_ids: list[str] = [layer["id"] for layer in layers]
+    return {
+        "tms_ids": sorted(
+            {
+                link["title"].replace("Tileset metadata for ", "")
+                for ts in tilesets
+                for link in ts.get("links", [])
+                if link.get("rel") == "self"
+            }
+        ),
+        "tileset_count": len(tilesets),
+        "layer_ids": sorted(set(layer_ids)),
+        "style_ids": sorted({s["id"] for s in first_styles}),
+        "style_titles": sorted({s["title"] for s in first_styles}),
+    }
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        pytest.param(ERA5, id="era5"),
+        pytest.param(HRRR, id="hrrr"),
+        pytest.param(IFS, id="ifs"),
+        pytest.param(GLOBAL_HEALPIX_L3, id="global_healpix_l3"),
+        pytest.param(REGIONAL_HEALPIX_NA, id="regional_healpix_na"),
+    ],
+)
+def test_tiles_endpoint_snapshot(fixture, snapshot):
+    """Snapshot the /tiles/ endpoint response across diverse grid types."""
+    ds = fixture.create()
+    rest = xpublish.Rest({"ds": ds}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+    response = client.get("/datasets/ds/tiles/")
+    assert response.status_code == 200
+    summary = _summarize_tilesets_list(response.json())
+    assert summary == snapshot.use_extension(JSONSnapshotExtension)

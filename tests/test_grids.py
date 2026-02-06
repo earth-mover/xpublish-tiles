@@ -26,6 +26,7 @@ from xpublish_tiles.grids import (
     CurvilinearCellIndex,
     GridSystem,
     GridSystem2D,
+    Healpix,
     LongitudeCellIndex,
     Polar,
     RasterAffine,
@@ -55,6 +56,7 @@ from xpublish_tiles.testing.datasets import (
     EU3035,
     EU3035_HIRES,
     FORECAST,
+    GLOBAL_HEALPIX_L3,
     HRRR,
     HRRR_CRS_WKT,
     HRRR_MULTIPLE,
@@ -63,6 +65,7 @@ from xpublish_tiles.testing.datasets import (
     POPDS,
     RADAR,
     REDGAUSS_N320,
+    REGIONAL_HEALPIX_NA,
     UTM33S_HIRES,
     UTM50S_HIRES,
     Dataset,
@@ -73,6 +76,7 @@ from xpublish_tiles.tiles_lib import get_max_zoom, get_min_zoom
 from xpublish_tiles.types import ContinuousData
 
 TRIANGULAR_SENTINEL = 1
+HEALPIX_SENTINEL = 2
 
 
 @pytest.mark.parametrize(
@@ -288,6 +292,18 @@ TRIANGULAR_SENTINEL = 1
             TRIANGULAR_SENTINEL,
             id="redgauss_n320",
         ),
+        pytest.param(
+            GLOBAL_HEALPIX_L3.create(),
+            "foo",
+            HEALPIX_SENTINEL,
+            id="global_healpix_l3",
+        ),
+        pytest.param(
+            REGIONAL_HEALPIX_NA.create(),
+            "foo",
+            HEALPIX_SENTINEL,
+            id="regional_healpix_na",
+        ),
     ],
 )
 def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> None:
@@ -300,6 +316,19 @@ def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> Non
         assert actual.crs == CRS.from_epsg(4326)
         assert actual.lon_spans_globe
         assert len(actual.indexes) == 1
+    elif expected is HEALPIX_SENTINEL:
+        assert isinstance(actual, Healpix)
+        assert actual.dim == "cell_ids"
+        level = actual.index.grid_info.level
+        if actual.cell_ids.size == 12 * 4**level:
+            assert actual.bbox == BBox(west=-180, south=-90, east=180, north=90)
+        else:
+            # regional: bbox strictly inside the globe
+            assert actual.bbox.west > -180 and actual.bbox.east < 180
+            assert actual.bbox.south > -90 and actual.bbox.north < 90
+        assert actual.crs.is_geographic
+        assert actual.X == "lon"
+        assert actual.Y == "lat"
     else:
         assert expected == actual
 

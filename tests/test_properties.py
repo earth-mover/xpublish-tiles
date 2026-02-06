@@ -31,12 +31,14 @@ from xpublish_tiles.testing.datasets import (
     HRRR_MULTIPLE,
     REDGAUSS_N320,
     Dim,
+    _create_global_healpix,
     uniform_grid,
 )
 from xpublish_tiles.testing.lib import (
     compare_image_buffers_with_debug,
     visualize_tile,
 )
+from xpublish_tiles.xpublish.tiles.metadata import allowed_styles
 
 
 @st.composite
@@ -157,6 +159,19 @@ def global_curvilinear_datasets(
 
 
 @st.composite
+def global_healpix_datasets(draw: DrawFn) -> xr.Dataset:
+    """Strategy that returns a global HEALPix grid dataset at a sampled refinement level.
+
+    Coarser levels are intentionally included — they run fast and exercise the
+    small-cell-count path.
+    """
+    level = draw(st.sampled_from([1, 2, 3, 4]))
+    ds = _create_global_healpix(level=level, dtype=np.float64)
+    ds.attrs["_xpublish_id"] = f"global_healpix_l{level}_proptest"
+    return ds
+
+
+@st.composite
 def global_unstructured_datasets(draw: DrawFn) -> xr.Dataset:
     """Strategy that returns global unstructured grid datasets.
 
@@ -190,9 +205,11 @@ def global_unstructured_datasets(draw: DrawFn) -> xr.Dataset:
     return ds
 
 
-# Combine both regular and unstructured global datasets
+# Combine regular, unstructured, and healpix global datasets
 all_global_datasets = st.one_of(
-    global_rectilinear_datasets(allow_categorical=False), global_unstructured_datasets()
+    global_rectilinear_datasets(allow_categorical=False),
+    global_unstructured_datasets(),
+    global_healpix_datasets(),
 )
 
 
@@ -286,17 +303,16 @@ def tile_and_tms(
     tile_tms=tile_and_tms(),
     ds=all_global_datasets,
     data=st.data(),
-    style=st.sampled_from(["raster", "polygons"]),
 )
 async def test_property_global_render_no_transparent_tile(
     tile_tms: tuple[Tile, TileMatrixSet],
     ds: xr.Dataset,
     data: st.DataObject,
-    style: str,
     pytestconfig,
 ):
     """Property test that global datasets should never produce transparent pixels."""
     tile, tms = tile_tms
+    style = data.draw(st.sampled_from(allowed_styles(ds)))
     query_params = create_query_params(
         tile,
         tms,
@@ -470,13 +486,11 @@ async def test_projected_coordinate_succeeds(dataset, data, pytestconfig):
     tile_tms=tile_and_tms(),
     ds=all_global_datasets,
     data=st.data(),
-    style=st.sampled_from(["raster", "polygons"]),
 )
 @settings(max_examples=50)
 # @reproduce_failure('6.138.3', b'AXicc2R0ZECFDBoMUKBhH5Dke+njyj8MjqyO3I4MAI0xCBQ=')
-async def test_zoom_in_doesnt_change_rendering(
-    tile_tms, ds, data, style, pytestconfig
-) -> None:
+async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig) -> None:
+    style = data.draw(st.sampled_from(allowed_styles(ds)))
     """Property test that zooming in doesn't change rendering.
 
     For a quadtree TMS, rendering a tile at a large size should produce the same
