@@ -58,7 +58,6 @@ from xpublish_tiles.testing.datasets import (
     PARA_HIRES,
     POPDS,
     REDGAUSS_N320,
-    REGIONAL_HYCOM,
     UTM33S_HIRES,
     UTM50S_HIRES,
     Dataset,
@@ -196,32 +195,6 @@ TRIANGULAR_SENTINEL = 1
                 ),
             ),
             id="pop",
-        ),
-        pytest.param(
-            REGIONAL_HYCOM.create(),
-            "foo",
-            Curvilinear(
-                crs=CRS.from_user_input(4326),
-                bbox=BBox(
-                    south=-0.1121322438120842,
-                    north=80.11212921142578,
-                    east=-119.49333190917969,
-                    west=-180.5066680908203,
-                ),
-                X="longitude",
-                Y="latitude",
-                Xdim="X",
-                Ydim="Y",
-                indexes=(
-                    CurvilinearCellIndex(
-                        X=REGIONAL_HYCOM.create().longitude.astype(np.float64),
-                        Y=REGIONAL_HYCOM.create().latitude.astype(np.float64),
-                        Xdim="X",
-                        Ydim="Y",
-                    ),
-                ),
-            ),
-            id="hycom",
         ),
         # pytest.param(
         #     cfxr.datasets.rotds,

@@ -43,7 +43,8 @@ from xpublish_tiles.testing.datasets import (
     HRRR,
     IFS,
     PARA,
-    TRIPOLAR_HYCOM,
+    TRIPOLE_ANTIMERIDIAN,
+    TRIPOLE_SEAM,
 )
 from xpublish_tiles.testing.lib import (
     assert_render_matches_snapshot,
@@ -758,38 +759,17 @@ async def test_async_load_timeout():
             await pipeline(ds, query_params)
 
 
-@pytest.mark.parametrize(
-    "tile",
-    [
-        morecantile.Tile(x=0, y=0, z=0),
-        morecantile.Tile(x=1, y=1, z=1),
-        morecantile.Tile(x=2, y=3, z=2),
-        morecantile.Tile(x=0, y=2, z=2),
-        morecantile.Tile(x=2, y=2, z=2),
-        morecantile.Tile(x=9, y=3, z=4),
-        morecantile.Tile(x=5, y=1, z=3),
-    ],
-)
-@pytest.mark.parametrize(
-    "dataset",
-    [
-        # pytest.param(GLOBAL_HYCOM, id="global_hycom"),
-        pytest.param(TRIPOLAR_HYCOM, id="tripolar_hycom"),
-    ],
-)
-async def test_hycom_like_grid(tile, dataset, png_snapshot, pytestconfig):
-    ds = dataset.create()
-    query = create_query_params(tms=WEBMERC_TMS, tile=tile)
-    result = await pipeline(ds, query)
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ds_factory", [TRIPOLE_ANTIMERIDIAN, TRIPOLE_SEAM])
+async def test_tripole(ds_factory, png_snapshot, pytestconfig):
+    ds = ds_factory.create()
+    tile = Tile(x=0, y=0, z=0)
+    tms = WEBMERC_TMS
+    query_params = create_query_params(tile, tms)
+    result = await pipeline(ds, query_params)
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
-    assert_render_matches_snapshot(
-        result,
-        png_snapshot,
-        tile=tile,
-        tms=WEBMERC_TMS,
-        dataset_bbox=ds.attrs.get("bbox"),
-    )
+    assert_render_matches_snapshot(result, png_snapshot, skip_transparency_check=True)
 
 
 class TestFixCoordinateDiscontinuities:

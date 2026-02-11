@@ -1059,116 +1059,122 @@ CURVILINEAR = Dataset(
 )
 
 
-def _create_curvilinear_grid_like_hycom(
+def tripolar_grid(
     *,
-    regional_subset: bool,
     dims: tuple[Dim, ...],
     dtype: npt.DTypeLike,
     attrs: dict[str, Any],
 ) -> xr.Dataset:
-    """Build a global HYCOM-like curvilinear grid matching actual HYCOM/RTOFS dimensions.
+    """Create a tripolar grid dataset with 2D lat/lon coordinates.
 
-    Note: this doesn't properly work; the `TRIPOLAR_HYCOM` test case uses
-    actual coordinate values from the real model. That said; this dataset is still wonky
-    and its useful for testing.
-
-    Creates a simplified curvilinear grid with:
-    - Full HYCOM dimensions: 4500 (lon) x 3298 (lat)
-    - Latitude range: -80° to 90°
-    - Longitude: -180° to 180° with wraparound at antimeridian
-    - 2D coordinate arrays (curvilinear)
+    Mimics the HYCOM tripolar grid structure:
+    - Lower portion is rectilinear (lat constant along X, lon constant along Y)
+    - Upper portion is curvilinear with the tripolar fold
+    - Longitude crosses the antimeridian
     """
     ds = uniform_grid(dims=dims, dtype=dtype, attrs=attrs)
 
-    ny, nx = ds.sizes["Y"], ds.sizes["X"]
+    y_dim, x_dim = dims[0], dims[1]
+    ny, nx = y_dim.size, x_dim.size
 
-    if regional_subset:
-        # Create a truly regional grid (no wrapping)
-        lat_1d = np.linspace(0.0, 80.0, ny, dtype=np.float32)
-        lon_1d = np.linspace(-180.0, -120.0, nx, dtype=np.float32)
-        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
-        # Add small curvilinear variation
-        lat_variation = 0.1 * np.sin(2 * np.pi * np.arange(nx) / nx)
-        lat = lat_2d + lat_variation[np.newaxis, :]
-        lon_variation = 0.5 * np.sin(2 * np.pi * np.arange(ny) / ny)
-        lon = lon_2d + lon_variation[:, np.newaxis]
-        ds.attrs["bbox"] = BBox(west=-180.0, south=0.0, east=-120.0, north=80.0)
-    else:
-        # Global grid with antimeridian wrapping
-        # Use endpoint=False to prevent 180 wrapping to -180 (duplicate edge)
-        lat_1d = np.linspace(-80.0, 90.0, ny, dtype=np.float32)
-        lon_1d = np.linspace(-180.0, 180.0, nx, dtype=np.float32, endpoint=False)
-        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
-        lat_variation = 0.1 * np.sin(2 * np.pi * np.arange(nx) / nx)
-        lat = lat_2d + lat_variation[np.newaxis, :]
-        lon_variation = 0.5 * np.sin(2 * np.pi * np.arange(ny) / ny)
-        lon = lon_2d + lon_variation[:, np.newaxis]
-        lon = ((lon + 180.0) % 360.0) - 180.0
-        ds.attrs["bbox"] = BBox(west=-180.0, south=-80.0, east=180.0, north=90.0)
+    # Longitude: base shifts from ~176 to ~-138 along Y, with X offset of ~27°
+    lon_spacing = 0.27
+    base_lons = np.linspace(175.9, -137.53, ny)[:, np.newaxis]
+    x_offsets = (np.arange(nx) * lon_spacing)[np.newaxis, :]
+    lons_raw = base_lons + x_offsets
+    lons = np.where(lons_raw > 180, lons_raw - 360, lons_raw).astype(np.float32)
 
-    ds["foo"] = ds["foo"].chunk(X=1000, Y=1000)
-    ds.coords["latitude"] = (
-        ["Y", "X"],
-        lat.astype(np.float32),
-        {"standard_name": "latitude", "units": "degrees_north"},
-    )
-    ds.coords["longitude"] = (
-        ["Y", "X"],
-        lon.astype(np.float32),
-        {
-            "standard_name": "longitude",
-            "units": "degrees_east",
-            "modulo": "360 degrees",
-        },
-    )
+    # Latitude: 30° to 84.5° along Y, with tripolar fold distortion in upper rows
+    y_frac = np.linspace(0, 1, ny)[:, np.newaxis]
+    x_frac = np.linspace(0, 1, nx)[np.newaxis, :]
+    base_lats = np.broadcast_to(
+        np.linspace(30.0, 84.5, ny)[:, np.newaxis], (ny, nx)
+    ).copy()
+
+    # Tripolar fold: starts at ~25% up, right side stays at lower latitude
+    transition = np.clip((y_frac - 0.25) / 0.75, 0, 1)
+    distortion = -33.0 * transition * x_frac
+    lats = (base_lats + distortion).astype(np.float32)
+
+    ds.coords["lat"] = ((y_dim.name, x_dim.name), lats, {"standard_name": "latitude"})
+    ds.coords["lon"] = ((y_dim.name, x_dim.name), lons, {"standard_name": "longitude"})
+    ds["foo"].attrs["coordinates"] = "lat lon"
+
     return ds
 
 
-GLOBAL_HYCOM = Dataset(
-    name="global_hycom",
-    setup=partial(_create_curvilinear_grid_like_hycom, regional_subset=False),
+TRIPOLE_ANTIMERIDIAN = Dataset(
+    name="tripole_antimeridian",
     dims=(
-        Dim(
-            name="X",
-            size=4500,
-            chunk_size=4500,
-            data=np.arange(4500),
-            attrs={
-                "standard_name": "projection_x_coordinate",
-                "axis": "X",
-                "point_spacing": "even",
-            },
-        ),
-        Dim(
-            name="Y",
-            size=3298,
-            chunk_size=3298,
-            data=np.arange(3298),
-            attrs={
-                "standard_name": "projection_y_coordinate",
-                "axis": "Y",
-                "point_spacing": "even",
-            },
-        ),
+        Dim(name="Y", size=1307, chunk_size=500, data=None),
+        Dim(name="X", size=895, chunk_size=500, data=None),
     ),
-    dtype=np.float64,
-    attrs={
-        "valid_min": 5.0,
-        "valid_max": 15.0,
-        "coordinates": "latitude longitude",
-    },
+    dtype=np.float32,
+    setup=tripolar_grid,
 )
 
-REGIONAL_HYCOM = Dataset(
-    name="regional_hycom",
-    setup=partial(_create_curvilinear_grid_like_hycom, regional_subset=True),
-    dims=GLOBAL_HYCOM.dims,  # gets subset later
-    dtype=np.float64,
-    attrs={
-        "valid_min": 5.0,
-        "valid_max": 15.0,
-        "coordinates": "latitude longitude",
-    },
+
+def tripolar_seam_grid(
+    *,
+    dims: tuple[Dim, ...],
+    dtype: npt.DTypeLike,
+    attrs: dict[str, Any],
+) -> xr.Dataset:
+    """Create a global tripolar grid with the bipolar seam at Y=-1.
+
+    Mimics the HYCOM GLB0.08 global tripolar grid:
+    - Rectilinear longitude for all rows (360° starting at 74.16°E)
+    - Y=-1 is the fold: lon[-1, :] = lon[-2, ::-1]
+    - Latitude is a piecewise-linear W-shape at the seam (two poles at nx/4, 3*nx/4)
+      interpolated from a flat base at Y=0
+    """
+    ds = uniform_grid(dims=dims, dtype=dtype, attrs=attrs)
+
+    y_dim, x_dim = dims[0], dims[1]
+    ny, nx = y_dim.size, x_dim.size
+
+    # --- Longitude ---
+    # Rectilinear: 360° starting at 74.16°, wrapping at ±180
+    dx_lon = 360.0 / nx
+    lon_1d = 74.16 + np.arange(nx) * dx_lon
+    lon_1d = ((lon_1d + 180) % 360) - 180
+
+    lons = np.broadcast_to(lon_1d[np.newaxis, :], (ny, nx)).copy()
+    # Seam: Y=-1 is the reverse of Y=-2
+    lons[-1, :] = lons[-2, ::-1]
+
+    # --- Latitude ---
+    # W-shape at seam: piecewise linear triangle wave with two peaks
+    # 75° at X=0, nx/2, nx-1 (edges and center)
+    # 90° at X=nx/4, 3*nx/4 (poles)
+    lat_min, lat_max = 75.0, 90.0
+    x_frac = np.arange(nx, dtype=np.float64) / (nx - 1)
+    phase = (x_frac % 0.5) / 0.25
+    triangle = np.where(phase <= 1, phase, 2 - phase)
+    lat_seam = lat_min + (lat_max - lat_min) * triangle
+
+    # Interpolate from flat at Y=0 to W-shape at Y=-1
+    y_frac = np.linspace(0, 1, ny)[:, np.newaxis]
+    lats = lat_min + y_frac * (lat_seam[np.newaxis, :] - lat_min)
+
+    lons = lons.astype(np.float32)
+    lats = lats.astype(np.float32)
+
+    ds.coords["lat"] = ((y_dim.name, x_dim.name), lats, {"standard_name": "latitude"})
+    ds.coords["lon"] = ((y_dim.name, x_dim.name), lons, {"standard_name": "longitude"})
+    ds["foo"].attrs["coordinates"] = "lat lon"
+
+    return ds
+
+
+TRIPOLE_SEAM = Dataset(
+    name="tripole_seam",
+    dims=(
+        Dim(name="Y", size=1000, chunk_size=500, data=None),
+        Dim(name="X", size=2000, chunk_size=500, data=None),
+    ),
+    dtype=np.float32,
+    setup=tripolar_seam_grid,
 )
 
 
@@ -1521,7 +1527,6 @@ DATASET_LOOKUP = {
     "hrrr_multiple": HRRR_MULTIPLE,
     "global_nans": GLOBAL_NANS,
     "redgauss_n320": REDGAUSS_N320,
-    "global_hycom": GLOBAL_HYCOM,
-    "regional_hycom": REGIONAL_HYCOM,
-    "tripolar_hycom": TRIPOLAR_HYCOM,
+    "tripole_antimeridian": TRIPOLE_ANTIMERIDIAN,
+    "tripole_seam": TRIPOLE_SEAM,
 }
