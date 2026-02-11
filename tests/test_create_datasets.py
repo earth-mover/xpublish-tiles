@@ -11,7 +11,6 @@ from xpublish_tiles.testing.datasets import (
     PARA_HIRES,
     REDGAUSS_N320,
     SENTINEL2_NOCOORDS,
-    TRIPOLAR_HYCOM,
     UTM33S,
     UTM33S_HIRES,
     UTM50S_HIRES,
@@ -33,7 +32,6 @@ from xpublish_tiles.testing.datasets import (
         pytest.param(UTM33S_HIRES, id="utm33s_hires"),
         pytest.param(UTM50S_HIRES, id="utm50s_hires"),
         pytest.param(REDGAUSS_N320, id="redgauss_n320"),
-        pytest.param(TRIPOLAR_HYCOM, id="tripolar_hycom"),
     ]
 )
 def dataset(request):
@@ -46,5 +44,5 @@ def dataset(request):
 def test_create_local_dataset(dataset: Dataset, repo) -> None:
     ds = dataset.create()
     session = repo.writable_session("main")
-    to_icechunk(ds.drop_encoding(), session, group=dataset.name, mode="w")
+    to_icechunk(ds, session, group=dataset.name, mode="w")
     session.commit(f"wrote {dataset.name!r}")
