@@ -27,6 +27,7 @@ from xpublish_tiles.lib import (
     _prevent_slice_overlap,
     crs_repr,
     is_4326_like,
+    unwrap,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.utils import NUMBA_THREADING_LOCK, time_debug
@@ -85,10 +86,12 @@ class GridMappingInfo:
 
 # Regex patterns for coordinate detection
 X_COORD_PATTERN = re.compile(
-    r"^(x|i|xi|nlon|rlon|ni)[a-z0-9_]*$|^x?(nav_lon|lon|glam)[a-z0-9_]*$"
+    r"^(x|i|xi|nlon|rlon|ni)[a-z0-9_]*$|^x?(nav_lon|lon|glam)[a-z0-9_]*$",
+    re.IGNORECASE,
 )
 Y_COORD_PATTERN = re.compile(
-    r"^(y|j|eta|nlat|rlat|nj)[a-z0-9_]*$|^y?(nav_lat|lat|gphi)[a-z0-9_]*$"
+    r"^(y|j|eta|nlat|rlat|nj)[a-z0-9_]*$|^y?(nav_lat|lat|gphi)[a-z0-9_]*$",
+    re.IGNORECASE,
 )
 
 _GRID_CACHE = cachetools.LRUCache(maxsize=config["grid_cache_max_size"])
@@ -168,7 +171,7 @@ def _convert_longitude_slice(
     -------
     tuple[slice, ...]
         Converted slice(s) that match dataset's coordinate system.
-        Returns tuple of slices when selection crosses boundaries.
+        Returns tuple of slices when selection crosses boundaries or spans multiple periods.
     """
     if lon_slice.start is None or lon_slice.stop is None:
         raise ValueError("start and stop should not be None")
@@ -189,7 +192,7 @@ def _convert_longitude_slice(
 
     # Normalize start and stop to be within or near the grid's coordinate range
     # by shifting them by multiples of 360
-    # This is required to deal with cases where `np.unwrap` changed
+    # This is required to deal with cases where unwrapping changed
     # the longitude coordinates to be continuous
     coord_center = (left_break + right_break) / 2
     query_center = (original_start + original_stop) / 2
@@ -430,6 +433,42 @@ class CellTreeIndex(xr.Index):
         )
 
 
+def _detect_tripolar_fold_row(X: np.ndarray, *, yaxis: int) -> int | None:
+    """Detect tripolar grid fold row by checking if the last row is a flipped version of the second-to-last.
+
+    In a tripolar grid, the northernmost row of data is a flipped version of the row below it.
+    This creates a "seam" at the North Pole where the grid folds back on itself.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        2D longitude coordinate array
+    yaxis : int
+        Axis index for Y dimension
+
+    Returns
+    -------
+    int | None
+        Index of the fold row (the row that is flipped), or None if not a tripolar grid
+    """
+    n_rows = X.shape[yaxis]
+    if n_rows < 2:
+        return None
+
+    last_row = np.take(X, -1, axis=yaxis)
+    second_last_row = np.take(X, -2, axis=yaxis)
+    second_last_flipped = np.flip(second_last_row)
+
+    # Check if last row matches flipped second-to-last row.
+    # Use a tolerance that accounts for floating-point precision in grid coordinates.
+    # For float32 coordinates (common in HYCOM), precision errors can reach ~0.0001,
+    # so use a slightly larger tolerance of 0.001 (~1 km at equator).
+    if np.allclose(last_row, second_last_flipped, atol=0.001, rtol=0):
+        return n_rows - 1
+
+    return None
+
+
 class CurvilinearCellIndex(xr.Index):
     left_break: float
     right_break: float
@@ -446,30 +485,56 @@ class CurvilinearCellIndex(xr.Index):
     top: np.ndarray
     _dXmin: float
     _dYmin: float
+    tripolar_fold_row: int | None
 
-    def __init__(self, *, X: xr.DataArray, Y: xr.DataArray, Xdim: str, Ydim: str):
+    def __init__(
+        self,
+        *,
+        X: xr.DataArray,
+        Y: xr.DataArray,
+        Xdim: str,
+        Ydim: str,
+        tripolar_fold_row: int | None = None,
+    ):
         if Y.nbytes > MAX_COORD_VAR_NBYTES or X.nbytes > MAX_COORD_VAR_NBYTES:
             raise ValueError(
                 f"Coordinate variables {X.name!r} and {Y.name!r} are too big to load in to memory!"
             )
         self.X, self.Y = X.reset_coords(drop=True), Y.reset_coords(drop=True)
         self.Xdim, self.Ydim = Xdim, Ydim
+        self.tripolar_fold_row = tripolar_fold_row
 
         # derived quantities
         X, Y = self.X.data, self.Y.data
         xaxis = self.X.get_axis_num(self.Xdim)
         yaxis = self.Y.get_axis_num(self.Ydim)
 
-        # Store actual coordinate bounds for longitude slice conversion
-        # Use overall min/max of X coordinates after unwrapping
-        self.left_break = float(X.min())
-        self.right_break = float(X.max())
+        # Store coordinate bounds for longitude slice conversion.
+        # For geographic CRS, X coordinates are already unwrapped by Curvilinear.from_dataset,
+        # so left_break/right_break represent the continuous range (e.g., 74° to 434°).
+        # _convert_longitude_slice uses these to map tile requests to grid indices.
+        # Use first/last columns along x-axis for the breaks.
+        # For tripolar grids, exclude the fold row since it has distorted coordinates.
+        first_col = np.take(X, 0, axis=xaxis)
+        last_col = np.take(X, -1, axis=xaxis)
+        if tripolar_fold_row is not None:
+            first_col = first_col[:tripolar_fold_row]
+            last_col = last_col[:tripolar_fold_row]
+        self.left_break = float(np.min(first_col))
+        self.right_break = float(np.max(last_col))
+
+        # Compute cell bounds from coordinate diffs. For geographic CRS, X coordinates
+        # are already unwrapped, so diffs are continuous (no 360° jumps at antimeridian).
         dX, dY = _padded_diff(X, axis=xaxis), _padded_diff(Y, axis=yaxis)
         self.left, self.right = X - dX / 2, X + dX / 2
         self.bottom, self.top = Y - dY / 2, Y + dY / 2
-        self.y_is_increasing = True
-        if not (self.bottom < self.top).all():
-            self.y_is_increasing = False
+        # Determine if Y is increasing by checking the first row.
+        # Don't use .all() because tripolar grids have dY=0 in the fold region
+        # which would cause the swap to trigger incorrectly.
+        first_row_bottom = np.take(self.bottom, 0, axis=yaxis)
+        first_row_top = np.take(self.top, 0, axis=yaxis)
+        self.y_is_increasing = (first_row_bottom < first_row_top).all()
+        if not self.y_is_increasing:
             self.top, self.bottom = self.bottom, self.top
         self.xaxis, self.yaxis = xaxis, yaxis
 
@@ -498,7 +563,9 @@ class CurvilinearCellIndex(xr.Index):
         X, Y = self.X.data, self.Y.data
         xaxis, yaxis = self.xaxis, self.yaxis
         bottom, top, left, right = self.bottom, self.top, self.left, self.right
-        Xlen, Ylen = X.shape[xaxis], Y.shape[yaxis]
+        Xlen = X.shape[xaxis]
+        # For tripolar grids, exclude the fold row from consideration
+        Ylen = self.tripolar_fold_row or Y.shape[yaxis]
 
         assert len(labels) == 1
         bbox = next(iter(labels.values()))
@@ -518,6 +585,12 @@ class CurvilinearCellIndex(xr.Index):
             size=Ylen,
             increasing=self.y_is_increasing,
         )
+
+        # add 1 to account for slice upper end being exclusive
+        y_start, y_stop = min(ys), max(ys) + 1
+        # Clamp Y slice to exclude tripolar fold row, if applicable
+        y_stop = min(y_stop, Ylen)
+
         all_indexers: list[slice] = []
         for sl in slices:
             xs = _grab_edges(
@@ -533,15 +606,14 @@ class CurvilinearCellIndex(xr.Index):
 
         slicers = {
             self.Xdim: all_indexers,
-            # add 1 to account for slice upper end being exclusive
-            self.Ydim: slice(min(ys), max(ys) + 1),
+            self.Ydim: slice(y_start, y_stop),
         }
         return IndexSelResult(slicers)
 
     def equals(self, other: Self) -> bool:
         return (
-            self.X.equals(other.X)
-            and self.Y.equals(other.Y)
+            np.allclose(self.X.data, other.X.data)
+            and np.allclose(self.Y.data, other.Y.data)
             and self.Xdim == other.Xdim
             and self.Ydim == other.Ydim
         )
@@ -1071,7 +1143,7 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
             # Use np.unwrap to fix longitude discontinuities without centering
             # This ensures datasets with the meridian discontinuitiy in the "middle"
             # of the dataset maintain a continuous coordinate system
-            x_data = np.unwrap(x_data, period=360)
+            x_data = unwrap(x_data, width=360)
 
         x_bounds = _compute_interval_bounds(x_data)
         x_intervals = pd.IntervalIndex.from_breaks(x_bounds, closed="left")
@@ -1185,7 +1257,11 @@ class Curvilinear(GridSystem):
             north = numbagg.nanmax(index.top)
 
             if self.crs.is_geographic:
-                lon_span = east - west
+                # This handling is necessary for subsets of tripolar grids;
+                # where the anti-meridian discontinuity is not present in some, but not all, rows.
+                lon_span = (
+                    index.right.max(axis=index.xaxis) - index.left.min(axis=index.xaxis)
+                ).max()
                 self.lon_spans_globe = lon_span >= 350
                 # Normalize bbox to -180->180 for global grids
                 if self.lon_spans_globe:
@@ -1201,6 +1277,11 @@ class Curvilinear(GridSystem):
 
         # Calculate minimum grid spacing using index method
         self.dXmin, self.dYmin = index.get_min_spacing()
+
+    @property
+    def is_tripolar(self) -> bool:
+        index = next(iter(self.indexes))
+        return getattr(index, "tripolar_fold_row", None) is not None
 
     def _guess_dims(
         ds: xr.Dataset, *, X: xr.DataArray, Y: xr.DataArray
@@ -1257,15 +1338,27 @@ class Curvilinear(GridSystem):
         # Since Curvilinear grid transforms are quite expensive; we trade the memory cost
         # here to avoid repeated allocations when transforming.
         X, Y = ds[Xname].astype(np.float64), ds[Yname].astype(np.float64)
+        Xdim, Ydim = Curvilinear._guess_dims(ds, X=X, Y=Y)
+        yaxis = X.get_axis_num(Ydim)
+
+        # Detect tripolar grid BEFORE unwrapping (the fold row detection relies on
+        # the last row being a flipped version of the second-to-last, which only
+        # holds true before unwrap modifies the coordinates)
+        tripolar_fold_row = _detect_tripolar_fold_row(X.data, yaxis=yaxis)
 
         if crs.is_geographic:
             # Use np.unwrap to fix longitude discontinuities without centering
             # This ensures datasets with the meridian discontinuity in the "middle"
             # of the dataset maintain a continuous coordinate system
-            X = X.copy(data=np.unwrap(X.data, period=360))
+            X = X.copy(data=unwrap(X.data, width=360))
 
-        Xdim, Ydim = Curvilinear._guess_dims(ds, X=X, Y=Y)
-        index = CurvilinearCellIndex(X=X, Y=Y, Xdim=Xdim, Ydim=Ydim)
+        index = CurvilinearCellIndex(
+            X=X,
+            Y=Y,
+            Xdim=Xdim,
+            Ydim=Ydim,
+            tripolar_fold_row=tripolar_fold_row,
+        )
         return cls(
             crs=crs,
             X=Xname,
@@ -1281,8 +1374,10 @@ class Curvilinear(GridSystem):
         return {self.Xdim, self.Ydim}
 
     def equals(self, other: Self) -> bool:
-        if (self.crs == other.crs and self.bbox == other.bbox) or (
-            self.X == other.X and self.Y == other.Y
+        if (
+            (self.crs == other.crs and self.bbox == other.bbox)
+            and (self.X == other.X and self.Y == other.Y)
+            and self.indexes[0].equals(other.indexes[0])
         ):
             return super().equals(other)
         else:

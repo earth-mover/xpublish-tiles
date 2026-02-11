@@ -1059,6 +1059,69 @@ CURVILINEAR = Dataset(
 )
 
 
+def tripolar_grid(
+    *,
+    dims: tuple[Dim, ...],
+    dtype: npt.DTypeLike,
+    attrs: dict[str, Any],
+) -> xr.Dataset:
+    """Create a tripolar grid dataset mimicking an NE Pacific HYCOM regional slice.
+
+    Key properties matched from hycom_slice.nc (1307x895):
+    - Longitude crosses the antimeridian (unwrapped: 175.92° to 247.44° at Y=0)
+    - Bottom ~20% of rows are rectilinear (lat/lon constant along X/Y respectively)
+    - Upper rows are curvilinear: left side reaches 84.5°N, right side only 51.4°N
+    - Lon columns shift eastward as Y increases, more on the left (+46°) than right (+6°)
+    """
+    ds = uniform_grid(dims=dims, dtype=dtype, attrs=attrs)
+
+    y_dim, x_dim = dims[0], dims[1]
+    ny, nx = y_dim.size, x_dim.size
+
+    x_frac = np.linspace(0, 1, nx)
+    y_frac = np.linspace(0, 1, ny)
+
+    # --- Longitude (built in unwrapped space, then wrapped) ---
+    # At Y=0: 175.92° to 247.44° (unwrapped), crossing antimeridian
+    lon_row0 = np.linspace(175.92, 247.44, nx)
+
+    # Each column shifts eastward as Y increases:
+    # X=0 shifts +46.5°, X=nx-1 shifts +5.8° (left side fans out much more)
+    lon_shift_max = 46.5 * (1 - x_frac) + 5.8 * x_frac
+
+    # Smooth power curve: near-zero at bottom, accelerates toward top (no kink)
+    lons = (
+        lon_row0[np.newaxis, :]
+        + (y_frac**4)[:, np.newaxis] * lon_shift_max[np.newaxis, :]
+    )
+    lons = (((lons + 180) % 360) - 180).astype(np.float32)
+
+    # --- Latitude ---
+    # Top row: 84.5° at X=0, 51.35° at X=nx-1
+    # Each column rises monotonically from 30.04 to its ceiling
+    lat_top = np.linspace(84.5, 51.35, nx)
+    lats = (30.04 + y_frac[:, np.newaxis] * (lat_top[np.newaxis, :] - 30.04)).astype(
+        np.float32
+    )
+
+    ds.coords["lat"] = ((y_dim.name, x_dim.name), lats, {"standard_name": "latitude"})
+    ds.coords["lon"] = ((y_dim.name, x_dim.name), lons, {"standard_name": "longitude"})
+    ds["foo"].attrs["coordinates"] = "lat lon"
+
+    return ds
+
+
+TRIPOLE_ANTIMERIDIAN = Dataset(
+    name="tripole_antimeridian",
+    dims=(
+        Dim(name="Y", size=1307, chunk_size=500, data=None),
+        Dim(name="X", size=895, chunk_size=500, data=None),
+    ),
+    dtype=np.float32,
+    setup=tripolar_grid,
+)
+
+
 POPDS = xr.Dataset(
     {
         "TEMP": (
@@ -1280,6 +1343,7 @@ REDGAUSS_N320 = Dataset(
     tiles=GLOBAL_BENCHMARK_TILES,
 )
 
+
 # Lookup dictionary for all available datasets
 DATASET_LOOKUP = {
     "hrrr": HRRR,
@@ -1298,4 +1362,5 @@ DATASET_LOOKUP = {
     "hrrr_multiple": HRRR_MULTIPLE,
     "global_nans": GLOBAL_NANS,
     "redgauss_n320": REDGAUSS_N320,
+    "tripole_antimeridian": TRIPOLE_ANTIMERIDIAN,
 }
