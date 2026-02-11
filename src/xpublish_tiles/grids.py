@@ -86,10 +86,12 @@ class GridMappingInfo:
 
 # Regex patterns for coordinate detection
 X_COORD_PATTERN = re.compile(
-    r"^(x|i|xi|nlon|rlon|ni)[a-z0-9_]*$|^x?(nav_lon|lon|glam)[a-z0-9_]*$"
+    r"^(x|i|xi|nlon|rlon|ni)[a-z0-9_]*$|^x?(nav_lon|lon|glam)[a-z0-9_]*$",
+    re.IGNORECASE,
 )
 Y_COORD_PATTERN = re.compile(
-    r"^(y|j|eta|nlat|rlat|nj)[a-z0-9_]*$|^y?(nav_lat|lat|gphi)[a-z0-9_]*$"
+    r"^(y|j|eta|nlat|rlat|nj)[a-z0-9_]*$|^y?(nav_lat|lat|gphi)[a-z0-9_]*$",
+    re.IGNORECASE,
 )
 
 _GRID_CACHE = cachetools.LRUCache(maxsize=config["grid_cache_max_size"])
