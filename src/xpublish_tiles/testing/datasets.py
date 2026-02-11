@@ -1065,36 +1065,44 @@ def tripolar_grid(
     dtype: npt.DTypeLike,
     attrs: dict[str, Any],
 ) -> xr.Dataset:
-    """Create a tripolar grid dataset with 2D lat/lon coordinates.
+    """Create a tripolar grid dataset mimicking an NE Pacific HYCOM regional slice.
 
-    Mimics the HYCOM tripolar grid structure:
-    - Lower portion is rectilinear (lat constant along X, lon constant along Y)
-    - Upper portion is curvilinear with the tripolar fold
-    - Longitude crosses the antimeridian
+    Key properties matched from hycom_slice.nc (1307x895):
+    - Longitude crosses the antimeridian (unwrapped: 175.92° to 247.44° at Y=0)
+    - Bottom ~20% of rows are rectilinear (lat/lon constant along X/Y respectively)
+    - Upper rows are curvilinear: left side reaches 84.5°N, right side only 51.4°N
+    - Lon columns shift eastward as Y increases, more on the left (+46°) than right (+6°)
     """
     ds = uniform_grid(dims=dims, dtype=dtype, attrs=attrs)
 
     y_dim, x_dim = dims[0], dims[1]
     ny, nx = y_dim.size, x_dim.size
 
-    # Longitude: base shifts from ~176 to ~-138 along Y, with X offset of ~27°
-    lon_spacing = 0.27
-    base_lons = np.linspace(175.9, -137.53, ny)[:, np.newaxis]
-    x_offsets = (np.arange(nx) * lon_spacing)[np.newaxis, :]
-    lons_raw = base_lons + x_offsets
-    lons = np.where(lons_raw > 180, lons_raw - 360, lons_raw).astype(np.float32)
+    x_frac = np.linspace(0, 1, nx)
+    y_frac = np.linspace(0, 1, ny)
 
-    # Latitude: 30° to 84.5° along Y, with tripolar fold distortion in upper rows
-    y_frac = np.linspace(0, 1, ny)[:, np.newaxis]
-    x_frac = np.linspace(0, 1, nx)[np.newaxis, :]
-    base_lats = np.broadcast_to(
-        np.linspace(30.0, 84.5, ny)[:, np.newaxis], (ny, nx)
-    ).copy()
+    # --- Longitude (built in unwrapped space, then wrapped) ---
+    # At Y=0: 175.92° to 247.44° (unwrapped), crossing antimeridian
+    lon_row0 = np.linspace(175.92, 247.44, nx)
 
-    # Tripolar fold: starts at ~25% up, right side stays at lower latitude
-    transition = np.clip((y_frac - 0.25) / 0.75, 0, 1)
-    distortion = -33.0 * transition * x_frac
-    lats = (base_lats + distortion).astype(np.float32)
+    # Each column shifts eastward as Y increases:
+    # X=0 shifts +46.5°, X=nx-1 shifts +5.8° (left side fans out much more)
+    lon_shift_max = 46.5 * (1 - x_frac) + 5.8 * x_frac
+
+    # Smooth power curve: near-zero at bottom, accelerates toward top (no kink)
+    lons = (
+        lon_row0[np.newaxis, :]
+        + (y_frac**4)[:, np.newaxis] * lon_shift_max[np.newaxis, :]
+    )
+    lons = (((lons + 180) % 360) - 180).astype(np.float32)
+
+    # --- Latitude ---
+    # Top row: 84.5° at X=0, 51.35° at X=nx-1
+    # Each column rises monotonically from 30.04 to its ceiling
+    lat_top = np.linspace(84.5, 51.35, nx)
+    lats = (30.04 + y_frac[:, np.newaxis] * (lat_top[np.newaxis, :] - 30.04)).astype(
+        np.float32
+    )
 
     ds.coords["lat"] = ((y_dim.name, x_dim.name), lats, {"standard_name": "latitude"})
     ds.coords["lon"] = ((y_dim.name, x_dim.name), lons, {"standard_name": "longitude"})
@@ -1122,11 +1130,11 @@ def tripolar_seam_grid(
 ) -> xr.Dataset:
     """Create a global tripolar grid with the bipolar seam at Y=-1.
 
-    Mimics the HYCOM GLB0.08 global tripolar grid:
-    - Rectilinear longitude for all rows (360° starting at 74.16°E)
-    - Y=-1 is the fold: lon[-1, :] = lon[-2, ::-1]
-    - Latitude is a piecewise-linear W-shape at the seam (two poles at nx/4, 3*nx/4)
-      interpolated from a flat base at Y=0
+    Mimics the HYCOM GLB0.08 global tripolar grid (3298x4500):
+    - Longitude: 360° starting at 74.16°E, dx=360/nx, wrapped to [-180,180]
+    - Bottom ~66% of rows: rectilinear (lat constant along X, -80° to 47°)
+    - Top ~34%: curvilinear, lat diverges into W-shape with poles at nx/4, 3*nx/4
+    - Seam at Y=-1: lon[-1,:] = lon[-2,::-1], lat[-1,:] = lat[-2,::-1]
     """
     ds = uniform_grid(dims=dims, dtype=dtype, attrs=attrs)
 
@@ -1134,28 +1142,34 @@ def tripolar_seam_grid(
     ny, nx = y_dim.size, x_dim.size
 
     # --- Longitude ---
-    # Rectilinear: 360° starting at 74.16°, wrapping at ±180
     dx_lon = 360.0 / nx
     lon_1d = 74.16 + np.arange(nx) * dx_lon
     lon_1d = ((lon_1d + 180) % 360) - 180
 
     lons = np.broadcast_to(lon_1d[np.newaxis, :], (ny, nx)).copy()
-    # Seam: Y=-1 is the reverse of Y=-2
     lons[-1, :] = lons[-2, ::-1]
 
     # --- Latitude ---
-    # W-shape at seam: piecewise linear triangle wave with two peaks
-    # 75° at X=0, nx/2, nx-1 (edges and center)
-    # 90° at X=nx/4, 3*nx/4 (poles)
-    lat_min, lat_max = 75.0, 90.0
+    # Rectilinear below transition, curvilinear above
+    lat_south, lat_transition, lat_pole = -80.0, 47.0, 90.0
+    transition_row = int(0.66 * ny)
+
+    # Rectilinear portion: lat depends only on Y
+    lat_rect = np.linspace(lat_south, lat_transition, transition_row)
+    lats = np.zeros((ny, nx), dtype=np.float64)
+    lats[:transition_row, :] = lat_rect[:, np.newaxis]
+
+    # W-shape at seam: triangle wave — peaks (90°) at nx/4, 3*nx/4; valleys (47°) at 0, nx/2, nx-1
     x_frac = np.arange(nx, dtype=np.float64) / (nx - 1)
     phase = (x_frac % 0.5) / 0.25
     triangle = np.where(phase <= 1, phase, 2 - phase)
-    lat_seam = lat_min + (lat_max - lat_min) * triangle
+    lat_seam = lat_transition + (lat_pole - lat_transition) * triangle
 
-    # Interpolate from flat at Y=0 to W-shape at Y=-1
-    y_frac = np.linspace(0, 1, ny)[:, np.newaxis]
-    lats = lat_min + y_frac * (lat_seam[np.newaxis, :] - lat_min)
+    # Interpolate from flat at transition row to W-shape at top
+    n_fold = ny - transition_row
+    for i in range(n_fold):
+        t = (i + 1) / n_fold
+        lats[transition_row + i, :] = lat_transition + t * (lat_seam - lat_transition)
 
     lons = lons.astype(np.float32)
     lats = lats.astype(np.float32)
@@ -1165,17 +1179,6 @@ def tripolar_seam_grid(
     ds["foo"].attrs["coordinates"] = "lat lon"
 
     return ds
-
-
-TRIPOLE_SEAM = Dataset(
-    name="tripole_seam",
-    dims=(
-        Dim(name="Y", size=1000, chunk_size=500, data=None),
-        Dim(name="X", size=2000, chunk_size=500, data=None),
-    ),
-    dtype=np.float32,
-    setup=tripolar_seam_grid,
-)
 
 
 POPDS = xr.Dataset(
@@ -1528,5 +1531,4 @@ DATASET_LOOKUP = {
     "global_nans": GLOBAL_NANS,
     "redgauss_n320": REDGAUSS_N320,
     "tripole_antimeridian": TRIPOLE_ANTIMERIDIAN,
-    "tripole_seam": TRIPOLE_SEAM,
 }

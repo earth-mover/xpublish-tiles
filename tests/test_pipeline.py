@@ -44,7 +44,6 @@ from xpublish_tiles.testing.datasets import (
     IFS,
     PARA,
     TRIPOLE_ANTIMERIDIAN,
-    TRIPOLE_SEAM,
 )
 from xpublish_tiles.testing.lib import (
     assert_render_matches_snapshot,
@@ -760,10 +759,12 @@ async def test_async_load_timeout():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("ds_factory", [TRIPOLE_ANTIMERIDIAN, TRIPOLE_SEAM])
-async def test_tripole(ds_factory, png_snapshot, pytestconfig):
-    ds = ds_factory.create()
-    tile = Tile(x=0, y=0, z=0)
+@pytest.mark.parametrize("ds", [TRIPOLE_ANTIMERIDIAN.create()])
+@pytest.mark.parametrize(
+    "tile",
+    [Tile(x=0, y=0, z=2), Tile(x=0, y=1, z=2), Tile(x=0, y=0, z=1), Tile(z=3, y=2, x=1)],
+)
+async def test_tripole(ds, tile, png_snapshot, pytestconfig):
     tms = WEBMERC_TMS
     query_params = create_query_params(tile, tms)
     result = await pipeline(ds, query_params)

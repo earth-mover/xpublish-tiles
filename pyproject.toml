@@ -38,6 +38,7 @@ dependencies = [
     "numba-celltree>=0.4.1",
     "triangle>=20250106",
     "scikit-image>=0.25.2",
+    "icechunk>=1.1.4",
 ]
 dynamic = ["version"]
 

@@ -11,6 +11,7 @@ from xpublish_tiles.testing.datasets import (
     PARA_HIRES,
     REDGAUSS_N320,
     SENTINEL2_NOCOORDS,
+    TRIPOLE_ANTIMERIDIAN,
     UTM33S,
     UTM33S_HIRES,
     UTM50S_HIRES,
@@ -32,6 +33,7 @@ from xpublish_tiles.testing.datasets import (
         pytest.param(UTM33S_HIRES, id="utm33s_hires"),
         pytest.param(UTM50S_HIRES, id="utm50s_hires"),
         pytest.param(REDGAUSS_N320, id="redgauss_n320"),
+        pytest.param(TRIPOLE_ANTIMERIDIAN, id="tripole_antimeridian"),
     ]
 )
 def dataset(request):

@@ -401,6 +401,7 @@ def test_x_coordinate_regex_patterns():
     # Should match
     x_valid_names = [
         "x",
+        "X",
         "i",
         "nlon",
         "rlon",
@@ -418,7 +419,7 @@ def test_x_coordinate_regex_patterns():
         assert X_COORD_PATTERN.match(name), f"X pattern should match '{name}'"
 
     # Should not match
-    x_invalid_names = ["not_x", "X", "Y", "lat", "latitude", "foo", ""]
+    x_invalid_names = ["not_x", "lat", "latitude", "foo", ""]
 
     for name in x_invalid_names:
         assert not X_COORD_PATTERN.match(name), f"X pattern should not match '{name}'"
@@ -429,6 +430,7 @@ def test_y_coordinate_regex_patterns():
     # Should match
     y_valid_names = [
         "y",
+        "Y",
         "j",
         "nlat",
         "rlat",
@@ -446,7 +448,7 @@ def test_y_coordinate_regex_patterns():
         assert Y_COORD_PATTERN.match(name), f"Y pattern should match '{name}'"
 
     # Should not match
-    y_invalid_names = ["not_y", "Y", "X", "lon", "longitude", "foo", ""]
+    y_invalid_names = ["not_y", "lon", "longitude", "foo", ""]
 
     for name in y_invalid_names:
         assert not Y_COORD_PATTERN.match(name), f"Y pattern should not match '{name}'"
