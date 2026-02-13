@@ -287,6 +287,9 @@ async def test_radar_data(radar_dataset_and_tile, png_snapshot, pytestconfig):
         Tile(x=17, y=23, z=6),
         Tile(x=14, y=23, z=6),
         Tile(x=3, y=5, z=4),
+        Tile(x=3, y=7, z=4),
+        # edge-case where there is not data in the tile but the bbox overlaps
+        Tile(x=4, y=7, z=4),
     ],
 )
 async def test_curvilinear_polygons(tile, png_snapshot, pytestconfig):

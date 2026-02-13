@@ -77,7 +77,15 @@ class PolygonsRenderer(DatashaderRenderer):
             gdf = gpd.GeoDataFrame(geometry=context.cell_boundaries)
             gdf["data"] = data.values
 
-            mesh = cvs.polygons(gdf, "geometry", agg=dsh.mean("data"))
+            try:
+                mesh = cvs.polygons(gdf, "geometry", agg=dsh.mean("data"))
+            except ValueError as e:
+                if "Geometry type combination is not supported" not in str(e):
+                    raise
+                logger.debug("☐ No data (polygons don't overlap tile bbox)")
+                im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+                im.save(buffer, format=str(format))
+                return
 
         if isinstance(context.datatype, ContinuousData):
             if colorscalerange is None:
