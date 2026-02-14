@@ -995,9 +995,6 @@ async def transform_for_render(
     For raster style: transform X/Y coordinates to output CRS.
     For polygons style: transform cell boundary geometries to output CRS.
     """
-    if style == "polygons":
-        return await _transform_polygons(contexts, crs=crs)
-
     result = {}
     for var_name, context in contexts.items():
         if isinstance(context, NullRenderContext):
@@ -1011,6 +1008,10 @@ async def transform_for_render(
         if alternate is None:
             result[var_name] = context
             continue
+
+        input_to_output = transformer_from_crs(alternate.crs, crs)
+        if style == "polygons":
+            return await _transform_polygons(contexts, input_to_output)
 
         # Detect discontinuity for geographic CRS
         if grid.crs.is_geographic:
@@ -1038,7 +1039,7 @@ async def transform_for_render(
 
         with log_duration("transform_coordinates", "🔄"):
             newX, newY = await transform_coordinates(
-                subset, alternate.X, alternate.Y, transformer_from_crs(alternate.crs, crs)
+                subset, alternate.X, alternate.Y, input_to_output
             )
 
         # Fix coordinate discontinuities in transformed coordinates if detected
@@ -1047,7 +1048,6 @@ async def transform_for_render(
         # discontinuity is in the tile; it will be preserved by the transformation,
         # regardless of how we may modify the coordinates *before* transforming.
         if has_discontinuity:
-            input_to_output = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
             if isinstance(grid, GridSystem2D):
                 fixed = fix_coordinate_discontinuities(
                     newX.data,
