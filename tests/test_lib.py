@@ -10,6 +10,7 @@ from hypothesis import strategies as st
 from hypothesis.extra import numpy as npst
 
 import xarray as xr
+from tests import NUMERIC_DTYPES
 from xpublish_tiles.config import config
 from xpublish_tiles.lib import (
     apply_range_colors,
@@ -359,22 +360,7 @@ class TestApplyRangeColors:
         assert _get_under_color(result) == pytest.approx((0.0, 0.0, 1.0, 1.0), rel=0.01)
 
 
-@pytest.mark.parametrize(
-    "dtype",
-    [
-        np.int8,
-        np.int16,
-        np.int32,
-        np.int64,
-        np.uint8,
-        np.uint16,
-        np.uint32,
-        np.uint64,
-        np.float16,
-        np.float32,
-        np.float64,
-    ],
-)
+@pytest.mark.parametrize("dtype", NUMERIC_DTYPES)
 def test_coarsen_mean_pad_dtypes(dtype):
     """Test that coarsen_mean_pad handles all numeric dtypes."""
     arr = np.arange(12, dtype=dtype).reshape(4, 3)
