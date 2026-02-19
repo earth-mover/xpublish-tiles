@@ -32,7 +32,7 @@ from xpublish_tiles.lib import (
     unwrap,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
-from xpublish_tiles.utils import NUMBA_THREADING_LOCK, time_debug
+from xpublish_tiles.utils import NUMBA_THREADING_LOCK, time_debug, xarray_object_key
 
 GRID_DETECTION_LOCK = threading.Lock()
 
@@ -2208,12 +2208,7 @@ def guess_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
     """
     xpublish_id = ds.attrs.get("_xpublish_id")
     cache_key = (
-        (
-            xpublish_id,
-            tuple(sorted(dim for dim, size in ds[name].sizes.items() if size > 1)),
-        )
-        if xpublish_id is not None
-        else None
+        (xpublish_id, xarray_object_key(ds[name])) if xpublish_id is not None else None
     )
 
     if cache_key is not None and cache_key in _GRID_CACHE:

@@ -5,11 +5,17 @@ import threading
 import time
 from typing import Any
 
+import xarray as xr
 from xpublish_tiles.logger import log_duration, logger
 
 # Only use lock if tbb is not available
 HAS_TBB = importlib.util.find_spec("tbb") is not None
 NUMBA_THREADING_LOCK = contextlib.nullcontext() if HAS_TBB else threading.Lock()
+
+
+def xarray_object_key(obj: xr.DataArray | xr.Dataset) -> tuple:
+    """Cache key fragment: sorted dims whose size > 1."""
+    return tuple(sorted(dim for dim, size in obj.sizes.items() if size > 1))
 
 
 def lower_case_keys(d: Any) -> dict[str, Any]:
