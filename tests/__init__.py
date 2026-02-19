@@ -1,9 +1,24 @@
 """Shared test utilities."""
 
+import numpy as np
 from pyproj import CRS
 from pyproj.aoi import BBox
 
 from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
+
+NUMERIC_DTYPES = [
+    np.int8,
+    np.int16,
+    np.int32,
+    np.int64,
+    np.uint8,
+    np.uint16,
+    np.uint32,
+    np.uint64,
+    np.float16,
+    np.float32,
+    np.float64,
+]
 
 
 def create_query_params(
