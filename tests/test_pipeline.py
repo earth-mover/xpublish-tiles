@@ -17,7 +17,7 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from src.xpublish_tiles.render.raster import nearest_on_uniform_grid_quadmesh
-from tests import create_query_params
+from tests import NUMERIC_DTYPES, create_query_params
 from xarray.testing import assert_equal
 from xpublish_tiles import config
 from xpublish_tiles.lib import (
@@ -42,6 +42,7 @@ from xpublish_tiles.testing.datasets import (
     IFS,
     PARA,
     TRIPOLE_ANTIMERIDIAN,
+    create_global_dataset,
 )
 from xpublish_tiles.testing.lib import (
     assert_render_matches_snapshot,
@@ -101,6 +102,34 @@ def test_bbox_overlap_detection(bbox, grid_config):
         f"Valid bbox {bbox} should overlap with global {grid_description} grid. "
         f"Longitude wrapping should handle any longitude values."
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dtype", NUMERIC_DTYPES)
+async def test_pipeline_dtypes(dtype, png_snapshot):
+    """Test that the full rendering pipeline handles all numeric dtypes."""
+    ds = create_global_dataset()
+    rng = np.random.default_rng(42)
+    shape = ds["foo"].shape
+    if np.issubdtype(dtype, np.integer):
+        info = np.iinfo(dtype)
+        lo = max(info.min, -10000)
+        hi = min(info.max, 10000)
+        data = rng.integers(lo, hi, size=shape, dtype=dtype)
+    else:
+        data = rng.uniform(-1, 1, size=shape).astype(dtype)
+    ds["foo"] = ds["foo"].copy(data=data)
+    ds["foo"].attrs["valid_min"] = (
+        int(data.min()) if np.issubdtype(dtype, np.integer) else float(data.min())
+    )
+    ds["foo"].attrs["valid_max"] = (
+        int(data.max()) if np.issubdtype(dtype, np.integer) else float(data.max())
+    )
+    tile = Tile(x=2, y=1, z=2)
+    query_params = create_query_params(tile, WEBMERC_TMS)
+    with config.set(rectilinear_check_min_size=0):
+        result = await pipeline(ds, query_params)
+    assert_render_matches_snapshot(result, png_snapshot)
 
 
 @pytest.mark.asyncio

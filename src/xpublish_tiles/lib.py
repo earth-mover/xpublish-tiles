@@ -681,8 +681,18 @@ def _coarsen_nanmean_2d(arr, fy, fx, out):
             out[i, j] = total / count if count > 0 else np.nan
 
 
+def maybe_cast_data(data: xr.DataArray) -> xr.DataArray:
+    """Upcast small floats (e.g. float16) to float32 for numba compatibility."""
+    dtype = data.dtype
+    totype = str(dtype.str)
+    if dtype.kind == "f" and dtype.itemsize < 4:
+        totype = totype[:-1] + "4"
+    return data.astype(totype, copy=False)
+
+
 def coarsen_mean_pad(da: xr.DataArray, factors: dict[str, int]) -> xr.DataArray:
     """Memory-efficient coarsen with boundary='pad' and nanmean."""
+    da = maybe_cast_data(da)
     dims = da.dims
     arr = da.data
     H, W = arr.shape
