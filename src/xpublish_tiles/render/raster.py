@@ -19,6 +19,7 @@ from xpublish_tiles.lib import (
     apply_range_colors,
     create_colormap_from_dict,
     create_listed_colormap_from_dict,
+    maybe_cast_data,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import Renderer, register_renderer, render_error_image
@@ -155,15 +156,6 @@ class DatashaderRasterRenderer(Renderer):
     def validate(self, context: dict[str, "RenderContext"]):
         assert len(context) == 1
 
-    def maybe_cast_data(self, data) -> xr.DataArray:  # type: ignore[name-defined]
-        dtype = data.dtype
-        totype = str(dtype.str)
-        # numba only supports float32 and float64. upcast everything else
-        # https://numba.readthedocs.io/en/stable/reference/types.html#numbers
-        if dtype.kind == "f" and dtype.itemsize < 4:
-            totype = totype[:-1] + "4"
-        return data.astype(totype, copy=False)
-
     def render(
         self,
         *,
@@ -203,7 +195,7 @@ class DatashaderRasterRenderer(Renderer):
             x_range=(bbox.west, bbox.east),
             y_range=(bbox.south, bbox.north),
         )
-        data = self.maybe_cast_data(context.da)
+        data = maybe_cast_data(context.da)
 
         if isinstance(context.grid, GridSystem2D):
             # Use the actual coordinate names from the grid system
@@ -234,7 +226,7 @@ class DatashaderRasterRenderer(Renderer):
                             agg=dsh.reductions.mode(cast(str, data.name)),
                         )
             else:
-                data = self.maybe_cast_data(context.da)
+                data = maybe_cast_data(context.da)
                 with log_duration(
                     f"render (continuous) {data.shape} quadmesh", "🎨", logger
                 ):
