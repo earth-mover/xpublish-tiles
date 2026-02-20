@@ -67,4 +67,7 @@ jobs:
       - name: Test CLI entry point doesn't crash
         run: |
           uv run --no-project python -c "from xpublish_tiles.cli.main import main"
+          uv run --no-project python -c "import xpublish_tiles"
+          uv run --no-project python -c "from xpublish_tiles.xpublish.tiles import TilesPlugin"
+          uv run --no-project python -c "from xpublish_tiles.xpublish.wms import WMSPlugin"
           uv run --no-project xpublish-tiles --help
