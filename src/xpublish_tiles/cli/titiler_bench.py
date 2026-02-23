@@ -8,8 +8,7 @@ import attr
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from titiler.xarray.factory import TilerFactory
-from titiler.xarray.io import Reader
+
 
 import xarray as xr
 from xpublish_tiles.cli.benchmark_common import (
@@ -19,6 +18,13 @@ from xpublish_tiles.cli.benchmark_common import (
     run_concurrent_tile_requests,
     wait_for_server_ready,
 )
+from xpublish_tiles.lib import BenchmarkImportError
+
+try:
+    from titiler.xarray.factory import TilerFactory
+    from titiler.xarray.io import Reader
+except ImportError as e:
+    raise BenchmarkImportError from e
 
 # Global storage for in-memory datasets
 _DATASET_STORE = {}

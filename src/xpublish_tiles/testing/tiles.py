@@ -1,6 +1,13 @@
 import morecantile
-import pytest
 from morecantile import Tile
+
+from xpublish_tiles.lib import BenchmarkImportError
+
+try:
+    import pytest
+except ImportError as e:
+    raise BenchmarkImportError from e
+
 
 # WebMercatorQuad TMS for creating tiles
 WEBMERC_TMS = morecantile.tms.get("WebMercatorQuad")

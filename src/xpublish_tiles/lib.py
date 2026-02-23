@@ -83,6 +83,16 @@ def crs_repr(crs: CRS | None) -> str:
         return "<CRS>"
 
 
+class BenchmarkImportError(ImportError):
+    """Raised when the user attempts to benchmark without needed dependencies."""
+
+    def __init__(self):
+        super().__init__(
+            f"Additional dependencies are required for benchmarking."
+            " Please install xpublish-tiles[testing]."
+        )
+
+
 class TileTooBigError(Exception):
     """Raised when a tile request would result in too much data to render."""
 
