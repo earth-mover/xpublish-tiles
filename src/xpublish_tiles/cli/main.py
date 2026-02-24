@@ -16,7 +16,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import xarray as xr
 from xpublish_tiles.cli.bench import run_benchmark
-from xpublish_tiles.cli.titiler_bench import run_titiler_benchmark
 from xpublish_tiles.logger import setup_logging
 from xpublish_tiles.testing.datasets import (
     DATASET_LOOKUP,
@@ -349,6 +348,7 @@ def _run_single_dataset_benchmark(dataset_name, args, ds=None):
 
         # Use titiler.xarray if requested
         if hasattr(args, "titiler") and args.titiler:
+            from xpublish_tiles.cli.titiler_bench import run_titiler_benchmark
             return run_titiler_benchmark(
                 dataset=ds,
                 dataset_name=dataset_name,
