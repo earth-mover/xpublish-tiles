@@ -46,3 +46,29 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
+
+  # Install only the base dependencies, no extras, and ensure the CLI can still be imported
+  # Intended to reproduce <https://github.com/earth-mover/xpublish-tiles/issues/179>
+  test-import-with-base-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install package without optional deps
+        run: |
+          uv venv
+          uv pip install .
+
+      - name: Test CLI entry point doesn't crash
+        run: |
+          # without the `--no-project` flag, development dependencies are installed and invalidate the test!
+          uv run --no-project python -c "from xpublish_tiles.cli.main import main"
+          uv run --no-project python -c "import xpublish_tiles"
+          uv run --no-project python -c "from xpublish_tiles.xpublish.tiles import TilesPlugin"
+          uv run --no-project python -c "from xpublish_tiles.xpublish.wms import WMSPlugin"
+          uv run --no-project xpublish-tiles --help

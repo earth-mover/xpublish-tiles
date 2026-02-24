@@ -29,6 +29,7 @@ from xpublish_tiles.testing.tiles import (
     WEBMERC_TILES_EDGE_CASES,
     WGS84_TILES,
     WGS84_TILES_EDGE_CASES,
+    TileTestParam,
 )
 
 
@@ -48,8 +49,8 @@ class Dataset:
     dtype: np.typing.DTypeLike
     attrs: dict[str, Any] = field(default_factory=dict)
     setup: Callable
-    edge_case_tiles: list = field(default_factory=list)
-    tiles: list = field(default_factory=list)
+    edge_case_tiles: list[TileTestParam] = field(default_factory=list)
+    tiles: list[TileTestParam] = field(default_factory=list)
     benchmark_tiles: list[str] = field(default_factory=list)
 
     def create(self):
