@@ -921,6 +921,30 @@ def test_grid_detection_thread_lock():
     assert mock_from_dataset.call_count == 1
 
 
+def test_min_zoom_cache_hit():
+    """Test that get_min_zoom returns cached result on second call."""
+    from xpublish_tiles.tiles_lib import _MIN_ZOOM_CACHE, _compute_min_zoom
+
+    ds = IFS.create()
+    grid = guess_grid_system(ds, "foo")
+    tms = morecantile.tms.get("WebMercatorQuad")
+    da = ds["foo"]
+    xpublish_id = "ifs_min_zoom_cache_test"
+
+    _MIN_ZOOM_CACHE.clear()
+    try:
+        with patch(
+            "xpublish_tiles.tiles_lib._compute_min_zoom", wraps=_compute_min_zoom
+        ) as mock_compute:
+            result1 = get_min_zoom(grid, tms, da, xpublish_id)
+            result2 = get_min_zoom(grid, tms, da, xpublish_id)
+
+        assert result1 == result2
+        assert mock_compute.call_count == 1
+    finally:
+        _MIN_ZOOM_CACHE.clear()
+
+
 def test_qhull_error():
     ds = REDGAUSS_N320.create()
     # make sure it works
