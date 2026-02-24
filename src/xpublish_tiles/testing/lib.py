@@ -9,6 +9,8 @@ from unittest import mock
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pytest
+from _pytest.mark.structures import ParameterSet
 from morecantile import Tile
 from PIL import Image
 from pyproj.aoi import BBox
@@ -17,6 +19,7 @@ from syrupy import SnapshotAssertion
 
 from xpublish_tiles.lib import check_transparent_pixels
 from xpublish_tiles.logger import logger
+from xpublish_tiles.testing.tiles import TileTestParam
 
 
 def compare_image_buffers(buffer1: io.BytesIO, buffer2: io.BytesIO) -> bool:
@@ -670,6 +673,13 @@ def visualize_tile(result: io.BytesIO, tile: Tile) -> None:
     plt.show(block=True)  # Block until window is closed
 
 
+def tiletestparams_as_pytestparams(
+    tiletestparams: list[TileTestParam],
+) -> list[ParameterSet]:
+    """Convert tile test parameters to `pytest.param`s."""
+    return [pytest.param(t.tile, t.tms, id=t.id) for t in tiletestparams]
+
+
 # Export the fixture name for easier importing
 __all__ = [
     "assert_render_matches_snapshot",
@@ -678,6 +688,7 @@ __all__ = [
     "compare_images_perceptual",
     "create_debug_visualization",
     "png_snapshot",
+    "tiletestparams_as_pytestparams",
     "validate_transparency",
     "visualize_tile",
 ]

@@ -7,7 +7,6 @@ from hypothesis import Verbosity, settings
 import icechunk
 import xarray as xr
 from xpublish_tiles.testing.datasets import (
-    CURVILINEAR,
     EU3035,
     EU3035_HIRES,
     HRRR,
@@ -16,7 +15,6 @@ from xpublish_tiles.testing.datasets import (
     create_global_dataset,
 )
 from xpublish_tiles.testing.lib import compare_image_buffers, png_snapshot  # noqa: F401
-from xpublish_tiles.testing.tiles import CURVILINEAR_TILES
 
 # Disable numba, datashader, and PIL debug logs
 logging.getLogger("numba").setLevel(logging.WARNING)
@@ -141,9 +139,11 @@ def _get_projected_dataset_tile_params():
     for dataset_class in [UTM33S, EU3035, EU3035_HIRES, HRRR]:
         # Use the tiles directly from the dataset class
         for tile_param in dataset_class.tiles:
-            tile, tms = tile_param.values
             param_id = f"{dataset_class.name}_{tile_param.id}"
-            params.append(pytest.param((dataset_class, tile, tms), id=param_id))
+            params.append(pytest.param(
+                (dataset_class, tile_param.tile, tile_param.tms),
+                id=param_id,
+            ))
     return params
 
 
@@ -152,9 +152,3 @@ def projected_dataset_and_tile(request):
     dataset_class, tile, tms = request.param
     ds = dataset_class.create()
     return (ds, tile, tms)
-
-
-@pytest.fixture(params=CURVILINEAR_TILES)
-def curvilinear_dataset_and_tile(request):
-    tile, tms = request.param
-    return (CURVILINEAR.create(), tile, tms)

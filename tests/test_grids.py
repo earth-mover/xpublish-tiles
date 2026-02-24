@@ -62,6 +62,7 @@ from xpublish_tiles.testing.datasets import (
     UTM50S_HIRES,
     Dataset,
 )
+from xpublish_tiles.testing.lib import tiletestparams_as_pytestparams
 from xpublish_tiles.testing.tiles import TILES
 from xpublish_tiles.tiles_lib import get_max_zoom, get_min_zoom
 from xpublish_tiles.types import ContinuousData
@@ -358,7 +359,10 @@ def test_multiple_grid_mappings_detection() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tile,tms", TILES)
+@pytest.mark.parametrize(
+    "tile,tms",
+    tiletestparams_as_pytestparams(TILES),
+)
 async def test_subset(global_datasets, tile, tms):
     """Test subsetting with tiles that span equator, anti-meridian, and poles."""
     ds = global_datasets
