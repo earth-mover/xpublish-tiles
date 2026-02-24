@@ -1,10 +1,8 @@
-from functools import cached_property
 from dataclasses import dataclass
+from functools import cached_property
 
 import morecantile
 from morecantile import Tile, TileMatrixSet
-
-from xpublish_tiles.lib import BenchmarkImportError
 
 
 @dataclass(kw_only=True)
@@ -33,7 +31,9 @@ ETRS89_TMS = morecantile.tms.get("EuropeanETRS89_LAEAQuad")
 # WebMercator tiles - regular cases
 WEBMERC_TILES_REGULAR = [
     # WebMercatorQuad tiles - European region focus to avoid anti-meridian issues
-    TileTestParam(tile=Tile(x=2, y=1, z=2), tms=WEBMERC_TMS, name="webmerc_europe_center"),
+    TileTestParam(
+        tile=Tile(x=2, y=1, z=2), tms=WEBMERC_TMS, name="webmerc_europe_center"
+    ),
     TileTestParam(tile=Tile(x=1, y=1, z=2), tms=WEBMERC_TMS, name="webmerc_europe_west"),
     TileTestParam(tile=Tile(x=0, y=0, z=5), tms=WEBMERC_TMS, name="webmerc_europe_south"),
     # Note: webmerc_europe_east(2/3/1) removed - causes anti-meridian crossing when projected to ETRS89 LAEA
@@ -41,41 +41,85 @@ WEBMERC_TILES_REGULAR = [
     TileTestParam(tile=Tile(x=2, y=2, z=2), tms=WEBMERC_TMS, name="webmerc_europe_south"),
     # Higher zoom European region
     TileTestParam(tile=Tile(x=8, y=5, z=4), tms=WEBMERC_TMS, name="webmerc_europe_zoom4"),
-    TileTestParam(tile=Tile(x=16, y=10, z=5), tms=WEBMERC_TMS, name="webmerc_europe_zoom5"),
+    TileTestParam(
+        tile=Tile(x=16, y=10, z=5), tms=WEBMERC_TMS, name="webmerc_europe_zoom5"
+    ),
     # Small bbox test
     TileTestParam(tile=Tile(x=8, y=8, z=5), tms=WEBMERC_TMS, name="webmerc_small_bbox"),
     # Additional anti-meridian tiles
-    TileTestParam(tile=Tile(x=0, y=2, z=3), tms=WEBMERC_TMS, name="webmerc_antimeridian_z3_west"),
-    TileTestParam(tile=Tile(x=7, y=2, z=3), tms=WEBMERC_TMS, name="webmerc_antimeridian_z3_east"),
-    TileTestParam(tile=Tile(x=31, y=10, z=5), tms=WEBMERC_TMS, name="webmerc_antimeridian_z5_east"),
-    TileTestParam(tile=Tile(x=0, y=10, z=5), tms=WEBMERC_TMS, name="webmerc_antimeridian_z5_west"),
+    TileTestParam(
+        tile=Tile(x=0, y=2, z=3), tms=WEBMERC_TMS, name="webmerc_antimeridian_z3_west"
+    ),
+    TileTestParam(
+        tile=Tile(x=7, y=2, z=3), tms=WEBMERC_TMS, name="webmerc_antimeridian_z3_east"
+    ),
+    TileTestParam(
+        tile=Tile(x=31, y=10, z=5), tms=WEBMERC_TMS, name="webmerc_antimeridian_z5_east"
+    ),
+    TileTestParam(
+        tile=Tile(x=0, y=10, z=5), tms=WEBMERC_TMS, name="webmerc_antimeridian_z5_west"
+    ),
     # Additional prime meridian tiles
-    TileTestParam(tile=Tile(x=4, y=2, z=3), tms=WEBMERC_TMS, name="webmerc_prime_meridian_z3"),
-    TileTestParam(tile=Tile(x=16, y=10, z=5), tms=WEBMERC_TMS, name="webmerc_prime_meridian_z5"),
-    TileTestParam(tile=Tile(x=15, y=10, z=5), tms=WEBMERC_TMS, name="webmerc_prime_west_z5"),
-    TileTestParam(tile=Tile(x=17, y=10, z=5), tms=WEBMERC_TMS, name="webmerc_prime_east_z5"),
+    TileTestParam(
+        tile=Tile(x=4, y=2, z=3), tms=WEBMERC_TMS, name="webmerc_prime_meridian_z3"
+    ),
+    TileTestParam(
+        tile=Tile(x=16, y=10, z=5), tms=WEBMERC_TMS, name="webmerc_prime_meridian_z5"
+    ),
+    TileTestParam(
+        tile=Tile(x=15, y=10, z=5), tms=WEBMERC_TMS, name="webmerc_prime_west_z5"
+    ),
+    TileTestParam(
+        tile=Tile(x=17, y=10, z=5), tms=WEBMERC_TMS, name="webmerc_prime_east_z5"
+    ),
     # Additional equator tiles
-    TileTestParam(tile=Tile(x=1, y=1, z=2), tms=WEBMERC_TMS, name="webmerc_equator_north"),
+    TileTestParam(
+        tile=Tile(x=1, y=1, z=2), tms=WEBMERC_TMS, name="webmerc_equator_north"
+    ),
     TileTestParam(tile=Tile(x=0, y=2, z=2), tms=WEBMERC_TMS, name="webmerc_equator_west"),
     TileTestParam(tile=Tile(x=3, y=2, z=2), tms=WEBMERC_TMS, name="webmerc_equator_east"),
-    TileTestParam(tile=Tile(x=4, y=4, z=3), tms=WEBMERC_TMS, name="webmerc_equator_z3_south"),
-    TileTestParam(tile=Tile(x=4, y=3, z=3), tms=WEBMERC_TMS, name="webmerc_equator_z3_north"),
-    TileTestParam(tile=Tile(x=16, y=16, z=5), tms=WEBMERC_TMS, name="webmerc_equator_z5_south"),
-    TileTestParam(tile=Tile(x=16, y=15, z=5), tms=WEBMERC_TMS, name="webmerc_equator_z5_north"),
-    TileTestParam(tile=Tile(x=31, y=16, z=5), tms=WEBMERC_TMS, name="webmerc_equator_antimeridian_east"),
+    TileTestParam(
+        tile=Tile(x=4, y=4, z=3), tms=WEBMERC_TMS, name="webmerc_equator_z3_south"
+    ),
+    TileTestParam(
+        tile=Tile(x=4, y=3, z=3), tms=WEBMERC_TMS, name="webmerc_equator_z3_north"
+    ),
+    TileTestParam(
+        tile=Tile(x=16, y=16, z=5), tms=WEBMERC_TMS, name="webmerc_equator_z5_south"
+    ),
+    TileTestParam(
+        tile=Tile(x=16, y=15, z=5), tms=WEBMERC_TMS, name="webmerc_equator_z5_north"
+    ),
+    TileTestParam(
+        tile=Tile(x=31, y=16, z=5),
+        tms=WEBMERC_TMS,
+        name="webmerc_equator_antimeridian_east",
+    ),
 ]
 
 # WebMercator tiles - edge cases for integration tests (max 5)
 WEBMERC_TILES_EDGE_CASES = [
     # Anti-meridian (180/-180 degrees) problematic tiles
-    TileTestParam(tile=Tile(x=0, y=1, z=2), tms=WEBMERC_TMS, name="webmerc_antimeridian_west"),
-    TileTestParam(tile=Tile(x=3, y=1, z=2), tms=WEBMERC_TMS, name="webmerc_antimeridian_east"),
+    TileTestParam(
+        tile=Tile(x=0, y=1, z=2), tms=WEBMERC_TMS, name="webmerc_antimeridian_west"
+    ),
+    TileTestParam(
+        tile=Tile(x=3, y=1, z=2), tms=WEBMERC_TMS, name="webmerc_antimeridian_east"
+    ),
     # Prime meridian (0 degrees) problematic tiles
-    TileTestParam(tile=Tile(x=2, y=1, z=2), tms=WEBMERC_TMS, name="webmerc_prime_meridian"),
+    TileTestParam(
+        tile=Tile(x=2, y=1, z=2), tms=WEBMERC_TMS, name="webmerc_prime_meridian"
+    ),
     # Equator (0 degrees latitude) tiles
-    TileTestParam(tile=Tile(x=1, y=2, z=2), tms=WEBMERC_TMS, name="webmerc_equator_south"),
+    TileTestParam(
+        tile=Tile(x=1, y=2, z=2), tms=WEBMERC_TMS, name="webmerc_equator_south"
+    ),
     # Equator at anti-meridian - most complex edge case
-    TileTestParam(tile=Tile(x=0, y=16, z=5), tms=WEBMERC_TMS, name="webmerc_equator_antimeridian_west"),
+    TileTestParam(
+        tile=Tile(x=0, y=16, z=5),
+        tms=WEBMERC_TMS,
+        name="webmerc_equator_antimeridian_west",
+    ),
 ]
 
 # WebMercator tiles (supported TMS) - combined
@@ -101,10 +145,14 @@ ETRS89_TILES_REGULAR = [
 ETRS89_TILES_EDGE_CASES = [
     # Higher zoom edge cases within Europe
     TileTestParam(tile=Tile(x=4, y=4, z=4), tms=ETRS89_TMS, name="etrs89_central_zoom4"),
-    TileTestParam(tile=Tile(x=6, y=6, z=4), tms=ETRS89_TMS, name="etrs89_southeast_zoom4"),
+    TileTestParam(
+        tile=Tile(x=6, y=6, z=4), tms=ETRS89_TMS, name="etrs89_southeast_zoom4"
+    ),
     # Small bbox test for ETRS89
     TileTestParam(tile=Tile(x=8, y=8, z=5), tms=ETRS89_TMS, name="etrs89_small_bbox"),
-    TileTestParam(tile=Tile(x=15, y=12, z=5), tms=WEBMERC_TMS, name="webmerc_corner_zoom5"),
+    TileTestParam(
+        tile=Tile(x=15, y=12, z=5), tms=WEBMERC_TMS, name="webmerc_corner_zoom5"
+    ),
     TileTestParam(tile=Tile(x=5, y=1, z=3), tms=WEBMERC_TMS, name="webmerc_corner_zoom3"),
 ]
 
@@ -123,18 +171,36 @@ WGS84_TILES_REGULAR = [
     TileTestParam(tile=Tile(x=3, y=1, z=2), tms=WGS84_TMS, name="wgs84_prime_east"),
     # Anti-meridian tiles (180/-180 degrees longitude)
     # At z=2, x=0 covers western edge near anti-meridian
-    TileTestParam(tile=Tile(x=0, y=1, z=2), tms=WGS84_TMS, name="wgs84_antimeridian_west"),
+    TileTestParam(
+        tile=Tile(x=0, y=1, z=2), tms=WGS84_TMS, name="wgs84_antimeridian_west"
+    ),
 ]
 
 # WGS84 tiles - edge cases for integration tests (max 5)
 WGS84_TILES_EDGE_CASES = [
-    TileTestParam(tile=Tile(x=0, y=2, z=2), tms=WGS84_TMS, name="wgs84_antimeridian_west_equator"),
+    TileTestParam(
+        tile=Tile(x=0, y=2, z=2), tms=WGS84_TMS, name="wgs84_antimeridian_west_equator"
+    ),
     # Equator at anti-meridian - key test case for coordinate transformation
-    TileTestParam(tile=Tile(x=0, y=1, z=3), tms=WGS84_TMS, name="wgs84_equator_antimeridian_z3"),
-    TileTestParam(tile=Tile(x=0, y=2, z=3), tms=WGS84_TMS, name="wgs84_equator_antimeridian_south_z3"),
+    TileTestParam(
+        tile=Tile(x=0, y=1, z=3), tms=WGS84_TMS, name="wgs84_equator_antimeridian_z3"
+    ),
+    TileTestParam(
+        tile=Tile(x=0, y=2, z=3),
+        tms=WGS84_TMS,
+        name="wgs84_equator_antimeridian_south_z3",
+    ),
     # Higher zoom equator anti-meridian tiles
-    TileTestParam(tile=Tile(x=0, y=15, z=5), tms=WGS84_TMS, name="wgs84_equator_antimeridian_north_z5"),
-    TileTestParam(tile=Tile(x=0, y=16, z=5), tms=WGS84_TMS, name="wgs84_equator_antimeridian_south_z5"),
+    TileTestParam(
+        tile=Tile(x=0, y=15, z=5),
+        tms=WGS84_TMS,
+        name="wgs84_equator_antimeridian_north_z5",
+    ),
+    TileTestParam(
+        tile=Tile(x=0, y=16, z=5),
+        tms=WGS84_TMS,
+        name="wgs84_equator_antimeridian_south_z5",
+    ),
 ]
 
 # WGS84 tiles for equator anti-meridian and 0 longitude testing - combined
@@ -166,8 +232,12 @@ HRRR_TILES_REGULAR = [
 # HRRR tiles - edge cases for integration tests (max 5)
 HRRR_TILES_EDGE_CASES = [
     # Ultra high zoom - precise boundaries (edge cases)
-    TileTestParam(tile=Tile(x=130, y=356, z=10), tms=WEBMERC_TMS, name="hrrr_sw_extreme_z10"),
-    TileTestParam(tile=Tile(x=338, y=356, z=10), tms=WEBMERC_TMS, name="hrrr_se_extreme_z10"),
+    TileTestParam(
+        tile=Tile(x=130, y=356, z=10), tms=WEBMERC_TMS, name="hrrr_sw_extreme_z10"
+    ),
+    TileTestParam(
+        tile=Tile(x=338, y=356, z=10), tms=WEBMERC_TMS, name="hrrr_se_extreme_z10"
+    ),
     TileTestParam(tile=Tile(x=234, y=403, z=10), tms=WEBMERC_TMS, name="hrrr_center_z10"),
 ]
 
@@ -218,16 +288,24 @@ UTM33S_TILES_REGULAR = [
     TileTestParam(tile=Tile(x=8, y=8, z=4), tms=WEBMERC_TMS, name="utm33s_north_z4"),
     # TileTestParam(tile=Tile(x=8, y=9, z=4), tms=WEBMERC_TMS, name="utm33s_central_z4"),
     TileTestParam(tile=Tile(x=8, y=10, z=4), tms=WEBMERC_TMS, name="utm33s_south_z4"),
-    TileTestParam(tile=Tile(x=8, y=11, z=4), tms=WEBMERC_TMS, name="utm33s_antarctica_z4"),
-    TileTestParam(tile=Tile(x=8, y=14, z=4), tms=WEBMERC_TMS, name="utm33s_deep_antarctica_z4"),
+    TileTestParam(
+        tile=Tile(x=8, y=11, z=4), tms=WEBMERC_TMS, name="utm33s_antarctica_z4"
+    ),
+    TileTestParam(
+        tile=Tile(x=8, y=14, z=4), tms=WEBMERC_TMS, name="utm33s_deep_antarctica_z4"
+    ),
     # Zoom 5 - Detailed tiles
     TileTestParam(tile=Tile(x=17, y=16, z=5), tms=WEBMERC_TMS, name="utm33s_equator_z5"),
     TileTestParam(tile=Tile(x=17, y=17, z=5), tms=WEBMERC_TMS, name="utm33s_north_z5"),
     TileTestParam(tile=Tile(x=17, y=18, z=5), tms=WEBMERC_TMS, name="utm33s_central_z5"),
     TileTestParam(tile=Tile(x=17, y=20, z=5), tms=WEBMERC_TMS, name="utm33s_south_z5"),
-    TileTestParam(tile=Tile(x=17, y=23, z=5), tms=WEBMERC_TMS, name="utm33s_antarctica_z5"),
+    TileTestParam(
+        tile=Tile(x=17, y=23, z=5), tms=WEBMERC_TMS, name="utm33s_antarctica_z5"
+    ),
     # TileTestParam(tile=Tile(x=17, y=25, z=5), tms=WEBMERC_TMS, name="utm33s_deep_z5"),
-    TileTestParam(tile=Tile(x=17, y=22, z=5), tms=WEBMERC_TMS, name="utm33s_mid_antarctica_z5"),
+    TileTestParam(
+        tile=Tile(x=17, y=22, z=5), tms=WEBMERC_TMS, name="utm33s_mid_antarctica_z5"
+    ),
 ]
 
 # UTM Zone 33S tiles - edge cases for equator and Antarctica boundaries
@@ -235,16 +313,28 @@ UTM33S_TILES_EDGE_CASES = [
     # Equator edge cases (northern boundary at 0°)
     TileTestParam(tile=Tile(x=34, y=32, z=6), tms=WEBMERC_TMS, name="utm33s_equator_z6"),
     TileTestParam(tile=Tile(x=68, y=64, z=7), tms=WEBMERC_TMS, name="utm33s_equator_z7"),
-    TileTestParam(tile=Tile(x=136, y=128, z=8), tms=WEBMERC_TMS, name="utm33s_equator_z8"),
+    TileTestParam(
+        tile=Tile(x=136, y=128, z=8), tms=WEBMERC_TMS, name="utm33s_equator_z8"
+    ),
     # Antarctica edge cases (southern boundary at -80°S)
-    TileTestParam(tile=Tile(x=17, y=28, z=5), tms=WEBMERC_TMS, name="utm33s_antarctica_edge_z5"),
-    TileTestParam(tile=Tile(x=34, y=56, z=6), tms=WEBMERC_TMS, name="utm33s_antarctica_edge_z6"),
+    TileTestParam(
+        tile=Tile(x=17, y=28, z=5), tms=WEBMERC_TMS, name="utm33s_antarctica_edge_z5"
+    ),
+    TileTestParam(
+        tile=Tile(x=34, y=56, z=6), tms=WEBMERC_TMS, name="utm33s_antarctica_edge_z6"
+    ),
     # TileTestParam(tile=Tile(x=68, y=112, z=7), tms=WEBMERC_TMS, name="utm33s_antarctica_edge_z7"),
     # TileTestParam(tile=Tile(x=136, y=224, z=8), tms=WEBMERC_TMS, name="utm33s_antarctica_edge_z8"),
     # Very high zoom equator and Antarctica
-    TileTestParam(tile=Tile(x=277, y=256, z=9), tms=WEBMERC_TMS, name="utm33s_equator_z9"),
-    TileTestParam(tile=Tile(x=277, y=448, z=9), tms=WEBMERC_TMS, name="utm33s_antarctica_z9"),
-    TileTestParam(tile=Tile(x=4372, y=4160, z=13), tms=WEBMERC_TMS, name="utm33s_center_swatch_z9"),
+    TileTestParam(
+        tile=Tile(x=277, y=256, z=9), tms=WEBMERC_TMS, name="utm33s_equator_z9"
+    ),
+    TileTestParam(
+        tile=Tile(x=277, y=448, z=9), tms=WEBMERC_TMS, name="utm33s_antarctica_z9"
+    ),
+    TileTestParam(
+        tile=Tile(x=4372, y=4160, z=13), tms=WEBMERC_TMS, name="utm33s_center_swatch_z9"
+    ),
 ]
 
 # UTM Zone 33S tiles - combined
@@ -252,12 +342,24 @@ UTM33S_TILES = UTM33S_TILES_REGULAR + UTM33S_TILES_EDGE_CASES
 
 # Curvilinear tiles - for testing curvilinear coordinate data
 CURVILINEAR_TILES = [
-    TileTestParam(tile=Tile(x=3, y=5, z=4), tms=WEBMERC_TMS, name="curvilinear_hrrr_east_z4"),
-    TileTestParam(tile=Tile(x=7, y=12, z=5), tms=WEBMERC_TMS, name="curvilinear_hrrr_sw_corner_z5"),
-    TileTestParam(tile=Tile(x=6, y=11, z=5), tms=WEBMERC_TMS, name="curvilinear_hrrr_se_corner_z5"),
-    TileTestParam(tile=Tile(x=27, y=48, z=7), tms=WEBMERC_TMS, name="curvilinear_hrrr_central_z7"),
-    TileTestParam(tile=Tile(x=15, y=24, z=6), tms=WEBMERC_TMS, name="curvilinear_central_us_z6"),
-    TileTestParam(tile=Tile(x=442, y=744, z=11), tms=WEBMERC_TMS, name="curvilinear_central_us_z11"),
+    TileTestParam(
+        tile=Tile(x=3, y=5, z=4), tms=WEBMERC_TMS, name="curvilinear_hrrr_east_z4"
+    ),
+    TileTestParam(
+        tile=Tile(x=7, y=12, z=5), tms=WEBMERC_TMS, name="curvilinear_hrrr_sw_corner_z5"
+    ),
+    TileTestParam(
+        tile=Tile(x=6, y=11, z=5), tms=WEBMERC_TMS, name="curvilinear_hrrr_se_corner_z5"
+    ),
+    TileTestParam(
+        tile=Tile(x=27, y=48, z=7), tms=WEBMERC_TMS, name="curvilinear_hrrr_central_z7"
+    ),
+    TileTestParam(
+        tile=Tile(x=15, y=24, z=6), tms=WEBMERC_TMS, name="curvilinear_central_us_z6"
+    ),
+    TileTestParam(
+        tile=Tile(x=442, y=744, z=11), tms=WEBMERC_TMS, name="curvilinear_central_us_z11"
+    ),
 ]
 
 # South America benchmark tiles (for Sentinel dataset)

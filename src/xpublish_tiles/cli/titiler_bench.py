@@ -9,7 +9,6 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-
 import xarray as xr
 from xpublish_tiles.cli.benchmark_common import (
     calculate_benchmark_stats,

@@ -349,6 +349,7 @@ def _run_single_dataset_benchmark(dataset_name, args, ds=None):
         # Use titiler.xarray if requested
         if hasattr(args, "titiler") and args.titiler:
             from xpublish_tiles.cli.titiler_bench import run_titiler_benchmark
+
             return run_titiler_benchmark(
                 dataset=ds,
                 dataset_name=dataset_name,

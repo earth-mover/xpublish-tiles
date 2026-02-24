@@ -88,7 +88,7 @@ class BenchmarkImportError(ImportError):
 
     def __init__(self):
         super().__init__(
-            f"Additional dependencies are required for benchmarking."
+            "Additional dependencies are required for benchmarking."
             " Please install xpublish-tiles[testing]."
         )
 

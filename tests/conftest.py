@@ -140,10 +140,12 @@ def _get_projected_dataset_tile_params():
         # Use the tiles directly from the dataset class
         for tile_param in dataset_class.tiles:
             param_id = f"{dataset_class.name}_{tile_param.id}"
-            params.append(pytest.param(
-                (dataset_class, tile_param.tile, tile_param.tms),
-                id=param_id,
-            ))
+            params.append(
+                pytest.param(
+                    (dataset_class, tile_param.tile, tile_param.tms),
+                    id=param_id,
+                )
+            )
     return params
 
 
