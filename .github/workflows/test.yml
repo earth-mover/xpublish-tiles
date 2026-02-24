@@ -66,6 +66,7 @@ jobs:
 
       - name: Test CLI entry point doesn't crash
         run: |
+          # without the `--no-project` flag, development dependencies are installed and invalidate the test!
           uv run --no-project python -c "from xpublish_tiles.cli.main import main"
           uv run --no-project python -c "import xpublish_tiles"
           uv run --no-project python -c "from xpublish_tiles.xpublish.tiles import TilesPlugin"
