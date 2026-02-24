@@ -45,10 +45,10 @@ from xpublish_tiles.testing.datasets import (
     create_global_dataset,
 )
 from xpublish_tiles.testing.lib import (
+    as_pytestparams,
     assert_render_matches_snapshot,
     compare_image_buffers,
     compare_image_buffers_with_debug,
-    tiletestparams_as_pytestparams,
     visualize_tile,
 )
 from xpublish_tiles.testing.tiles import (
@@ -135,7 +135,7 @@ async def test_pipeline_dtypes(dtype, png_snapshot):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tile,tms", tiletestparams_as_pytestparams(TILES))
+@pytest.mark.parametrize("tile,tms", as_pytestparams(TILES))
 async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot, pytestconfig):
     """Test pipeline with various tiles using their native TMS CRS."""
     ds = global_datasets
@@ -238,7 +238,7 @@ async def test_projected_coordinate_data(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tile,tms", tiletestparams_as_pytestparams(CURVILINEAR_TILES))
+@pytest.mark.parametrize("tile,tms", as_pytestparams(CURVILINEAR_TILES))
 async def test_curvilinear_data(tile, tms, png_snapshot, pytestconfig):
     ds = CURVILINEAR.create()
     query_params = create_query_params(tile, tms)
@@ -266,7 +266,7 @@ async def test_curvilinear_data(tile, tms, png_snapshot, pytestconfig):
     )
 
 
-@pytest.mark.parametrize("tile,tms", tiletestparams_as_pytestparams(PARA_TILES))
+@pytest.mark.parametrize("tile,tms", as_pytestparams(PARA_TILES))
 async def test_categorical_data(tile, tms, png_snapshot, pytestconfig):
     ds = PARA.create().squeeze("time")
     query_params = create_query_params(tile, tms)
@@ -404,10 +404,7 @@ async def test_continuous_data_with_range_colors(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "tile,tms",
-    tiletestparams_as_pytestparams(GLOBAL_NANS.tiles),
-)
+@pytest.mark.parametrize("tile,tms", as_pytestparams(GLOBAL_NANS.tiles))
 async def test_global_nans_data(tile, tms, png_snapshot, pytestconfig):
     """Test pipeline with global dataset containing diagonal NaN patterns."""
     ds = GLOBAL_NANS.create()
@@ -730,7 +727,7 @@ async def test_transparent_tile_no_coverage(pytestconfig):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tile,tms", tiletestparams_as_pytestparams(HRRR.tiles))
+@pytest.mark.parametrize("tile,tms", as_pytestparams(HRRR.tiles))
 async def test_hrrr_multiple_vs_hrrr_rendering(tile, tms, pytestconfig):
     """Test that HRRR_MULTIPLE renders identically to HRRR for the same tiles."""
     from xpublish_tiles.testing.datasets import HRRR_MULTIPLE

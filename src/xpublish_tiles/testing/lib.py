@@ -673,7 +673,7 @@ def visualize_tile(result: io.BytesIO, tile: Tile) -> None:
     plt.show(block=True)  # Block until window is closed
 
 
-def tiletestparams_as_pytestparams(
+def as_pytestparams(
     tiletestparams: list[TileTestParam],
 ) -> list[ParameterSet]:
     """Convert tile test parameters to `pytest.param`s."""
@@ -682,13 +682,13 @@ def tiletestparams_as_pytestparams(
 
 # Export the fixture name for easier importing
 __all__ = [
+    "as_pytestparams",
     "assert_render_matches_snapshot",
     "compare_image_buffers",
     "compare_image_buffers_with_debug",
     "compare_images_perceptual",
     "create_debug_visualization",
     "png_snapshot",
-    "tiletestparams_as_pytestparams",
     "validate_transparency",
     "visualize_tile",
 ]
