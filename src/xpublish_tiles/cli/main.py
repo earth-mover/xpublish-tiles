@@ -422,6 +422,11 @@ def run_bench_suite(args):
     # Run both xpublish-tiles and titiler benchmarks if titiler requested
     implementations = ["xpublish-tiles"]
     if hasattr(args, "titiler") and args.titiler:
+        # Ensure we can successfully import the titiler benchmark function.
+        # If we can't, it's because needed extras aren't installed. In this case, a
+        # useful message will be displayed to the user.
+        from xpublish_tiles.cli.titiler_bench import run_titiler_benchmark  # noqa: F401
+
         implementations.append("titiler")
 
     print(
