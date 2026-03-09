@@ -449,7 +449,7 @@ class TilesPlugin(Plugin):
                 status_code = 500
                 bound_logger = get_context_logger()
                 bound_logger.error("Exception", exc_info=e)
-                detail = "Internal server error."
+                detail = f"Internal server error: {repr(e)}"
 
             if status_code != 200:
                 if not query.render_errors:
