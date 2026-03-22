@@ -69,6 +69,13 @@ def extract_dimensions(dataset: xr.Dataset) -> list[WMSDimensionResponse]:
         coord_name_str = str(coord_name)
         if coord_name_str.lower() in spatial_coords:
             continue
+        # Skip scalar coordinates (e.g., radar site latitude/longitude/altitude)
+        if coord.ndim == 0:
+            continue
+        # Skip auxiliary coordinates that aren't indexable dimensions
+        # (e.g., elevation(azimuth) in radar data — varies per ray, not a selectable WMS dimension)
+        if coord_name_str not in dataset.dims:
+            continue
 
         # Extract dimension metadata
         units = getattr(coord, "units", "")
