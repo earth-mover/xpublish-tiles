@@ -362,6 +362,14 @@ CURVILINEAR_TILES = [
     ),
 ]
 
+# Radar tiles (centered on ~41.6°N, -88.1°W — KLOT-like radar)
+# Coverage: ~300km radius in azimuthal equidistant projection
+RADAR_TILES = [
+    pytest.param((Tile(x=4, y=5, z=4), WEBMERC_TMS), id="radar_chicago_z4(4/4/5)"),
+    pytest.param((Tile(x=16, y=23, z=6), WEBMERC_TMS), id="radar_chicago_z6(6/16/23)"),
+    pytest.param((Tile(x=33, y=47, z=7), WEBMERC_TMS), id="radar_chicago_z7(7/33/47)"),
+]
+
 # South America benchmark tiles (for Sentinel dataset)
 # Coverage area roughly: -82°W to -27°W, 13°N to -55°S
 # Focused on the region that's working in the logs (tiles 120-122, 72-73)
