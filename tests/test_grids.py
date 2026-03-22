@@ -30,6 +30,7 @@ from xpublish_tiles.grids import (
     Rectilinear,
     Triangular,
     UgridIndexer,
+    guess_coordinate_vars,
     guess_grid_system,
 )
 from xpublish_tiles.lib import (
@@ -57,6 +58,7 @@ from xpublish_tiles.testing.datasets import (
     IFS,
     PARA_HIRES,
     POPDS,
+    RADAR,
     REDGAUSS_N320,
     UTM33S_HIRES,
     UTM50S_HIRES,
@@ -283,6 +285,27 @@ TRIANGULAR_SENTINEL = 1
             TRIANGULAR_SENTINEL,
             id="redgauss_n320",
         ),
+        pytest.param(
+            (_radar_ds := RADAR.create()),
+            "foo",
+            Curvilinear(
+                crs=CRS.from_proj4("+proj=aeqd +lat_0=41.6 +lon_0=-88.1 +datum=WGS84"),
+                X="x",
+                Y="y",
+                Xdim="range",
+                Ydim="azimuth",
+                Z=None,
+                indexes=(
+                    CurvilinearCellIndex(
+                        X=_radar_ds.x,
+                        Y=_radar_ds.y,
+                        Xdim="range",
+                        Ydim="azimuth",
+                    ),
+                ),
+            ),
+            id="radar_polar",
+        ),
     ],
 )
 def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> None:
@@ -297,6 +320,40 @@ def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> Non
         assert len(actual.indexes) == 1
     else:
         assert expected == actual
+
+
+def test_guess_coordinate_vars_filters_scalars():
+    """Scalar latitude/longitude should be filtered out, keeping only 2D coords."""
+    ds = xr.Dataset(
+        {"temp": (("y", "x"), np.ones((3, 3)))},
+        coords={
+            "latitude": 41.6,  # scalar — radar site
+            "longitude": -88.1,  # scalar — radar site
+            "lat": (("y", "x"), np.ones((3, 3)), {"standard_name": "latitude"}),
+            "lon": (("y", "x"), np.ones((3, 3)), {"standard_name": "longitude"}),
+        },
+    )
+    ds["latitude"].attrs["standard_name"] = "latitude"
+    ds["longitude"].attrs["standard_name"] = "longitude"
+
+    Xname, Yname = guess_coordinate_vars(ds, CRS.from_epsg(4326))
+    assert Xname == ("lon",)
+    assert Yname == ("lat",)
+
+
+def test_guess_coordinate_vars_warns_all_scalar():
+    """When all coordinate candidates are scalar, a warning should be emitted."""
+    ds = xr.Dataset(
+        {"temp": (("a", "b"), np.ones((3, 3)))},
+        coords={
+            "latitude": ((), 41.6, {"standard_name": "latitude"}),
+            "longitude": ((), -88.1, {"standard_name": "longitude"}),
+        },
+    )
+    with pytest.warns(UserWarning, match="All .* coordinate candidates are scalar"):
+        Xname, Yname = guess_coordinate_vars(ds, CRS.from_epsg(4326))
+    assert Xname is None
+    assert Yname is None
 
 
 @pytest.mark.parametrize(
