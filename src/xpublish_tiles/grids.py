@@ -1321,14 +1321,15 @@ class Curvilinear(GridSystem):
                     elif Y_COORD_PATTERN.match(dim_str) and not Ydim:
                         Ydim = dim_str
 
-            # If we still can't identify, raise an error
+            # Fallback: assume dim0=Y, dim1=X (row-major convention).
             if not Xdim or not Ydim:
-                raise RuntimeError(
-                    f"Could not identify X and Y dimensions for curvilinear grid. "
-                    f"Coordinate dimensions are {list(X.dims)}, but could not determine "
-                    f"which corresponds to X and which to Y axes. "
-                    f"Please ensure your dataset has proper CF axis attributes or add SGRID metadata."
+                warnings.warn(
+                    f"Falling back to dimension ordering convention for curvilinear grid: "
+                    f"{X.dims[0]}→Y, {X.dims[1]}→X",
+                    stacklevel=2,
                 )
+                Ydim = str(X.dims[0])
+                Xdim = str(X.dims[1])
         return Xdim, Ydim
 
     @classmethod
@@ -1627,6 +1628,29 @@ def guess_coordinate_vars(
     else:
         axes = ds.cf.axes
         Xname, Yname = axes.get("X", None), axes.get("Y", None)
+
+    # Filter out scalar (0-d) coordinates — they are metadata, not grid coordinates.
+    # Radar datasets have scalar latitude/longitude (site location) alongside
+    # 2D lat/lon (gate positions). See https://github.com/openradar/xradar/issues/340
+    if Xname is not None:
+        filtered = tuple(x for x in Xname if ds[x].ndim > 0)
+        if Xname and not filtered:
+            warnings.warn(
+                f"All X coordinate candidates are scalar: {Xname}. "
+                f"No spatial grid coordinates found.",
+                stacklevel=2,
+            )
+        Xname = filtered or None
+    if Yname is not None:
+        filtered = tuple(y for y in Yname if ds[y].ndim > 0)
+        if Yname and not filtered:
+            warnings.warn(
+                f"All Y coordinate candidates are scalar: {Yname}. "
+                f"No spatial grid coordinates found.",
+                stacklevel=2,
+            )
+        Yname = filtered or None
+
     return Xname, Yname
 
 
@@ -1744,6 +1768,11 @@ def _detect_grid_metadata(
             grid_cls = Triangular if X.dims == Y.dims else Rectilinear
         elif X.ndim == 2 and Y.ndim == 2:
             grid_cls = Curvilinear
+        else:
+            raise RuntimeError(
+                f"Unsupported coordinate dimensionality: {Xname} has ndim={X.ndim}, "
+                f"{Yname} has ndim={Y.ndim}. Expected 1D or 2D coordinate arrays."
+            )
 
     return GridMetadata(X=Xname, Y=Yname, crs=mapping.crs, grid_cls=grid_cls)
 
