@@ -1121,6 +1121,14 @@ TRIPOLE_ANTIMERIDIAN = Dataset(
     dtype=np.float32,
     setup=tripolar_grid,
 )
+
+
+def radar_polar_grid(
+    *,
+    dims: tuple[Dim, ...],
+    dtype: npt.DTypeLike,
+    attrs: dict[str, Any],
+) -> xr.Dataset:
     """Create a radar polar grid dataset with 2D x/y in azimuthal equidistant CRS.
 
     Simulates a georeferenced radar sweep with (azimuth, range) dimensions
