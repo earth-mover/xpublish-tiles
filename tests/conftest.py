@@ -10,11 +10,13 @@ from xpublish_tiles.testing.datasets import (
     EU3035,
     EU3035_HIRES,
     HRRR,
+    RADAR,
     REDGAUSS_N320,
     UTM33S,
     create_global_dataset,
 )
 from xpublish_tiles.testing.lib import compare_image_buffers, png_snapshot  # noqa: F401
+from xpublish_tiles.testing.tiles import RADAR_TILES
 
 # Disable numba, datashader, and PIL debug logs
 logging.getLogger("numba").setLevel(logging.WARNING)
@@ -154,3 +156,9 @@ def projected_dataset_and_tile(request):
     dataset_class, tile, tms = request.param
     ds = dataset_class.create()
     return (ds, tile, tms)
+
+
+@pytest.fixture(params=RADAR_TILES, ids=lambda t: t.name)
+def radar_dataset_and_tile(request):
+    param = request.param
+    return (RADAR.create(), param.tile, param.tms)
