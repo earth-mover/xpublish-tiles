@@ -34,6 +34,44 @@ def test_wms_convert_attributes_to_wms():
     assert "nested" in attr_dict["complex_obj"]  # Complex object converted to string
 
 
+def test_extract_dimensions_skips_scalar_and_aux_coords():
+    """Scalar coords and non-dimension aux coords should be excluded from WMS dimensions."""
+    from xpublish_tiles.xpublish.wms.utils import extract_dimensions
+
+    ds = xr.Dataset(
+        {"DBZH": (("vcp_time", "azimuth", "range"), np.ones((2, 4, 5)))},
+        coords={
+            "vcp_time": [0, 1],
+            "azimuth": [0, 90, 180, 270],
+            "range": np.arange(5),
+            "latitude": 41.6,  # scalar — should be skipped
+            "longitude": -88.1,  # scalar — should be skipped
+            "altitude": 378,  # scalar — should be skipped
+            "elevation": (
+                "azimuth",
+                [0.5, 0.5, 0.5, 0.5],
+            ),  # aux coord — should be skipped
+            "time": (
+                "azimuth",
+                np.array(["2025-01-01"] * 4, dtype="datetime64"),
+            ),  # aux — skipped
+        },
+    )
+
+    dimensions = extract_dimensions(ds)
+    dim_names = {d.name for d in dimensions}
+
+    # Only actual dimensions should appear, not scalar or aux coords
+    assert "latitude" not in dim_names
+    assert "longitude" not in dim_names
+    assert "altitude" not in dim_names
+    assert "elevation" not in dim_names
+    assert "time" not in dim_names
+    # vcp_time is a real dimension — but its name isn't in the spatial skip list
+    # and it's not named "time" or "elevation", so it goes to the "arbitrary dimension" branch
+    assert "vcp_time" in dim_names
+
+
 def test_wms_layers_include_attributes():
     """Test that WMS layers include variable attributes"""
     from xpublish_tiles.xpublish.wms.utils import extract_layers
