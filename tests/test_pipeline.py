@@ -266,6 +266,20 @@ async def test_curvilinear_data(tile, tms, png_snapshot, pytestconfig):
     )
 
 
+@pytest.mark.asyncio
+async def test_radar_data(radar_dataset_and_tile, pytestconfig):
+    ds, tile, tms = radar_dataset_and_tile
+    query_params = create_query_params(tile, tms)
+    result = await pipeline(ds, query_params)
+    result.seek(0)
+    img = Image.open(result)
+    arr = np.array(img)
+    assert arr.shape == (256, 256, 4)
+    assert np.count_nonzero(arr[:, :, 3]) > 0, (
+        "Radar tile should have non-transparent pixels"
+    )
+
+
 @pytest.mark.parametrize("tile,tms", as_pytestparams(PARA_TILES))
 async def test_categorical_data(tile, tms, png_snapshot, pytestconfig):
     ds = PARA.create().squeeze("time")
