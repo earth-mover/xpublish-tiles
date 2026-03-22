@@ -1121,6 +1121,92 @@ TRIPOLE_ANTIMERIDIAN = Dataset(
     dtype=np.float32,
     setup=tripolar_grid,
 )
+    """Create a radar polar grid dataset with 2D x/y in azimuthal equidistant CRS.
+
+    Simulates a georeferenced radar sweep with (azimuth, range) dimensions
+    and 2D x/y coordinates in meters (azimuthal equidistant projection).
+    Includes crs_wkt for CRS detection by cf_xarray.
+    """
+    az_dim, range_dim = dims[0], dims[1]
+    n_azimuth, n_range = az_dim.size, range_dim.size
+
+    # Radar location (KLOT-like)
+    radar_lat, radar_lon = 41.6, -88.1
+
+    # Create azimuth and range coordinate values
+    azimuth = np.linspace(0.5, 360.0 - 360.0 / n_azimuth + 0.5, n_azimuth)
+    max_range = 300000.0  # 300 km
+    range_m = np.linspace(2125.0, max_range, n_range).astype(np.float32)
+
+    # Compute 2D x/y in meters (azimuthal equidistant projection)
+    az_rad = np.radians(azimuth)
+    az_2d, range_2d = np.meshgrid(az_rad, range_m, indexing="ij")
+    x_2d = (range_2d * np.sin(az_2d)).astype(np.float64)
+    y_2d = (range_2d * np.cos(az_2d)).astype(np.float64)
+
+    # Create synthetic reflectivity data
+    storm_az, storm_range = np.radians(45), 100000.0
+    az_diff = np.abs(az_2d - storm_az)
+    az_diff = np.minimum(az_diff, 2 * np.pi - az_diff)
+    range_diff = np.abs(range_2d - storm_range)
+    dbzh = 50 * np.exp(-((az_diff / 0.35) ** 2 + (range_diff / 30000) ** 2))
+    dbzh = np.clip(dbzh + np.random.default_rng(42).normal(0, 2, dbzh.shape), -10, 70)
+
+    chunks = (az_dim.chunk_size, range_dim.chunk_size)
+    data = dask.array.from_array(dbzh.astype(dtype), chunks=chunks)
+
+    # Create CRS WKT for azimuthal equidistant projection
+    crs = pyproj.CRS.from_proj4(
+        f"+proj=aeqd +lat_0={radar_lat} +lon_0={radar_lon} +datum=WGS84"
+    )
+
+    ds = xr.Dataset(
+        data_vars={
+            "foo": (
+                [az_dim.name, range_dim.name],
+                data,
+                {
+                    "coordinates": "x y",
+                    "long_name": "Equivalent reflectivity factor H",
+                    "units": "dBZ",
+                    "valid_min": -10.0,
+                    "valid_max": 70.0,
+                },
+            ),
+        },
+        coords={
+            az_dim.name: (az_dim.name, azimuth, {"standard_name": "ray_azimuth_angle"}),
+            range_dim.name: (
+                range_dim.name,
+                range_m,
+                {"standard_name": "projection_range_coordinate"},
+            ),
+            "x": (
+                (az_dim.name, range_dim.name),
+                x_2d,
+                {"standard_name": "easting", "units": "m"},
+            ),
+            "y": (
+                (az_dim.name, range_dim.name),
+                y_2d,
+                {"standard_name": "northing", "units": "m"},
+            ),
+            "crs_wkt": ((), crs.to_epsg() or 0, crs.to_cf()),
+        },
+    )
+    ds.attrs.update(attrs)
+    return ds
+
+
+RADAR = Dataset(
+    name="radar",
+    dims=(
+        Dim(name="azimuth", size=360, chunk_size=360, data=None),
+        Dim(name="range", size=500, chunk_size=500, data=None),
+    ),
+    dtype=np.float32,
+    setup=radar_polar_grid,
+)
 
 
 POPDS = xr.Dataset(
