@@ -267,16 +267,15 @@ async def test_curvilinear_data(tile, tms, png_snapshot, pytestconfig):
 
 
 @pytest.mark.asyncio
-async def test_radar_data(radar_dataset_and_tile, pytestconfig):
+async def test_radar_data(radar_dataset_and_tile, png_snapshot, pytestconfig):
     ds, tile, tms = radar_dataset_and_tile
     query_params = create_query_params(tile, tms)
     result = await pipeline(ds, query_params)
-    result.seek(0)
-    img = Image.open(result)
-    arr = np.array(img)
-    assert arr.shape == (256, 256, 4)
-    assert np.count_nonzero(arr[:, :, 3]) > 0, (
-        "Radar tile should have non-transparent pixels"
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    # Radar polar data has transparent corners (circular coverage, not rectangular)
+    assert_render_matches_snapshot(
+        result, png_snapshot, tile=tile, tms=tms, skip_transparency_check=True
     )
 
 
