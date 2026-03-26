@@ -356,6 +356,19 @@ def test_guess_coordinate_vars_warns_all_scalar():
     assert Yname is None
 
 
+def test_detect_grid_metadata_unsupported_ndim():
+    """Coordinates with unsupported dimensionality (e.g., 3D) should raise RuntimeError."""
+    ds = xr.Dataset(
+        {"temp": (("a", "b", "c"), np.ones((2, 3, 4)))},
+        coords={
+            "lat": (("a", "b", "c"), np.ones((2, 3, 4)), {"standard_name": "latitude"}),
+            "lon": (("a", "b", "c"), np.ones((2, 3, 4)), {"standard_name": "longitude"}),
+        },
+    )
+    with pytest.raises(RuntimeError, match="Unsupported coordinate dimensionality"):
+        guess_grid_system(ds, "temp")
+
+
 @pytest.mark.parametrize(
     "dataset, minzoom, maxzoom",
     (
