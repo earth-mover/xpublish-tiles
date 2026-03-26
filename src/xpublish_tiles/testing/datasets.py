@@ -1149,8 +1149,8 @@ def radar_polar_grid(
     # Compute 2D x/y in meters (azimuthal equidistant projection)
     az_rad = np.radians(azimuth)
     az_2d, range_2d = np.meshgrid(az_rad, range_m, indexing="ij")
-    x_2d = (range_2d * np.sin(az_2d, dtype=np.float64))
-    y_2d = (range_2d * np.cos(az_2d, dtype=np.float64))
+    x_2d = range_2d * np.sin(az_2d, dtype=np.float64)
+    y_2d = range_2d * np.cos(az_2d, dtype=np.float64)
 
     # Create synthetic reflectivity data
     storm_az, storm_range = np.radians(45), 100000.0
