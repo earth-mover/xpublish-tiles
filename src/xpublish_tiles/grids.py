@@ -1321,7 +1321,19 @@ class Curvilinear(GridSystem):
                     elif Y_COORD_PATTERN.match(dim_str) and not Ydim:
                         Ydim = dim_str
 
-            # Fallback: assume dim0=Y, dim1=X (row-major convention).
+            # Detect radar-like dimensions via standard_name attributes
+            # See https://github.com/openradar/xradar/issues/340
+            if not Xdim or not Ydim:
+                for dim in X.dims:
+                    dim_str = str(dim)
+                    if dim_str in ds.coords:
+                        sn = ds[dim_str].attrs.get("standard_name", "")
+                        if sn == "projection_range_coordinate" and not Xdim:
+                            Xdim = dim_str
+                        elif sn == "ray_azimuth_angle" and not Ydim:
+                            Ydim = dim_str
+
+            # Last resort: assume dim0=Y, dim1=X (row-major convention).
             if not Xdim or not Ydim:
                 warnings.warn(
                     f"Falling back to dimension ordering convention for curvilinear grid: "
