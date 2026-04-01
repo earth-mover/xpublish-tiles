@@ -12,6 +12,7 @@ import cf_xarray  # noqa: F401
 import numbagg
 import numpy as np
 import pandas as pd
+import pyproj
 import rasterix
 import triangle
 from numba_celltree import CellTree2d
@@ -430,6 +431,160 @@ class CellTreeIndex(xr.Index):
                     antimeridian_vertices=antimeridian_vertices,
                 )
             }
+        )
+
+
+class PolarIndex(xr.Index):
+    """Index for polar radar grids that converts geographic bboxes to azimuth/range slices."""
+
+    def __init__(
+        self,
+        *,
+        azimuth: np.ndarray,
+        range_m: np.ndarray,
+        radar_lat: float,
+        radar_lon: float,
+        Xdim: str,
+        Ydim: str,
+    ):
+        self.azimuth = np.asarray(azimuth, dtype=np.float64)
+        self.range_m = np.asarray(range_m, dtype=np.float64)
+        self.radar_lat = radar_lat
+        self.radar_lon = radar_lon
+        self.Xdim = Xdim
+        self.Ydim = Ydim
+
+        # Transformers for geographic ↔ azimuthal equidistant (meters from radar)
+        aeqd_proj = f"+proj=aeqd +lat_0={radar_lat} +lon_0={radar_lon} +datum=WGS84"
+        self._to_aeqd = pyproj.Transformer.from_crs(
+            "EPSG:4326", aeqd_proj, always_xy=True
+        )
+        self._to_4326 = pyproj.Transformer.from_crs(
+            aeqd_proj, "EPSG:4326", always_xy=True
+        )
+
+        az_diff = np.abs(np.diff(self.azimuth))
+        az_diff[az_diff == 0] = np.inf
+        self._dXmin = None if np.all(np.isinf(az_diff)) else float(np.min(az_diff))
+
+        rng_diff = np.abs(np.diff(self.range_m))
+        rng_diff[rng_diff == 0] = np.inf
+        self._dYmin = None if np.all(np.isinf(rng_diff)) else float(np.min(rng_diff))
+
+    def get_min_spacing(self) -> tuple[float | None, float | None]:
+        return self._dXmin, self._dYmin
+
+    def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
+        assert len(labels) == 1
+        bbox = next(iter(labels.values()))
+        assert isinstance(bbox, BBox)
+        az_slices, rng_slice = self._bbox_to_polar_slices(bbox)
+        return IndexSelResult({self.Xdim: az_slices, self.Ydim: rng_slice})
+
+    def _bbox_to_polar_slices(self, bbox: BBox) -> tuple[list[slice], slice]:
+        corners = [
+            (bbox.south, bbox.west),
+            (bbox.south, bbox.east),
+            (bbox.north, bbox.west),
+            (bbox.north, bbox.east),
+        ]
+        # Also compute distances to edge midpoints for accurate range bounds
+        edge_midpoints = [
+            (bbox.south, self.radar_lon),
+            (bbox.north, self.radar_lon),
+            (self.radar_lat, bbox.west),
+            (self.radar_lat, bbox.east),
+        ]
+
+        all_dists = []
+        all_bearings = []
+        for lat, lon in corners:
+            d, b = self._distance_and_bearing(lat, lon)
+            all_dists.append(d)
+            all_bearings.append(b)
+        for lat, lon in edge_midpoints:
+            d, _ = self._distance_and_bearing(lat, lon)
+            all_dists.append(d)
+
+        # Check if radar is inside the bbox
+        radar_inside = (
+            bbox.south <= self.radar_lat <= bbox.north
+            and bbox.west <= self.radar_lon <= bbox.east
+        )
+
+        # Range: from 0 (if radar inside) or min distance to bbox
+        if radar_inside:
+            r_min = 0.0
+        else:
+            r_min = min(all_dists)
+        r_max = max(all_dists)
+
+        # Clamp to actual range values, ensure minimum 4 cells
+        rng_start = max(0, int(np.searchsorted(self.range_m, r_min)) - 2)
+        rng_stop = min(len(self.range_m), int(np.searchsorted(self.range_m, r_max)) + 2)
+        if rng_stop - rng_start < 4:
+            mid = (rng_start + rng_stop) // 2
+            rng_start = max(0, mid - 2)
+            rng_stop = min(len(self.range_m), mid + 2)
+        rng_slice = slice(rng_start, rng_stop)
+
+        # Azimuth: if radar inside bbox, need all azimuths
+        if radar_inside:
+            az_slices = [slice(0, len(self.azimuth))]
+            return az_slices, rng_slice
+
+        # Use only corner bearings for azimuth arc (edges can give
+        # misleading cardinal bearings when radar is outside bbox)
+        bearings = list(all_bearings)
+
+        # Find the smallest angular arc that contains all bearings.
+        # Sort bearings and find the largest gap — the arc is on the other side.
+        sorted_b = np.sort(bearings)
+        gaps = np.diff(sorted_b)
+        gaps = np.append(gaps, 360.0 - sorted_b[-1] + sorted_b[0])
+        largest_gap_idx = int(np.argmax(gaps))
+
+        if largest_gap_idx == len(sorted_b) - 1:
+            # Largest gap is between last and first bearing (common: no wrap)
+            az_min = float(sorted_b[0])
+            az_max = float(sorted_b[-1])
+        else:
+            # Largest gap is in the middle — the arc wraps around 0°
+            az_min = float(sorted_b[largest_gap_idx + 1])
+            az_max = float(sorted_b[largest_gap_idx]) + 360.0
+
+        az_start = max(0, int(np.searchsorted(self.azimuth, az_min % 360)) - 2)
+        az_stop = min(
+            len(self.azimuth), int(np.searchsorted(self.azimuth, az_max % 360)) + 2
+        )
+
+        # Handle wrap around 0/360
+        if az_max > 360.0:
+            # Wraps: need two slices
+            az_slices = [
+                slice(az_start, len(self.azimuth)),
+                slice(0, az_stop),
+            ]
+        else:
+            az_slices = [slice(az_start, az_stop)]
+
+        return az_slices, rng_slice
+
+    def _distance_and_bearing(self, lat: float, lon: float) -> tuple[float, float]:
+        """Compute distance (meters) and bearing (degrees) from radar to point."""
+        x, y = self._to_aeqd.transform(lon, lat)
+        distance = np.sqrt(x**2 + y**2)
+        bearing = np.degrees(np.arctan2(x, y)) % 360
+        return float(distance), float(bearing)
+
+    def equals(self, other) -> bool:
+        if not isinstance(other, PolarIndex):
+            return False
+        return (
+            np.allclose(self.azimuth, other.azimuth)
+            and np.allclose(self.range_m, other.range_m)
+            and self.radar_lat == other.radar_lat
+            and self.radar_lon == other.radar_lon
         )
 
 
@@ -1411,6 +1566,168 @@ class Curvilinear(GridSystem):
         return {self.Xdim: xslicers, self.Ydim: yslicers}
 
 
+@dataclass(kw_only=True, eq=False)
+class PolarGridSystem(GridSystem):
+    """Grid system for polar radar data (azimuth × range)."""
+
+    crs: CRS
+    bbox: BBox
+    X: str  # "lon" — computed coordinate name for rendering
+    Y: str  # "lat" — computed coordinate name for rendering
+    Xdim: str  # "azimuth"
+    Ydim: str  # "range"
+    indexes: tuple[PolarIndex, ...]
+    radar_lat: float
+    radar_lon: float
+    lon_spans_globe: bool = False
+    dXmin: float = field(init=False)
+    dYmin: float = field(init=False)
+
+    def __post_init__(self):
+        index = self.indexes[0]
+        dXmin, dYmin = index.get_min_spacing()
+        self.dXmin = dXmin or 0.0
+        self.dYmin = dYmin or 0.0
+
+    @classmethod
+    def from_dataset(cls, ds: xr.Dataset, crs: CRS, Xname: str, Yname: str) -> Self:
+        # Determine which is azimuth and which is range by standard_name
+        x_sn = ds[Xname].attrs.get("standard_name", "")
+        if x_sn == "ray_azimuth_angle":
+            az_name, rng_name = Xname, Yname
+        else:
+            az_name, rng_name = Yname, Xname
+
+        azimuth = np.asarray(ds[az_name].values, dtype=np.float64)
+        range_m = np.asarray(ds[rng_name].values, dtype=np.float64)
+
+        # Get radar site location from scalar coordinates or attributes
+        if "latitude" in ds.coords:
+            radar_lat = float(ds["latitude"])
+        elif "radar_latitude" in ds.attrs:
+            radar_lat = float(ds.attrs["radar_latitude"])
+        else:
+            raise RuntimeError(
+                "Radar site latitude not found. Expected scalar 'latitude' coordinate "
+                "or 'radar_latitude' dataset attribute."
+            )
+        if "longitude" in ds.coords:
+            radar_lon = float(ds["longitude"])
+        elif "radar_longitude" in ds.attrs:
+            radar_lon = float(ds.attrs["radar_longitude"])
+        else:
+            raise RuntimeError(
+                "Radar site longitude not found. Expected scalar 'longitude' coordinate "
+                "or 'radar_longitude' dataset attribute."
+            )
+
+        index = PolarIndex(
+            azimuth=azimuth,
+            range_m=range_m,
+            radar_lat=radar_lat,
+            radar_lon=radar_lon,
+            Xdim=az_name,
+            Ydim=rng_name,
+        )
+
+        # Compute bbox using pyproj: transform max range at cardinal directions
+        max_range_m = float(range_m.max())
+        cardinal_x = [0, max_range_m, 0, -max_range_m]
+        cardinal_y = [max_range_m, 0, -max_range_m, 0]
+        lons, lats = index._to_4326.transform(cardinal_x, cardinal_y)
+        bbox = BBox(west=min(lons), south=min(lats), east=max(lons), north=max(lats))
+
+        return cls(
+            crs=CRS.from_epsg(4326),
+            bbox=bbox,
+            X="lon",
+            Y="lat",
+            Xdim=az_name,
+            Ydim=rng_name,
+            indexes=(index,),
+            radar_lat=radar_lat,
+            radar_lon=radar_lon,
+        )
+
+    @property
+    def dims(self) -> set[str]:
+        return {self.Xdim, self.Ydim}
+
+    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill | UgridIndexer]]:
+        index = self.indexes[0]
+        sel_result = index.sel({self.Xdim: bbox})
+        az_slices = sel_result.dim_indexers[self.Xdim]
+        rng_slice = sel_result.dim_indexers[self.Ydim]
+        if not isinstance(az_slices, list):
+            az_slices = [az_slices]
+        return {self.Xdim: az_slices, self.Ydim: [rng_slice]}
+
+    def assign_index(self, da: xr.DataArray) -> xr.DataArray:
+        """Compute 2D lon/lat from azimuth/range on the subset.
+
+        Appends a wrap-around row so datashader's quadmesh closes the
+        gap between the last and first azimuth.
+        """
+        az_vals = da[self.Xdim].values
+        rng_vals = da[self.Ydim].values
+        data = da.values
+
+        # Check if azimuth covers the full 360° sweep.
+        # This includes both the full array case AND the wrapped case
+        # where sel() returned two slices concatenated (e.g., [340..359, 0..90]).
+        total_az = len(self.indexes[0].azimuth)
+        covers_full_sweep = len(az_vals) >= total_az
+
+        if covers_full_sweep:
+            # Append wrap-around: first azimuth + 360° and first data row
+            az_extended = np.append(az_vals, az_vals[0] + 360.0)
+            data_extended = np.concatenate([data, data[0:1]], axis=0)
+        else:
+            az_extended = az_vals
+            data_extended = data
+
+        # Compute lon/lat from azimuth/range using flat-earth approximation.
+        # ~200x faster than pyproj for large arrays. Accurate to 0.3% at 300km.
+        # pyproj is used for _distance_and_bearing() where single-point accuracy matters.
+        az_rad = np.radians(az_extended)
+        az_2d, rng_2d = np.meshgrid(az_rad, rng_vals, indexing="ij")
+        x_m = rng_2d * np.sin(az_2d)
+        y_m = rng_2d * np.cos(az_2d)
+        meters_per_deg_lat = 111320.0
+        meters_per_deg_lon = 111320.0 * np.cos(np.radians(self.radar_lat))
+        lon_2d = self.radar_lon + x_m / meters_per_deg_lon
+        lat_2d = self.radar_lat + y_m / meters_per_deg_lat
+
+        # Build coords dict, preserving scalar coords from original DataArray
+        coords = {
+            self.Xdim: az_extended,
+            self.Ydim: rng_vals,
+            "lon": ((self.Xdim, self.Ydim), lon_2d),
+            "lat": ((self.Xdim, self.Ydim), lat_2d),
+        }
+        for name, coord in da.coords.items():
+            if name not in coords and coord.ndim == 0:
+                coords[name] = coord
+
+        return xr.DataArray(
+            data_extended,
+            dims=(self.Xdim, self.Ydim),
+            coords=coords,
+            name=da.name,
+            attrs=da.attrs,
+        )
+
+    def equals(self, other: Self) -> bool:
+        if not isinstance(other, PolarGridSystem):
+            return False
+        return (
+            self.crs == other.crs
+            and self.radar_lat == other.radar_lat
+            and self.radar_lon == other.radar_lon
+            and self.indexes[0].equals(other.indexes[0])
+        )
+
+
 @dataclass(init=False, kw_only=True, eq=False)
 class Triangular(GridSystem):
     crs: CRS
@@ -1535,7 +1852,7 @@ class Triangular(GridSystem):
 # Type alias for 1D grid systems
 GridSystem1D = Triangular
 # Type alias for 2D grid systems that have X, Y, and crs attributes
-GridSystem2D = RasterAffine | Rectilinear | Curvilinear
+GridSystem2D = RasterAffine | Rectilinear | Curvilinear | PolarGridSystem
 
 
 def _guess_grid_mappings_and_crs(
@@ -1627,6 +1944,29 @@ def guess_coordinate_vars(
     else:
         axes = ds.cf.axes
         Xname, Yname = axes.get("X", None), axes.get("Y", None)
+
+    # Filter out scalar (0-d) coordinates — they are metadata, not grid coordinates.
+    # Radar datasets have scalar latitude/longitude (site location) alongside
+    # 2D lat/lon (gate positions). See https://github.com/openradar/xradar/issues/340
+    if Xname is not None:
+        filtered = tuple(x for x in Xname if ds[x].ndim > 0)
+        if Xname and not filtered:
+            warnings.warn(
+                f"All X coordinate candidates are scalar: {Xname}. "
+                f"No spatial grid coordinates found.",
+                stacklevel=2,
+            )
+        Xname = filtered or None
+    if Yname is not None:
+        filtered = tuple(y for y in Yname if ds[y].ndim > 0)
+        if Yname and not filtered:
+            warnings.warn(
+                f"All Y coordinate candidates are scalar: {Yname}. "
+                f"No spatial grid coordinates found.",
+                stacklevel=2,
+            )
+        Yname = filtered or None
+
     return Xname, Yname
 
 
@@ -1687,6 +2027,32 @@ def _guess_coordinates_for_mapping(
     return Xname[0], Yname[0]
 
 
+def _find_polar_coords(ds: xr.Dataset) -> tuple[str | None, str | None]:
+    """Find azimuth and range coordinate names by standard_name."""
+    az_name = None
+    rng_name = None
+    for name, coord in ds.coords.items():
+        sn = coord.attrs.get("standard_name", "")
+        if sn == "ray_azimuth_angle" and coord.ndim == 1:
+            az_name = str(name)
+        elif sn == "projection_range_coordinate" and coord.ndim == 1:
+            rng_name = str(name)
+    if az_name and rng_name:
+        return az_name, rng_name
+    return None, None
+
+
+def _is_polar_grid(X: xr.DataArray, Y: xr.DataArray) -> bool:
+    """Check if coordinates represent a polar radar grid (1D azimuth + 1D range)."""
+    if X.ndim != 1 or Y.ndim != 1:
+        return False
+    x_sn = X.attrs.get("standard_name", "")
+    y_sn = Y.attrs.get("standard_name", "")
+    return (x_sn == "ray_azimuth_angle" and y_sn == "projection_range_coordinate") or (
+        y_sn == "ray_azimuth_angle" and x_sn == "projection_range_coordinate"
+    )
+
+
 def _detect_grid_metadata(
     ds: xr.Dataset,
     mapping: GridMappingInfo,
@@ -1738,12 +2104,19 @@ def _detect_grid_metadata(
         X = ds[Xname]
         Y = ds[Yname]
 
-        if X.ndim == 1 and Y.ndim == 1:
+        if _is_polar_grid(X, Y):
+            grid_cls = PolarGridSystem
+        elif X.ndim == 1 and Y.ndim == 1:
             if is_rotated_pole(mapping.crs):
                 raise NotImplementedError("Rotated pole grids are not supported yet.")
             grid_cls = Triangular if X.dims == Y.dims else Rectilinear
         elif X.ndim == 2 and Y.ndim == 2:
             grid_cls = Curvilinear
+        else:
+            raise RuntimeError(
+                f"Unsupported coordinate dimensionality: {Xname} has ndim={X.ndim}, "
+                f"{Yname} has ndim={Y.ndim}. Expected 1D or 2D coordinate arrays."
+            )
 
     return GridMetadata(X=Xname, Y=Yname, crs=mapping.crs, grid_cls=grid_cls)
 
@@ -1831,18 +2204,25 @@ def guess_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
         if cache_key is not None and cache_key in _GRID_CACHE:
             return _GRID_CACHE[cache_key]
 
-        try:
-            grid = _guess_grid_for_dataset(ds.cf[[name]])
-        except RuntimeError:
+        # Check for polar radar grid first (needs full ds for scalar lat/lon)
+        az_coord, rng_coord = _find_polar_coords(ds)
+        if az_coord is not None and rng_coord is not None:
+            grid = PolarGridSystem.from_dataset(
+                ds, CRS.from_epsg(4326), az_coord, rng_coord
+            )
+        else:
             try:
-                grid = _guess_grid_for_dataset(ds)
+                grid = _guess_grid_for_dataset(ds.cf[[name]])
             except RuntimeError:
-                ds = ds.cf.guess_coord_axis()
-                grid = _guess_grid_for_dataset(ds)
-        except KeyError:
-            raise VariableNotFoundError(
-                f"Variable {name!r} not found in dataset."
-            ) from None
+                try:
+                    grid = _guess_grid_for_dataset(ds)
+                except RuntimeError:
+                    ds = ds.cf.guess_coord_axis()
+                    grid = _guess_grid_for_dataset(ds)
+            except KeyError:
+                raise VariableNotFoundError(
+                    f"Variable {name!r} not found in dataset."
+                ) from None
 
         grid.Z = _guess_z_dimension(ds.cf[name])
 
