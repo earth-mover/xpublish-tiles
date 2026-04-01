@@ -367,6 +367,9 @@ RADAR_TILES = [
     TileTestParam(tile=Tile(x=4, y=5, z=4), tms=WEBMERC_TMS, name="radar_chicago_z4"),
     TileTestParam(tile=Tile(x=16, y=23, z=6), tms=WEBMERC_TMS, name="radar_chicago_z6"),
     TileTestParam(tile=Tile(x=33, y=47, z=7), tms=WEBMERC_TMS, name="radar_chicago_z7"),
+    # Regression tiles from #210 — these were 100% transparent with Curvilinear path
+    TileTestParam(tile=Tile(x=33, y=48, z=7), tms=WEBMERC_TMS, name="radar_center_z7"),
+    TileTestParam(tile=Tile(x=67, y=95, z=8), tms=WEBMERC_TMS, name="radar_zoom_z8"),
 ]
 
 # South America benchmark tiles (for Sentinel dataset)
