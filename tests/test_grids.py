@@ -26,10 +26,12 @@ from xpublish_tiles.grids import (
     GridSystem,
     GridSystem2D,
     LongitudeCellIndex,
+    PolarGridSystem,
     RasterAffine,
     Rectilinear,
     Triangular,
     UgridIndexer,
+    guess_coordinate_vars,
     guess_grid_system,
 )
 from xpublish_tiles.lib import (
@@ -57,6 +59,7 @@ from xpublish_tiles.testing.datasets import (
     IFS,
     PARA_HIRES,
     POPDS,
+    RADAR,
     REDGAUSS_N320,
     UTM33S_HIRES,
     UTM50S_HIRES,
@@ -297,6 +300,138 @@ def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> Non
         assert len(actual.indexes) == 1
     else:
         assert expected == actual
+
+
+def test_polar_grid_detection():
+    """PolarGridSystem is detected for datasets with azimuth/range standard_names."""
+    ds = RADAR.create()
+    grid = guess_grid_system(ds, "foo")
+    assert isinstance(grid, PolarGridSystem)
+    assert grid.Xdim == "azimuth"
+    assert grid.Ydim == "range"
+    assert grid.X == "lon"
+    assert grid.Y == "lat"
+    assert grid.crs.to_epsg() == 4326
+    assert grid.radar_lat == 41.6
+    assert grid.radar_lon == -88.1
+
+
+def test_polar_grid_sel_contains_radar():
+    """When bbox contains the radar, all azimuths are returned."""
+    ds = RADAR.create()
+    grid = guess_grid_system(ds, "foo")
+    bbox = BBox(west=-89, south=41, east=-87, north=42)
+    slicers = grid.sel(bbox=bbox)
+    az_slices = slicers["azimuth"]
+    assert len(az_slices) == 1
+    assert az_slices[0] == slice(0, 360)
+
+
+def test_polar_grid_sel_subset():
+    """When bbox is outside radar, only relevant azimuths/ranges returned."""
+    ds = RADAR.create()
+    grid = guess_grid_system(ds, "foo")
+    # East of radar
+    bbox = BBox(west=-87, south=41, east=-86, north=42)
+    slicers = grid.sel(bbox=bbox)
+    az_slices = slicers["azimuth"]
+    total_az = sum(s.stop - s.start for s in az_slices)
+    assert total_az < 360, "Should subset azimuth, not return all"
+    rng_slice = slicers["range"][0]
+    assert rng_slice.start > 0, "Should not start at range gate 0"
+
+
+def test_polar_grid_sel_north_wrap():
+    """Bbox due north should return two azimuth slices crossing 0°."""
+    ds = RADAR.create()
+    grid = guess_grid_system(ds, "foo")
+    bbox = BBox(west=-88.5, south=42.5, east=-87.5, north=43.5)
+    slicers = grid.sel(bbox=bbox)
+    az_slices = slicers["azimuth"]
+    assert len(az_slices) == 2, "Should have two slices wrapping 0°"
+
+
+def test_polar_grid_assign_index():
+    """assign_index() should compute 2D lon/lat and preserve scalar coords."""
+    ds = RADAR.create()
+    grid = guess_grid_system(ds, "foo")
+    da = ds["foo"].isel(azimuth=slice(0, 10), range=slice(0, 5))
+    result = grid.assign_index(da)
+
+    # Should have lon/lat as 2D coords
+    assert "lon" in result.coords
+    assert "lat" in result.coords
+    assert result.lon.dims == ("azimuth", "range")
+
+    # Radar center (az=0, range=0) should be near radar site
+    assert abs(float(result.lon.isel(azimuth=0, range=0)) - grid.radar_lon) < 0.1
+    assert abs(float(result.lat.isel(azimuth=0, range=0)) - grid.radar_lat) < 0.1
+
+    # Scalar coords from original should be preserved
+    assert "latitude" in result.coords
+    assert "longitude" in result.coords
+
+
+def test_polar_grid_assign_index_full_sweep_wraps():
+    """Full sweep should get an extra azimuth row to close the circle."""
+    ds = RADAR.create()
+    grid = guess_grid_system(ds, "foo")
+    da = ds["foo"]
+    result = grid.assign_index(da)
+    assert result.sizes["azimuth"] == da.sizes["azimuth"] + 1
+
+
+def test_polar_grid_from_dataset_missing_location():
+    """from_dataset should raise when radar lat/lon is missing."""
+    ds = xr.Dataset(
+        {"DBZH": (("azimuth", "range"), np.ones((4, 5)))},
+        coords={
+            "azimuth": (
+                "azimuth",
+                [0, 90, 180, 270],
+                {"standard_name": "ray_azimuth_angle"},
+            ),
+            "range": (
+                "range",
+                np.arange(5, dtype=np.float32),
+                {"standard_name": "projection_range_coordinate"},
+            ),
+        },
+    )
+    with pytest.raises(RuntimeError, match="Radar site latitude not found"):
+        PolarGridSystem.from_dataset(ds, CRS.from_epsg(4326), "azimuth", "range")
+
+
+def test_guess_coordinate_vars_filters_scalars():
+    """Scalar latitude/longitude should be filtered out, keeping only 2D coords."""
+    ds = xr.Dataset(
+        {"temp": (("y", "x"), np.ones((3, 3)))},
+        coords={
+            "latitude": 41.6,
+            "longitude": -88.1,
+            "lat": (("y", "x"), np.ones((3, 3)), {"standard_name": "latitude"}),
+            "lon": (("y", "x"), np.ones((3, 3)), {"standard_name": "longitude"}),
+        },
+    )
+    ds["latitude"].attrs["standard_name"] = "latitude"
+    ds["longitude"].attrs["standard_name"] = "longitude"
+
+    Xname, Yname = guess_coordinate_vars(ds, CRS.from_epsg(4326))
+    assert Xname == ("lon",)
+    assert Yname == ("lat",)
+
+
+def test_detect_grid_metadata_unsupported_ndim():
+    """Coordinates with unsupported dimensionality should raise RuntimeError."""
+    ds = xr.Dataset(
+        {"temp": (("a", "b", "c"), np.ones((2, 3, 4)))},
+        coords={
+            "lat": (("a", "b", "c"), np.ones((2, 3, 4)), {"standard_name": "latitude"}),
+            "lon": (("a", "b", "c"), np.ones((2, 3, 4)), {"standard_name": "longitude"}),
+        },
+    )
+    with pytest.raises(RuntimeError, match="Unsupported coordinate dimensionality"):
+        guess_grid_system(ds, "temp")
 
 
 @pytest.mark.parametrize(
