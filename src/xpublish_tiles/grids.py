@@ -442,20 +442,20 @@ class PolarIndex(xr.Index):
         *,
         azimuth: np.ndarray,
         range_m: np.ndarray,
-        radar_lat: float,
-        radar_lon: float,
+        center_lat: float,
+        center_lon: float,
         Xdim: str,
         Ydim: str,
     ):
         self.azimuth = np.asarray(azimuth, dtype=np.float64)
         self.range_m = np.asarray(range_m, dtype=np.float64)
-        self.radar_lat = radar_lat
-        self.radar_lon = radar_lon
+        self.center_lat = center_lat
+        self.center_lon = center_lon
         self.Xdim = Xdim
         self.Ydim = Ydim
 
         # Transformers for geographic ↔ azimuthal equidistant (meters from radar)
-        aeqd_proj = f"+proj=aeqd +lat_0={radar_lat} +lon_0={radar_lon} +datum=WGS84"
+        aeqd_proj = f"+proj=aeqd +lat_0={center_lat} +lon_0={center_lon} +datum=WGS84"
         self._to_aeqd = pyproj.Transformer.from_crs(
             "EPSG:4326", aeqd_proj, always_xy=True
         )
@@ -463,6 +463,7 @@ class PolarIndex(xr.Index):
             aeqd_proj, "EPSG:4326", always_xy=True
         )
 
+        # Compute min spacing (None only if all values identical — not realistic for radar)
         az_diff = np.abs(np.diff(self.azimuth))
         az_diff[az_diff == 0] = np.inf
         self._dXmin = None if np.all(np.isinf(az_diff)) else float(np.min(az_diff))
@@ -490,10 +491,10 @@ class PolarIndex(xr.Index):
         ]
         # Also compute distances to edge midpoints for accurate range bounds
         edge_midpoints = [
-            (bbox.south, self.radar_lon),
-            (bbox.north, self.radar_lon),
-            (self.radar_lat, bbox.west),
-            (self.radar_lat, bbox.east),
+            (bbox.south, self.center_lon),
+            (bbox.north, self.center_lon),
+            (self.center_lat, bbox.west),
+            (self.center_lat, bbox.east),
         ]
 
         all_dists = []
@@ -508,8 +509,8 @@ class PolarIndex(xr.Index):
 
         # Check if radar is inside the bbox
         radar_inside = (
-            bbox.south <= self.radar_lat <= bbox.north
-            and bbox.west <= self.radar_lon <= bbox.east
+            bbox.south <= self.center_lat <= bbox.north
+            and bbox.west <= self.center_lon <= bbox.east
         )
 
         # Range: from 0 (if radar inside) or min distance to bbox
@@ -583,8 +584,8 @@ class PolarIndex(xr.Index):
         return (
             np.allclose(self.azimuth, other.azimuth)
             and np.allclose(self.range_m, other.range_m)
-            and self.radar_lat == other.radar_lat
-            and self.radar_lon == other.radar_lon
+            and self.center_lat == other.center_lat
+            and self.center_lon == other.center_lon
         )
 
 
@@ -1567,8 +1568,16 @@ class Curvilinear(GridSystem):
 
 
 @dataclass(kw_only=True, eq=False)
-class PolarGridSystem(GridSystem):
-    """Grid system for polar radar data (azimuth × range)."""
+class Polar(GridSystem):
+    """Grid system for polar radar data (azimuth × range).
+
+    CRS is set to EPSG:4326 because assign_index() computes lon/lat directly
+    from azimuth/range using a flat-earth approximation, bypassing the need for
+    an aeqd projection definition on the dataset. This avoids pyproj coordinate
+    transform overhead in the rendering hot path (~200x faster than pyproj for
+    large arrays). The pipeline's transform_coordinates() then handles
+    4326 → output CRS as usual.
+    """
 
     crs: CRS
     bbox: BBox
@@ -1577,8 +1586,8 @@ class PolarGridSystem(GridSystem):
     Xdim: str  # "azimuth"
     Ydim: str  # "range"
     indexes: tuple[PolarIndex, ...]
-    radar_lat: float
-    radar_lon: float
+    center_lat: float
+    center_lon: float
     lon_spans_globe: bool = False
     dXmin: float = field(init=False)
     dYmin: float = field(init=False)
@@ -1601,31 +1610,22 @@ class PolarGridSystem(GridSystem):
         azimuth = np.asarray(ds[az_name].values, dtype=np.float64)
         range_m = np.asarray(ds[rng_name].values, dtype=np.float64)
 
-        # Get radar site location from scalar coordinates or attributes
-        if "latitude" in ds.coords:
-            radar_lat = float(ds["latitude"])
-        elif "radar_latitude" in ds.attrs:
-            radar_lat = float(ds.attrs["radar_latitude"])
-        else:
+        # Get center location (radar site). Per WMO FM-301, radar datasets
+        # have scalar latitude/longitude coordinates for the site location.
+        # See https://github.com/openradar/xradar/issues/340
+        center_lat = _find_scalar_coord(ds, "latitude")
+        center_lon = _find_scalar_coord(ds, "longitude")
+        if center_lat is None or center_lon is None:
             raise RuntimeError(
-                "Radar site latitude not found. Expected scalar 'latitude' coordinate "
-                "or 'radar_latitude' dataset attribute."
-            )
-        if "longitude" in ds.coords:
-            radar_lon = float(ds["longitude"])
-        elif "radar_longitude" in ds.attrs:
-            radar_lon = float(ds.attrs["radar_longitude"])
-        else:
-            raise RuntimeError(
-                "Radar site longitude not found. Expected scalar 'longitude' coordinate "
-                "or 'radar_longitude' dataset attribute."
+                "Center location not found. Expected scalar 'latitude'/'longitude' "
+                "coordinates (WMO FM-301) or dataset attributes."
             )
 
         index = PolarIndex(
             azimuth=azimuth,
             range_m=range_m,
-            radar_lat=radar_lat,
-            radar_lon=radar_lon,
+            center_lat=center_lat,
+            center_lon=center_lon,
             Xdim=az_name,
             Ydim=rng_name,
         )
@@ -1645,8 +1645,8 @@ class PolarGridSystem(GridSystem):
             Xdim=az_name,
             Ydim=rng_name,
             indexes=(index,),
-            radar_lat=radar_lat,
-            radar_lon=radar_lon,
+            center_lat=center_lat,
+            center_lon=center_lon,
         )
 
     @property
@@ -1665,6 +1665,7 @@ class PolarGridSystem(GridSystem):
     def assign_index(self, da: xr.DataArray) -> xr.DataArray:
         """Compute 2D lon/lat from azimuth/range on the subset.
 
+        Called after apply_slicers() — data is already loaded in memory.
         Appends a wrap-around row so datashader's quadmesh closes the
         gap between the last and first azimuth.
         """
@@ -1689,14 +1690,18 @@ class PolarGridSystem(GridSystem):
         # Compute lon/lat from azimuth/range using flat-earth approximation.
         # ~200x faster than pyproj for large arrays. Accurate to 0.3% at 300km.
         # pyproj is used for _distance_and_bearing() where single-point accuracy matters.
+        # Arrays are post-subsetting/coarsening. Range is subsetted per tile;
+        # azimuth is often the full sweep for tiles containing the radar.
         az_rad = np.radians(az_extended)
         az_2d, rng_2d = np.meshgrid(az_rad, rng_vals, indexing="ij")
-        x_m = rng_2d * np.sin(az_2d)
-        y_m = rng_2d * np.cos(az_2d)
         meters_per_deg_lat = 111320.0
-        meters_per_deg_lon = 111320.0 * np.cos(np.radians(self.radar_lat))
-        lon_2d = self.radar_lon + x_m / meters_per_deg_lon
-        lat_2d = self.radar_lat + y_m / meters_per_deg_lat
+        meters_per_deg_lon = 111320.0 * np.cos(np.radians(self.center_lat))
+        lon_2d = rng_2d * np.sin(az_2d)
+        lon_2d /= meters_per_deg_lon
+        lon_2d += self.center_lon
+        lat_2d = rng_2d * np.cos(az_2d)
+        lat_2d /= meters_per_deg_lat
+        lat_2d += self.center_lat
 
         # Build coords dict, preserving scalar coords from original DataArray
         coords = {
@@ -1718,12 +1723,12 @@ class PolarGridSystem(GridSystem):
         )
 
     def equals(self, other: Self) -> bool:
-        if not isinstance(other, PolarGridSystem):
+        if not isinstance(other, Polar):
             return False
         return (
             self.crs == other.crs
-            and self.radar_lat == other.radar_lat
-            and self.radar_lon == other.radar_lon
+            and self.center_lat == other.center_lat
+            and self.center_lon == other.center_lon
             and self.indexes[0].equals(other.indexes[0])
         )
 
@@ -1852,7 +1857,7 @@ class Triangular(GridSystem):
 # Type alias for 1D grid systems
 GridSystem1D = Triangular
 # Type alias for 2D grid systems that have X, Y, and crs attributes
-GridSystem2D = RasterAffine | Rectilinear | Curvilinear | PolarGridSystem
+GridSystem2D = RasterAffine | Rectilinear | Curvilinear | Polar
 
 
 def _guess_grid_mappings_and_crs(
@@ -2027,6 +2032,22 @@ def _guess_coordinates_for_mapping(
     return Xname[0], Yname[0]
 
 
+def _find_scalar_coord(ds: xr.Dataset, standard_name: str) -> float | None:
+    """Find a scalar coordinate by standard_name or name, or fall back to attributes."""
+    # 1. Match by standard_name attribute
+    for coord in ds.coords.values():
+        if coord.ndim == 0 and coord.attrs.get("standard_name") == standard_name:
+            return float(coord)
+    # 2. Match by coordinate name (FM-301 mandates "latitude"/"longitude")
+    if standard_name in ds.coords and ds[standard_name].ndim == 0:
+        return float(ds[standard_name])
+    # 3. Fall back to dataset attributes
+    for attr in [standard_name, f"radar_{standard_name}", f"center_{standard_name}"]:
+        if attr in ds.attrs:
+            return float(ds.attrs[attr])
+    return None
+
+
 def _find_polar_coords(ds: xr.Dataset) -> tuple[str | None, str | None]:
     """Find azimuth and range coordinate names by standard_name."""
     az_name = None
@@ -2105,7 +2126,7 @@ def _detect_grid_metadata(
         Y = ds[Yname]
 
         if _is_polar_grid(X, Y):
-            grid_cls = PolarGridSystem
+            grid_cls = Polar
         elif X.ndim == 1 and Y.ndim == 1:
             if is_rotated_pole(mapping.crs):
                 raise NotImplementedError("Rotated pole grids are not supported yet.")
@@ -2207,9 +2228,7 @@ def guess_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
         # Check for polar radar grid first (needs full ds for scalar lat/lon)
         az_coord, rng_coord = _find_polar_coords(ds)
         if az_coord is not None and rng_coord is not None:
-            grid = PolarGridSystem.from_dataset(
-                ds, CRS.from_epsg(4326), az_coord, rng_coord
-            )
+            grid = Polar.from_dataset(ds, CRS.from_epsg(4326), az_coord, rng_coord)
         else:
             try:
                 grid = _guess_grid_for_dataset(ds.cf[[name]])
