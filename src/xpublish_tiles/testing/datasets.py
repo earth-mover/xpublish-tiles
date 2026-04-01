@@ -1123,6 +1123,82 @@ TRIPOLE_ANTIMERIDIAN = Dataset(
 )
 
 
+def radar_polar_grid(
+    *,
+    dims: tuple[Dim, ...],
+    dtype: npt.DTypeLike,
+    attrs: dict[str, Any],
+) -> xr.Dataset:
+    """Create a polar radar grid dataset with native azimuth/range coordinates.
+
+    Only uses 1D azimuth and range — no x/y/crs_wkt. PolarGridSystem
+    computes 2D lon/lat on-the-fly from azimuth + range + radar site location.
+    """
+    az_dim, range_dim = dims[0], dims[1]
+    n_azimuth, n_range = az_dim.size, range_dim.size
+
+    radar_lat, radar_lon = 41.6, -88.1
+
+    azimuth = np.linspace(0.5, 360.0 - 360.0 / n_azimuth + 0.5, n_azimuth)
+    max_range = 300000.0
+    range_m = np.linspace(2125.0, max_range, n_range).astype(np.float32)
+
+    # Synthetic reflectivity data
+    storm_az, storm_range = np.radians(45), 100000.0
+    az_rad = np.radians(azimuth)
+    az_2d, range_2d = np.meshgrid(az_rad, range_m, indexing="ij")
+    az_diff = np.abs(az_2d - storm_az)
+    az_diff = np.minimum(az_diff, 2 * np.pi - az_diff)
+    range_diff = np.abs(range_2d - storm_range)
+    dbzh = 50 * np.exp(-((az_diff / 0.35) ** 2 + (range_diff / 30000) ** 2))
+    dbzh = np.clip(dbzh + np.random.default_rng(42).normal(0, 2, dbzh.shape), -10, 70)
+
+    chunks = (az_dim.chunk_size, range_dim.chunk_size)
+    data = dask.array.from_array(dbzh.astype(dtype), chunks=chunks)
+
+    ds = xr.Dataset(
+        data_vars={
+            "foo": (
+                [az_dim.name, range_dim.name],
+                data,
+                {
+                    "long_name": "Equivalent reflectivity factor H",
+                    "units": "dBZ",
+                    "valid_min": -10.0,
+                    "valid_max": 70.0,
+                },
+            ),
+        },
+        coords={
+            az_dim.name: (
+                az_dim.name,
+                azimuth,
+                {"standard_name": "ray_azimuth_angle"},
+            ),
+            range_dim.name: (
+                range_dim.name,
+                range_m,
+                {"standard_name": "projection_range_coordinate"},
+            ),
+            "latitude": radar_lat,
+            "longitude": radar_lon,
+        },
+    )
+    ds.attrs.update(attrs)
+    return ds
+
+
+RADAR = Dataset(
+    name="radar",
+    dims=(
+        Dim(name="azimuth", size=360, chunk_size=360, data=None),
+        Dim(name="range", size=500, chunk_size=500, data=None),
+    ),
+    dtype=np.float32,
+    setup=radar_polar_grid,
+)
+
+
 POPDS = xr.Dataset(
     {
         "TEMP": (
