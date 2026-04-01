@@ -26,7 +26,7 @@ from xpublish_tiles.grids import (
     GridSystem,
     GridSystem2D,
     LongitudeCellIndex,
-    PolarGridSystem,
+    Polar,
     RasterAffine,
     Rectilinear,
     Triangular,
@@ -303,17 +303,17 @@ def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> Non
 
 
 def test_polar_grid_detection():
-    """PolarGridSystem is detected for datasets with azimuth/range standard_names."""
+    """Polar is detected for datasets with azimuth/range standard_names."""
     ds = RADAR.create()
     grid = guess_grid_system(ds, "foo")
-    assert isinstance(grid, PolarGridSystem)
+    assert isinstance(grid, Polar)
     assert grid.Xdim == "azimuth"
     assert grid.Ydim == "range"
     assert grid.X == "lon"
     assert grid.Y == "lat"
     assert grid.crs.to_epsg() == 4326
-    assert grid.radar_lat == 41.6
-    assert grid.radar_lon == -88.1
+    assert grid.center_lat == 41.6
+    assert grid.center_lon == -88.1
 
 
 def test_polar_grid_sel_contains_radar():
@@ -364,8 +364,8 @@ def test_polar_grid_assign_index():
     assert result.lon.dims == ("azimuth", "range")
 
     # Radar center (az=0, range=0) should be near radar site
-    assert abs(float(result.lon.isel(azimuth=0, range=0)) - grid.radar_lon) < 0.1
-    assert abs(float(result.lat.isel(azimuth=0, range=0)) - grid.radar_lat) < 0.1
+    assert abs(float(result.lon.isel(azimuth=0, range=0)) - grid.center_lon) < 0.1
+    assert abs(float(result.lat.isel(azimuth=0, range=0)) - grid.center_lat) < 0.1
 
     # Scalar coords from original should be preserved
     assert "latitude" in result.coords
@@ -398,8 +398,8 @@ def test_polar_grid_from_dataset_missing_location():
             ),
         },
     )
-    with pytest.raises(RuntimeError, match="Radar site latitude not found"):
-        PolarGridSystem.from_dataset(ds, CRS.from_epsg(4326), "azimuth", "range")
+    with pytest.raises(RuntimeError, match="Center location not found"):
+        Polar.from_dataset(ds, CRS.from_epsg(4326), "azimuth", "range")
 
 
 def test_guess_coordinate_vars_filters_scalars():
