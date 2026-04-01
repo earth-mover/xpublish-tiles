@@ -15,6 +15,7 @@ from xpublish_tiles.grids import (
     GridMetadata,
     GridSystem,
     GridSystem2D,
+    PolarGridSystem,
     Triangular,
     UgridIndexer,
     guess_grid_system,
@@ -960,8 +961,14 @@ async def subset_to_bbox(
             datatype=array.datatype,
         )
 
+        # For PolarGridSystem, compute lon/lat coordinates after subsetting
+        if isinstance(grid, PolarGridSystem):
+            subset = grid.assign_index(subset)
+
         if grid.crs.is_geographic:
-            if isinstance(grid, GridSystem2D):
+            if isinstance(grid, PolarGridSystem):
+                has_discontinuity = False
+            elif isinstance(grid, GridSystem2D):
                 # Check for discontinuities on geographic coords before projection.
                 # This is an optimization - we could also detect after projecting to the target CRS.
                 # However, that would be a tax on every render. So instead we look for
