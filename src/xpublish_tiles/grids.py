@@ -2222,9 +2222,7 @@ def guess_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
             # Check for polar radar grid (needs full ds for scalar lat/lon)
             az_coord, rng_coord = _find_polar_coords(ds)
             if az_coord is not None and rng_coord is not None:
-                grid = Polar.from_dataset(
-                    ds, CRS.from_epsg(4326), az_coord, rng_coord
-                )
+                grid = Polar.from_dataset(ds, CRS.from_epsg(4326), az_coord, rng_coord)
             else:
                 try:
                     grid = _guess_grid_for_dataset(ds)
