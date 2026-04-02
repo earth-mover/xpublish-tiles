@@ -26,6 +26,7 @@ from xpublish_tiles.lib import (
     Fill,
     VariableNotFoundError,
     _prevent_slice_overlap,
+    aeqd_to_4326,
     crs_repr,
     is_4326_like,
     unwrap,
@@ -1687,21 +1688,14 @@ class Polar(GridSystem):
             az_extended = az_vals
             data_extended = data
 
-        # Compute lon/lat from azimuth/range using flat-earth approximation.
-        # ~200x faster than pyproj for large arrays. Accurate to 0.3% at 300km.
-        # pyproj is used for _distance_and_bearing() where single-point accuracy matters.
+        # Convert azimuth/range to x/y in aeqd meters, then to lon/lat.
         # Arrays are post-subsetting/coarsening. Range is subsetted per tile;
         # azimuth is often the full sweep for tiles containing the radar.
         az_rad = np.radians(az_extended)
         az_2d, rng_2d = np.meshgrid(az_rad, rng_vals, indexing="ij")
-        meters_per_deg_lat = 111320.0
-        meters_per_deg_lon = 111320.0 * np.cos(np.radians(self.center_lat))
-        lon_2d = rng_2d * np.sin(az_2d)
-        lon_2d /= meters_per_deg_lon
-        lon_2d += self.center_lon
-        lat_2d = rng_2d * np.cos(az_2d)
-        lat_2d /= meters_per_deg_lat
-        lat_2d += self.center_lat
+        x_m = rng_2d * np.sin(az_2d)
+        y_m = rng_2d * np.cos(az_2d)
+        lon_2d, lat_2d = aeqd_to_4326(x_m, y_m, self.center_lat, self.center_lon)
 
         # Build coords dict, preserving scalar coords from original DataArray
         coords = {
@@ -2050,14 +2044,11 @@ def _find_scalar_coord(ds: xr.Dataset, standard_name: str) -> float | None:
 
 def _find_polar_coords(ds: xr.Dataset) -> tuple[str | None, str | None]:
     """Find azimuth and range coordinate names by standard_name."""
-    az_name = None
-    rng_name = None
-    for name, coord in ds.coords.items():
-        sn = coord.attrs.get("standard_name", "")
-        if sn == "ray_azimuth_angle" and coord.ndim == 1:
-            az_name = str(name)
-        elif sn == "projection_range_coordinate" and coord.ndim == 1:
-            rng_name = str(name)
+    std_names = ds.cf.standard_names
+    az_candidates = std_names.get("ray_azimuth_angle", [])
+    rng_candidates = std_names.get("projection_range_coordinate", [])
+    az_name = next((str(n) for n in az_candidates if ds[n].ndim == 1), None)
+    rng_name = next((str(n) for n in rng_candidates if ds[n].ndim == 1), None)
     if az_name and rng_name:
         return az_name, rng_name
     return None, None
@@ -2225,23 +2216,25 @@ def guess_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
         if cache_key is not None and cache_key in _GRID_CACHE:
             return _GRID_CACHE[cache_key]
 
-        # Check for polar radar grid first (needs full ds for scalar lat/lon)
-        az_coord, rng_coord = _find_polar_coords(ds)
-        if az_coord is not None and rng_coord is not None:
-            grid = Polar.from_dataset(ds, CRS.from_epsg(4326), az_coord, rng_coord)
-        else:
-            try:
-                grid = _guess_grid_for_dataset(ds.cf[[name]])
-            except RuntimeError:
+        try:
+            grid = _guess_grid_for_dataset(ds.cf[[name]])
+        except RuntimeError:
+            # Check for polar radar grid (needs full ds for scalar lat/lon)
+            az_coord, rng_coord = _find_polar_coords(ds)
+            if az_coord is not None and rng_coord is not None:
+                grid = Polar.from_dataset(
+                    ds, CRS.from_epsg(4326), az_coord, rng_coord
+                )
+            else:
                 try:
                     grid = _guess_grid_for_dataset(ds)
                 except RuntimeError:
                     ds = ds.cf.guess_coord_axis()
                     grid = _guess_grid_for_dataset(ds)
-            except KeyError:
-                raise VariableNotFoundError(
-                    f"Variable {name!r} not found in dataset."
-                ) from None
+        except KeyError:
+            raise VariableNotFoundError(
+                f"Variable {name!r} not found in dataset."
+            ) from None
 
         grid.Z = _guess_z_dimension(ds.cf[name])
 
