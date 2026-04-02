@@ -335,9 +335,7 @@ def test_polar_grid_sel_subset():
     bbox = BBox(west=-87, south=41, east=-86, north=42)
     slicers = grid.sel(bbox=bbox)
     az_slices = slicers["azimuth"]
-    total_az = sum(
-        cast(slice, s).stop - cast(slice, s).start for s in az_slices
-    )
+    total_az = sum(cast(slice, s).stop - cast(slice, s).start for s in az_slices)
     assert total_az < 360, "Should subset azimuth, not return all"
     rng_slice = cast(slice, slicers["range"][0])
     assert rng_slice.start > 0, "Should not start at range gate 0"
