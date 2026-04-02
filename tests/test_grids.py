@@ -335,9 +335,11 @@ def test_polar_grid_sel_subset():
     bbox = BBox(west=-87, south=41, east=-86, north=42)
     slicers = grid.sel(bbox=bbox)
     az_slices = slicers["azimuth"]
-    total_az = sum(s.stop - s.start for s in az_slices)
+    total_az = sum(
+        cast(slice, s).stop - cast(slice, s).start for s in az_slices
+    )
     assert total_az < 360, "Should subset azimuth, not return all"
-    rng_slice = slicers["range"][0]
+    rng_slice = cast(slice, slicers["range"][0])
     assert rng_slice.start > 0, "Should not start at range gate 0"
 
 
@@ -364,8 +366,9 @@ def test_polar_grid_assign_index():
     assert result.lon.dims == ("azimuth", "range")
 
     # Radar center (az=0, range=0) should be near radar site
-    assert abs(float(result.lon.isel(azimuth=0, range=0)) - grid.center_lon) < 0.1
-    assert abs(float(result.lat.isel(azimuth=0, range=0)) - grid.center_lat) < 0.1
+    polar_grid = cast(Polar, grid)
+    assert abs(float(result.lon.isel(azimuth=0, range=0)) - polar_grid.center_lon) < 0.1
+    assert abs(float(result.lat.isel(azimuth=0, range=0)) - polar_grid.center_lat) < 0.1
 
     # Scalar coords from original should be preserved
     assert "latitude" in result.coords
