@@ -362,6 +362,16 @@ CURVILINEAR_TILES = [
     ),
 ]
 
+# Radar tiles (centered on ~41.6°N, -88.1°W — KLOT-like radar)
+RADAR_TILES = [
+    TileTestParam(tile=Tile(x=4, y=5, z=4), tms=WEBMERC_TMS, name="radar_chicago_z4"),
+    TileTestParam(tile=Tile(x=16, y=23, z=6), tms=WEBMERC_TMS, name="radar_chicago_z6"),
+    TileTestParam(tile=Tile(x=33, y=47, z=7), tms=WEBMERC_TMS, name="radar_chicago_z7"),
+    # Regression tiles from #210 — these were 100% transparent with Curvilinear path
+    TileTestParam(tile=Tile(x=33, y=48, z=7), tms=WEBMERC_TMS, name="radar_center_z7"),
+    TileTestParam(tile=Tile(x=67, y=95, z=8), tms=WEBMERC_TMS, name="radar_zoom_z8"),
+]
+
 # South America benchmark tiles (for Sentinel dataset)
 # Coverage area roughly: -82°W to -27°W, 13°N to -55°S
 # Focused on the region that's working in the logs (tiles 120-122, 72-73)
