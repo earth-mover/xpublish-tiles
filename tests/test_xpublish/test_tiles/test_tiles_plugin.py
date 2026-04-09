@@ -711,6 +711,22 @@ def test_tilejson_endpoint():
         if tilejson["minzoom"] is not None:
             assert tilejson["minzoom"] <= tilejson["maxzoom"]
 
+    # Test that belowmincolor and abovemaxcolor are passed to tile URL
+    response = client.get(
+        "/datasets/temp/tiles/WebMercatorQuad/tilejson.json",
+        params={
+            "variables": "temperature",
+            "width": 256,
+            "height": 256,
+            "belowmincolor": "transparent",
+            "abovemaxcolor": "#FF0000",
+        },
+    )
+    assert response.status_code == 200
+    tile_url = response.json()["tiles"][0]
+    assert "belowmincolor=transparent" in tile_url
+    assert "abovemaxcolor=%23ff0000" in tile_url
+
 
 def test_tilejson_invalid_tile_matrix_set():
     """Test TileJSON endpoint returns 404 for invalid tile matrix set"""
