@@ -155,6 +155,27 @@ async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot, pytestco
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tile,tms", as_pytestparams(TILES))
+async def test_pipeline_tiles_polygons(
+    global_datasets, tile, tms, png_snapshot, pytestconfig
+):
+    """Test pipeline with polygons style rendering."""
+    ds = global_datasets
+    if ds.attrs["name"] == "reduced_gaussian_n320":
+        pytest.skip("polygons style not yet supported for Triangular grids")
+    query_params = create_query_params(tile, tms, style="polygons")
+    with config.set(rectilinear_check_min_size=0):
+        result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(
+        result,
+        png_snapshot,
+        skip_transparency_check=True,
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("ds", [GLOBAL_6KM.create(), GLOBAL_6KM_360.create()])
 @pytest.mark.parametrize(
     "tile",

@@ -28,6 +28,7 @@ from xpublish_tiles.lib import (
     _prevent_slice_overlap,
     aeqd_to_4326,
     crs_repr,
+    fill_rectilinear_rings,
     is_4326_like,
     unwrap,
 )
@@ -1012,6 +1013,14 @@ class GridSystem(ABC):
     def assign_index(self, da: xr.DataArray) -> xr.DataArray:
         return da
 
+    def cell_boundaries(
+        self,
+        da: xr.DataArray,
+        *,
+        slicers: dict[str, list] | None = None,
+    ) -> np.ndarray:
+        raise NotImplementedError
+
     def equals(self, other: object) -> bool:
         if not isinstance(other, GridSystem):
             return False
@@ -1228,6 +1237,51 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
             y_size=index._xy_shape[1],
         )
 
+    def cell_boundaries(
+        self,
+        da: xr.DataArray,
+        *,
+        slicers: dict[str, list] | None = None,
+    ) -> np.ndarray:
+        import shapely
+
+        (index,) = self.indexes
+        affine = index.transform()
+        nx, ny = index._xy_shape
+        xaxis = da.get_axis_num(self.Xdim)
+
+        x_edges = affine.c + np.arange(nx + 1) * affine.a
+        y_edges = affine.f + np.arange(ny + 1) * affine.e
+
+        assert slicers is not None
+        y_slice = next(s for s in slicers[self.Ydim] if isinstance(s, slice))
+        x_slices = [
+            slice(*s.indices(nx)) for s in slicers[self.Xdim] if isinstance(s, slice)
+        ]
+        y_start, y_stop, _ = y_slice.indices(ny)
+
+        ny_sel = y_stop - y_start
+        total_nx = sum(s.stop - s.start for s in x_slices)
+        shape = [0, 0]
+        shape[xaxis] = total_nx
+        shape[1 - xaxis] = ny_sel
+        rings = np.empty((*shape, 5, 2), dtype=np.float64)
+
+        yb = y_edges[y_start:y_stop]
+        yt = y_edges[y_start + 1 : y_stop + 1]
+
+        offset = 0
+        for x_slice in x_slices:
+            nx_sel = x_slice.stop - x_slice.start
+            xl = x_edges[x_slice.start : x_slice.stop]
+            xr_ = x_edges[x_slice.start + 1 : x_slice.stop + 1]
+            slc = [slice(None)] * 2
+            slc[xaxis] = slice(offset, offset + nx_sel)
+            fill_rectilinear_rings(rings[tuple(slc)], xl, xr_, yb, yt, xaxis=xaxis)
+            offset += nx_sel
+
+        return shapely.polygons(rings.reshape(-1, 5, 2))
+
     def equals(self, other: object) -> bool:
         if not isinstance(other, RasterAffine):
             return False
@@ -1391,6 +1445,59 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
             x_size=x_size,
             y_size=y_size,
         )
+
+    def cell_boundaries(
+        self,
+        da: xr.DataArray,
+        *,
+        slicers: dict[str, list] | None = None,
+    ) -> np.ndarray:
+        import shapely
+
+        x_index, y_index = self.indexes[0], self.indexes[-1]
+        x_left = x_index.index.left.values
+        x_right = x_index.index.right.values
+        y_left = y_index.index.left.values
+        y_right = y_index.index.right.values
+        xaxis = da.get_axis_num(self.Xdim)
+
+        assert slicers is not None
+        nx_total = len(x_left)
+        ny_total = len(y_left)
+        y_slice = next(s for s in slicers[self.Ydim] if isinstance(s, slice))
+        x_slices = [
+            slice(*s.indices(nx_total))
+            for s in slicers[self.Xdim]
+            if isinstance(s, slice)
+        ]
+        y_start, y_stop, _ = y_slice.indices(ny_total)
+
+        ny_sel = y_stop - y_start
+        total_nx = sum(s.stop - s.start for s in x_slices)
+        shape = [0, 0]
+        shape[xaxis] = total_nx
+        shape[1 - xaxis] = ny_sel
+        rings = np.empty((*shape, 5, 2), dtype=np.float64)
+
+        yb = y_left[y_start:y_stop]
+        yt = y_right[y_start:y_stop]
+
+        offset = 0
+        for x_slice in x_slices:
+            nx_sel = x_slice.stop - x_slice.start
+            slc = [slice(None)] * 2
+            slc[xaxis] = slice(offset, offset + nx_sel)
+            fill_rectilinear_rings(
+                rings[tuple(slc)],
+                x_left[x_slice],
+                x_right[x_slice],
+                yb,
+                yt,
+                xaxis=xaxis,
+            )
+            offset += nx_sel
+
+        return shapely.polygons(rings.reshape(-1, 5, 2))
 
     def equals(self, other: object) -> bool:
         if not isinstance(other, Rectilinear):
@@ -1612,33 +1719,31 @@ class Curvilinear(GridSystem):
         y_slice = next(s for s in slicers[self.Ydim] if isinstance(s, slice))
         x_slices = [s for s in slicers[self.Xdim] if isinstance(s, slice)]
 
-        pieces = []
+        ny_sel = y_slice.stop - y_slice.start
+        total_nx = sum(s.stop - s.start for s in x_slices)
+        rings = np.empty((total_nx, ny_sel, 5, 2), dtype=np.float64)
+
+        offset = 0
         for x_slice in x_slices:
-            slc = [slice(None)] * 2
-            slc[index.yaxis] = y_slice
-            slc[index.xaxis] = x_slice
-            slc = tuple(slc)
+            nx_sel = x_slice.stop - x_slice.start
+            slc_list: list[slice] = [slice(None)] * 2
+            slc_list[index.yaxis] = y_slice
+            slc_list[index.xaxis] = x_slice
+            slc = tuple(slc_list)
 
-            left = index.left[slc]
-            right = index.right[slc]
-            bottom = index.bottom[slc]
-            top = index.top[slc]
+            out = rings[offset : offset + nx_sel]
+            out[:, :, 0, 0] = index.left[slc]
+            out[:, :, 0, 1] = index.bottom[slc]
+            out[:, :, 1, 0] = index.right[slc]
+            out[:, :, 1, 1] = index.bottom[slc]
+            out[:, :, 2, 0] = index.right[slc]
+            out[:, :, 2, 1] = index.top[slc]
+            out[:, :, 3, 0] = index.left[slc]
+            out[:, :, 3, 1] = index.top[slc]
+            out[:, :, 4] = out[:, :, 0]
+            offset += nx_sel
 
-            m, n = left.shape
-            rings = np.empty((m, n, 5, 2), dtype=np.float64)
-            rings[:, :, 0, 0] = left
-            rings[:, :, 0, 1] = bottom
-            rings[:, :, 1, 0] = right
-            rings[:, :, 1, 1] = bottom
-            rings[:, :, 2, 0] = right
-            rings[:, :, 2, 1] = top
-            rings[:, :, 3, 0] = left
-            rings[:, :, 3, 1] = top
-            rings[:, :, 4] = rings[:, :, 0]
-
-            pieces.append(shapely.polygons(rings.reshape(-1, 5, 2)))
-
-        return np.concatenate(pieces) if len(pieces) > 1 else pieces[0]
+        return shapely.polygons(rings.reshape(-1, 5, 2))
 
 
 @dataclass(kw_only=True, eq=False)
@@ -1869,6 +1974,26 @@ class Triangular(GridSystem):
         ugrid_indexer = result.dim_indexers["ugrid"]
         assert isinstance(ugrid_indexer, UgridIndexer)
         return {self.dim: [ugrid_indexer]}
+
+    def cell_boundaries(
+        self,
+        da: xr.DataArray,
+        *,
+        slicers: dict[str, list] | None = None,
+    ) -> np.ndarray:
+        import shapely
+
+        assert slicers is not None
+        ugrid_indexer = next(s for s in slicers[self.dim] if isinstance(s, UgridIndexer))
+        index = next(iter(self.indexes))
+        vertices = index.tree.vertices
+
+        corners = vertices[ugrid_indexer.connectivity]  # (n_faces, 3, 2)
+        n = corners.shape[0]
+        rings = np.empty((n, 4, 2), dtype=np.float64)
+        rings[:, :3, :] = corners
+        rings[:, 3, :] = corners[:, 0, :]
+        return shapely.polygons(rings)
 
     @classmethod
     def from_dataset(

@@ -333,6 +333,7 @@ async def apply_slicers(
     alternate: GridMetadata,
     slicers: dict[str, list[slice | Fill | UgridIndexer]],
     datatype: DataType,
+    min_dim_size: int = 2,
 ) -> xr.DataArray:
     logger = get_context_logger()
 
@@ -403,8 +404,7 @@ async def apply_slicers(
         raise TileTooBigError(msg)
 
     nvars = sum(len(subset.data_vars) for subset in subsets)
-    # if any subset has shape < (2, 2) raise.
-    if any(total_size < 2 * nvars for total_size in total_shape):
+    if any(total_size < min_dim_size * nvars for total_size in total_shape):
         logger.error("Tile request resulted in insufficient data for rendering.")
         raise AssertionError("Tile request resulted in insufficient data for rendering.")
 
@@ -708,7 +708,11 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     context_logger = get_context_logger()
 
     subsets = await subset_to_bbox(
-        validated, bbox=query.bbox, crs=query.crs, max_shape=max_shape
+        validated,
+        bbox=query.bbox,
+        crs=query.crs,
+        max_shape=max_shape,
+        style=query.style,
     )
 
     # Transform coordinates to output CRS
@@ -912,6 +916,7 @@ async def subset_to_bbox(
     bbox: OutputBBox,
     crs: OutputCRS,
     max_shape: tuple[int, int],
+    style: str = "raster",
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:
     result = {}
     for var_name, array in validated.items():
@@ -944,14 +949,19 @@ async def subset_to_bbox(
         slicers = grid.sel(bbox=input_bbox)
         da = grid.assign_index(array.da)
 
-        # Estimate coarsen factors and adjusted slicers
-        coarsen_factors, new_slicers = estimate_coarsen_factors_and_slicers(
-            da,
-            grid=grid,
-            slicers=slicers,
-            max_shape=max_shape,
-            datatype=array.datatype,
-        )
+        # Polygon rendering needs 1:1 data-to-polygon mapping, so skip coarsening
+        if style == "polygons":
+            coarsen_factors = {}
+            new_slicers = slicers
+        else:
+            # Estimate coarsen factors and adjusted slicers
+            coarsen_factors, new_slicers = estimate_coarsen_factors_and_slicers(
+                da,
+                grid=grid,
+                slicers=slicers,
+                max_shape=max_shape,
+                datatype=array.datatype,
+            )
         alternate = grid.pick_alternate_grid(crs, coarsen_factors=coarsen_factors)
 
         subset = await apply_slicers(
@@ -960,6 +970,7 @@ async def subset_to_bbox(
             alternate=alternate,
             slicers=new_slicers,
             datatype=array.datatype,
+            min_dim_size=1 if style == "polygons" else 2,
         )
 
         # For Polar, compute lon/lat coordinates after subsetting
@@ -1085,6 +1096,7 @@ async def _transform_polygons(
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:
     """Transform cell boundary polygons to output CRS."""
     import geopandas as gpd
+    import shapely
 
     result = {}
     for var_name, context in contexts.items():
@@ -1097,19 +1109,34 @@ async def _transform_polygons(
         with log_duration("transform_polygons", "⬡"):
             boundaries = grid.cell_boundaries(context.da, slicers=context.slicers)  # type: ignore[attr-defined]
             gdf = gpd.GeoDataFrame(geometry=boundaries, crs=grid.crs)
-            gdf_transformed = gdf.to_crs(crs)
+            transformed_geoms = gdf.to_crs(crs).geometry.values
 
-        da = context.da
-        if da.values.ndim > 1:
-            da = xr.DataArray(da.values.ravel(), dims=["cell"])
+            # Normalize polygon x-coordinates to the output bbox range.
+            # E.g. data in 0→360 with output bbox -180→180 needs shifting.
+            bbox = context.bbox
+            centroids_x = shapely.get_coordinates(transformed_geoms)[:, 0]
+            if np.any(centroids_x > bbox.east + 1):
+                transformed_geoms = shapely.transform(
+                    transformed_geoms,
+                    lambda c: np.column_stack([c[:, 0] - 360, c[:, 1:]]),
+                )
+            elif np.any(centroids_x < bbox.west - 1):
+                transformed_geoms = shapely.transform(
+                    transformed_geoms,
+                    lambda c: np.column_stack([c[:, 0] + 360, c[:, 1:]]),
+                )
 
-        result[var_name] = PopulatedRenderContext(
-            da=da,
-            grid=grid,
-            datatype=context.datatype,
-            bbox=context.bbox,
-            ugrid_indexer=context.ugrid_indexer,
-            alternate=context.alternate,
-            cell_boundaries=gdf_transformed.geometry.values,
-        )
+            da = context.da
+            if da.values.ndim > 1:
+                da = xr.DataArray(da.values.ravel(), dims=["cell"])
+
+            result[var_name] = PopulatedRenderContext(
+                da=da,
+                grid=grid,
+                datatype=context.datatype,
+                bbox=context.bbox,
+                ugrid_indexer=context.ugrid_indexer,
+                alternate=context.alternate,
+                cell_boundaries=transformed_geoms,
+            )
     return result

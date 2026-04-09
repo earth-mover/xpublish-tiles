@@ -166,6 +166,9 @@ class PopulatedRenderContext(RenderContext):
         grid = self.grid
         bbox = self.bbox
 
+        if self.cell_boundaries is not None:
+            return self
+
         # Check if approximate rectilinear detection is enabled
         if not config.get("detect_approx_rectilinear"):
             return self

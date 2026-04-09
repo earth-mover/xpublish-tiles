@@ -286,26 +286,35 @@ def tile_and_tms(
     tile_tms=tile_and_tms(),
     ds=all_global_datasets,
     data=st.data(),
+    style=st.sampled_from(["raster", "polygons"]),
 )
 async def test_property_global_render_no_transparent_tile(
     tile_tms: tuple[Tile, TileMatrixSet],
     ds: xr.Dataset,
     data: st.DataObject,
+    style: str,
     pytestconfig,
 ):
     """Property test that global datasets should never produce transparent pixels."""
     tile, tms = tile_tms
+    # polygons style not yet supported for unstructured grids
+    if style == "polygons" and "point" in ds.dims:
+        assume(False)
     query_params = create_query_params(
-        tile, tms, size=2 ** data.draw(st.sampled_from(list(range(6, 11))))
+        tile,
+        tms,
+        size=2 ** data.draw(st.sampled_from(list(range(6, 11)))),
+        style=style,
     )
     with config.set(max_pixel_factor=2):
         result = await pipeline(ds, query_params)
-    transparent_percent = check_transparent_pixels(result.getvalue())
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
-    assert transparent_percent == 0, (
-        f"Found {transparent_percent:.1f}% transparent pixels in tile {tile}"
-    )
+    if style == "raster":
+        transparent_percent = check_transparent_pixels(result.getvalue())
+        assert transparent_percent == 0, (
+            f"Found {transparent_percent:.1f}% transparent pixels in tile {tile}"
+        )
 
 
 @pytest.mark.asyncio
