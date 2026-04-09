@@ -301,6 +301,16 @@ class TilesPlugin(Plugin):
                     f"{url_template}&colormap={quote(json.dumps(query.colormap))}"
                 )
 
+            if query.belowmincolor:
+                url_template = (
+                    f"{url_template}&belowmincolor={quote(query.belowmincolor)}"
+                )
+
+            if query.abovemaxcolor:
+                url_template = (
+                    f"{url_template}&abovemaxcolor={quote(query.abovemaxcolor)}"
+                )
+
             # Append selectors
             if selectors:
                 selector_qs = "&".join(f"{k}={v}" for k, v in selectors.items())
