@@ -138,6 +138,8 @@ class RenderContext(ABC):
 
 @dataclass
 class NullRenderContext(RenderContext):
+    cell_boundaries: None = None
+
     async def maybe_rewrite_to_rectilinear(
         self, *, width: int, height: int, logger=None
     ) -> Self:

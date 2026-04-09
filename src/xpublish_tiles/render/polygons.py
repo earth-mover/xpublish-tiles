@@ -50,18 +50,24 @@ class PolygonsRenderer(DatashaderRenderer):
         assert len(contexts) == 1
         (context,) = contexts.values()
 
-        if context.cell_boundaries is None:
-            raise ValueError(
-                "Cell boundaries not found. Ensure transform_for_render was called with polygons style."
-            )
-
-        if isinstance(context, NullRenderContext) or len(context.cell_boundaries) == 0:
+        if isinstance(context, NullRenderContext):
             logger.debug("☐ No data")
             im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
             im.save(buffer, format=str(format))
             return
 
         assert isinstance(context, PopulatedRenderContext)
+
+        if context.cell_boundaries is None:
+            raise ValueError(
+                "Cell boundaries not found. Ensure transform_for_render was called with polygons style."
+            )
+
+        if len(context.cell_boundaries) == 0:
+            logger.debug("☐ No data")
+            im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            im.save(buffer, format=str(format))
+            return
 
         bbox = context.bbox
         cvs = dsh.Canvas(

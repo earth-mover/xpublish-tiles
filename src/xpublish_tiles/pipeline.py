@@ -1011,7 +1011,7 @@ async def transform_for_render(
 
         input_to_output = transformer_from_crs(alternate.crs, crs)
         if style == "polygons":
-            return await _transform_polygons(contexts, input_to_output)
+            return await _transform_polygons(contexts, crs=crs)
 
         # Detect discontinuity for geographic CRS
         if grid.crs.is_geographic:
@@ -1095,7 +1095,7 @@ async def _transform_polygons(
         grid = context.grid
 
         with log_duration("transform_polygons", "⬡"):
-            boundaries = grid.cell_boundaries(context.da, slicers=context.slicers)
+            boundaries = grid.cell_boundaries(context.da, slicers=context.slicers)  # type: ignore[attr-defined]
             gdf = gpd.GeoDataFrame(geometry=boundaries, crs=grid.crs)
             gdf_transformed = gdf.to_crs(crs)
 
