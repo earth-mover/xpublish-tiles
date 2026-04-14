@@ -2207,7 +2207,14 @@ def guess_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
     If no _xpublish_id, skips caching to avoid cross-contamination.
     """
     xpublish_id = ds.attrs.get("_xpublish_id")
-    cache_key = (xpublish_id, name) if xpublish_id is not None else None
+    cache_key = (
+        (
+            xpublish_id,
+            tuple(sorted(dim for dim, size in ds[name].sizes.items() if size > 1)),
+        )
+        if xpublish_id is not None
+        else None
+    )
 
     if cache_key is not None and cache_key in _GRID_CACHE:
         return _GRID_CACHE[cache_key]

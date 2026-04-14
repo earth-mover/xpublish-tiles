@@ -19,6 +19,7 @@ import xarray as xr
 from tests import create_query_params
 from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
+    _GRID_CACHE,
     X_COORD_PATTERN,
     Y_COORD_PATTERN,
     Curvilinear,
@@ -1055,6 +1056,56 @@ def test_grid_detection_thread_lock():
     assert all(isinstance(r, Rectilinear) for r in results)
     # Constructor should only be called once due to thread lock and caching
     assert mock_from_dataset.call_count == 1
+
+
+def test_grid_cache_keys_by_dims():
+    """Cache keys use variable dims, so same-dims variables share one entry."""
+    ds = xr.Dataset(
+        {
+            "a": xr.Variable(("y", "x"), np.zeros((3, 4))),
+            "b": xr.Variable(("y", "x"), np.ones((3, 4))),
+            "c": xr.Variable(("y", "x"), np.full((3, 4), 2.0)),
+            "d": xr.Variable(("time", "y", "x"), np.zeros((2, 3, 4))),
+            "e": xr.Variable(("level", "y", "x"), np.zeros((5, 3, 4))),
+            "f": xr.Variable(("level", "y", "x"), np.zeros((5, 3, 4))),
+        },
+        coords={
+            "x": ("x", np.linspace(-180, 180, 4)),
+            "y": ("y", np.linspace(-90, 90, 3)),
+            "time": ("time", [0, 1]),
+            "level": ("level", [0, 1, 2, 3, 4]),
+        },
+    )
+    ds["x"].attrs["units"] = "degrees_east"
+    ds["y"].attrs["units"] = "degrees_north"
+    ds.attrs["_xpublish_id"] = "cache_dims_test"
+
+    # Clear any prior entries for this dataset
+    keys_to_remove = [k for k in _GRID_CACHE if k[0] == "cache_dims_test"]
+    for k in keys_to_remove:
+        del _GRID_CACHE[k]
+
+    original_from_dataset = Rectilinear.from_dataset
+    with patch.object(
+        Rectilinear, "from_dataset", wraps=original_from_dataset
+    ) as mock_from_dataset:
+        # a, b, c all share (y, x) → 1 miss then 2 hits
+        guess_grid_system(ds, "a")
+        guess_grid_system(ds, "b")
+        guess_grid_system(ds, "c")
+        assert mock_from_dataset.call_count == 1
+
+        # d has (time, y, x) → new miss
+        guess_grid_system(ds, "d")
+        assert mock_from_dataset.call_count == 2
+
+        # e has (level, y, x) → new miss
+        guess_grid_system(ds, "e")
+        assert mock_from_dataset.call_count == 3
+
+        # f shares (level, y, x) with e → hit
+        guess_grid_system(ds, "f")
+        assert mock_from_dataset.call_count == 3
 
 
 def test_qhull_error():
