@@ -1,12 +1,15 @@
 import io
+from numbers import Number
 
 import datashader as dsh
 import datashader.transfer_functions as tf
 import geopandas as gpd
 import matplotlib as mpl
+import numbagg
 import numpy as np
 from PIL import Image
 
+from xpublish_tiles.grids import Triangular
 from xpublish_tiles.lib import (
     MissingParameterError,
     apply_range_colors,
@@ -35,7 +38,7 @@ class PolygonsRenderer(DatashaderRenderer):
         width: int,
         height: int,
         variant: str,
-        colorscalerange: tuple[float, float] | None = None,
+        colorscalerange: tuple[Number, Number] | None = None,
         format: ImageFormat = ImageFormat.PNG,
         context_logger=None,
         colormap: dict[str, str] | None = None,
@@ -81,7 +84,13 @@ class PolygonsRenderer(DatashaderRenderer):
 
         with log_duration(f"render (polygons) {data.shape}", "⬡", logger):
             gdf = gpd.GeoDataFrame(geometry=context.cell_boundaries)
-            gdf["data"] = data.values
+            if isinstance(context.grid, Triangular) and context.ugrid_indexer is not None:
+                # Triangular grids: data is per-vertex, polygons are per-face.
+                # Average the 3 vertex values to get a face-center value.
+                face_vals = data.values[context.ugrid_indexer.connectivity]
+                gdf["data"] = numbagg.nanmean(face_vals, axis=1)
+            else:
+                gdf["data"] = data.values
 
             try:
                 mesh = cvs.polygons(gdf, "geometry", agg=dsh.mean("data"))

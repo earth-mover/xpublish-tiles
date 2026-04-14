@@ -557,6 +557,26 @@ def has_coordinate_discontinuity(
     return False
 
 
+def fix_antimeridian_vertices(
+    x_data: np.ndarray,
+    anti: dict[str, np.ndarray],
+    transformer: pyproj.Transformer,
+    *,
+    bbox: BBox,
+) -> None:
+    """Fix antimeridian discontinuities in-place for the given vertex indices.
+
+    Used by both the raster and polygon paths for triangular grids.
+    ``anti`` is ``UgridIndexer.antimeridian_vertices``, mapping "pos"/"neg"
+    to arrays of indices into ``x_data``.
+    """
+    for verts in [anti["pos"], anti["neg"]]:
+        if verts.size > 0:
+            x_data[verts] = fix_coordinate_discontinuities(
+                x_data[verts], transformer, bbox=bbox
+            )
+
+
 def fix_coordinate_discontinuities(
     coordinates: np.ndarray, transformer: pyproj.Transformer, *, bbox: BBox
 ) -> np.ndarray:
@@ -1069,14 +1089,12 @@ async def transform_for_render(
 
             elif isinstance(grid, Triangular):
                 assert context.ugrid_indexer is not None
-                anti = context.ugrid_indexer.antimeridian_vertices
-                for verts in [anti["pos"], anti["neg"]]:
-                    if verts.size > 0:
-                        newX.data[verts] = fix_coordinate_discontinuities(
-                            newX.data[verts],
-                            input_to_output,
-                            bbox=bbox,
-                        )
+                fix_antimeridian_vertices(
+                    newX.data,
+                    context.ugrid_indexer.antimeridian_vertices,
+                    input_to_output,
+                    bbox=bbox,
+                )
         newda = subset.assign_coords({grid.X: newX, grid.Y: newY})
         result[var_name] = PopulatedRenderContext(
             da=newda,
@@ -1111,20 +1129,55 @@ async def _transform_polygons(
             gdf = gpd.GeoDataFrame(geometry=boundaries, crs=grid.crs)
             transformed_geoms = gdf.to_crs(crs).geometry.values
 
-            # Normalize polygon x-coordinates to the output bbox range.
-            # E.g. data in 0→360 with output bbox -180→180 needs shifting.
             bbox = context.bbox
-            centroids_x = shapely.get_coordinates(transformed_geoms)[:, 0]
-            if np.any(centroids_x > bbox.east + 1):
-                transformed_geoms = shapely.transform(
-                    transformed_geoms,
-                    lambda c: np.column_stack([c[:, 0] - 360, c[:, 1:]]),
+            input_to_output = transformer_from_crs(grid.crs, crs)
+
+            # Fix antimeridian for triangular grids — same approach as the raster path.
+            if (
+                isinstance(grid, Triangular)
+                and context.ugrid_indexer is not None
+                and grid.lon_spans_globe
+            ):
+                anti = context.ugrid_indexer.antimeridian_vertices
+                conn = context.ugrid_indexer.connectivity
+                coords = shapely.get_coordinates(transformed_geoms)
+                n_ring = conn.shape[1] + 1  # 3 corners + close
+
+                # Map vertex-level anti indices → ring coordinate indices.
+                # Each face i occupies ring coords [i*n_ring .. (i+1)*n_ring).
+                # conn[i, j] is the vertex index at ring position i*n_ring+j.
+                face_offsets = np.arange(len(conn)) * n_ring
+                ring_anti = {}
+                for key in ["pos", "neg"]:
+                    if anti[key].size > 0:
+                        mask = np.isin(conn, anti[key])
+                        ring_idx = (face_offsets[:, None] + np.arange(conn.shape[1]))[
+                            mask
+                        ]
+                        # Also include closing coords where vertex 0 was affected
+                        close_idx = face_offsets[mask[:, 0]] + (n_ring - 1)
+                        ring_anti[key] = np.concatenate([ring_idx, close_idx])
+                    else:
+                        ring_anti[key] = anti[key]
+
+                fix_antimeridian_vertices(
+                    coords[:, 0], ring_anti, input_to_output, bbox=bbox
                 )
-            elif np.any(centroids_x < bbox.west - 1):
-                transformed_geoms = shapely.transform(
-                    transformed_geoms,
-                    lambda c: np.column_stack([c[:, 0] + 360, c[:, 1:]]),
-                )
+                transformed_geoms = shapely.polygons(coords.reshape(-1, n_ring, 2))
+            else:
+                # Normalize polygon x-coordinates to the output bbox range.
+                # E.g. data in 0→360 with output bbox -180→180 needs shifting.
+                centroids_x = shapely.get_coordinates(transformed_geoms)[:, 0]
+                if np.any(centroids_x > bbox.east + 1):
+                    transformed_geoms = shapely.transform(
+                        transformed_geoms,
+                        lambda c: np.column_stack([c[:, 0] - 360, c[:, 1:]]),
+                    )
+                elif np.any(centroids_x < bbox.west - 1):
+                    transformed_geoms = shapely.transform(
+                        transformed_geoms,
+                        lambda c: np.column_stack([c[:, 0] + 360, c[:, 1:]]),
+                    )
 
             da = context.da
             if da.values.ndim > 1:

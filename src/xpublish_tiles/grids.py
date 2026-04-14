@@ -1455,10 +1455,12 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
         import shapely
 
         x_index, y_index = self.indexes[0], self.indexes[-1]
-        x_left = x_index.index.left.values
-        x_right = x_index.index.right.values
-        y_left = y_index.index.left.values
-        y_right = y_index.index.right.values
+        x_ii = cast(pd.IntervalIndex, x_index.index)
+        y_ii = cast(pd.IntervalIndex, y_index.index)
+        x_left = x_ii.left
+        x_right = x_ii.right
+        y_left = y_ii.left
+        y_right = y_ii.right
         xaxis = da.get_axis_num(self.Xdim)
 
         assert slicers is not None
@@ -1985,10 +1987,10 @@ class Triangular(GridSystem):
 
         assert slicers is not None
         ugrid_indexer = next(s for s in slicers[self.dim] if isinstance(s, UgridIndexer))
-        index = next(iter(self.indexes))
-        vertices = index.tree.vertices
-
-        corners = vertices[ugrid_indexer.connectivity]  # (n_faces, 3, 2)
+        index = cast(CellTreeIndex, next(iter(self.indexes)))
+        # connectivity contains local indices into the vertex subset, not the full tree
+        subset_vertices = index.tree.vertices[ugrid_indexer.vertices]
+        corners = subset_vertices[ugrid_indexer.connectivity]  # (n_faces, 3, 2)
         n = corners.shape[0]
         rings = np.empty((n, 4, 2), dtype=np.float64)
         rings[:, :3, :] = corners
