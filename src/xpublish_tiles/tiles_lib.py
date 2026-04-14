@@ -1,5 +1,8 @@
 """Tile-related utility functions for grids."""
 
+import threading
+
+import cachetools
 import morecantile
 import numpy as np
 from pyproj import CRS
@@ -8,7 +11,10 @@ from pyproj.aoi import BBox
 import xarray as xr
 from xpublish_tiles.grids import GridSystem, GridSystem2D, Triangular
 from xpublish_tiles.lib import transformer_from_crs
-from xpublish_tiles.utils import time_debug
+from xpublish_tiles.utils import time_debug, xarray_object_key
+
+_MIN_ZOOM_CACHE = cachetools.LRUCache(maxsize=8192)
+_MIN_ZOOM_LOCK = threading.Lock()
 
 
 @time_debug
@@ -57,29 +63,9 @@ def get_max_zoom(grid: GridSystem, tms: morecantile.TileMatrixSet) -> int:
 
 
 @time_debug
-def get_min_zoom(
+def _compute_min_zoom(
     grid: GridSystem, tms: morecantile.TileMatrixSet, da: xr.DataArray
 ) -> int:
-    """Calculate minimum zoom level that avoids TileTooBigError.
-
-    This method finds the zoom level below which no tile would trigger
-    the TileTooBigError check in apply_slicers.
-
-    Parameters
-    ----------
-    grid : Grid
-        The grid to calculate zoom for
-    tms : morecantile.TileMatrixSet
-        The tile matrix set to calculate zoom for
-    da : xr.DataArray
-        Data array (only metadata used, no data loaded).
-        Required since we use `Grid.sel`.
-
-    Returns
-    -------
-    int
-        Minimum safe zoom level for this grid and data
-    """
     from xpublish_tiles.pipeline import check_data_is_renderable_size
 
     tms_crs = CRS.from_wkt(tms.crs.to_wkt())
@@ -148,3 +134,52 @@ def get_min_zoom(
             return zoom
 
     return tms.minzoom
+
+
+def get_min_zoom(
+    grid: GridSystem,
+    tms: morecantile.TileMatrixSet,
+    da: xr.DataArray,
+    xpublish_id: str | None = None,
+) -> int:
+    """Calculate minimum zoom level that avoids TileTooBigError.
+
+    This method finds the zoom level below which no tile would trigger
+    the TileTooBigError check in apply_slicers.
+
+    Parameters
+    ----------
+    grid : Grid
+        The grid to calculate zoom for
+    tms : morecantile.TileMatrixSet
+        The tile matrix set to calculate zoom for
+    da : xr.DataArray
+        Data array (only metadata used, no data loaded).
+        Required since we use `Grid.sel`.
+    xpublish_id : str | None
+        Optional dataset identifier for caching. When provided,
+        results are cached per (xpublish_id, spatial_dims, tms.id).
+
+    Returns
+    -------
+    int
+        Minimum safe zoom level for this grid and data
+    """
+    if xpublish_id is not None:
+        cache_key: tuple | None = (xpublish_id, xarray_object_key(da), tms.id)
+    else:
+        cache_key = None
+
+    if cache_key is not None and cache_key in _MIN_ZOOM_CACHE:
+        return _MIN_ZOOM_CACHE[cache_key]
+
+    with _MIN_ZOOM_LOCK:
+        if cache_key is not None and cache_key in _MIN_ZOOM_CACHE:
+            return _MIN_ZOOM_CACHE[cache_key]
+
+        result = _compute_min_zoom(grid, tms, da)
+
+        if cache_key is not None:
+            _MIN_ZOOM_CACHE[cache_key] = result
+
+        return result
