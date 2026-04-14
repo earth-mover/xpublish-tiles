@@ -972,7 +972,7 @@ async def subset_to_bbox(
             grid=grid,
             datatype=array.datatype,
             bbox=bbox,
-            ugrid_indexer=next(iter(slicers[grid.Xdim]))
+            ugrid_indexer=cast(UgridIndexer, next(iter(slicers[grid.Xdim])))
             if isinstance(grid, Triangular)
             else None,
             alternate=alternate,
