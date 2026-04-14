@@ -1,7 +1,7 @@
 """Tile matrix set definitions for OGC Tiles API"""
 
 from collections.abc import Hashable
-from typing import Union, cast
+from typing import cast
 
 import cf_xarray as cfxr  # noqa: F401 - needed to enable .cf accessor
 import morecantile
@@ -256,7 +256,7 @@ async def extract_dimension_extents(
         values = coord.values
 
         # Handle different coordinate types
-        extent: list[Union[str, float, int]]
+        extent: list[str | float | int] = []
         actual_values: list[str | float | int] | None = None
 
         if len(values) == 0:
@@ -279,7 +279,7 @@ async def extract_dimension_extents(
                 ]
         elif np.issubdtype(values.dtype, np.number):
             # Numeric coordinates
-            extent = [values.min(), values.max()]
+            extent = [float(values.min()), float(values.max())]
             if len(values) <= max_actual_values:
                 actual_values = values
         else:

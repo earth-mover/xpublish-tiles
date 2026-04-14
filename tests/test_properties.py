@@ -296,7 +296,7 @@ async def test_property_global_render_no_transparent_tile(
     """Property test that global datasets should never produce transparent pixels."""
     tile, tms = tile_tms
     query_params = create_query_params(
-        tile, tms, size=2 ** data.draw(st.sampled_from(np.arange(6, 11)))
+        tile, tms, size=2 ** data.draw(st.sampled_from(list(range(6, 11))))
     )
     with config.set(max_pixel_factor=2):
         result = await pipeline(ds, query_params)

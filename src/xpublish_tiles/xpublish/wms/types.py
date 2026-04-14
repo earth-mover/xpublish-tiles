@@ -179,7 +179,7 @@ class WMSGetFeatureInfoQuery(WMSBaseQuery):
         description="Optional elevation to get feature info for. Only valid when the layer has an elevation dimension. To get all elevations, use 'all', to get a range of elevations, use 'start/end'",
     )
     crs: CRS = Field(
-        "EPSG:4326",
+        CRS.from_epsg(4326),
         description="Coordinate reference system to use for the query. Currently only EPSG:4326 is supported for this request",
     )
     bbox: BBox = Field(
@@ -235,7 +235,7 @@ class WMSGetLegendGraphicQuery(WMSBaseQuery):
         description="Style to use for the query. Defaults to raster/default. Default may be replaced by the name of any colormap defined by matplotlibs defaults",
     )
     format: ImageFormat = Field(
-        "image/png",
+        ImageFormat.PNG,
         description="Format to use for the query. Defaults to image/png",
     )
 

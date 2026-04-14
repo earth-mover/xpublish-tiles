@@ -205,7 +205,7 @@ class PopulatedRenderContext(RenderContext):
             bbox=grid.bbox,
             X=grid.Xdim,
             Y=grid.Ydim,
-            indexes=(),  # type: ignore[arg-type]
+            indexes=(),  # ty: ignore[invalid-argument-type]
             Z=None,
         )
         logger = logger or get_context_logger()

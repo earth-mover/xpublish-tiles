@@ -116,6 +116,10 @@ filterwarnings = [
     "ignore::pydantic.warnings.PydanticDeprecatedSince20",
 ]
 
+[tool.ty.src]
+# Standalone script with its own inline dependencies (PEP 723)
+exclude = ["src/xpublish_tiles/testing/grids/extract_n320.py"]
+
 [tool.ruff]
 line-length = 90
 extend-exclude = ["*.ipynb", "doc", "_typed_ops.pyi"]

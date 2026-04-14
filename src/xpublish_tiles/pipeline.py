@@ -230,9 +230,6 @@ def get_coarsen_factors(
     if not isinstance(grid, GridSystem2D):
         return {}, slicers
 
-    # After the isinstance check, we know grid is GridSystem2D
-    grid = cast(GridSystem2D, grid)
-
     def largest_odd_ge(a, b):
         """Return largest odd integer >= a/b (minimum 3), or None if < 2."""
         quotient = a // b
@@ -980,7 +977,8 @@ async def subset_to_bbox(
                     check_antimeridian=True,
                 )
             elif isinstance(grid, Triangular):
-                anti = next(iter(slicers[grid.Xdim])).antimeridian_vertices
+                ugrid = cast(UgridIndexer, next(iter(slicers[grid.Xdim])))
+                anti = ugrid.antimeridian_vertices
                 has_discontinuity = anti["pos"].size > 0 or anti["neg"].size > 0
             else:
                 raise NotImplementedError
@@ -1010,7 +1008,8 @@ async def subset_to_bbox(
                 newX = newX.copy(data=fixed)
 
             elif isinstance(grid, Triangular):
-                anti = next(iter(slicers[grid.dim])).antimeridian_vertices
+                ugrid = cast(UgridIndexer, next(iter(slicers[grid.dim])))
+                anti = ugrid.antimeridian_vertices
                 for verts in [anti["pos"], anti["neg"]]:
                     if verts.size > 0:
                         newX.data[verts] = fix_coordinate_discontinuities(
@@ -1024,7 +1023,7 @@ async def subset_to_bbox(
             grid=grid,
             datatype=array.datatype,
             bbox=bbox,
-            ugrid_indexer=next(iter(slicers[grid.Xdim]))
+            ugrid_indexer=cast(UgridIndexer, next(iter(slicers[grid.Xdim])))
             if isinstance(grid, Triangular)
             else None,
         )

@@ -11,7 +11,7 @@
 import csv
 
 import requests
-from bs4 import BeautifulSoup  # type: ignore[import-untyped]
+from bs4 import BeautifulSoup
 
 # Download and parse the table from ECMWF
 print("Downloading N320 grid table from ECMWF...")
