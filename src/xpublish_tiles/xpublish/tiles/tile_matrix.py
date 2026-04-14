@@ -189,7 +189,10 @@ async def get_tile_matrix_limits(
     tms = morecantile.tms.get(tms_id)
 
     if zoom_levels is None:
-        min_zoom = await async_run(get_min_zoom, grid, tms, dataset[first_data_var])
+        xpublish_id = dataset.attrs.get("_xpublish_id")
+        min_zoom = await async_run(
+            get_min_zoom, grid, tms, dataset[first_data_var], xpublish_id
+        )
         zoom_levels = range(min_zoom, tms.maxzoom)
 
     limits = []
