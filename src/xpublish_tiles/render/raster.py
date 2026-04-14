@@ -23,7 +23,7 @@ from xpublish_tiles.lib import (
     maybe_cast_data,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
-from xpublish_tiles.render import Renderer, register_renderer, render_error_image
+from xpublish_tiles.render import DatashaderRenderer, register_renderer
 from xpublish_tiles.types import (
     ContinuousData,
     DiscreteData,
@@ -153,7 +153,7 @@ def nearest_on_uniform_grid_quadmesh(
 
 
 @register_renderer
-class DatashaderRasterRenderer(Renderer):
+class DatashaderRasterRenderer(DatashaderRenderer):
     def validate(self, context: dict[str, "RenderContext"]):
         assert len(context) == 1
 
@@ -313,50 +313,6 @@ class DatashaderRasterRenderer(Renderer):
 
         im.save(buffer, format=str(format))
 
-    def render_error(
-        self,
-        *,
-        buffer: io.BytesIO,
-        width: int,
-        height: int,
-        message: str,
-        format: ImageFormat = ImageFormat.PNG,
-        cmap: str = "",
-        colorscalerange: tuple[Number, Number] | None = None,
-        **kwargs,
-    ):
-        """Render an error tile with the given message."""
-        error_buffer = render_error_image(
-            message, width=width, height=height, format=format
-        )
-        buffer.write(error_buffer.getvalue())
-        error_buffer.close()
-
     @staticmethod
     def style_id() -> str:
         return "raster"
-
-    @staticmethod
-    def supported_variants() -> list[str]:
-        colormaps = list(mpl.colormaps)
-        variants = [name for name in sorted(colormaps) if not name.endswith("_r")]
-        variants.append("custom")
-        return variants
-
-    @staticmethod
-    def default_variant() -> str:
-        return "viridis"
-
-    @classmethod
-    def describe_style(cls, variant: str) -> dict[str, str]:
-        if variant == "custom":
-            return {
-                "id": f"{cls.style_id()}/{variant}",
-                "title": "Raster - Custom",
-                "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
-            }
-        return {
-            "id": f"{cls.style_id()}/{variant}",
-            "title": f"Raster - {variant.title()}",
-            "description": f"Raster rendering using {variant} colormap",
-        }

@@ -130,3 +130,53 @@ class Renderer(ABC):
             "title": f"{cls.style_id().title()} - {variant.title()}",
             "description": f"{cls.style_id().title()} rendering using {variant}",
         }
+
+
+class DatashaderRenderer(Renderer):
+    """Base class for datashader-based renderers with common colormap handling."""
+
+    def render_error(
+        self,
+        *,
+        buffer: io.BytesIO,
+        width: int,
+        height: int,
+        message: str,
+        format: ImageFormat = ImageFormat.PNG,
+        cmap: str = "",
+        colorscalerange: tuple[Number, Number] | None = None,
+        **kwargs,
+    ):
+        error_buffer = render_error_image(
+            message, width=width, height=height, format=format
+        )
+        buffer.write(error_buffer.getvalue())
+        error_buffer.close()
+
+    @staticmethod
+    def supported_variants() -> list[str]:
+        import matplotlib as mpl
+
+        colormaps = list(mpl.colormaps)
+        variants = [name for name in sorted(colormaps) if not name.endswith("_r")]
+        variants.append("custom")
+        return variants
+
+    @staticmethod
+    def default_variant() -> str:
+        return "viridis"
+
+    @classmethod
+    def describe_style(cls, variant: str) -> dict[str, str]:
+        style_name = cls.style_id().title()
+        if variant == "custom":
+            return {
+                "id": f"{cls.style_id()}/{variant}",
+                "title": f"{style_name} - Custom",
+                "description": f"{style_name} rendering with a custom colormap provided via the 'colormap' parameter",
+            }
+        return {
+            "id": f"{cls.style_id()}/{variant}",
+            "title": f"{style_name} - {variant.title()}",
+            "description": f"{style_name} rendering using {variant} colormap",
+        }
