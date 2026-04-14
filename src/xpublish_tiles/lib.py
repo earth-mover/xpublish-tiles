@@ -33,11 +33,14 @@ M_PI = 3.14159265358979323846  # from proj
 M_2_PI = 6.28318530717958647693  # from proj
 
 
-def unwrap(data: np.ndarray, *, width: float) -> np.ndarray:
-    factor = 2 * np.pi / width
-    un = unwrap_phase(data * factor)
-    un /= factor
-    return un
+def unwrap(data: np.ndarray, *, width: float, axis: int | None = None) -> np.ndarray:
+    if axis is None:
+        factor = 2 * np.pi / width
+        un = unwrap_phase(data * factor)
+        un /= factor
+        return un
+    else:
+        return np.unwrap(data, period=width, axis=axis)
 
 
 @dataclass(frozen=True)

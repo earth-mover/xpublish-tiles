@@ -717,13 +717,15 @@ class CurvilinearCellIndex(xr.Index):
             self.top, self.bottom = self.bottom, self.top
         self.xaxis, self.yaxis = xaxis, yaxis
 
-        # Calculate minimum spacing
-        dX = np.abs(np.diff(X, axis=xaxis))
+        # Calculate minimum spacing using in-place ops
+        dX = np.diff(X, axis=xaxis)
+        np.abs(dX, out=dX)
         dX[dX == 0] = np.inf
         result = numbagg.nanmin(dX)
         self._dXmin = 0.0 if np.isinf(result) else float(result)
 
-        dY = np.abs(np.diff(Y, axis=yaxis))
+        dY = np.diff(Y, axis=yaxis)
+        np.abs(dY, out=dY)
         dY[dY == 0] = np.inf
         result = numbagg.nanmin(dY)
         self._dYmin = 0.0 if np.isinf(result) else float(result)
@@ -1017,7 +1019,7 @@ class GridSystem(ABC):
         self,
         da: xr.DataArray,
         *,
-        slicers: dict[str, list] | None = None,
+        slicers: dict[str, list],
     ) -> np.ndarray:
         raise NotImplementedError
 
@@ -1104,12 +1106,66 @@ class GridSystem(ABC):
         return GridMetadata(X=self.X, Y=self.Y, crs=self.crs, grid_cls=type(self))
 
 
-class RectilinearSelMixin:
-    """Mixin for generic rectilinear .sel"""
+class RectilinearMixin:
+    """Mixin for rectilinear grid operations (.sel and .cell_boundaries)."""
 
     indexes: tuple[xr.Index, ...]
     X: str
     Y: str
+    Xdim: str
+    Ydim: str
+
+    def _cell_boundaries_from_edges(
+        self,
+        da: xr.DataArray,
+        slicers: dict[str, list],
+        *,
+        x_left: np.ndarray | pd.Index,
+        x_right: np.ndarray | pd.Index,
+        y_left: np.ndarray | pd.Index,
+        y_right: np.ndarray | pd.Index,
+    ) -> np.ndarray:
+        """Build shapely polygons from cell edge arrays. Shared by RasterAffine and Rectilinear."""
+        import shapely
+
+        xaxis = da.get_axis_num(self.Xdim)
+        nx_total = len(x_left)
+        ny_total = len(y_left)
+
+        y_slice = next(s for s in slicers[self.Ydim] if isinstance(s, slice))
+        x_slices = [
+            slice(*s.indices(nx_total))
+            for s in slicers[self.Xdim]
+            if isinstance(s, slice)
+        ]
+        y_start, y_stop, _ = y_slice.indices(ny_total)
+
+        ny_sel = y_stop - y_start
+        total_nx = sum(s.stop - s.start for s in x_slices)
+        shape = [0, 0]
+        shape[xaxis] = total_nx
+        shape[1 - xaxis] = ny_sel
+        rings = np.empty((*shape, 5, 2), dtype=np.float64)
+
+        yb = y_left[y_start:y_stop]
+        yt = y_right[y_start:y_stop]
+
+        offset = 0
+        for x_slice in x_slices:
+            nx_sel = x_slice.stop - x_slice.start
+            slc = [slice(None)] * 2
+            slc[xaxis] = slice(offset, offset + nx_sel)
+            fill_rectilinear_rings(
+                rings[tuple(slc)],
+                x_left[x_slice],
+                x_right[x_slice],
+                yb,
+                yt,
+                xaxis=xaxis,
+            )
+            offset += nx_sel
+
+        return shapely.polygons(rings.reshape(-1, 5, 2))
 
     def _rectilinear_sel(
         self, *, bbox: BBox, y_is_increasing: bool, x_size: int, y_size: int
@@ -1163,7 +1219,7 @@ class RectilinearSelMixin:
 
 
 @dataclass(kw_only=True, eq=False)
-class RasterAffine(RectilinearSelMixin, GridSystem):
+class RasterAffine(RectilinearMixin, GridSystem):
     """2D horizontal grid defined by an affine transform."""
 
     crs: CRS
@@ -1241,46 +1297,21 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
         self,
         da: xr.DataArray,
         *,
-        slicers: dict[str, list] | None = None,
+        slicers: dict[str, list],
     ) -> np.ndarray:
-        import shapely
-
         (index,) = self.indexes
         affine = index.transform()
         nx, ny = index._xy_shape
-        xaxis = da.get_axis_num(self.Xdim)
-
         x_edges = affine.c + np.arange(nx + 1) * affine.a
         y_edges = affine.f + np.arange(ny + 1) * affine.e
-
-        assert slicers is not None
-        y_slice = next(s for s in slicers[self.Ydim] if isinstance(s, slice))
-        x_slices = [
-            slice(*s.indices(nx)) for s in slicers[self.Xdim] if isinstance(s, slice)
-        ]
-        y_start, y_stop, _ = y_slice.indices(ny)
-
-        ny_sel = y_stop - y_start
-        total_nx = sum(s.stop - s.start for s in x_slices)
-        shape = [0, 0]
-        shape[xaxis] = total_nx
-        shape[1 - xaxis] = ny_sel
-        rings = np.empty((*shape, 5, 2), dtype=np.float64)
-
-        yb = y_edges[y_start:y_stop]
-        yt = y_edges[y_start + 1 : y_stop + 1]
-
-        offset = 0
-        for x_slice in x_slices:
-            nx_sel = x_slice.stop - x_slice.start
-            xl = x_edges[x_slice.start : x_slice.stop]
-            xr_ = x_edges[x_slice.start + 1 : x_slice.stop + 1]
-            slc = [slice(None)] * 2
-            slc[xaxis] = slice(offset, offset + nx_sel)
-            fill_rectilinear_rings(rings[tuple(slc)], xl, xr_, yb, yt, xaxis=xaxis)
-            offset += nx_sel
-
-        return shapely.polygons(rings.reshape(-1, 5, 2))
+        return self._cell_boundaries_from_edges(
+            da,
+            slicers,
+            x_left=x_edges[:-1],
+            x_right=x_edges[1:],
+            y_left=y_edges[:-1],
+            y_right=y_edges[1:],
+        )
 
     def equals(self, other: object) -> bool:
         if not isinstance(other, RasterAffine):
@@ -1294,7 +1325,7 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
 
 
 @dataclass(kw_only=True, eq=False)
-class Rectilinear(RectilinearSelMixin, GridSystem):
+class Rectilinear(RectilinearMixin, GridSystem):
     """
     2D horizontal grid defined by two explicit 1D basis vectors.
     Assumes coordinates are cell centers.
@@ -1450,56 +1481,19 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
         self,
         da: xr.DataArray,
         *,
-        slicers: dict[str, list] | None = None,
+        slicers: dict[str, list],
     ) -> np.ndarray:
-        import shapely
-
         x_index, y_index = self.indexes[0], self.indexes[-1]
         x_ii = cast(pd.IntervalIndex, x_index.index)
         y_ii = cast(pd.IntervalIndex, y_index.index)
-        x_left = x_ii.left
-        x_right = x_ii.right
-        y_left = y_ii.left
-        y_right = y_ii.right
-        xaxis = da.get_axis_num(self.Xdim)
-
-        assert slicers is not None
-        nx_total = len(x_left)
-        ny_total = len(y_left)
-        y_slice = next(s for s in slicers[self.Ydim] if isinstance(s, slice))
-        x_slices = [
-            slice(*s.indices(nx_total))
-            for s in slicers[self.Xdim]
-            if isinstance(s, slice)
-        ]
-        y_start, y_stop, _ = y_slice.indices(ny_total)
-
-        ny_sel = y_stop - y_start
-        total_nx = sum(s.stop - s.start for s in x_slices)
-        shape = [0, 0]
-        shape[xaxis] = total_nx
-        shape[1 - xaxis] = ny_sel
-        rings = np.empty((*shape, 5, 2), dtype=np.float64)
-
-        yb = y_left[y_start:y_stop]
-        yt = y_right[y_start:y_stop]
-
-        offset = 0
-        for x_slice in x_slices:
-            nx_sel = x_slice.stop - x_slice.start
-            slc = [slice(None)] * 2
-            slc[xaxis] = slice(offset, offset + nx_sel)
-            fill_rectilinear_rings(
-                rings[tuple(slc)],
-                x_left[x_slice],
-                x_right[x_slice],
-                yb,
-                yt,
-                xaxis=xaxis,
-            )
-            offset += nx_sel
-
-        return shapely.polygons(rings.reshape(-1, 5, 2))
+        return self._cell_boundaries_from_edges(
+            da,
+            slicers,
+            x_left=x_ii.left,
+            x_right=x_ii.right,
+            y_left=y_ii.left,
+            y_right=y_ii.right,
+        )
 
     def equals(self, other: object) -> bool:
         if not isinstance(other, Rectilinear):
@@ -1704,7 +1698,7 @@ class Curvilinear(GridSystem):
         self,
         da: xr.DataArray,
         *,
-        slicers: dict[str, list] | None = None,
+        slicers: dict[str, list],
     ) -> np.ndarray:
         """Get cell boundary polygons for curvilinear grid cells.
 
@@ -1716,7 +1710,6 @@ class Curvilinear(GridSystem):
 
         index = next(iter(self.indexes))
         assert isinstance(index, CurvilinearCellIndex)
-        assert slicers is not None
 
         y_slice = next(s for s in slicers[self.Ydim] if isinstance(s, slice))
         x_slices = [s for s in slicers[self.Xdim] if isinstance(s, slice)]
@@ -1742,9 +1735,10 @@ class Curvilinear(GridSystem):
             out[:, :, 2, 1] = index.top[slc]
             out[:, :, 3, 0] = index.left[slc]
             out[:, :, 3, 1] = index.top[slc]
-            out[:, :, 4] = out[:, :, 0]
             offset += nx_sel
 
+        # Close rings: copy corner 0 to position 4
+        rings[:, :, 4] = rings[:, :, 0]
         return shapely.polygons(rings.reshape(-1, 5, 2))
 
 
@@ -1981,11 +1975,10 @@ class Triangular(GridSystem):
         self,
         da: xr.DataArray,
         *,
-        slicers: dict[str, list] | None = None,
+        slicers: dict[str, list],
     ) -> np.ndarray:
         import shapely
 
-        assert slicers is not None
         ugrid_indexer = next(s for s in slicers[self.dim] if isinstance(s, UgridIndexer))
         index = cast(CellTreeIndex, next(iter(self.indexes)))
         # connectivity contains local indices into the vertex subset, not the full tree

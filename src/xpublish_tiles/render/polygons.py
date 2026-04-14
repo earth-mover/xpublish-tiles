@@ -13,6 +13,7 @@ from xpublish_tiles.types import (
     ImageFormat,
     RenderContext,
 )
+from xpublish_tiles.utils import NUMBA_THREADING_LOCK
 
 
 @register_renderer
@@ -67,7 +68,8 @@ class PolygonsRenderer(DatashaderRenderer):
                 # Triangular grids: data is per-vertex, polygons are per-face.
                 # Average the 3 vertex values to get a face-center value.
                 face_vals = data.values[context.ugrid_indexer.connectivity]
-                gdf["data"] = numbagg.nanmean(face_vals, axis=1)
+                with NUMBA_THREADING_LOCK:
+                    gdf["data"] = numbagg.nanmean(face_vals, axis=1)
             else:
                 gdf["data"] = data.values
 

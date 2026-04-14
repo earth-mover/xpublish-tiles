@@ -297,9 +297,6 @@ async def test_property_global_render_no_transparent_tile(
 ):
     """Property test that global datasets should never produce transparent pixels."""
     tile, tms = tile_tms
-    # polygons style not yet supported for unstructured grids
-    if style == "polygons" and "point" in ds.dims:
-        assume(False)
     query_params = create_query_params(
         tile,
         tms,
@@ -470,10 +467,17 @@ async def test_projected_coordinate_succeeds(dataset, data, pytestconfig):
 
 
 @pytest.mark.asyncio
-@given(tile_tms=tile_and_tms(), ds=all_global_datasets, data=st.data())
+@given(
+    tile_tms=tile_and_tms(),
+    ds=all_global_datasets,
+    data=st.data(),
+    style=st.sampled_from(["raster", "polygons"]),
+)
 @settings(max_examples=50)
 # @reproduce_failure('6.138.3', b'AXicc2R0ZECFDBoMUKBhH5Dke+njyj8MjqyO3I4MAI0xCBQ=')
-async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig) -> None:
+async def test_zoom_in_doesnt_change_rendering(
+    tile_tms, ds, data, style, pytestconfig
+) -> None:
     """Property test that zooming in doesn't change rendering.
 
     For a quadtree TMS, rendering a tile at a large size should produce the same
@@ -526,7 +530,7 @@ async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig)
 
     # Render parent tile at 2048x2048
     parent_size = 2048
-    parent_query = create_query_params(tile, tms, size=parent_size)
+    parent_query = create_query_params(tile, tms, size=parent_size, style=style)
 
     with config.set(max_pixel_factor=20000):
         parent_result = await pipeline(ds, parent_query)
@@ -577,7 +581,7 @@ async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig)
         child_size = parent_size // num_tiles_per_side
 
         # Render the child tile
-        child_query = create_query_params(child_tile, tms, size=child_size)
+        child_query = create_query_params(child_tile, tms, size=child_size, style=style)
         child_result = await pipeline(ds, child_query)
 
         # Extract corresponding region from parent

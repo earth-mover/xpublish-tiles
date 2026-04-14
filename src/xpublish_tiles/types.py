@@ -1,7 +1,7 @@
 import enum
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, NewType, Self
 
 import numba
@@ -157,7 +157,8 @@ class PopulatedRenderContext(RenderContext):
     ugrid_indexer: UgridIndexer | None = None
     alternate: GridMetadata | None = None
     cell_boundaries: np.ndarray | None = None
-    slicers: dict[str, list] | None = None
+    # Used by cell_boundaries for polygon rendering.
+    slicers: dict[str, list] = field(default_factory=dict)
 
     async def maybe_rewrite_to_rectilinear(
         self, *, width: int, height: int, logger=None

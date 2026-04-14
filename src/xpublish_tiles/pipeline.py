@@ -578,7 +578,11 @@ def fix_antimeridian_vertices(
 
 
 def fix_coordinate_discontinuities(
-    coordinates: np.ndarray, transformer: pyproj.Transformer, *, bbox: BBox
+    coordinates: np.ndarray,
+    transformer: pyproj.Transformer,
+    *,
+    bbox: BBox,
+    axis: int | None = None,
 ) -> np.ndarray:
     """
     Fix coordinate discontinuities that occur during coordinate transformation.
@@ -589,9 +593,22 @@ def fix_coordinate_discontinuities(
     intelligent offset corrections to make coordinates continuous.
 
     The algorithm:
-    1. Uses skimage.restoration.unwrap_phase to fix coordinate discontinuities automatically
+    1. Uses unwrap to fix coordinate discontinuities automatically
     2. Calculates the expected coordinate space width using transformer bounds
     3. Shifts the result to maximize overlap with the bbox
+
+    Parameters
+    ----------
+    coordinates : np.ndarray
+        Coordinate values to fix.
+    transformer : pyproj.Transformer
+        Transformer from source to target CRS.
+    bbox : BBox
+        Target bounding box to align coordinates to.
+    axis : int or None
+        Axis along which to unwrap. None uses scikit-image unwrap_phase
+        (spatial unwrapping across all dimensions). An integer uses
+        numpy unwrap along that axis (independent per-slice unwrapping).
 
     Examples
     --------
@@ -619,19 +636,23 @@ def fix_coordinate_discontinuities(
         return coordinates
 
     # Step 1: Use unwrap to fix discontinuities
-    unwrapped_coords = unwrap(coordinates, width=coordinate_space_width)
+    unwrapped_coords = unwrap(coordinates, width=coordinate_space_width, axis=axis)
 
     # Step 2: Determine optimal shift based on coordinate and bbox bounds
-    coord_min, coord_max = unwrapped_coords.min(), unwrapped_coords.max()
     bbox_center = (bbox.west + bbox.east) / 2
-    coord_center = (coord_min + coord_max) / 2
+    coord_center = (unwrapped_coords.min(axis=axis) + unwrapped_coords.max(axis=axis)) / 2
 
     # Calculate how many coordinate_space_widths we need to shift to align centers
     center_diff = bbox_center - coord_center
-    shift_multiple = round(center_diff / coordinate_space_width)
+    shift_multiple = np.round(center_diff / coordinate_space_width)
 
     # Apply the calculated shift
-    result = unwrapped_coords + (shift_multiple * coordinate_space_width)
+    if axis is not None:
+        # Expand shift for broadcasting (e.g. per-polygon shifts)
+        shift = shift_multiple * coordinate_space_width
+        result = unwrapped_coords + np.expand_dims(shift, axis=axis)
+    else:
+        result = unwrapped_coords + (shift_multiple * coordinate_space_width)
     return result
 
 
@@ -1125,59 +1146,25 @@ async def _transform_polygons(
         grid = context.grid
 
         with log_duration("transform_polygons", "⬡"):
-            boundaries = grid.cell_boundaries(context.da, slicers=context.slicers)  # type: ignore[attr-defined]
+            boundaries = grid.cell_boundaries(context.da, slicers=context.slicers)
             gdf = gpd.GeoDataFrame(geometry=boundaries, crs=grid.crs)
             transformed_geoms = gdf.to_crs(crs).geometry.values
 
             bbox = context.bbox
             input_to_output = transformer_from_crs(grid.crs, crs)
 
-            # Fix antimeridian for triangular grids — same approach as the raster path.
-            if (
-                isinstance(grid, Triangular)
-                and context.ugrid_indexer is not None
-                and grid.lon_spans_globe
-            ):
-                anti = context.ugrid_indexer.antimeridian_vertices
-                conn = context.ugrid_indexer.connectivity
+            if grid.crs.is_geographic:
+                # Fix per-polygon ring discontinuities (e.g. cells crossing ±180°
+                # after CRS transform get wrapped by pyproj, spanning the globe)
+                # and shift each polygon individually to the bbox's coordinate window.
                 coords = shapely.get_coordinates(transformed_geoms)
-                n_ring = conn.shape[1] + 1  # 3 corners + close
-
-                # Map vertex-level anti indices → ring coordinate indices.
-                # Each face i occupies ring coords [i*n_ring .. (i+1)*n_ring).
-                # conn[i, j] is the vertex index at ring position i*n_ring+j.
-                face_offsets = np.arange(len(conn)) * n_ring
-                ring_anti = {}
-                for key in ["pos", "neg"]:
-                    if anti[key].size > 0:
-                        mask = np.isin(conn, anti[key])
-                        ring_idx = (face_offsets[:, None] + np.arange(conn.shape[1]))[
-                            mask
-                        ]
-                        # Also include closing coords where vertex 0 was affected
-                        close_idx = face_offsets[mask[:, 0]] + (n_ring - 1)
-                        ring_anti[key] = np.concatenate([ring_idx, close_idx])
-                    else:
-                        ring_anti[key] = anti[key]
-
-                fix_antimeridian_vertices(
-                    coords[:, 0], ring_anti, input_to_output, bbox=bbox
+                n_polys = len(transformed_geoms)
+                n_ring = coords.shape[0] // n_polys
+                coords_3d = coords.reshape(n_polys, n_ring, 2)
+                coords_3d[:, :, 0] = fix_coordinate_discontinuities(
+                    coords_3d[:, :, 0], input_to_output, bbox=bbox, axis=1
                 )
-                transformed_geoms = shapely.polygons(coords.reshape(-1, n_ring, 2))
-            else:
-                # Normalize polygon x-coordinates to the output bbox range.
-                # E.g. data in 0→360 with output bbox -180→180 needs shifting.
-                centroids_x = shapely.get_coordinates(transformed_geoms)[:, 0]
-                if np.any(centroids_x > bbox.east + 1):
-                    transformed_geoms = shapely.transform(
-                        transformed_geoms,
-                        lambda c: np.column_stack([c[:, 0] - 360, c[:, 1:]]),
-                    )
-                elif np.any(centroids_x < bbox.west - 1):
-                    transformed_geoms = shapely.transform(
-                        transformed_geoms,
-                        lambda c: np.column_stack([c[:, 0] + 360, c[:, 1:]]),
-                    )
+                transformed_geoms = shapely.polygons(coords_3d)
 
             da = context.da
             if da.values.ndim > 1:
