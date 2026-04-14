@@ -443,7 +443,7 @@ def test_detect_grid_metadata_unsupported_ndim():
         pytest.param(HRRR, 0, 6, id="hrrr"),
         pytest.param(REDGAUSS_N320, 0, 24, id="redgauss_n320"),
         # data spacing: 120m; Zoom level 10: 152m spacing @ eq
-        pytest.param(EU3035_HIRES, 5, 10, id="eu3035_hires"),
+        pytest.param(EU3035_HIRES, 4, 10, id="eu3035_hires"),
         # data spacing: 30m; Zoom level 13: 38m spacing @ eq
         pytest.param(PARA_HIRES, 7, 13, id="para_hires"),
         # data spacing: 0.5m; Zoom level 19: 0.3m spacing @ eq
