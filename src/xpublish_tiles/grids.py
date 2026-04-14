@@ -44,7 +44,7 @@ MAX_COORD_VAR_NBYTES = 1 * 1024 * 1024 * 1024
 class UgridIndexer:
     """Dataclass for UGRID indexing results from CellTreeIndex.sel."""
 
-    vertices: np.ndarray
+    vertices: np.ndarray | pd.Index
     connectivity: np.ndarray
     # face indices that intersect the anti-meridian
     antimeridian_vertices: dict[str, np.ndarray]
@@ -464,16 +464,15 @@ class PolarIndex(xr.Index):
             aeqd_proj, "EPSG:4326", always_xy=True
         )
 
-        # Compute min spacing (None only if all values identical — not realistic for radar)
         az_diff = np.abs(np.diff(self.azimuth))
         az_diff[az_diff == 0] = np.inf
-        self._dXmin = None if np.all(np.isinf(az_diff)) else float(np.min(az_diff))
+        self._dXmin = float(np.min(az_diff))
 
         rng_diff = np.abs(np.diff(self.range_m))
         rng_diff[rng_diff == 0] = np.inf
-        self._dYmin = None if np.all(np.isinf(rng_diff)) else float(np.min(rng_diff))
+        self._dYmin = float(np.min(rng_diff))
 
-    def get_min_spacing(self) -> tuple[float | None, float | None]:
+    def get_min_spacing(self) -> tuple[float, float]:
         return self._dXmin, self._dYmin
 
     def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
@@ -579,7 +578,7 @@ class PolarIndex(xr.Index):
         bearing = np.degrees(np.arctan2(x, y)) % 360
         return float(distance), float(bearing)
 
-    def equals(self, other) -> bool:
+    def equals(self, other: xr.Index, **kwargs: Any) -> bool:
         if not isinstance(other, PolarIndex):
             return False
         return (
@@ -699,21 +698,15 @@ class CurvilinearCellIndex(xr.Index):
         np.abs(dX, out=dX)
         dX[dX == 0] = np.inf
         result = numbagg.nanmin(dX)
-        self._dXmin = None if np.isinf(result) else float(result)
+        self._dXmin = 0.0 if np.isinf(result) else float(result)
 
         np.abs(dY, out=dY)
         dY[dY == 0] = np.inf
         result = numbagg.nanmin(dY)
-        self._dYmin = None if np.isinf(result) else float(result)
+        self._dYmin = 0.0 if np.isinf(result) else float(result)
 
     def get_min_spacing(self) -> tuple[float, float]:
-        """Get minimum spacing in X and Y directions.
-
-        Returns
-        -------
-        tuple[float | None, float | None]
-            (dXmin, dYmin) - minimum spacing in X and Y directions
-        """
+        """Get minimum spacing in X and Y directions."""
         return self._dXmin, self._dYmin
 
     def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
@@ -767,7 +760,9 @@ class CurvilinearCellIndex(xr.Index):
         }
         return IndexSelResult(slicers)
 
-    def equals(self, other: Self) -> bool:
+    def equals(self, other: xr.Index, **kwargs: Any) -> bool:
+        if not isinstance(other, CurvilinearCellIndex):
+            return False
         return (
             np.allclose(self.X.data, other.X.data)
             and np.allclose(self.Y.data, other.Y.data)
@@ -777,7 +772,9 @@ class CurvilinearCellIndex(xr.Index):
 
 
 class LongitudeCellIndex(xr.indexes.PandasIndex):
-    _dXmin: float | None
+    _dXmin: float
+    # PandasIndex.index is typed as pd.Index; keep a typed reference for .left/.right/.mid
+    _interval_index: pd.IntervalIndex
 
     def __init__(self, interval_index: pd.IntervalIndex, dim: str):
         """
@@ -792,43 +789,38 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         """
         assert interval_index.closed == "left"
         super().__init__(interval_index, dim)
-        self.index = interval_index
+        self._interval_index = interval_index
         self._xrindex = xr.indexes.PandasIndex(interval_index, dim)
         self._is_global = self._determine_global_coverage()
 
         # Store the actual coordinate bounds (left_break, right_break)
-        left_bounds = self.index.left.values
-        right_bounds = self.index.right.values
+        left_bounds = interval_index.left
+        right_bounds = interval_index.right
         self.left_break = float(left_bounds[0])
         self.right_break = float(right_bounds[-1])
 
         # Calculate and store minimum cell width
         widths = right_bounds - left_bounds
-        self._dXmin = float(np.min(widths)) if len(widths) > 0 else None
+        self._dXmin = float(np.min(widths)) if len(widths) > 0 else 0.0
 
     @property
     def cell_bounds(self) -> np.ndarray:
         """Get the cell bounds as an array."""
-        return np.array([self.index.left.values, self.index.right.values]).T
+        ii = self._interval_index
+        return np.array([ii.left, ii.right]).T
 
     @property
-    def cell_centers(self) -> np.ndarray:
-        """Get the cell centers as an array."""
-        return self.index.mid.values
+    def cell_centers(self) -> pd.Index:
+        """Get the cell centers."""
+        return self._interval_index.mid
 
     @property
     def is_global(self) -> bool:
         """Check if this longitude index covers the full globe."""
         return self._is_global
 
-    def get_min_spacing(self) -> float | None:
-        """Get minimum cell width (right - left).
-
-        Returns
-        -------
-        float | None
-            Minimum cell width
-        """
+    def get_min_spacing(self) -> float:
+        """Get minimum cell width (right - left)."""
         return self._dXmin
 
     def _determine_global_coverage(self) -> bool:
@@ -838,8 +830,8 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         Returns True if the longitude spans nearly 360 degrees, indicating
         global coverage.
         """
-        left_bounds = self.index.left.values
-        right_bounds = self.index.right.values
+        left_bounds = self._interval_index.left
+        right_bounds = self._interval_index.right
 
         # Get the full span from leftmost left bound to rightmost right bound
         min_lon = left_bounds.min()
@@ -946,8 +938,9 @@ def _indexes_equal(a: xr.Index, b: xr.Index) -> bool:
         ):
             if a.index.closed != b.index.closed:
                 return False
-            return np.allclose(a.index.left.values, b.index.left.values) and np.allclose(
-                a.index.right.values, b.index.right.values
+            return bool(
+                np.allclose(a.index.left.values, b.index.left.values)  # ty: ignore[invalid-argument-type]
+                and np.allclose(a.index.right.values, b.index.right.values)  # ty: ignore[invalid-argument-type]
             )
 
     return a.equals(b)
@@ -997,8 +990,10 @@ class GridSystem(ABC):
     def assign_index(self, da: xr.DataArray) -> xr.DataArray:
         return da
 
-    def equals(self, other: Self) -> bool:
-        if not isinstance(self, type(other)):
+    def equals(self, other: object) -> bool:
+        if not isinstance(other, GridSystem):
+            return False
+        if type(self) is not type(other):
             return False
         if len(self.indexes) != len(other.indexes):
             return False
@@ -1013,15 +1008,9 @@ class GridSystem(ABC):
             return False
         if any(a != b for a, b in zip(self.alternates, other.alternates, strict=False)):
             return False
-        if self.dXmin is None or other.dXmin is None:
-            if self.dXmin != other.dXmin:
-                return False
-        elif not np.isclose(self.dXmin, other.dXmin):
+        if not np.isclose(self.dXmin, other.dXmin):
             return False
-        if self.dYmin is None or other.dYmin is None:
-            if self.dYmin != other.dYmin:
-                return False
-        elif not np.isclose(self.dYmin, other.dYmin):
+        if not np.isclose(self.dYmin, other.dYmin):
             return False
         return True
 
@@ -1087,7 +1076,11 @@ class GridSystem(ABC):
 class RectilinearSelMixin:
     """Mixin for generic rectilinear .sel"""
 
-    def sel(
+    indexes: tuple[xr.Index, ...]
+    X: str
+    Y: str
+
+    def _rectilinear_sel(
         self, *, bbox: BBox, y_is_increasing: bool, x_size: int, y_size: int
     ) -> dict[str, list[slice | Fill | UgridIndexer]]:
         """
@@ -1202,18 +1195,20 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
         (index,) = self.indexes
         return da.assign_coords(xr.Coordinates.from_xindex(index))
 
-    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
+    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill | UgridIndexer]]:
         (index,) = self.indexes
         affine = index.transform()
 
-        return super().sel(
+        return self._rectilinear_sel(
             bbox=bbox,
             y_is_increasing=affine.e > 0,
             x_size=index._xy_shape[0],
             y_size=index._xy_shape[1],
         )
 
-    def equals(self, other: Self) -> bool:
+    def equals(self, other: object) -> bool:
+        if not isinstance(other, RasterAffine):
+            return False
         if (self.crs == other.crs and self.bbox == other.bbox) or (
             self.X == other.X and self.Y == other.Y
         ):
@@ -1265,18 +1260,22 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
                 self.right_break = x_index.right_break
             else:
                 assert isinstance(x_index, xr.indexes.PandasIndex)
-                left_bounds = x_index.index.left.values
-                right_bounds = x_index.index.right.values
+                x_ii = cast(pd.IntervalIndex, x_index.index)
+                left_bounds = x_ii.left
+                right_bounds = x_ii.right
                 widths = right_bounds - left_bounds
-                self.dXmin = float(np.min(widths)) if len(widths) > 0 else None
+                self.dXmin = float(np.min(widths)) if len(widths) > 0 else 0.0
                 self.left_break = float(left_bounds[0])
                 self.right_break = float(right_bounds[-1])
 
         if len(self.indexes) > 1:
             y_index = self.indexes[1]
             assert isinstance(y_index, xr.indexes.PandasIndex)
-            widths = y_index.index.right.values - y_index.index.left.values
-            self.dYmin = float(np.min(widths)) if len(widths) > 0 else None
+            y_ii = cast(pd.IntervalIndex, y_index.index)
+            y_right = y_ii.right
+            y_left = y_ii.left
+            widths = y_right - y_left
+            self.dYmin = float(np.min(widths)) if len(widths) > 0 else 0.0
 
     @property
     def dims(self) -> set[str]:
@@ -1341,7 +1340,7 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
             indexes=(x_index, y_index),
         )
 
-    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill]]:
+    def sel(self, *, bbox: BBox) -> dict[str, list[slice | Fill | UgridIndexer]]:
         """
         Select a subset of the data array using a bounding box.
         """
@@ -1363,16 +1362,17 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
         # Both index types have len() method
         x_size = len(x_index.index)
         y_size = len(y_index.index)
-        y_index_cast = cast(xr.indexes.PandasIndex, y_index)
 
-        return super().sel(
+        return self._rectilinear_sel(
             bbox=bbox,
-            y_is_increasing=y_index_cast.index.is_monotonic_increasing,
+            y_is_increasing=y_index.index.is_monotonic_increasing,
             x_size=x_size,
             y_size=y_size,
         )
 
-    def equals(self, other: Self) -> bool:
+    def equals(self, other: object) -> bool:
+        if not isinstance(other, Rectilinear):
+            return False
         if (self.crs == other.crs and self.bbox == other.bbox) or (
             self.X == other.X and self.Y == other.Y
         ):
@@ -1530,7 +1530,9 @@ class Curvilinear(GridSystem):
         """Return the set of dimension names for this grid system."""
         return {self.Xdim, self.Ydim}
 
-    def equals(self, other: Self) -> bool:
+    def equals(self, other: object) -> bool:
+        if not isinstance(other, Curvilinear):
+            return False
         if (
             (self.crs == other.crs and self.bbox == other.bbox)
             and (self.X == other.X and self.Y == other.Y)
@@ -1595,9 +1597,7 @@ class Polar(GridSystem):
 
     def __post_init__(self):
         index = self.indexes[0]
-        dXmin, dYmin = index.get_min_spacing()
-        self.dXmin = dXmin or 0.0
-        self.dYmin = dYmin or 0.0
+        self.dXmin, self.dYmin = index.get_min_spacing()
 
     @classmethod
     def from_dataset(cls, ds: xr.Dataset, crs: CRS, Xname: str, Yname: str) -> Self:
@@ -1706,7 +1706,7 @@ class Polar(GridSystem):
         }
         for name, coord in da.coords.items():
             if name not in coords and coord.ndim == 0:
-                coords[name] = coord
+                coords[str(name)] = coord
 
         return xr.DataArray(
             data_extended,
@@ -1716,7 +1716,7 @@ class Polar(GridSystem):
             attrs=da.attrs,
         )
 
-    def equals(self, other: Self) -> bool:
+    def equals(self, other: object) -> bool:
         if not isinstance(other, Polar):
             return False
         return (
@@ -1822,7 +1822,8 @@ class Triangular(GridSystem):
             # normalize to -180<=grid.X<180
             vertices[:, 0] = ((vertices[:, 0] + 180) % 360) - 180
 
-        (dim,) = ds[Xname].dims
+        (dim_,) = ds[Xname].dims
+        dim = str(dim_)
         with log_duration("Triangulating", "🔺"):
             if numbagg.anynan(vertices):
                 raise ValueError(

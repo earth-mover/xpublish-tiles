@@ -1,6 +1,9 @@
+import io
+from numbers import Number
 from typing import TYPE_CHECKING
 
 from xpublish_tiles.render import Renderer, register_renderer
+from xpublish_tiles.types import ImageFormat
 
 if TYPE_CHECKING:
     from xpublish_tiles.types import RenderContext
@@ -16,14 +19,16 @@ class QuiverRenderer(Renderer):
         self,
         *,
         contexts: dict[str, "RenderContext"],
-        buffer,
+        buffer: io.BytesIO,
         width: int,
         height: int,
         variant: str,
-        colorscalerange=None,
-        format=None,
+        colorscalerange: tuple[Number, Number] | None = None,
+        format: ImageFormat = ImageFormat.PNG,
         context_logger=None,
         colormap: dict[str, str] | None = None,
+        abovemaxcolor: str | None = None,
+        belowmincolor: str | None = None,
     ) -> None:
         # Handle "default" alias
         if variant == "default":

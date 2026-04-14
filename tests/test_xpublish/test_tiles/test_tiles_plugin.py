@@ -424,6 +424,7 @@ async def test_dimension_extraction_utilities():
     # Check time dimension
     time_dim = next(d for d in dimensions if d.name == "time")
     assert time_dim.type.value == "temporal"
+    assert time_dim.values is not None
     assert len(time_dim.values) == 4
     assert time_dim.extent[0] == "2021-01-01T00:00:00"
     assert time_dim.extent[1] == "2021-01-04T00:00:00"

@@ -493,7 +493,10 @@ def pad_slicers(
 
         dim_slicers = slicers[dim.name]
         # Convert to proper slice objects with dimension size
-        indexers = [slice(*idxr.indices(dim.size)) for idxr in dim_slicers]  # type: ignore[misc]
+        indexers = [
+            slice(*idxr.indices(dim.size))  # ty: ignore[unresolved-attribute]
+            for idxr in dim_slicers
+        ]
 
         # Prevent overlap if requested (before padding)
         if dim.prevent_overlap:
@@ -504,7 +507,7 @@ def pad_slicers(
         left_edge = first.start - dim.left_pad
         right_edge = last.stop + dim.right_pad
 
-        indexers_with_fill: list[slice | Fill]
+        indexers_with_fill: list[slice | Fill] = []
         if len(indexers) == 1:
             indexers_with_fill = [slice(max(0, left_edge), min(dim.size, right_edge))]
         else:
@@ -691,7 +694,7 @@ def _coarsen_nanmean_2d(arr, fy, fx, out):
     ny_out, nx_out = out.shape
     H, W = arr.shape
 
-    for i in numba.prange(ny_out):  # type: ignore[not-iterable]
+    for i in numba.prange(ny_out):  # ty: ignore[not-iterable]
         y_start = i * fy
         y_end = min((i + 1) * fy, H)
 

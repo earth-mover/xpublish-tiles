@@ -1,10 +1,11 @@
 import io
+from numbers import Number
 from typing import TYPE_CHECKING, cast
 
-import datashader as dsh  # type: ignore
-import datashader.reductions  # type: ignore
-import datashader.transfer_functions as tf  # type: ignore
-import matplotlib as mpl  # type: ignore
+import datashader as dsh
+import datashader.reductions
+import datashader.transfer_functions as tf
+import matplotlib as mpl
 import matplotlib.colors as mcolors
 import numbagg
 import numpy as np
@@ -73,7 +74,7 @@ def _range_color_to_rgba(color: str) -> tuple[int, int, int, int]:
 def _apply_out_of_range_colors(
     image: Image.Image,
     mesh: xr.DataArray,
-    colorscalerange: tuple[float, float] | None,
+    colorscalerange: tuple[Number, Number] | None,
     abovemaxcolor: str | None,
     belowmincolor: str | None,
 ) -> Image.Image:
@@ -164,7 +165,7 @@ class DatashaderRasterRenderer(Renderer):
         width: int,
         height: int,
         variant: str,
-        colorscalerange: tuple[float, float] | None = None,
+        colorscalerange: tuple[Number, Number] | None = None,
         format: ImageFormat = ImageFormat.PNG,
         context_logger=None,
         colormap: dict[str, str] | None = None,
@@ -198,8 +199,7 @@ class DatashaderRasterRenderer(Renderer):
         data = maybe_cast_data(context.da)
 
         if isinstance(context.grid, GridSystem2D):
-            # Use the actual coordinate names from the grid system
-            grid = cast(GridSystem2D, context.grid)
+            grid = context.grid
             if isinstance(context.datatype, DiscreteData):
                 if isinstance(grid, Curvilinear):
                     # FIXME: we'll need to track Xdim, Ydim explicitly no dims: tuple[str]
@@ -322,7 +322,7 @@ class DatashaderRasterRenderer(Renderer):
         message: str,
         format: ImageFormat = ImageFormat.PNG,
         cmap: str = "",
-        colorscalerange: tuple[float, float] | None = None,
+        colorscalerange: tuple[Number, Number] | None = None,
         **kwargs,
     ):
         """Render an error tile with the given message."""

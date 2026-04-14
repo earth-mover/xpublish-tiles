@@ -620,6 +620,7 @@ def assert_render_matches_snapshot(
     if snapshot_data is None:
         # No existing snapshot, fail the comparison
         assert content == png_snapshot
+        return  # unreachable, assert will raise
     snapshot_bytes = snapshot_data
 
     # Use perceptual comparison

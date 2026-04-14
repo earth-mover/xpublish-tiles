@@ -11,7 +11,7 @@ license = { text = "Apache-2.0" }
 classifiers = [
   "License :: OSI Approved :: Apache Software License",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "cf-xarray>=0.10.8",
     "cftime>=1.6.4.post1",
@@ -38,7 +38,7 @@ dependencies = [
     "numba-celltree>=0.4.1",
     "triangle>=20250106",
     "scikit-image>=0.25.2",
-    "icechunk>=1.1.4",
+    "icechunk>=2",
     "pooch>=1.8.2",
 ]
 dynamic = ["version"]
@@ -88,6 +88,7 @@ dev = [
     "xpublish-tiles[testing]",
     "coiled>=1.118.3",
     "memray>=1.18.0",
+    "py-spy>=0.4.1",
 ]
 
 [project.entry-points."xpublish.plugin"]
@@ -114,6 +115,10 @@ filterwarnings = [
     "ignore::DeprecationWarning:pyct.cmd",
     "ignore::pydantic.warnings.PydanticDeprecatedSince20",
 ]
+
+[tool.ty.src]
+# Standalone script with its own inline dependencies (PEP 723)
+exclude = ["src/xpublish_tiles/testing/grids/extract_n320.py"]
 
 [tool.ruff]
 line-length = 90

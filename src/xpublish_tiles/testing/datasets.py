@@ -468,7 +468,7 @@ IFS = Dataset(
             name="step",
             size=49,
             chunk_size=5,
-            data=pd.to_timedelta(np.arange(0, 49), unit="h"),
+            data=pd.to_timedelta(np.arange(0, 49), unit="h").values,
         ),
         Dim(
             name="latitude",
@@ -795,7 +795,7 @@ HRRR = Dataset(
             name="step",
             size=1,
             chunk_size=1,
-            data=pd.to_timedelta(np.arange(0, 2), unit="h"),
+            data=pd.to_timedelta(np.arange(0, 2), unit="h").values,
         ),
     ),
     dtype=np.float32,
@@ -1341,7 +1341,7 @@ HRRR_MULTIPLE = Dataset(
             name="step",
             size=1,
             chunk_size=1,
-            data=pd.to_timedelta(np.arange(0, 2), unit="h"),
+            data=pd.to_timedelta(np.arange(0, 2), unit="h").values,
         ),
     ),
     dtype=np.float32,
@@ -1417,7 +1417,7 @@ REDGAUSS_N320 = Dataset(
     ),
     setup=create_n320,
     dtype=np.float32,
-    tiles=GLOBAL_BENCHMARK_TILES,
+    tiles=GLOBAL_BENCHMARK_TILES,  # ty: ignore[invalid-argument-type]
 )
 
 
