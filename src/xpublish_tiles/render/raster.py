@@ -1,11 +1,9 @@
 import io
 from numbers import Number
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import datashader as dsh
 import datashader.reductions
-import datashader.transfer_functions as tf
-import matplotlib as mpl
 import matplotlib.colors as mcolors
 import numbagg
 import numpy as np
@@ -16,10 +14,6 @@ from scipy.interpolate import NearestNDInterpolator
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, GridSystem2D, Triangular
 from xpublish_tiles.lib import (
-    MissingParameterError,
-    apply_range_colors,
-    create_colormap_from_dict,
-    create_listed_colormap_from_dict,
     maybe_cast_data,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
@@ -28,8 +22,6 @@ from xpublish_tiles.types import (
     ContinuousData,
     DiscreteData,
     ImageFormat,
-    NullRenderContext,
-    PopulatedRenderContext,
     RenderContext,
 )
 from xpublish_tiles.utils import NUMBA_THREADING_LOCK
@@ -172,30 +164,19 @@ class DatashaderRasterRenderer(DatashaderRenderer):
         abovemaxcolor: str | None = None,
         belowmincolor: str | None = None,
     ):
-        # Use the passed context logger or fallback to get_context_logger
-        logger = context_logger if context_logger is not None else get_context_logger()
-        # Handle "default" alias
-        if variant == "default":
-            variant = self.default_variant()
-
-        self.validate(contexts)
-        (context,) = contexts.values()
-        if isinstance(context, NullRenderContext):
-            logger.debug("☐ No data")
-            im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-            im.save(buffer, format=str(format))
-            return
-
-        if TYPE_CHECKING:
-            assert isinstance(context, PopulatedRenderContext)
-
-        bbox = context.bbox
-        cvs = dsh.Canvas(
-            plot_height=height,
-            plot_width=width,
-            x_range=(bbox.west, bbox.east),
-            y_range=(bbox.south, bbox.north),
+        prepared = self._prepare_render(
+            contexts,
+            buffer=buffer,
+            width=width,
+            height=height,
+            variant=variant,
+            format=format,
+            context_logger=context_logger,
         )
+        if prepared is None:
+            return
+        context, cvs, variant = prepared
+        logger = context_logger if context_logger is not None else get_context_logger()
         data = maybe_cast_data(context.da)
 
         if isinstance(context.grid, GridSystem2D):
@@ -255,61 +236,19 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                 f"Grid type {type(context.grid)} not supported by DatashaderRasterRenderer"
             )
 
+        im = self.shade_mesh(
+            mesh,
+            context.datatype,
+            variant=variant,
+            colorscalerange=colorscalerange,
+            colormap=colormap,
+            abovemaxcolor=abovemaxcolor,
+            belowmincolor=belowmincolor,
+        )
         if isinstance(context.datatype, ContinuousData):
-            if colorscalerange is None:
-                valid_min = context.datatype.valid_min
-                valid_max = context.datatype.valid_max
-                if valid_min is not None and valid_max is not None:
-                    colorscalerange = (valid_min, valid_max)
-                else:
-                    raise MissingParameterError(
-                        "`colorscalerange` must be specified when array does not have valid_min and valid_max attributes specified."
-                    )
-
-            # Use custom colormap if provided, otherwise use variant
-            if colormap is not None:
-                cmap = create_colormap_from_dict(colormap)
-            else:
-                cmap = mpl.colormaps.get_cmap(variant)
-
-            # Apply over/under colors for out-of-range values
-            cmap = apply_range_colors(cmap, abovemaxcolor, belowmincolor)
-
-            with np.errstate(invalid="ignore"):
-                shaded = tf.shade(
-                    mesh,
-                    cmap=cmap,
-                    how="linear",
-                    span=colorscalerange,
-                )
-            im = shaded.to_pil()
             im = _apply_out_of_range_colors(
                 im, mesh, colorscalerange, abovemaxcolor, belowmincolor
             )
-        elif isinstance(context.datatype, DiscreteData):
-            kwargs = {}
-            flag_values = context.datatype.values
-            # Custom colormap overrides flag_colors
-            if colormap is not None:
-                kwargs["color_key"] = create_listed_colormap_from_dict(
-                    colormap, flag_values
-                )
-            elif context.datatype.colors is not None:
-                kwargs["color_key"] = dict(
-                    zip(context.datatype.values, context.datatype.colors, strict=True)
-                )
-            else:
-                minv = min(flag_values)
-                maxv = max(flag_values)
-                cmap = mpl.colormaps.get_cmap(variant)
-                kwargs["color_key"] = {
-                    v: mcolors.to_hex(cmap((v - minv) / maxv)) for v in flag_values
-                }
-            with np.errstate(invalid="ignore"):
-                shaded = tf.shade(mesh, how="linear", **kwargs)
-            im = shaded.to_pil()
-        else:
-            raise NotImplementedError(f"Unsupported datatype: {type(context.datatype)}")
 
         im.save(buffer, format=str(format))
 

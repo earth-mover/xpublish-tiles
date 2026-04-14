@@ -2,26 +2,15 @@ import io
 from numbers import Number
 
 import datashader as dsh
-import datashader.transfer_functions as tf
 import geopandas as gpd
-import matplotlib as mpl
 import numbagg
-import numpy as np
 from PIL import Image
 
 from xpublish_tiles.grids import Triangular
-from xpublish_tiles.lib import (
-    MissingParameterError,
-    apply_range_colors,
-    create_colormap_from_dict,
-)
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import DatashaderRenderer, register_renderer
 from xpublish_tiles.types import (
-    ContinuousData,
     ImageFormat,
-    NullRenderContext,
-    PopulatedRenderContext,
     RenderContext,
 )
 
@@ -45,21 +34,19 @@ class PolygonsRenderer(DatashaderRenderer):
         abovemaxcolor: str | None = None,
         belowmincolor: str | None = None,
     ):
-        logger = context_logger if context_logger is not None else get_context_logger()
-
-        if variant == "default":
-            variant = self.default_variant()
-
-        assert len(contexts) == 1
-        (context,) = contexts.values()
-
-        if isinstance(context, NullRenderContext):
-            logger.debug("☐ No data")
-            im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-            im.save(buffer, format=str(format))
+        prepared = self._prepare_render(
+            contexts,
+            buffer=buffer,
+            width=width,
+            height=height,
+            variant=variant,
+            format=format,
+            context_logger=context_logger,
+        )
+        if prepared is None:
             return
-
-        assert isinstance(context, PopulatedRenderContext)
+        context, cvs, variant = prepared
+        logger = context_logger if context_logger is not None else get_context_logger()
 
         if context.cell_boundaries is None:
             raise ValueError(
@@ -71,14 +58,6 @@ class PolygonsRenderer(DatashaderRenderer):
             im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
             im.save(buffer, format=str(format))
             return
-
-        bbox = context.bbox
-        cvs = dsh.Canvas(
-            plot_height=height,
-            plot_width=width,
-            x_range=(bbox.west, bbox.east),
-            y_range=(bbox.south, bbox.north),
-        )
 
         data = context.da
 
@@ -102,37 +81,15 @@ class PolygonsRenderer(DatashaderRenderer):
                 im.save(buffer, format=str(format))
                 return
 
-        if isinstance(context.datatype, ContinuousData):
-            if colorscalerange is None:
-                valid_min = context.datatype.valid_min
-                valid_max = context.datatype.valid_max
-                if valid_min is not None and valid_max is not None:
-                    colorscalerange = (valid_min, valid_max)
-                else:
-                    raise MissingParameterError(
-                        "`colorscalerange` must be specified when array does not have valid_min and valid_max attributes."
-                    )
-
-            if colormap is not None:
-                cmap = create_colormap_from_dict(colormap)
-            else:
-                cmap = mpl.colormaps.get_cmap(variant)
-
-            cmap = apply_range_colors(cmap, abovemaxcolor, belowmincolor)
-
-            with np.errstate(invalid="ignore"):
-                shaded = tf.shade(
-                    mesh,
-                    cmap=cmap,
-                    how="linear",
-                    span=colorscalerange,
-                )
-            im = shaded.to_pil()
-        else:
-            raise NotImplementedError(
-                f"PolygonsRenderer only supports ContinuousData, got {type(context.datatype)}"
-            )
-
+        im = self.shade_mesh(
+            mesh,
+            context.datatype,
+            variant=variant,
+            colorscalerange=colorscalerange,
+            colormap=colormap,
+            abovemaxcolor=abovemaxcolor,
+            belowmincolor=belowmincolor,
+        )
         im.save(buffer, format=str(format))
 
     @staticmethod
