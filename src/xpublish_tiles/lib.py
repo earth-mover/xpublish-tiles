@@ -596,28 +596,30 @@ def slicers_to_pad_instruction(slicers, datatype) -> dict[str, Any]:
     return pad_kwargs
 
 
-def fill_quad_rings(
-    out: np.ndarray,
-    xl: np.ndarray,
-    xr: np.ndarray,
-    yb: np.ndarray,
-    yt: np.ndarray,
-) -> None:
-    """Fill a (..., 5, 2) ring array from 2D edge arrays with matching shapes.
+@numba.njit(parallel=True, cache=True, boundscheck=False)
+def fill_quad_rings(out, xl, xr, yb, yt):
+    """Fill a (a, b, 5, 2) ring array from 2D edge arrays.
 
-    All inputs must have the same 2D shape as ``out[..., 0, 0]``. Counter-clockwise
-    ring order: SW, SE, NE, NW, SW(close).
+    All inputs must have shape ``(a, b)``. Counter-clockwise ring order:
+    SW, SE, NE, NW, SW(close). Ravel order matches the input layout.
     """
-    out[..., 0, 0] = xl
-    out[..., 1, 0] = xr
-    out[..., 2, 0] = xr
-    out[..., 3, 0] = xl
-    out[..., 4, 0] = xl
-    out[..., 0, 1] = yb
-    out[..., 1, 1] = yb
-    out[..., 2, 1] = yt
-    out[..., 3, 1] = yt
-    out[..., 4, 1] = yb
+    a, b = xl.shape
+    for i in numba.prange(a):
+        for j in range(b):
+            xli = xl[i, j]
+            xri = xr[i, j]
+            ybi = yb[i, j]
+            yti = yt[i, j]
+            out[i, j, 0, 0] = xli
+            out[i, j, 0, 1] = ybi
+            out[i, j, 1, 0] = xri
+            out[i, j, 1, 1] = ybi
+            out[i, j, 2, 0] = xri
+            out[i, j, 2, 1] = yti
+            out[i, j, 3, 0] = xli
+            out[i, j, 3, 1] = yti
+            out[i, j, 4, 0] = xli
+            out[i, j, 4, 1] = ybi
 
 
 def fill_rectilinear_rings(
@@ -637,7 +639,9 @@ def fill_rectilinear_rings(
     indexing = "ij" if xaxis == 0 else "xy"
     xl2d, yb2d = np.meshgrid(xl, yb, indexing=indexing)
     xr2d, yt2d = np.meshgrid(xr, yt, indexing=indexing)
-    fill_quad_rings(out, xl2d, xr2d, yb2d, yt2d)
+    # Lock is only used when tbb is not available (e.g., on macOS)
+    with NUMBA_THREADING_LOCK:
+        fill_quad_rings(out, xl2d, xr2d, yb2d, yt2d)
 
 
 def apply_range_colors(

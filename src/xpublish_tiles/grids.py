@@ -1696,13 +1696,14 @@ class Curvilinear(GridSystem):
             dst[xaxis] = slice(offset, offset + nx_sel)
             src_slc, dst_slc = tuple(src), tuple(dst)
 
-            fill_quad_rings(
-                rings[dst_slc],
-                index.left[src_slc],
-                index.right[src_slc],
-                index.bottom[src_slc],
-                index.top[src_slc],
-            )
+            with NUMBA_THREADING_LOCK:
+                fill_quad_rings(
+                    rings[dst_slc],
+                    index.left[src_slc],
+                    index.right[src_slc],
+                    index.bottom[src_slc],
+                    index.top[src_slc],
+                )
             offset += nx_sel
 
         return shapely.polygons(rings.reshape(-1, 5, 2))
