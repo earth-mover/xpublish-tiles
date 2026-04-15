@@ -4,12 +4,22 @@ from numbers import Number
 from typing import TYPE_CHECKING
 
 import datashader as dsh
+import matplotlib as mpl
+import matplotlib.colors as mcolors
 import numpy as np
 from PIL import Image, ImageDraw
 
 import xarray as xr
+from xpublish_tiles.lib import (
+    MissingParameterError,
+    apply_range_colors,
+    create_colormap_from_dict,
+    create_listed_colormap_from_dict,
+)
 from xpublish_tiles.logger import get_context_logger
 from xpublish_tiles.types import (
+    ContinuousData,
+    DiscreteData,
     ImageFormat,
     NullRenderContext,
     PopulatedRenderContext,
@@ -198,16 +208,6 @@ class DatashaderRenderer(Renderer):
         ``cvs.trimesh`` / ``cvs.polygons`` is identical.
         """
         import datashader.transfer_functions as tf
-        import matplotlib as mpl
-        import matplotlib.colors as mcolors
-
-        from xpublish_tiles.lib import (
-            MissingParameterError,
-            apply_range_colors,
-            create_colormap_from_dict,
-            create_listed_colormap_from_dict,
-        )
-        from xpublish_tiles.types import ContinuousData, DiscreteData
 
         if isinstance(datatype, ContinuousData):
             if colorscalerange is None:
