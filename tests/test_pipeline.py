@@ -41,6 +41,7 @@ from xpublish_tiles.testing.datasets import (
     HRRR,
     IFS,
     PARA,
+    REDGAUSS_N320,
     TRIPOLE_ANTIMERIDIAN,
     create_global_dataset,
 )
@@ -321,6 +322,34 @@ async def test_curvilinear_polygons(tile, png_snapshot, pytestconfig):
     assert_render_matches_snapshot(
         result, png_snapshot, tile=tile, tms=WEBMERC_TMS, skip_transparency_check=True
     )
+
+
+@pytest.fixture(scope="module")
+def n320_dataset():
+    return REDGAUSS_N320.create()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tile,colorscalerange",
+    [
+        # Near-polar tiles where the N320 reduced Gaussian grid has sparse
+        # longitudinal coverage, so individual triangles are large enough
+        # to be clearly visible in the rendered output.
+        (Tile(x=0, y=0, z=5), (-0.5, 0.5)),
+        (Tile(x=32, y=8, z=6), (0.6, 0.8)),
+    ],
+)
+async def test_n320_polygons_triangles_visible(
+    n320_dataset, tile, colorscalerange, png_snapshot, pytestconfig
+):
+    query_params = create_query_params(
+        tile, WEBMERC_TMS, style="polygons", colorscalerange=colorscalerange
+    )
+    result = await pipeline(n320_dataset, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(result, png_snapshot, tile=tile, tms=WEBMERC_TMS)
 
 
 @pytest.mark.parametrize("tile,tms", as_pytestparams(PARA_TILES))

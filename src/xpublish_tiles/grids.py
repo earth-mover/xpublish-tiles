@@ -28,6 +28,7 @@ from xpublish_tiles.lib import (
     _prevent_slice_overlap,
     aeqd_to_4326,
     crs_repr,
+    fill_quad_rings,
     fill_rectilinear_rings,
     is_4326_like,
     unwrap,
@@ -249,36 +250,22 @@ def _convert_longitude_slice(
         return (slice(start, stop),)
 
 
-def _padded_diff(arr: np.ndarray, axis: int = -1) -> np.ndarray:
-    """
-    Compute differences along an axis and pad to match original array shape.
-    This replaces np.gradient for computing spacing between points.
+def _adjacent_pair(arr: np.ndarray, axis: int) -> tuple[np.ndarray, np.ndarray]:
+    """Return ``(arr[:-1], arr[1:])`` sliced along the given axis."""
+    lo = [slice(None)] * arr.ndim
+    hi = [slice(None)] * arr.ndim
+    lo[axis] = slice(None, -1)
+    hi[axis] = slice(1, None)
+    return arr[tuple(lo)], arr[tuple(hi)]
 
-    Similar to np.gradient but uses forward differences instead of centered differences.
-    The result represents the spacing to the next point, with the last value repeated.
 
-    Parameters
-    ----------
-    arr : np.ndarray
-        Input array
-    axis : int
-        Axis along which to compute differences. Default is -1 (last axis).
-
-    Returns
-    -------
-    np.ndarray
-        Array of same shape as input with padded differences.
-        Uses forward differences with the last value repeated.
-    """
-    # Compute forward differences
-    diff = np.diff(arr, axis=axis)
-
-    # Create padding width specification
-    pad_width = [(0, 0)] * arr.ndim
-    pad_width[axis] = (0, 1)
-
-    # Pad by repeating the last slice along the axis
-    return np.pad(diff, pad_width, mode="edge")
+def _min_nonzero_diff(hi: np.ndarray, lo: np.ndarray) -> float:
+    """Minimum of ``|hi - lo|``, treating zeros as missing (0.0 if all zero)."""
+    d = hi - lo
+    np.abs(d, out=d)
+    d[d == 0] = np.inf
+    result = numbagg.nanmin(d)
+    return 0.0 if np.isinf(result) else float(result)
 
 
 def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
@@ -688,24 +675,8 @@ class CurvilinearCellIndex(xr.Index):
 
         X_breaks = infer_interval_breaks(X, axis=xaxis)
         Y_breaks = infer_interval_breaks(Y, axis=yaxis)
-
-        left_sl = tuple(
-            slice(None, -1) if i == xaxis else slice(None) for i in range(X.ndim)
-        )
-        right_sl = tuple(
-            slice(1, None) if i == xaxis else slice(None) for i in range(X.ndim)
-        )
-        self.left = X_breaks[left_sl]
-        self.right = X_breaks[right_sl]
-
-        bottom_sl = tuple(
-            slice(None, -1) if i == yaxis else slice(None) for i in range(Y.ndim)
-        )
-        top_sl = tuple(
-            slice(1, None) if i == yaxis else slice(None) for i in range(Y.ndim)
-        )
-        self.bottom = Y_breaks[bottom_sl]
-        self.top = Y_breaks[top_sl]
+        self.left, self.right = _adjacent_pair(X_breaks, xaxis)
+        self.bottom, self.top = _adjacent_pair(Y_breaks, yaxis)
 
         # Determine if Y is increasing by checking the first row.
         # Don't use .all() because tripolar grids have dY=0 in the fold region
@@ -717,18 +688,9 @@ class CurvilinearCellIndex(xr.Index):
             self.top, self.bottom = self.bottom, self.top
         self.xaxis, self.yaxis = xaxis, yaxis
 
-        # Calculate minimum spacing using in-place ops
-        dX = np.diff(X, axis=xaxis)
-        np.abs(dX, out=dX)
-        dX[dX == 0] = np.inf
-        result = numbagg.nanmin(dX)
-        self._dXmin = 0.0 if np.isinf(result) else float(result)
-
-        dY = np.diff(Y, axis=yaxis)
-        np.abs(dY, out=dY)
-        dY[dY == 0] = np.inf
-        result = numbagg.nanmin(dY)
-        self._dYmin = 0.0 if np.isinf(result) else float(result)
+        # Minimum cell width/height using the already-computed edges.
+        self._dXmin = _min_nonzero_diff(self.right, self.left)
+        self._dYmin = _min_nonzero_diff(self.top, self.bottom)
 
     def get_min_spacing(self) -> tuple[float, float]:
         """Get minimum spacing in X and Y directions."""
@@ -1704,41 +1666,45 @@ class Curvilinear(GridSystem):
 
         Uses the index's precomputed left/right/bottom/top bounds (which have
         shared edges via infer_interval_breaks) sliced via the integer slicers.
-        Returns a 1D array of shapely Polygon objects (raveled from the 2D grid).
+        Returns a 1D array of shapely Polygon objects in the same ravel order
+        as ``da.values``.
         """
         import shapely
 
         index = next(iter(self.indexes))
         assert isinstance(index, CurvilinearCellIndex)
 
+        xaxis, yaxis = index.xaxis, index.yaxis
         y_slice = next(s for s in slicers[self.Ydim] if isinstance(s, slice))
         x_slices = [s for s in slicers[self.Xdim] if isinstance(s, slice)]
 
         ny_sel = y_slice.stop - y_slice.start
         total_nx = sum(s.stop - s.start for s in x_slices)
-        rings = np.empty((total_nx, ny_sel, 5, 2), dtype=np.float64)
+        shape = [0, 0]
+        shape[xaxis] = total_nx
+        shape[yaxis] = ny_sel
+        rings = np.empty((*shape, 5, 2), dtype=np.float64)
 
         offset = 0
         for x_slice in x_slices:
             nx_sel = x_slice.stop - x_slice.start
-            slc_list: list[slice] = [slice(None)] * 2
-            slc_list[index.yaxis] = y_slice
-            slc_list[index.xaxis] = x_slice
-            slc = tuple(slc_list)
+            src = [slice(None)] * 2
+            src[yaxis] = y_slice
+            src[xaxis] = x_slice
+            dst = [slice(None)] * 2
+            dst[yaxis] = slice(None)
+            dst[xaxis] = slice(offset, offset + nx_sel)
+            src_slc, dst_slc = tuple(src), tuple(dst)
 
-            out = rings[offset : offset + nx_sel]
-            out[:, :, 0, 0] = index.left[slc]
-            out[:, :, 0, 1] = index.bottom[slc]
-            out[:, :, 1, 0] = index.right[slc]
-            out[:, :, 1, 1] = index.bottom[slc]
-            out[:, :, 2, 0] = index.right[slc]
-            out[:, :, 2, 1] = index.top[slc]
-            out[:, :, 3, 0] = index.left[slc]
-            out[:, :, 3, 1] = index.top[slc]
+            fill_quad_rings(
+                rings[dst_slc],
+                index.left[src_slc],
+                index.right[src_slc],
+                index.bottom[src_slc],
+                index.top[src_slc],
+            )
             offset += nx_sel
 
-        # Close rings: copy corner 0 to position 4
-        rings[:, :, 4] = rings[:, :, 0]
         return shapely.polygons(rings.reshape(-1, 5, 2))
 
 

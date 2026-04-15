@@ -596,6 +596,30 @@ def slicers_to_pad_instruction(slicers, datatype) -> dict[str, Any]:
     return pad_kwargs
 
 
+def fill_quad_rings(
+    out: np.ndarray,
+    xl: np.ndarray,
+    xr: np.ndarray,
+    yb: np.ndarray,
+    yt: np.ndarray,
+) -> None:
+    """Fill a (..., 5, 2) ring array from 2D edge arrays with matching shapes.
+
+    All inputs must have the same 2D shape as ``out[..., 0, 0]``. Counter-clockwise
+    ring order: SW, SE, NE, NW, SW(close).
+    """
+    out[..., 0, 0] = xl
+    out[..., 1, 0] = xr
+    out[..., 2, 0] = xr
+    out[..., 3, 0] = xl
+    out[..., 4, 0] = xl
+    out[..., 0, 1] = yb
+    out[..., 1, 1] = yb
+    out[..., 2, 1] = yt
+    out[..., 3, 1] = yt
+    out[..., 4, 1] = yb
+
+
 def fill_rectilinear_rings(
     out: np.ndarray,
     xl: np.ndarray,
@@ -613,15 +637,7 @@ def fill_rectilinear_rings(
     indexing = "ij" if xaxis == 0 else "xy"
     xl2d, yb2d = np.meshgrid(xl, yb, indexing=indexing)
     xr2d, yt2d = np.meshgrid(xr, yt, indexing=indexing)
-    out[:, :, 0, 0] = xl2d
-    out[:, :, 0, 1] = yb2d
-    out[:, :, 1, 0] = xr2d
-    out[:, :, 1, 1] = yb2d
-    out[:, :, 2, 0] = xr2d
-    out[:, :, 2, 1] = yt2d
-    out[:, :, 3, 0] = xl2d
-    out[:, :, 3, 1] = yt2d
-    out[:, :, 4] = out[:, :, 0]
+    fill_quad_rings(out, xl2d, xr2d, yb2d, yt2d)
 
 
 def apply_range_colors(
