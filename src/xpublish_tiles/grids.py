@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import pyproj
 import rasterix
+import shapely
 import triangle
 from numba_celltree import CellTree2d
 from pyproj import CRS
@@ -1088,8 +1089,6 @@ class RectilinearMixin:
         y_right: np.ndarray | pd.Index,
     ) -> np.ndarray:
         """Build shapely polygons from cell edge arrays. Shared by RasterAffine and Rectilinear."""
-        import shapely
-
         xaxis = da.get_axis_num(self.Xdim)
         nx_total = len(x_left)
         ny_total = len(y_left)
@@ -1669,8 +1668,6 @@ class Curvilinear(GridSystem):
         Returns a 1D array of shapely Polygon objects in the same ravel order
         as ``da.values``.
         """
-        import shapely
-
         index = next(iter(self.indexes))
         assert isinstance(index, CurvilinearCellIndex)
 
@@ -1944,8 +1941,6 @@ class Triangular(GridSystem):
         *,
         slicers: dict[str, list],
     ) -> np.ndarray:
-        import shapely
-
         ugrid_indexer = next(s for s in slicers[self.dim] if isinstance(s, UgridIndexer))
         index = cast(CellTreeIndex, next(iter(self.indexes)))
         # connectivity contains local indices into the vertex subset, not the full tree

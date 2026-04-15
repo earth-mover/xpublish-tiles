@@ -604,7 +604,7 @@ def fill_quad_rings(out, xl, xr, yb, yt):
     SW, SE, NE, NW, SW(close). Ravel order matches the input layout.
     """
     a, b = xl.shape
-    for i in numba.prange(a):
+    for i in numba.prange(a):  # ty: ignore[not-iterable]
         for j in range(b):
             xli = xl[i, j]
             xri = xr[i, j]
@@ -637,8 +637,8 @@ def fill_rectilinear_rings(
     so the ravel order matches the DataArray's dimension order.
     """
     indexing = "ij" if xaxis == 0 else "xy"
-    xl2d, yb2d = np.meshgrid(xl, yb, indexing=indexing)
-    xr2d, yt2d = np.meshgrid(xr, yt, indexing=indexing)
+    xl2d, yb2d = np.meshgrid(xl, yb, indexing=indexing, copy=False)
+    xr2d, yt2d = np.meshgrid(xr, yt, indexing=indexing, copy=False)
     # Lock is only used when tbb is not available (e.g., on macOS)
     with NUMBA_THREADING_LOCK:
         fill_quad_rings(out, xl2d, xr2d, yb2d, yt2d)
