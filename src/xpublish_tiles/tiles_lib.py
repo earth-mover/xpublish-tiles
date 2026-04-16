@@ -13,6 +13,7 @@ from xpublish_tiles.grids import GridSystem, GridSystem2D, Triangular
 from xpublish_tiles.lib import (
     apply_default_pad,
     check_data_is_renderable_size,
+    normalize_slicers,
     transformer_from_crs,
 )
 from xpublish_tiles.utils import time_debug, xarray_object_key
@@ -139,8 +140,9 @@ def _compute_min_zoom(
 
             tile_bbox = BBox(west=left, south=bottom, east=right, north=top)
             slicers = grid.sel(bbox=tile_bbox)
-            if isinstance(grid, GridSystem2D) and style != "polygons":
+            if isinstance(grid, GridSystem2D):
                 slicers = apply_default_pad(slicers, da, grid)
+                slicers = normalize_slicers(slicers, dict(da.sizes))
             if not check_data_is_renderable_size(
                 slicers, da, grid, alternate, style=style
             ):

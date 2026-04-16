@@ -34,6 +34,7 @@ from xpublish_tiles.lib import (
     coarsen_mean_pad,
     get_data_load_semaphore,
     max_render_shape,
+    normalize_slicers,
     pad_slicers,
     transform_coordinates,
     transformer_from_crs,
@@ -181,7 +182,6 @@ def estimate_coarsen_factors_and_slicers(
     slicers: dict[str, list[slice | Fill | UgridIndexer]],
     max_shape: tuple[int, int],
     datatype: DataType,
-    style: str,
 ) -> tuple[dict[str, int], dict[str, list[slice | Fill | UgridIndexer]]]:
     """
     Estimate coarsening factors and adjusted slicers for the given data array.
@@ -222,8 +222,7 @@ def estimate_coarsen_factors_and_slicers(
             da=da,
             grid=grid,
         )
-    if style != "polygons":
-        new_slicers = apply_default_pad(new_slicers, da, grid)
+    new_slicers = apply_default_pad(new_slicers, da, grid)
     return coarsen_factors, new_slicers
 
 
@@ -873,8 +872,8 @@ async def subset_to_bbox(
             slicers=slicers,
             max_shape=max_shape,
             datatype=array.datatype,
-            style=style,
         )
+        new_slicers = normalize_slicers(new_slicers, dict(da.sizes))
         alternate = grid.pick_alternate_grid(crs, coarsen_factors=coarsen_factors)
 
         subset = await apply_slicers(

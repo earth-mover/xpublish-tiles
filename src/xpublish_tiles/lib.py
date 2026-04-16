@@ -4,7 +4,7 @@ import asyncio
 import io
 import math
 import operator
-from collections.abc import Hashable, Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import lru_cache, partial
@@ -602,6 +602,19 @@ def pad_slicers(
     return result
 
 
+def normalize_slicers(
+    slicers: "dict[str, list[slice | Fill | UgridIndexer]]",
+    dim_sizes: "Mapping[Hashable, int]",
+) -> "dict[str, list[slice | Fill | UgridIndexer]]":
+    return {
+        dim: [
+            slice(*s.indices(dim_sizes[dim])) if isinstance(s, slice) else s
+            for s in entries
+        ]
+        for dim, entries in slicers.items()
+    }
+
+
 def apply_default_pad(slicers, da, grid):
     """Apply default padding for edge safety (floating-point roundoff protection).
 
@@ -858,13 +871,13 @@ def _get_indexer_size(
     elif isinstance(sl, _UgridIndexer):
         return sl.vertices.size
     elif isinstance(sl, slice):
-        if dim_size is None:
-            if sl.start is None or sl.stop is None or sl.start < 0 or sl.stop < 0:
-                raise ValueError("dim_size is required for open-ended or negative slices")
-            return sl.stop - sl.start
-        # slice.indices normalizes negative/None start/stop (e.g. wraparound
-        # `slice(-2, None)` → (dim_size - 2, dim_size, 1), size = 2).
-        start, stop, _ = sl.indices(dim_size)
+        start = sl.start if sl.start is not None else 0
+        if sl.stop is not None:
+            stop = sl.stop
+        elif dim_size is not None:
+            stop = dim_size
+        else:
+            raise ValueError("dim_size is required for open-ended slices")
         return stop - start
     else:
         raise TypeError(f"Unknown indexer type: {type(sl)!r}")
