@@ -181,6 +181,7 @@ def estimate_coarsen_factors_and_slicers(
     slicers: dict[str, list[slice | Fill | UgridIndexer]],
     max_shape: tuple[int, int],
     datatype: DataType,
+    style: str,
 ) -> tuple[dict[str, int], dict[str, list[slice | Fill | UgridIndexer]]]:
     """
     Estimate coarsening factors and adjusted slicers for the given data array.
@@ -221,7 +222,8 @@ def estimate_coarsen_factors_and_slicers(
             da=da,
             grid=grid,
         )
-    new_slicers = apply_default_pad(new_slicers, da, grid)
+    if style != "polygons":
+        new_slicers = apply_default_pad(new_slicers, da, grid)
     return coarsen_factors, new_slicers
 
 
@@ -881,6 +883,7 @@ async def subset_to_bbox(
             slicers=slicers,
             max_shape=max_shape,
             datatype=array.datatype,
+            style=style,
         )
         alternate = grid.pick_alternate_grid(crs, coarsen_factors=coarsen_factors)
 

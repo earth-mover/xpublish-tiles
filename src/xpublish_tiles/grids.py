@@ -855,12 +855,6 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         self._dXmin = float(np.min(widths)) if len(widths) > 0 else 0.0
 
     @property
-    def cell_bounds(self) -> np.ndarray:
-        """Get the cell bounds as an array."""
-        ii = self._interval_index
-        return np.array([ii.left, ii.right]).T
-
-    @property
     def cell_centers(self) -> pd.Index:
         """Get the cell centers."""
         return self._interval_index.mid
@@ -1401,12 +1395,10 @@ class Rectilinear(RectilinearMixin, GridSystem):
     dYmin: float = field(init=False)
     left_break: float = field(init=False)
     right_break: float = field(init=False)
-    y_is_increasing: bool = field(init=False)
 
     def __post_init__(self) -> None:
         self.Xdim = self.X
         self.Ydim = self.Y
-        self.y_is_increasing = self.indexes[-1].index.is_monotonic_increasing
         # Determine if this grid spans the globe in longitude
         if (
             self.indexes
@@ -1531,7 +1523,7 @@ class Rectilinear(RectilinearMixin, GridSystem):
 
         return self._rectilinear_sel(
             bbox=bbox,
-            y_is_increasing=self.y_is_increasing,
+            y_is_increasing=y_index.index.is_monotonic_increasing,
             x_size=x_size,
             y_size=y_size,
         )

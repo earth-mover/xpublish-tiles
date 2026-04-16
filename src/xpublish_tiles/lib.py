@@ -805,13 +805,11 @@ def _get_indexer_size(
     elif isinstance(sl, _UgridIndexer):
         return sl.vertices.size
     elif isinstance(sl, slice):
-        start = sl.start if sl.start is not None else 0
-        if sl.stop is not None:
-            stop = sl.stop
-        elif dim_size is not None:
-            stop = dim_size
-        else:
+        if dim_size is None and (sl.start is None or sl.stop is None):
             raise ValueError("dim_size is required for open-ended slices")
+        # slice.indices normalizes negative/None start/stop (e.g. wraparound
+        # `slice(-2, None)` → (dim_size - 2, dim_size, 1), size = 2).
+        start, stop, _ = sl.indices(dim_size if dim_size is not None else 0)
         return stop - start
     else:
         raise TypeError(f"Unknown indexer type: {type(sl)!r}")
@@ -894,5 +892,11 @@ def max_render_shape(
     For polygons: derived from ``max_num_geometries`` so that
     ``product(max_shape) <= max_num_geometries``.
     """
+    if style == "polygons":
+        max_num = config.get("max_num_geometries")
+        aspect = width / height
+        max_h = int(math.sqrt(max_num / aspect))
+        max_w = int(max_h * aspect)
+        return (max_w, max_h)
     pixel_factor = config.get("max_pixel_factor")
     return (pixel_factor * width, pixel_factor * height)

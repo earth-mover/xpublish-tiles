@@ -10,7 +10,11 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from xpublish_tiles.grids import GridSystem, GridSystem2D, Triangular
-from xpublish_tiles.lib import check_data_is_renderable_size, transformer_from_crs
+from xpublish_tiles.lib import (
+    apply_default_pad,
+    check_data_is_renderable_size,
+    transformer_from_crs,
+)
 from xpublish_tiles.utils import time_debug, xarray_object_key
 
 _MIN_ZOOM_CACHE = cachetools.LRUCache(maxsize=8192)
@@ -83,25 +87,38 @@ def _compute_min_zoom(
 
     grid_to_wgs84 = transformer_from_crs(grid.crs, 4326)
 
-    bbox_lons = [grid.bbox.west, grid.bbox.east, grid.bbox.west, grid.bbox.east]
-    bbox_lats = [grid.bbox.south, grid.bbox.south, grid.bbox.north, grid.bbox.north]
-    wgs84_lons, wgs84_lats = grid_to_wgs84.transform(bbox_lons, bbox_lats)
+    # Sample points along the grid's actual boundary in its native CRS, then
+    # transform to WGS84. This avoids the axis-aligned-bbox overestimate you get
+    # from transforming only the 4 corners — which places "corner" test points
+    # outside the grid's real footprint for non-rectilinear projections (e.g.
+    # EPSG:3035), producing tile bboxes that don't overlap the grid.
+    n = 4
+    edge_ys = np.linspace(grid.bbox.south, grid.bbox.north, n)
+    edge_xs = np.linspace(grid.bbox.west, grid.bbox.east, n)
+    native_xs = np.concatenate(
+        [
+            np.full(n, grid.bbox.west),  # west edge
+            np.full(n, grid.bbox.east),  # east edge
+            edge_xs[1:-1],  # south edge (excl. corners)
+            edge_xs[1:-1],  # north edge (excl. corners)
+            [(grid.bbox.west + grid.bbox.east) / 2],  # center
+        ]
+    )
+    native_ys = np.concatenate(
+        [
+            edge_ys,
+            edge_ys,
+            np.full(n - 2, grid.bbox.south),
+            np.full(n - 2, grid.bbox.north),
+            [(grid.bbox.south + grid.bbox.north) / 2],
+        ]
+    )
+    wgs84_lons, wgs84_lats = grid_to_wgs84.transform(native_xs, native_ys)
 
-    wgs84_west, wgs84_east = min(wgs84_lons), max(wgs84_lons)
-    wgs84_south, wgs84_north = min(wgs84_lats), max(wgs84_lats)
-
-    west = max(wgs84_west, tms_geo_bounds.left)
-    east = min(wgs84_east, tms_geo_bounds.right)
-    south = max(wgs84_south, tms_geo_bounds.bottom)
-    north = min(wgs84_north, tms_geo_bounds.top)
-
-    test_points = [
-        (west, south),
-        (east, south),
-        (west, north),
-        (east, north),
-        ((west + east) / 2, (south + north) / 2),
-    ]
+    # Clip to TMS geo bounds so tms.tile(lon, lat, zoom) is valid.
+    wgs84_lons = np.clip(wgs84_lons, tms_geo_bounds.left, tms_geo_bounds.right)
+    wgs84_lats = np.clip(wgs84_lats, tms_geo_bounds.bottom, tms_geo_bounds.top)
+    test_points = list(zip(wgs84_lons.tolist(), wgs84_lats.tolist(), strict=True))
 
     alternate = grid.pick_alternate_grid(tms_crs, coarsen_factors={})
     transformer = transformer_from_crs(tms_crs, grid.crs)
@@ -121,15 +138,9 @@ def _compute_min_zoom(
 
             tile_bbox = BBox(west=left, south=bottom, east=right, north=top)
 
-            # Slicing wrong with RasterAffine
-            # {'x': [slice(0, 0, None)], 'y': [slice(np.int64(14867), 33584, None)]} BBox(west=-1060766.3943231786, south=601661.7823203206, east=1669241.1682457477, north=3631880.0755465305)
-            # {'x': [slice(28741, 28741, None)], 'y': [slice(np.int64(13631), 33584, None)]} BBox(west=7160230.022809643, south=711472.8767478825, east=9897879.13161066, north=3780209.8177550193)
             slicers = grid.sel(bbox=tile_bbox)
-            print(slicers, tile_bbox)
 
             if isinstance(grid, GridSystem2D):
-                from xpublish_tiles.lib import apply_default_pad
-
                 slicers = apply_default_pad(slicers, da, grid)
 
             if not check_data_is_renderable_size(
