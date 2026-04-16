@@ -307,11 +307,10 @@ async def test_property_global_render_no_transparent_tile(
         result = await pipeline(ds, query_params)
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
-    if style == "raster":
-        transparent_percent = check_transparent_pixels(result.getvalue())
-        assert transparent_percent == 0, (
-            f"Found {transparent_percent:.1f}% transparent pixels in tile {tile}"
-        )
+    transparent_percent = check_transparent_pixels(result.getvalue())
+    assert transparent_percent == 0, (
+        f"Found {transparent_percent:.1f}% transparent pixels in tile {tile}"
+    )
 
 
 @pytest.mark.asyncio

@@ -468,7 +468,6 @@ def fix_coordinate_discontinuities(
     transformer: pyproj.Transformer,
     *,
     bbox: BBox,
-    axis: int | None = None,
 ) -> np.ndarray:
     """
     Fix coordinate discontinuities that occur during coordinate transformation.
@@ -491,11 +490,6 @@ def fix_coordinate_discontinuities(
         Transformer from source to target CRS.
     bbox : BBox
         Target bounding box to align coordinates to.
-    axis : int or None
-        Axis along which to unwrap. None uses scikit-image unwrap_phase
-        (spatial unwrapping across all dimensions). An integer uses
-        numpy unwrap along that axis (independent per-slice unwrapping).
-
     Examples
     --------
     >>> import numpy as np
@@ -522,23 +516,19 @@ def fix_coordinate_discontinuities(
         return coordinates
 
     # Step 1: Use unwrap to fix discontinuities
-    unwrapped_coords = unwrap(coordinates, width=coordinate_space_width, axis=axis)
+    unwrapped_coords = unwrap(coordinates, width=coordinate_space_width)
 
     # Step 2: Determine optimal shift based on coordinate and bbox bounds
+    coord_min, coord_max = unwrapped_coords.min(), unwrapped_coords.max()
     bbox_center = (bbox.west + bbox.east) / 2
-    coord_center = (unwrapped_coords.min(axis=axis) + unwrapped_coords.max(axis=axis)) / 2
+    coord_center = (coord_min + coord_max) / 2
 
     # Calculate how many coordinate_space_widths we need to shift to align centers
     center_diff = bbox_center - coord_center
-    shift_multiple = np.round(center_diff / coordinate_space_width)
+    shift_multiple = round(center_diff / coordinate_space_width)
 
     # Apply the calculated shift
-    if axis is not None:
-        # Expand shift for broadcasting (e.g. per-polygon shifts)
-        shift = shift_multiple * coordinate_space_width
-        result = unwrapped_coords + np.expand_dims(shift, axis=axis)
-    else:
-        result = unwrapped_coords + (shift_multiple * coordinate_space_width)
+    result = unwrapped_coords + (shift_multiple * coordinate_space_width)
     return result
 
 
@@ -1002,8 +992,6 @@ async def transform_for_render(
                         newX.data,
                         input_to_output,
                         bbox=bbox,
-                        # axis=None here helps handle tripole
-                        axis=None,
                     )
                 )
 
