@@ -35,7 +35,7 @@ jobs:
 
       # To debug snapshot test failures run with --debug-visual-save and download the artifact zip created in the next step.
       - name: Run tests with coverage
-        run: uv run pytest tests --cov=src/xpublish_tiles --cov-report=xml --cov-report=term-missing --durations=10 -nauto --shard-id=${{ strategy.job-index }} --num-shards=${{ strategy.job-total }}
+        run: uv run pytest tests --cov=src/xpublish_tiles --cov-report=xml --cov-report=term-missing --durations=10 -nauto --splits=${{ strategy.job-total }} --group=${{ matrix.shard }} --splitting-algorithm=least_duration
 
       - name: Upload debug visual images on failure
         if: failure()
