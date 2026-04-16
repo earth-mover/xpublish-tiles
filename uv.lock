@@ -3415,6 +3415,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pytest-shard"
+version = "0.1.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c6/ca/3efa6f3b84dab83220db45997e785be726684c2c2c4267bffb7d80101c7f/pytest-shard-0.1.2.tar.gz", hash = "sha256:b86a967fbfd1c8e50295095ccda031b7e890862ee06531d5142844f4c1d1cd67", size = 3579, upload-time = "2020-12-11T19:52:55.083Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/65/7a/dbeb4c54e9fc3b59622f410091365f354a69cda1af10c3b83ac0ca6e6f4f/pytest_shard-0.1.2-py3-none-any.whl", hash = "sha256:407a1df385cebe1feb9b4d2e7eeee8b044f8a24f0919421233159a17c59be2b9", size = 4608, upload-time = "2020-12-11T19:52:54.226Z" },
+]
+
+[[package]]
 name = "pytest-xdist"
 version = "3.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4517,6 +4529,7 @@ testing = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "pytest-randomly" },
+    { name = "pytest-shard" },
     { name = "pytest-xdist" },
     { name = "scikit-image" },
     { name = "syrupy" },
@@ -4564,6 +4577,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'testing'", specifier = ">=1.1.0" },
     { name = "pytest-cov", marker = "extra == 'testing'", specifier = ">=6.2.1" },
     { name = "pytest-randomly", marker = "extra == 'testing'", specifier = ">=3.16.0" },
+    { name = "pytest-shard", marker = "extra == 'testing'", specifier = ">=0.1.2" },
     { name = "pytest-xdist", marker = "extra == 'testing'", specifier = ">=3.6.1" },
     { name = "rasterix", specifier = ">=0.1a4" },
     { name = "requests", specifier = ">=2.32.5" },
