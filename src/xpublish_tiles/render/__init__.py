@@ -1,9 +1,11 @@
 import io
 from abc import ABC, abstractmethod
+from importlib.metadata import entry_points
 from numbers import Number
 from typing import TYPE_CHECKING
 
 import datashader as dsh
+import datashader.transfer_functions as tf
 import matplotlib as mpl
 import matplotlib.colors as mcolors
 import numpy as np
@@ -53,8 +55,6 @@ class RenderRegistry:
         """Load renderers from entry points."""
         if cls._loaded:
             return
-
-        from importlib.metadata import entry_points
 
         eps = entry_points(group="xpublish_tiles.renderers")
         for ep in eps:
@@ -207,8 +207,6 @@ class DatashaderRenderer(Renderer):
         Shared by raster and polygon renderers — everything after ``cvs.quadmesh`` /
         ``cvs.trimesh`` / ``cvs.polygons`` is identical.
         """
-        import datashader.transfer_functions as tf
-
         if isinstance(datatype, ContinuousData):
             if colorscalerange is None:
                 valid_min = datatype.valid_min
@@ -281,8 +279,6 @@ class DatashaderRenderer(Renderer):
 
     @staticmethod
     def supported_variants() -> list[str]:
-        import matplotlib as mpl
-
         colormaps = list(mpl.colormaps)
         variants = [name for name in sorted(colormaps) if not name.endswith("_r")]
         variants.append("custom")

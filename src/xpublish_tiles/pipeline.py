@@ -1066,8 +1066,6 @@ async def transform_for_render(
             result[var_name] = context
             continue
 
-        input_to_output = transformer_from_crs(alternate.crs, crs)
-
         if style == "polygons" and isinstance(grid, GridSystem2D):
             to_transform = grid.cell_corners(
                 slicers=context.slicers,
@@ -1076,30 +1074,40 @@ async def transform_for_render(
         else:
             to_transform = subset
 
+        input_to_output = transformer_from_crs(alternate.crs, crs)
         with log_duration("transform_coordinates", "🔄"):
             newX, newY = await transform_coordinates(
                 to_transform, alternate.X, alternate.Y, input_to_output
             )
 
+        # Check for discontinuities on geographic coords before projection.
+        # This is an optimization - we could also detect after projecting to the target CRS.
+        # However, that would be a tax on every render. So instead we look for
+        # the anti-meridian discontinuity specifically.
         if grid.crs.is_geographic:
             if isinstance(grid, Polar):
                 has_discontinuity = False
+            elif isinstance(grid, GridSystem2D):
+                has_discontinuity = has_coordinate_discontinuity(
+                    to_transform[grid.X].data,
+                    360.0,
+                    axis=to_transform[grid.X].get_axis_num(grid.Xdim),
+                    check_antimeridian=True,
+                )
             elif isinstance(grid, Triangular):
                 assert context.ugrid_indexer is not None
                 anti = context.ugrid_indexer.antimeridian_vertices
                 has_discontinuity = anti["pos"].size > 0 or anti["neg"].size > 0
             else:
-                has_discontinuity = has_coordinate_discontinuity(
-                    to_transform[grid.X].data,
-                    360.0,
-                    axis=to_transform[grid.X].get_axis_num(grid.Xdim)
-                    if grid.Xdim in to_transform[grid.X].dims
-                    else 0,
-                    check_antimeridian=True,
-                )
+                raise NotImplementedError
         else:
             has_discontinuity = False
 
+        # Fix coordinate discontinuities in transformed coordinates if detected
+        # For example, when transforming to WebMercator pyproj will always return values
+        # in the approximate range -20e6 -> 20e6 m range. So if the dataset's anti-meridian
+        # discontinuity is in the tile; it will be preserved by the transformation,
+        # regardless of how we may modify the coordinates *before* transforming.
         if has_discontinuity:
             if isinstance(grid, Triangular):
                 assert context.ugrid_indexer is not None
@@ -1112,7 +1120,11 @@ async def transform_for_render(
             else:
                 newX = newX.copy(
                     data=fix_coordinate_discontinuities(
-                        newX.data, input_to_output, bbox=bbox
+                        newX.data,
+                        input_to_output,
+                        bbox=bbox,
+                        # axis=None here helps handle tripole
+                        axis=None,
                     )
                 )
 
@@ -1127,11 +1139,6 @@ async def transform_for_render(
                 rings = np.empty((n, 4, 2), dtype=np.float64)
                 rings[:, :3, :] = tri_corners
                 rings[:, 3, :] = tri_corners[:, 0, :]
-                # Per-triangle unwrap for faces crossing the antimeridian
-                if grid.crs.is_geographic:
-                    rings[:, :, 0] = fix_coordinate_discontinuities(
-                        rings[:, :, 0], input_to_output, bbox=bbox, axis=1
-                    )
                 cell_boundaries = shapely.polygons(rings)
             else:
                 # Align corner dim order with the data so ravel orders match.

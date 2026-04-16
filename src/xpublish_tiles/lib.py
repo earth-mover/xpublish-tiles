@@ -598,33 +598,23 @@ def slicers_to_pad_instruction(slicers, datatype) -> dict[str, Any]:
 
 @numba.njit(parallel=True, cache=True, boundscheck=False)
 def fill_rings_from_corners(out, corner_x, corner_y):
-    """Fill a (ny, nx, 5, 2) ring array from a (ny+1, nx+1) corner grid.
+    """Fill a (n0, n1, 5, 2) ring array from a (n0+1, n1+1) corner grid.
 
-    Each cell (i, j) has corners at grid positions (i, j), (i, j+1),
-    (i+1, j+1), (i+1, j). Counter-clockwise ring order:
-    SW, SE, NE, NW, SW(close).
+    Ring order: (i,j), (i,j+1), (i+1,j+1), (i+1,j), (i,j) [close].
     """
-    ny, nx = out.shape[0], out.shape[1]
-    for i in numba.prange(ny):  # ty: ignore[not-iterable]
-        for j in range(nx):
-            x00 = corner_x[i, j]
-            x01 = corner_x[i, j + 1]
-            x10 = corner_x[i + 1, j]
-            x11 = corner_x[i + 1, j + 1]
-            y00 = corner_y[i, j]
-            y01 = corner_y[i, j + 1]
-            y10 = corner_y[i + 1, j]
-            y11 = corner_y[i + 1, j + 1]
-            out[i, j, 0, 0] = x00
-            out[i, j, 0, 1] = y00
-            out[i, j, 1, 0] = x01
-            out[i, j, 1, 1] = y01
-            out[i, j, 2, 0] = x11
-            out[i, j, 2, 1] = y11
-            out[i, j, 3, 0] = x10
-            out[i, j, 3, 1] = y10
-            out[i, j, 4, 0] = x00
-            out[i, j, 4, 1] = y00
+    n0, n1 = out.shape[0], out.shape[1]
+    for i in numba.prange(n0):  # ty: ignore[not-iterable]
+        for j in range(n1):
+            out[i, j, 0, 0] = corner_x[i, j]
+            out[i, j, 0, 1] = corner_y[i, j]
+            out[i, j, 1, 0] = corner_x[i, j + 1]
+            out[i, j, 1, 1] = corner_y[i, j + 1]
+            out[i, j, 2, 0] = corner_x[i + 1, j + 1]
+            out[i, j, 2, 1] = corner_y[i + 1, j + 1]
+            out[i, j, 3, 0] = corner_x[i + 1, j]
+            out[i, j, 3, 1] = corner_y[i + 1, j]
+            out[i, j, 4, 0] = corner_x[i, j]
+            out[i, j, 4, 1] = corner_y[i, j]
 
 
 def apply_range_colors(
