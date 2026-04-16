@@ -123,12 +123,13 @@ def _compute_min_zoom(
     alternate = grid.pick_alternate_grid(tms_crs, coarsen_factors={})
     transformer = transformer_from_crs(tms_crs, grid.crs)
 
-    for zoom in range(tms.minzoom, tms.maxzoom + 1):
-        all_tiles_renderable = True
-
-        for lon, lat in test_points:
-            tile = tms.tile(lon, lat, zoom)
-            bounds = tms.xy_bounds(tile)
+    def all_renderable(zoom: int) -> bool:
+        unique_tiles = {
+            (tile.x, tile.y)
+            for tile in (tms.tile(lon, lat, zoom) for lon, lat in test_points)
+        }
+        for x, y in unique_tiles:
+            bounds = tms.xy_bounds(morecantile.Tile(x=x, y=y, z=zoom))
             left, bottom, right, top = transformer.transform_bounds(
                 bounds.left, bounds.bottom, bounds.right, bounds.top
             )
@@ -137,22 +138,29 @@ def _compute_min_zoom(
                 right += 360
 
             tile_bbox = BBox(west=left, south=bottom, east=right, north=top)
-
             slicers = grid.sel(bbox=tile_bbox)
-
-            if isinstance(grid, GridSystem2D):
+            if isinstance(grid, GridSystem2D) and style != "polygons":
                 slicers = apply_default_pad(slicers, da, grid)
-
             if not check_data_is_renderable_size(
                 slicers, da, grid, alternate, style=style
             ):
-                all_tiles_renderable = False
-                break
+                return False
+        return True
 
-        if all_tiles_renderable:
-            return zoom
-
-    return tms.minzoom
+    # Renderability is monotonic in zoom (higher zoom → smaller tiles → fewer
+    # cells). Binary-search for the smallest zoom that is fully renderable.
+    lo, hi = tms.minzoom, tms.maxzoom
+    if all_renderable(lo):
+        return lo
+    if not all_renderable(hi):
+        return tms.minzoom
+    while lo + 1 < hi:
+        mid = (lo + hi) // 2
+        if all_renderable(mid):
+            hi = mid
+        else:
+            lo = mid
+    return hi
 
 
 def get_min_zoom(

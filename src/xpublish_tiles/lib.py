@@ -805,11 +805,13 @@ def _get_indexer_size(
     elif isinstance(sl, _UgridIndexer):
         return sl.vertices.size
     elif isinstance(sl, slice):
-        if dim_size is None and (sl.start is None or sl.stop is None):
-            raise ValueError("dim_size is required for open-ended slices")
+        if dim_size is None:
+            if sl.start is None or sl.stop is None or sl.start < 0 or sl.stop < 0:
+                raise ValueError("dim_size is required for open-ended or negative slices")
+            return sl.stop - sl.start
         # slice.indices normalizes negative/None start/stop (e.g. wraparound
         # `slice(-2, None)` → (dim_size - 2, dim_size, 1), size = 2).
-        start, stop, _ = sl.indices(dim_size if dim_size is not None else 0)
+        start, stop, _ = sl.indices(dim_size)
         return stop - start
     else:
         raise TypeError(f"Unknown indexer type: {type(sl)!r}")
