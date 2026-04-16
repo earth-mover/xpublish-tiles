@@ -1401,10 +1401,12 @@ class Rectilinear(RectilinearMixin, GridSystem):
     dYmin: float = field(init=False)
     left_break: float = field(init=False)
     right_break: float = field(init=False)
+    y_is_increasing: bool = field(init=False)
 
     def __post_init__(self) -> None:
         self.Xdim = self.X
         self.Ydim = self.Y
+        self.y_is_increasing = self.indexes[-1].index.is_monotonic_increasing
         # Determine if this grid spans the globe in longitude
         if (
             self.indexes
@@ -1529,7 +1531,7 @@ class Rectilinear(RectilinearMixin, GridSystem):
 
         return self._rectilinear_sel(
             bbox=bbox,
-            y_is_increasing=y_index.index.is_monotonic_increasing,
+            y_is_increasing=self.y_is_increasing,
             x_size=x_size,
             y_size=y_size,
         )
@@ -1539,8 +1541,8 @@ class Rectilinear(RectilinearMixin, GridSystem):
         x_index, y_index = self.indexes[0], self.indexes[-1]
         x_ii = cast(pd.IntervalIndex, x_index.index)
         y_ii = cast(pd.IntervalIndex, y_index.index)
-        x_edges = np.append(np.asarray(x_ii.left), x_ii.right[-1])
-        y_edges = np.append(np.asarray(y_ii.left), y_ii.right[-1])
+        x_edges = _compute_interval_bounds(np.asarray(x_ii.mid))
+        y_edges = _compute_interval_bounds(np.asarray(y_ii.mid))
         return x_edges, y_edges
 
     def cell_corners(

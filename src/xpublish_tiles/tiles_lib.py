@@ -10,7 +10,7 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from xpublish_tiles.grids import GridSystem, GridSystem2D, Triangular
-from xpublish_tiles.lib import transformer_from_crs
+from xpublish_tiles.lib import check_data_is_renderable_size, transformer_from_crs
 from xpublish_tiles.utils import time_debug, xarray_object_key
 
 _MIN_ZOOM_CACHE = cachetools.LRUCache(maxsize=8192)
@@ -70,8 +70,6 @@ def _compute_min_zoom(
     *,
     style: str,
 ) -> int:
-    from xpublish_tiles.pipeline import check_data_is_renderable_size
-
     tms_crs = CRS.from_wkt(tms.crs.to_wkt())
 
     geo_left, geo_bottom, geo_right, geo_top = tms.bbox

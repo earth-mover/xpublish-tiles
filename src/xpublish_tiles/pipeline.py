@@ -1,6 +1,5 @@
 import asyncio
 import io
-import math
 from functools import partial
 from typing import Any, cast
 
@@ -29,6 +28,7 @@ from xpublish_tiles.lib import (
     PadDimension,
     TileTooBigError,
     VariableNotFoundError,
+    _iter_subset_shapes,
     async_run,
     coarsen_mean_pad,
     get_data_load_semaphore,
@@ -69,110 +69,6 @@ def round_bbox(bbox: BBox) -> BBox:
 
 def sum_tuples(*tuples):
     return tuple(sum(values) for values in zip(*tuples, strict=False))
-
-
-def check_data_is_renderable_size(
-    slicers: dict[str, list[slice | Fill | UgridIndexer]],
-    da: xr.DataArray,
-    grid: GridSystem,
-    alternate: GridMetadata,
-    *,
-    style: str = "raster",
-) -> bool:
-    """
-    Check if given slicers produce data of renderable size without loading data.
-
-    This replicates the logic from apply_slicers that checks for tile size limits.
-    But is less accurate because we aren't careful about coordinate variables.
-    We do *not* want to apply isel here because this function is used in a loop to determine
-    minzoom for many TMS-es on the metadata route.
-
-    Parameters
-    ----------
-    slicers : dict[str, list[slice | Fill | UgridIndexer]]
-        Slicers for data selection
-    da : xr.DataArray
-        Data array (only metadata used, no data loaded)
-    grid : GridSystem2D
-        Grid system information
-    alternate : GridMetadata
-        Alternate grid metadata
-
-    Returns
-    -------
-    bool
-        True if data is within renderable size limits, False if too big
-    """
-    has_alternate = alternate.crs != grid.crs
-    # Factor calculation matches apply_slicers logic:
-    # if we have crs matching the desired CRS,
-    # then we load that data from disk;
-    # and double the limit to allow slightly larger tiles
-    # = (1 data var + 2 coord vars) * 2
-    factor = 3 if has_alternate else 1
-
-    # Get individual shapes for each subset and compute sum of products (not product of sums)
-    total_size = sum(math.prod(shape) for shape in _iter_subset_shapes(slicers, da, grid))
-    if style == "polygons":
-        total_size *= grid.npoints_per_geometry
-    assert total_size > 0
-    # Check if it's within the limit
-    return total_size * da.dtype.itemsize <= factor * config.get("max_renderable_size")
-
-
-def _get_indexer_size(
-    sl: slice | Fill | UgridIndexer, dim_size: int | None = None
-) -> int:
-    """Get the size of an indexer (slice, Fill, or UgridIndexer)."""
-    if isinstance(sl, Fill):
-        return sl.size
-    elif isinstance(sl, UgridIndexer):
-        return sl.vertices.size
-    elif isinstance(sl, slice):
-        start = sl.start if sl.start is not None else 0
-        if sl.stop is not None:
-            stop = sl.stop
-        elif dim_size is not None:
-            stop = dim_size
-        else:
-            raise ValueError("dim_size is required for open-ended slices")
-        return stop - start
-    else:
-        raise TypeError(f"Unknown indexer type: {type(sl)!r}")
-
-
-def _iter_subset_shapes(
-    slicers: dict[str, list[slice | Fill | UgridIndexer]],
-    da: xr.DataArray,
-    grid: GridSystem,
-):
-    """
-    Iterate over individual subset shapes from slicers.
-
-    Yields tuple shapes for each subset that will be created.
-    For GridSystem2D, yields (x_size, y_size) for each X slice.
-    For Triangular, yields (size,) for the single slice.
-    """
-    if isinstance(grid, Triangular):
-        yield (_get_indexer_size(next(iter(slicers[grid.dim])), da.sizes[grid.dim]),)
-        return
-
-    # Find the one Y slice that's actually a slice (not Fill)
-    yslice = None
-    for candidate in slicers[grid.Ydim]:
-        if isinstance(candidate, slice):
-            yslice = candidate
-            break
-
-    if yslice is None:
-        # If no slice found, take the first item (should be a Fill or slice)
-        yslice = slicers[grid.Ydim][0]
-
-    y_size = _get_indexer_size(yslice, da.sizes[grid.Ydim])
-
-    for sl in slicers[grid.Xdim]:
-        x_size = _get_indexer_size(sl, da.sizes[grid.Xdim])
-        yield (x_size, y_size)
 
 
 def shape_from_slicers(
