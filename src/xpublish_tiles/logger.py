@@ -6,6 +6,8 @@ import contextlib
 import contextvars
 import functools
 import logging
+import sys
+import threading
 import time
 from collections.abc import Callable
 from typing import Any
@@ -31,6 +33,24 @@ _context_logger: contextvars.ContextVar[structlog.stdlib.BoundLogger | None] = (
     contextvars.ContextVar("context_logger")
 )
 
+# Context variable to hold the current log accumulator for a request
+_context_accumulator: contextvars.ContextVar[LogAccumulator | None] = (
+    contextvars.ContextVar("context_accumulator", default=None)
+)
+
+# Lock to serialize the final flush so concurrent requests don't interleave
+_flush_lock = threading.Lock()
+
+
+def _accumulate_if_active(logger, method_name, event_dict):
+    """Structlog processor: if an accumulator is active in this context,
+    capture the event and drop it; otherwise pass through unchanged."""
+    accumulator = _context_accumulator.get()
+    if accumulator is not None:
+        accumulator.logs.append(event_dict)
+        raise structlog.DropEvent
+    return event_dict
+
 
 # Set up a shared logger for the xpublish_tiles package (for backward compatibility)
 logger = logging.getLogger("xpublish_tiles")
@@ -45,11 +65,14 @@ shared_processors = [
 structlog.configure(
     processors=[
         structlog.stdlib.filter_by_level,  # Respects standard logging level
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.add_log_level,
         *shared_processors,
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         structlog.processors.UnicodeDecoder(),
+        _accumulate_if_active,
         structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
     ],
     context_class=dict,
@@ -195,21 +218,9 @@ def with_accumulated_logs(
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
-            # Create log accumulator and configure structlog
+            # Create per-request log accumulator and register it in the context
             accumulator = LogAccumulator()
-
-            structlog.configure(
-                processors=[
-                    structlog.stdlib.filter_by_level,
-                    structlog.stdlib.add_logger_name,
-                    structlog.stdlib.add_log_level,
-                    structlog.processors.TimeStamper(fmt="iso"),
-                    accumulator,
-                ],
-                context_class=dict,
-                logger_factory=structlog.stdlib.LoggerFactory(),
-                cache_logger_on_first_use=False,
-            )
+            accumulator_token = _context_accumulator.set(accumulator)
 
             # Create bound logger with context if provided
             bound_logger = get_logger()
@@ -231,21 +242,31 @@ def with_accumulated_logs(
                 total_ms = (time.perf_counter() - start_time) * 1000
                 raise
             finally:
-                # Print all log lines if logger level allows
-                if accumulator.logs and bound_logger.isEnabledFor(logging.DEBUG):
-                    console_renderer = CleanConsoleRenderer()
+                try:
+                    # Always flush accumulated logs when non-empty. The entries
+                    # stored here already passed structlog's level filter.
+                    if accumulator.logs:
+                        console_renderer = CleanConsoleRenderer()
 
-                    # Generate log message
-                    if log_message_fn is not None:
-                        log_msg = log_message_fn(*args, **kwargs)
-                    else:
-                        log_msg = func.__name__
+                        if log_message_fn is not None:
+                            log_msg = log_message_fn(*args, **kwargs)
+                        else:
+                            log_msg = func.__name__
 
-                    print(f"🔧 {log_msg} (total: {total_ms:.0f}ms)")
-                    for log_entry in accumulator.logs:
-                        rendered = console_renderer(None, None, log_entry)
-                        print(f"   {rendered}")
-                    print()  # Empty line after each request
+                        lines = [f"🔧 {log_msg} (total: {total_ms:.0f}ms)"]
+                        for log_entry in accumulator.logs:
+                            rendered = console_renderer(None, None, log_entry)
+                            lines.append(f"   {rendered}")
+                        lines.append("")  # Empty line after each request
+                        output = "\n".join(lines) + "\n"
+
+                        # Single atomic write under a lock so concurrent
+                        # requests don't interleave their log blocks.
+                        with _flush_lock:
+                            sys.stdout.write(output)
+                            sys.stdout.flush()
+                finally:
+                    _context_accumulator.reset(accumulator_token)
 
         return wrapper
 
