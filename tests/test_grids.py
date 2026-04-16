@@ -938,7 +938,7 @@ class TestGridZoomMethods:
         "shape, expected",
         (
             ((10, 20), 0),
-            ((30000, 15000), 2),
+            ((30000, 15000), 1),
         ),
     )
     def test_get_min_zoom(self, shape, expected):
@@ -1175,7 +1175,7 @@ async def test_curvilinear_memory_limit_and_minzoom():
     with config.set({"max_renderable_size": memory_limit}):
         # Calculate minzoom - should be high enough to avoid memory issues
         minzoom = get_min_zoom(grid, tms, ds["foo"])
-        assert minzoom == 3
+        assert minzoom == 2
 
         # Get slicers for a tile at minzoom to verify memory calculation
         tile = morecantile.Tile(x=0, y=0, z=minzoom)

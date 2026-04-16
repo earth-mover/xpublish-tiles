@@ -124,13 +124,11 @@ def _get_indexer_size(
     elif isinstance(sl, UgridIndexer):
         return sl.vertices.size
     elif isinstance(sl, slice):
-        start = sl.start if sl.start is not None else 0
-        if sl.stop is not None:
-            stop = sl.stop
-        elif dim_size is not None:
-            stop = dim_size
-        else:
-            raise ValueError("dim_size is required for open-ended slices")
+        if dim_size is None:
+            if sl.start is None or sl.stop is None or sl.start < 0 or sl.stop < 0:
+                raise ValueError("dim_size is required for open-ended or negative slices")
+            return sl.stop - sl.start
+        start, stop, _ = sl.indices(dim_size)
         return stop - start
     else:
         raise TypeError(f"Unknown indexer type: {type(sl)!r}")
