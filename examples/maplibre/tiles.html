@@ -48,10 +48,13 @@
     <body>
         <div id="map"></div>
         <div id="toggle-container">
+            <button id="fly-to-center" class="toggle-button">Fly to Data</button>
             <button id="globe-toggle" class="toggle-button">Disable Globe</button>
             <button id="tile-boundaries-toggle" class="toggle-button">Show Tile Boundaries</button>
         </div>
         <script>
+            const TILEJSON_URL = "http://localhost:8080/tiles/WebMercatorQuad/tilejson.json?variables=foo&width=512&height=512&style=polygons/viridis";
+
             const map = new maplibregl.Map({
                 container: "map",
                 style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
@@ -70,7 +73,7 @@
                     type: "raster",
                     // use the tiles option to specify a raster tile source URL
                     // https://docs.mapbox.com/style-spec/reference/sources/
-                    url: "http://localhost:8080/tiles/WebMercatorQuad/tilejson.json?variables=foo&width=512&height=512&style=polygons/viridis",
+                    url: TILEJSON_URL,
                     tileSize: 512,
                 });
                 map.addLayer(
@@ -85,6 +88,18 @@
                     // 'building' // Place layer under labels, roads and buildings.
                 );
                 map.showTileBoundaries = false;
+
+                // Fly to data center using tilejson bbox & minzoom
+                document.getElementById("fly-to-center").addEventListener("click", async () => {
+                    const resp = await fetch(TILEJSON_URL);
+                    const tj = await resp.json();
+                    if (tj.bounds) {
+                        const [west, south, east, north] = tj.bounds;
+                        map.fitBounds([[west, south], [east, north]], {
+                            padding: 40,
+                        });
+                    }
+                });
 
                 // Toggle globe projection
                 const globeToggle = document.getElementById("globe-toggle");
