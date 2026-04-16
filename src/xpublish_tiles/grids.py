@@ -1014,6 +1014,7 @@ class GridSystem(ABC):
     Y: str
     Xdim: str
     Ydim: str
+    npoints_per_geometry: int
 
     # FIXME: do we really need these Index objects on the class?
     #   - reconsider when we do curvilinear and triangular grids
@@ -1189,6 +1190,7 @@ class RectilinearMixin:
     Y: str
     Xdim: str
     Ydim: str
+    npoints_per_geometry: int = field(init=False, default=5)
 
     def coarsen_indices(
         self,
@@ -1284,6 +1286,7 @@ class RasterAffine(RectilinearMixin, GridSystem):
     indexes: tuple[rasterix.RasterIndex]
     Z: str | None = None
     lon_spans_globe: bool = field(init=False)
+    npoints_per_geometry: int = field(init=False, default=5)
     dXmin: float = field(init=False)
     dYmin: float = field(init=False)
 
@@ -1392,6 +1395,7 @@ class Rectilinear(RectilinearMixin, GridSystem):
     Ydim: str = field(init=False)
     indexes: tuple[xr.indexes.PandasIndex | LongitudeCellIndex, xr.indexes.PandasIndex]
     Z: str | None = None
+    npoints_per_geometry: int = field(init=False, default=5)
     lon_spans_globe: bool = field(init=False)
     dXmin: float = field(init=False)
     dYmin: float = field(init=False)
@@ -1581,6 +1585,7 @@ class Curvilinear(GridSystem):
     lon_spans_globe: bool = field(init=False)
     dXmin: float = field(init=False)
     dYmin: float = field(init=False)
+    npoints_per_geometry: int = field(init=False, default=5)
 
     def __post_init__(self) -> None:
         index = next(iter(self.indexes))
@@ -1813,6 +1818,7 @@ class Polar(GridSystem):
     center_lat: float
     center_lon: float
     lon_spans_globe: bool = False
+    npoints_per_geometry: int = field(init=False, default=5)
     dXmin: float = field(init=False)
     dYmin: float = field(init=False)
 
@@ -1959,6 +1965,7 @@ class Triangular(GridSystem):
     dim: str
     lon_spans_globe: bool
     indexes: tuple[xr.Index]
+    npoints_per_geometry: int = field(init=False, default=4)
 
     # these make no sense
     dXmin: float = 0

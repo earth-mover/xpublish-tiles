@@ -759,3 +759,22 @@ def coarsen_mean_pad(da: xr.DataArray, factors: dict[str, int]) -> xr.DataArray:
     with NUMBA_THREADING_LOCK:
         _coarsen_nanmean_2d(arr, fy, fx, out)
     return xr.DataArray(out, dims=dims, name=da.name)
+
+
+def max_render_shape(
+    *, style: str, width: int = 256, height: int = 256
+) -> tuple[int, int]:
+    """Compute the per-axis max data shape for coarsening, given the render style.
+
+    For raster: ``max_pixel_factor * tile_size`` per axis.
+    For polygons: derived from ``max_num_geometries`` so that
+    ``product(max_shape) <= max_num_geometries``.
+    """
+    if style == "polygons":
+        max_num = config.get("max_num_geometries")
+        aspect = width / height
+        max_h = int(math.sqrt(max_num / aspect))
+        max_w = int(max_h * aspect)
+        return (max_w, max_h)
+    pixel_factor = config.get("max_pixel_factor")
+    return (pixel_factor * width, pixel_factor * height)

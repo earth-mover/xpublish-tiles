@@ -20,6 +20,7 @@ config = donfig.Config(
             # in bytes; ~10,000 * 10,000 float64 pixels; takes the pipeline ~ 1s
             "max_renderable_size": 1024**3,
             "max_pixel_factor": 3,  # coarsen down to this many input grid cells per output pixel
+            "max_num_geometries": 1_500_000,  # coarsend down to this many geometries.
             "async_load": True,
             "async_load_timeout_per_tile": 20,  # seconds; None to disable
             "num_concurrent_data_loads": 4,  # max concurrent tile data loads; None to disable

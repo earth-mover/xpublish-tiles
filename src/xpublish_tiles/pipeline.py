@@ -29,10 +29,10 @@ from xpublish_tiles.lib import (
     PadDimension,
     TileTooBigError,
     VariableNotFoundError,
-    apply_default_pad,
     async_run,
     coarsen_mean_pad,
     get_data_load_semaphore,
+    max_render_shape,
     pad_slicers,
     transform_coordinates,
     transformer_from_crs,
@@ -76,6 +76,8 @@ def check_data_is_renderable_size(
     da: xr.DataArray,
     grid: GridSystem,
     alternate: GridMetadata,
+    *,
+    style: str = "raster",
 ) -> bool:
     """
     Check if given slicers produce data of renderable size without loading data.
@@ -111,7 +113,9 @@ def check_data_is_renderable_size(
 
     # Get individual shapes for each subset and compute sum of products (not product of sums)
     total_size = sum(math.prod(shape) for shape in _iter_subset_shapes(slicers, da, grid))
-
+    if style == "polygons":
+        total_size *= grid.npoints_per_geometry
+    assert total_size > 0
     # Check if it's within the limit
     return total_size * da.dtype.itemsize <= factor * config.get("max_renderable_size")
 
@@ -280,7 +284,6 @@ def estimate_coarsen_factors_and_slicers(
     slicers: dict[str, list[slice | Fill | UgridIndexer]],
     max_shape: tuple[int, int],
     datatype: DataType,
-    skip_default_pad: bool = False,
 ) -> tuple[dict[str, int], dict[str, list[slice | Fill | UgridIndexer]]]:
     """
     Estimate coarsening factors and adjusted slicers for the given data array.
@@ -297,10 +300,6 @@ def estimate_coarsen_factors_and_slicers(
         Maximum allowed shape (width, height)
     datatype : DataType
         Data type information
-    skip_default_pad : bool
-        When True, skip apply_default_pad. Polygon rendering provides explicit
-        cell edges, so the floating-point edge-safety padding that datashader
-        raster rendering requires is unnecessary.
 
     Returns
     -------
@@ -325,11 +324,6 @@ def estimate_coarsen_factors_and_slicers(
             da=da,
             grid=grid,
         )
-
-    if not skip_default_pad:
-        # Apply default_pad for edge safety (floating-point roundoff protection)
-        new_slicers = apply_default_pad(new_slicers, da, grid)
-
     return coarsen_factors, new_slicers
 
 
@@ -734,11 +728,9 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = await async_run(
         partial(apply_query, ds, variables=query.variables, selectors=query.selectors)
     )
-    if query.style == "polygons":
-        pixel_factor = config.get("polygon_max_pixel_factor")
-    else:
-        pixel_factor = config.get("max_pixel_factor")
-    max_shape = (pixel_factor * query.width, pixel_factor * query.height)
+    max_shape = max_render_shape(
+        style=query.style, width=query.width, height=query.height
+    )
 
     # Capture the context logger before entering thread pool
     context_logger = get_context_logger()
@@ -991,8 +983,6 @@ async def subset_to_bbox(
             slicers=slicers,
             max_shape=max_shape,
             datatype=array.datatype,
-            # Polygons provide explicit cell edges, so skip the datashader edge-safety pad.
-            skip_default_pad=style == "polygons",
         )
         alternate = grid.pick_alternate_grid(crs, coarsen_factors=coarsen_factors)
 
