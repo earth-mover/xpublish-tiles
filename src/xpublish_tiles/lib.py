@@ -61,6 +61,62 @@ class Fill:
     size: int
 
 
+@dataclass
+class CoarsenedCoordinateIndices:
+    """Index arrays for coarsening ``total`` cells by ``factor``.
+
+    All indices are offset by ``offset`` (default 0), so they index
+    directly into the original edge/coordinate arrays.
+    ``starts`` is computed eagerly; ``centers()`` and ``ends()`` compute
+    on demand.
+    """
+
+    total: int
+    factor: int
+    offset: int = 0
+    starts: np.ndarray = field(init=False)
+
+    def __post_init__(self):
+        n = math.ceil(self.total / self.factor)
+        self.starts = np.arange(n) * self.factor + self.offset
+
+    def centers(self) -> np.ndarray:
+        return np.minimum(self.starts + self.factor // 2, self.offset + self.total - 1)
+
+    def ends(self) -> np.ndarray:
+        return np.minimum(self.starts + self.factor, self.offset + self.total) - 1
+
+
+def _coarsen_indices_impl(
+    slicers: dict[str, list],
+    dims: list[str],
+    coarsen_factors: dict[str, int],
+) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Compute left/right edge indices into the original edge arrays for each coarsened cell.
+
+    Uses :class:`CoarsenedCoordinateIndices` for the stride math.  For multi-slice
+    (wraparound) dims the slices are flattened first, because a coarsened
+    cell can span the boundary between slices.
+    """
+    result: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    for dim in dims:
+        slices = [s for s in slicers[dim] if isinstance(s, slice)]
+        factor = coarsen_factors.get(dim, 1)
+
+        if len(slices) == 1:
+            s = slices[0]
+            w = CoarsenedCoordinateIndices(s.stop - s.start, factor, offset=s.start)
+            starts, ends = w.starts, w.ends()
+        else:
+            orig = np.concatenate([np.arange(s.start, s.stop) for s in slices])
+            w = CoarsenedCoordinateIndices(orig.size, factor)
+            starts = orig[w.starts]
+            ends = orig[w.ends()]
+
+        result[dim] = (starts, ends)
+    return result
+
+
 def crs_repr(crs: CRS | None) -> str:
     """Generate a concise representation string for a CRS object.
 

@@ -138,7 +138,7 @@ class RenderContext(ABC):
 
 @dataclass
 class NullRenderContext(RenderContext):
-    cell_boundaries: None = None
+    cell_rings: None = None
 
     async def maybe_rewrite_to_rectilinear(
         self, *, width: int, height: int, logger=None
@@ -156,8 +156,7 @@ class PopulatedRenderContext(RenderContext):
     bbox: OutputBBox
     ugrid_indexer: UgridIndexer | None = None
     alternate: GridMetadata | None = None
-    cell_boundaries: Any = None
-    # Used by cell_boundaries for polygon rendering.
+    cell_rings: np.ndarray | None = None
     slicers: dict[str, list] = field(default_factory=dict)
     coarsen_factors: dict[str, int] = field(default_factory=dict)
 
@@ -168,7 +167,7 @@ class PopulatedRenderContext(RenderContext):
         grid = self.grid
         bbox = self.bbox
 
-        if self.cell_boundaries is not None:
+        if self.cell_rings is not None:
             return self
 
         # Check if approximate rectilinear detection is enabled

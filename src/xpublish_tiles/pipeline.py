@@ -11,7 +11,6 @@ from pyproj.aoi import BBox
 import xarray as xr
 from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
-    CoarsenedCoordinateIndices,
     GridMetadata,
     GridSystem,
     GridSystem2D,
@@ -22,6 +21,7 @@ from xpublish_tiles.grids import (
 )
 from xpublish_tiles.lib import (
     AsyncLoadTimeoutError,
+    CoarsenedCoordinateIndices,
     Fill,
     IndexingError,
     MissingParameterError,
@@ -1011,15 +1011,15 @@ async def transform_for_render(
             if newX.ndim == 2:
                 newX = newX.transpose(*subset.dims)
                 newY = newY.transpose(*subset.dims)
-            cell_boundaries = grid.corners_to_polygons(
+            cell_rings = grid.corners_to_rings(
                 newX.data, newY.data, ugrid_indexer=context.ugrid_indexer
             )
-            # Flatten 2D data to match the 1D polygon array from corners_to_polygons.
+            # Flatten 2D data to match the 1D ring array from corners_to_rings.
             da = context.da
             if da.values.ndim > 1:
                 da = xr.DataArray(da.values.ravel(), dims=["cell"])
         else:
-            cell_boundaries = None
+            cell_rings = None
             da = subset.assign_coords({grid.X: newX, grid.Y: newY})
 
         result[var_name] = PopulatedRenderContext(
@@ -1029,6 +1029,6 @@ async def transform_for_render(
             bbox=bbox,
             ugrid_indexer=context.ugrid_indexer,
             alternate=alternate,
-            cell_boundaries=cell_boundaries,
+            cell_rings=cell_rings,
         )
     return result

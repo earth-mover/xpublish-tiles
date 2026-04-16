@@ -7,6 +7,7 @@ import spatialpandas
 from PIL import Image
 
 from xpublish_tiles.grids import Triangular
+from xpublish_tiles.lib import polygons_from_rings
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import DatashaderRenderer, register_renderer
 from xpublish_tiles.types import (
@@ -49,12 +50,12 @@ class PolygonsRenderer(DatashaderRenderer):
         context, cvs, variant = prepared
         logger = context_logger if context_logger is not None else get_context_logger()
 
-        if context.cell_boundaries is None:
+        if context.cell_rings is None:
             raise ValueError(
-                "Cell boundaries not found. Ensure transform_for_render was called with polygons style."
+                "Cell rings not found. Ensure transform_for_render was called with polygons style."
             )
 
-        if len(context.cell_boundaries) == 0:
+        if len(context.cell_rings) == 0:
             logger.debug("☐ No data")
             im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
             im.save(buffer, format=str(format))
@@ -72,7 +73,7 @@ class PolygonsRenderer(DatashaderRenderer):
             else:
                 values = data.values
             gdf = spatialpandas.GeoDataFrame(
-                {"geometry": context.cell_boundaries, "data": values}
+                {"geometry": polygons_from_rings(context.cell_rings), "data": values}
             )
 
             try:
