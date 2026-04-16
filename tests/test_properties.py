@@ -609,7 +609,7 @@ async def test_zoom_in_doesnt_change_rendering(
                 "--debug-visual-save", default=False
             ),
             mode="perceptual",
-            perceptual_threshold=0.98,
+            perceptual_threshold=0.95 if style == "polygons" else 0.98,
         )
 
         assert images_similar, (

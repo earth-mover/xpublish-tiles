@@ -1,4 +1,5 @@
 import itertools
+import math
 import re
 import threading
 import warnings
@@ -268,6 +269,32 @@ def _min_nonzero_diff(hi: np.ndarray, lo: np.ndarray) -> float:
     return 0.0 if np.isinf(result) else float(result)
 
 
+@dataclass
+class CoarsenedCoordinateIndices:
+    """Index arrays for coarsening ``total`` cells by ``factor``.
+
+    All indices are offset by ``offset`` (default 0), so they index
+    directly into the original edge/coordinate arrays.
+    ``starts`` is computed eagerly; ``centers()`` and ``ends()`` compute
+    on demand.
+    """
+
+    total: int
+    factor: int
+    offset: int = 0
+    starts: np.ndarray = field(init=False)
+
+    def __post_init__(self):
+        n = math.ceil(self.total / self.factor)
+        self.starts = np.arange(n) * self.factor + self.offset
+
+    def centers(self) -> np.ndarray:
+        return np.minimum(self.starts + self.factor // 2, self.offset + self.total - 1)
+
+    def ends(self) -> np.ndarray:
+        return np.minimum(self.starts + self.factor, self.offset + self.total) - 1
+
+
 def _coarsen_indices_impl(
     slicers: dict[str, list],
     dims: list[str],
@@ -275,25 +302,27 @@ def _coarsen_indices_impl(
 ) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     """Compute left/right edge indices into the original edge arrays for each coarsened cell.
 
-    For each ``dim``:
-    - Flatten ``slicers[dim]`` (list of slices, possibly multiple for wraparound) into
-      a single logical index array spanning the selected original cells.
-    - With ``factor = coarsen_factors.get(dim, 1)``, each coarsened cell k covers
-      original cells ``[k*factor, (k+1)*factor - 1]``. The right edge is clamped via
-      ``min(..., total)`` for the incomplete-last-window case, mirroring the
-      coord-subsampling in ``coarsen()`` (pipeline.py:478-487).
+    Uses :class:`CoarsenedCoordinateIndices` for the stride math.  For multi-slice
+    (wraparound) dims the slices are flattened first, because a coarsened
+    cell can span the boundary between slices.
     """
     result: dict[str, tuple[np.ndarray, np.ndarray]] = {}
     for dim in dims:
-        orig_indices = np.concatenate(
-            [np.arange(s.start, s.stop) for s in slicers[dim] if isinstance(s, slice)]
-        )
-        total = orig_indices.size
+        slices = [s for s in slicers[dim] if isinstance(s, slice)]
         factor = coarsen_factors.get(dim, 1)
-        n_coarse = -(-total // factor)  # ceil(total / factor)
-        k = np.arange(n_coarse)
-        starts = orig_indices[k * factor]
-        ends = orig_indices[np.minimum((k + 1) * factor, total) - 1]
+
+        if len(slices) == 1:
+            # Single slice — use offset, no index array needed.
+            s = slices[0]
+            w = CoarsenedCoordinateIndices(s.stop - s.start, factor, offset=s.start)
+            starts, ends = w.starts, w.ends()
+        else:
+            # Multi-slice (wraparound): flatten first.
+            orig = np.concatenate([np.arange(s.start, s.stop) for s in slices])
+            w = CoarsenedCoordinateIndices(orig.size, factor)
+            starts = orig[w.starts]
+            ends = orig[w.ends()]
+
         result[dim] = (starts, ends)
     return result
 
@@ -1029,17 +1058,20 @@ class GridSystem(ABC):
         self,
         corner_x: np.ndarray,
         corner_y: np.ndarray,
+        *,
+        ugrid_indexer: "UgridIndexer | None" = None,
     ) -> np.ndarray:
         """Assemble shapely polygons from a transformed corner grid.
 
         For 1D inputs, meshgrid is applied (assumes Y-first data layout).
         For 2D inputs, the caller must ensure the axis order matches
-        ``da.values.ravel()``.
+        ``da.values.ravel()``.  Triangular grids override this to use
+        ``ugrid_indexer.connectivity`` for triangle assembly.
         """
         if corner_x.ndim == 1:
             corner_x, corner_y = np.meshgrid(corner_x, corner_y)
-        ny, nx = corner_x.shape[0] - 1, corner_x.shape[1] - 1
-        rings = np.empty((ny, nx, 5, 2), dtype=np.float64)
+        n0, n1 = corner_x.shape[0] - 1, corner_x.shape[1] - 1
+        rings = np.empty((n0, n1, 5, 2), dtype=np.float64)
         with NUMBA_THREADING_LOCK:
             fill_rings_from_corners(rings, corner_x, corner_y)
         return shapely.polygons(rings.reshape(-1, 5, 2))
@@ -1987,6 +2019,23 @@ class Triangular(GridSystem):
         ugrid_indexer = result.dim_indexers["ugrid"]
         assert isinstance(ugrid_indexer, UgridIndexer)
         return {self.dim: [ugrid_indexer]}
+
+    def corners_to_polygons(
+        self,
+        corner_x: np.ndarray,
+        corner_y: np.ndarray,
+        *,
+        ugrid_indexer: "UgridIndexer | None" = None,
+    ) -> np.ndarray:
+        """Build triangle polygons from transformed vertex coords + connectivity."""
+        assert ugrid_indexer is not None
+        verts = np.column_stack([corner_x, corner_y])
+        tri_corners = verts[ugrid_indexer.connectivity]  # (n_faces, 3, 2)
+        n = tri_corners.shape[0]
+        rings = np.empty((n, 4, 2), dtype=np.float64)
+        rings[:, :3, :] = tri_corners
+        rings[:, 3, :] = tri_corners[:, 0, :]
+        return shapely.polygons(rings)
 
     @classmethod
     def from_dataset(

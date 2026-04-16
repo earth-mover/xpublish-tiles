@@ -7,12 +7,12 @@ from typing import Any, cast
 import numpy as np
 import pandas as pd
 import pyproj
-import shapely
 from pyproj.aoi import BBox
 
 import xarray as xr
 from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
+    CoarsenedCoordinateIndices,
     GridMetadata,
     GridSystem,
     GridSystem2D,
@@ -473,26 +473,11 @@ def coarsen(
 
         coarsened = coarsen_mean_pad(da_no_coords, coarsen_factors)
 
-        # Build indexers once for all coarsened dimensions
+        # Subselect coordinates at window centers
         indexers = {}
         for dim, factor in coarsen_factors.items():
             assert factor % 2 == 1, f"{factor} should be odd."
-            center_offset = factor // 2
-            n_windows = coarsened.sizes[dim]
-            dim_size = da.sizes[dim]
-            indices = np.arange(n_windows) * factor + center_offset
-            # For incomplete last window: use midpoint if present, else last element
-            # 'midpoint' is the point that would've been used if the window was complete.
-            if indices[-1] >= dim_size:
-                last_window_start = (n_windows - 1) * factor
-                last_window_size = dim_size - last_window_start
-                if last_window_size > center_offset:
-                    # Midpoint exists, use it
-                    indices[-1] = last_window_start + center_offset
-                else:
-                    # Midpoint doesn't exist, use last element
-                    indices[-1] = dim_size - 1
-            indexers[dim] = indices
+            indexers[dim] = CoarsenedCoordinateIndices(da.sizes[dim], factor).centers()
 
         # Subselect coordinates using relevant indexers
         new_coords = {}
@@ -749,7 +734,10 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = await async_run(
         partial(apply_query, ds, variables=query.variables, selectors=query.selectors)
     )
-    pixel_factor = config.get("max_pixel_factor")
+    if query.style == "polygons":
+        pixel_factor = config.get("polygon_max_pixel_factor")
+    else:
+        pixel_factor = config.get("max_pixel_factor")
     max_shape = (pixel_factor * query.width, pixel_factor * query.height)
 
     # Capture the context logger before entering thread pool
@@ -1128,45 +1116,28 @@ async def transform_for_render(
                     )
                 )
 
-        # --- Style-specific assembly ---
         if style == "polygons":
-            if isinstance(grid, Triangular):
-                # Build triangle polygons from transformed vertices + connectivity
-                assert context.ugrid_indexer is not None
-                verts = np.column_stack([newX.data, newY.data])
-                tri_corners = verts[context.ugrid_indexer.connectivity]
-                n = tri_corners.shape[0]
-                rings = np.empty((n, 4, 2), dtype=np.float64)
-                rings[:, :3, :] = tri_corners
-                rings[:, 3, :] = tri_corners[:, 0, :]
-                cell_boundaries = shapely.polygons(rings)
-            else:
-                # Align corner dim order with the data so ravel orders match.
-                if newX.ndim == 2:
-                    newX = newX.transpose(*subset.dims)
-                    newY = newY.transpose(*subset.dims)
-                cell_boundaries = grid.corners_to_polygons(newX.data, newY.data)
-
+            if newX.ndim == 2:
+                newX = newX.transpose(*subset.dims)
+                newY = newY.transpose(*subset.dims)
+            cell_boundaries = grid.corners_to_polygons(
+                newX.data, newY.data, ugrid_indexer=context.ugrid_indexer
+            )
+            # Flatten 2D data to match the 1D polygon array from corners_to_polygons.
             da = context.da
             if da.values.ndim > 1:
                 da = xr.DataArray(da.values.ravel(), dims=["cell"])
-            result[var_name] = PopulatedRenderContext(
-                da=da,
-                grid=grid,
-                datatype=context.datatype,
-                bbox=bbox,
-                ugrid_indexer=context.ugrid_indexer,
-                alternate=context.alternate,
-                cell_boundaries=cell_boundaries,
-            )
         else:
-            newda = subset.assign_coords({grid.X: newX, grid.Y: newY})
-            result[var_name] = PopulatedRenderContext(
-                da=newda,
-                grid=grid,
-                datatype=context.datatype,
-                bbox=bbox,
-                ugrid_indexer=context.ugrid_indexer,
-                alternate=alternate,
-            )
+            cell_boundaries = None
+            da = subset.assign_coords({grid.X: newX, grid.Y: newY})
+
+        result[var_name] = PopulatedRenderContext(
+            da=da,
+            grid=grid,
+            datatype=context.datatype,
+            bbox=bbox,
+            ugrid_indexer=context.ugrid_indexer,
+            alternate=alternate,
+            cell_boundaries=cell_boundaries,
+        )
     return result
