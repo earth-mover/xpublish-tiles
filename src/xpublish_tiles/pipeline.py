@@ -7,6 +7,7 @@ from typing import Any, cast
 import numpy as np
 import pandas as pd
 import pyproj
+import shapely
 from pyproj.aoi import BBox
 
 import xarray as xr
@@ -279,6 +280,7 @@ def estimate_coarsen_factors_and_slicers(
     slicers: dict[str, list[slice | Fill | UgridIndexer]],
     max_shape: tuple[int, int],
     datatype: DataType,
+    skip_default_pad: bool = False,
 ) -> tuple[dict[str, int], dict[str, list[slice | Fill | UgridIndexer]]]:
     """
     Estimate coarsening factors and adjusted slicers for the given data array.
@@ -295,6 +297,10 @@ def estimate_coarsen_factors_and_slicers(
         Maximum allowed shape (width, height)
     datatype : DataType
         Data type information
+    skip_default_pad : bool
+        When True, skip apply_default_pad. Polygon rendering provides explicit
+        cell edges, so the floating-point edge-safety padding that datashader
+        raster rendering requires is unnecessary.
 
     Returns
     -------
@@ -320,8 +326,9 @@ def estimate_coarsen_factors_and_slicers(
             grid=grid,
         )
 
-    # Always apply default_pad for edge safety (floating-point roundoff protection)
-    new_slicers = apply_default_pad(new_slicers, da, grid)
+    if not skip_default_pad:
+        # Apply default_pad for edge safety (floating-point roundoff protection)
+        new_slicers = apply_default_pad(new_slicers, da, grid)
 
     return coarsen_factors, new_slicers
 
@@ -990,19 +997,15 @@ async def subset_to_bbox(
         slicers = grid.sel(bbox=input_bbox)
         da = grid.assign_index(array.da)
 
-        # Polygon rendering needs 1:1 data-to-polygon mapping, so skip coarsening
-        if style == "polygons":
-            coarsen_factors = {}
-            new_slicers = slicers
-        else:
-            # Estimate coarsen factors and adjusted slicers
-            coarsen_factors, new_slicers = estimate_coarsen_factors_and_slicers(
-                da,
-                grid=grid,
-                slicers=slicers,
-                max_shape=max_shape,
-                datatype=array.datatype,
-            )
+        coarsen_factors, new_slicers = estimate_coarsen_factors_and_slicers(
+            da,
+            grid=grid,
+            slicers=slicers,
+            max_shape=max_shape,
+            datatype=array.datatype,
+            # Polygons provide explicit cell edges, so skip the datashader edge-safety pad.
+            skip_default_pad=style == "polygons",
+        )
         alternate = grid.pick_alternate_grid(crs, coarsen_factors=coarsen_factors)
 
         subset = await apply_slicers(
@@ -1031,6 +1034,7 @@ async def subset_to_bbox(
             else None,
             alternate=alternate,
             slicers=new_slicers,
+            coarsen_factors=coarsen_factors,
         )
     return result
 
@@ -1044,8 +1048,9 @@ async def transform_for_render(
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:
     """Transform coordinates to output CRS.
 
-    For raster style: transform X/Y coordinates to output CRS.
-    For polygons style: transform cell boundary geometries to output CRS.
+    For raster style: transform X/Y center coordinates to output CRS.
+    For polygons style: transform cell corner coordinates, then assemble polygons.
+    Both share the same transform + discontinuity-fix machinery.
     """
     result = {}
     for var_name, context in contexts.items():
@@ -1062,53 +1067,41 @@ async def transform_for_render(
             continue
 
         input_to_output = transformer_from_crs(alternate.crs, crs)
-        if style == "polygons":
-            return await _transform_polygons(contexts, crs=crs)
 
-        # Detect discontinuity for geographic CRS
+        if style == "polygons" and isinstance(grid, GridSystem2D):
+            to_transform = grid.cell_corners(
+                slicers=context.slicers,
+                coarsen_factors=context.coarsen_factors,
+            )
+        else:
+            to_transform = subset
+
+        with log_duration("transform_coordinates", "🔄"):
+            newX, newY = await transform_coordinates(
+                to_transform, alternate.X, alternate.Y, input_to_output
+            )
+
         if grid.crs.is_geographic:
             if isinstance(grid, Polar):
                 has_discontinuity = False
-            elif isinstance(grid, GridSystem2D):
-                # Check for discontinuities on geographic coords before projection.
-                # This is an optimization - we could also detect after projecting to the target CRS.
-                # However, that would be a tax on every render. So instead we look for
-                # the anti-meridian discontinuity specifically.
-                has_discontinuity = has_coordinate_discontinuity(
-                    subset[grid.X].data,
-                    360.0,
-                    axis=subset[grid.X].get_axis_num(grid.Xdim),
-                    check_antimeridian=True,
-                )
             elif isinstance(grid, Triangular):
                 assert context.ugrid_indexer is not None
                 anti = context.ugrid_indexer.antimeridian_vertices
                 has_discontinuity = anti["pos"].size > 0 or anti["neg"].size > 0
             else:
-                raise NotImplementedError
+                has_discontinuity = has_coordinate_discontinuity(
+                    to_transform[grid.X].data,
+                    360.0,
+                    axis=to_transform[grid.X].get_axis_num(grid.Xdim)
+                    if grid.Xdim in to_transform[grid.X].dims
+                    else 0,
+                    check_antimeridian=True,
+                )
         else:
             has_discontinuity = False
 
-        with log_duration("transform_coordinates", "🔄"):
-            newX, newY = await transform_coordinates(
-                subset, alternate.X, alternate.Y, input_to_output
-            )
-
-        # Fix coordinate discontinuities in transformed coordinates if detected
-        # For example, when transforming to WebMercator pyproj will always return values
-        # in the approximate range -20e6 -> 20e6 m range. So if the dataset's anti-meridian
-        # discontinuity is in the tile; it will be preserved by the transformation,
-        # regardless of how we may modify the coordinates *before* transforming.
         if has_discontinuity:
-            if isinstance(grid, GridSystem2D):
-                fixed = fix_coordinate_discontinuities(
-                    newX.data,
-                    input_to_output,
-                    bbox=bbox,
-                )
-                newX = newX.copy(data=fixed)
-
-            elif isinstance(grid, Triangular):
+            if isinstance(grid, Triangular):
                 assert context.ugrid_indexer is not None
                 fix_antimeridian_vertices(
                     newX.data,
@@ -1116,67 +1109,57 @@ async def transform_for_render(
                     input_to_output,
                     bbox=bbox,
                 )
-        newda = subset.assign_coords({grid.X: newX, grid.Y: newY})
-        result[var_name] = PopulatedRenderContext(
-            da=newda,
-            grid=grid,
-            datatype=context.datatype,
-            bbox=bbox,
-            ugrid_indexer=context.ugrid_indexer,
-            alternate=alternate,
-        )
-    return result
-
-
-async def _transform_polygons(
-    contexts: dict[str, PopulatedRenderContext | NullRenderContext],
-    *,
-    crs: OutputCRS,
-) -> dict[str, PopulatedRenderContext | NullRenderContext]:
-    """Transform cell boundary polygons to output CRS."""
-    import geopandas as gpd
-    import shapely
-
-    result = {}
-    for var_name, context in contexts.items():
-        if isinstance(context, NullRenderContext):
-            result[var_name] = context
-            continue
-
-        grid = context.grid
-
-        with log_duration("transform_polygons", "⬡"):
-            boundaries = grid.cell_boundaries(context.da, slicers=context.slicers)
-            gdf = gpd.GeoDataFrame(geometry=boundaries, crs=grid.crs)
-            transformed_geoms = gdf.to_crs(crs).geometry.values
-
-            bbox = context.bbox
-            input_to_output = transformer_from_crs(grid.crs, crs)
-
-            if grid.crs.is_geographic:
-                # Fix per-polygon ring discontinuities (e.g. cells crossing ±180°
-                # after CRS transform get wrapped by pyproj, spanning the globe)
-                # and shift each polygon individually to the bbox's coordinate window.
-                coords = shapely.get_coordinates(transformed_geoms)
-                n_polys = len(transformed_geoms)
-                n_ring = coords.shape[0] // n_polys
-                coords_3d = coords.reshape(n_polys, n_ring, 2)
-                coords_3d[:, :, 0] = fix_coordinate_discontinuities(
-                    coords_3d[:, :, 0], input_to_output, bbox=bbox, axis=1
+            else:
+                newX = newX.copy(
+                    data=fix_coordinate_discontinuities(
+                        newX.data, input_to_output, bbox=bbox
+                    )
                 )
-                transformed_geoms = shapely.polygons(coords_3d)
+
+        # --- Style-specific assembly ---
+        if style == "polygons":
+            if isinstance(grid, Triangular):
+                # Build triangle polygons from transformed vertices + connectivity
+                assert context.ugrid_indexer is not None
+                verts = np.column_stack([newX.data, newY.data])
+                tri_corners = verts[context.ugrid_indexer.connectivity]
+                n = tri_corners.shape[0]
+                rings = np.empty((n, 4, 2), dtype=np.float64)
+                rings[:, :3, :] = tri_corners
+                rings[:, 3, :] = tri_corners[:, 0, :]
+                # Per-triangle unwrap for faces crossing the antimeridian
+                if grid.crs.is_geographic:
+                    rings[:, :, 0] = fix_coordinate_discontinuities(
+                        rings[:, :, 0], input_to_output, bbox=bbox, axis=1
+                    )
+                cell_boundaries = shapely.polygons(rings)
+            else:
+                # Align corner dim order with the data so ravel orders match.
+                if newX.ndim == 2:
+                    newX = newX.transpose(*subset.dims)
+                    newY = newY.transpose(*subset.dims)
+                cell_boundaries = grid.corners_to_polygons(newX.data, newY.data)
 
             da = context.da
             if da.values.ndim > 1:
                 da = xr.DataArray(da.values.ravel(), dims=["cell"])
-
             result[var_name] = PopulatedRenderContext(
                 da=da,
                 grid=grid,
                 datatype=context.datatype,
-                bbox=context.bbox,
+                bbox=bbox,
                 ugrid_indexer=context.ugrid_indexer,
                 alternate=context.alternate,
-                cell_boundaries=transformed_geoms,
+                cell_boundaries=cell_boundaries,
+            )
+        else:
+            newda = subset.assign_coords({grid.X: newX, grid.Y: newY})
+            result[var_name] = PopulatedRenderContext(
+                da=newda,
+                grid=grid,
+                datatype=context.datatype,
+                bbox=bbox,
+                ugrid_indexer=context.ugrid_indexer,
+                alternate=alternate,
             )
     return result

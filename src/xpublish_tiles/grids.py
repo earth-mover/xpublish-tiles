@@ -29,8 +29,7 @@ from xpublish_tiles.lib import (
     _prevent_slice_overlap,
     aeqd_to_4326,
     crs_repr,
-    fill_quad_rings,
-    fill_rectilinear_rings,
+    fill_rings_from_corners,
     is_4326_like,
     unwrap,
 )
@@ -267,6 +266,36 @@ def _min_nonzero_diff(hi: np.ndarray, lo: np.ndarray) -> float:
     d[d == 0] = np.inf
     result = numbagg.nanmin(d)
     return 0.0 if np.isinf(result) else float(result)
+
+
+def _coarsen_indices_impl(
+    slicers: dict[str, list],
+    dims: list[str],
+    coarsen_factors: dict[str, int],
+) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Compute left/right edge indices into the original edge arrays for each coarsened cell.
+
+    For each ``dim``:
+    - Flatten ``slicers[dim]`` (list of slices, possibly multiple for wraparound) into
+      a single logical index array spanning the selected original cells.
+    - With ``factor = coarsen_factors.get(dim, 1)``, each coarsened cell k covers
+      original cells ``[k*factor, (k+1)*factor - 1]``. The right edge is clamped via
+      ``min(..., total)`` for the incomplete-last-window case, mirroring the
+      coord-subsampling in ``coarsen()`` (pipeline.py:478-487).
+    """
+    result: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    for dim in dims:
+        orig_indices = np.concatenate(
+            [np.arange(s.start, s.stop) for s in slicers[dim] if isinstance(s, slice)]
+        )
+        total = orig_indices.size
+        factor = coarsen_factors.get(dim, 1)
+        n_coarse = -(-total // factor)  # ceil(total / factor)
+        k = np.arange(n_coarse)
+        starts = orig_indices[k * factor]
+        ends = orig_indices[np.minimum((k + 1) * factor, total) - 1]
+        result[dim] = (starts, ends)
+    return result
 
 
 def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
@@ -679,6 +708,11 @@ class CurvilinearCellIndex(xr.Index):
         self.left, self.right = _adjacent_pair(X_breaks, xaxis)
         self.bottom, self.top = _adjacent_pair(Y_breaks, yaxis)
 
+        # Full corner grids: break along the OTHER axis to get (ny+1, nx+1).
+        # Used by cell_corners for polygon rendering.
+        self.corner_x = infer_interval_breaks(X_breaks, axis=yaxis)
+        self.corner_y = infer_interval_breaks(Y_breaks, axis=xaxis)
+
         # Determine if Y is increasing by checking the first row.
         # Don't use .all() because tripolar grids have dY=0 in the fold region
         # which would cause the swap to trigger incorrectly.
@@ -978,12 +1012,58 @@ class GridSystem(ABC):
     def assign_index(self, da: xr.DataArray) -> xr.DataArray:
         return da
 
-    def cell_boundaries(
+    def cell_corners(
         self,
-        da: xr.DataArray,
         *,
         slicers: dict[str, list],
+        coarsen_factors: dict[str, int],
+    ) -> xr.DataArray:
+        """Return a synthetic DataArray whose X/Y coords are the cell corner grid.
+
+        For 2D grids, the corner grid has shape ``(ny_c+1, nx_c+1)``
+        (after coarsening). ``transform_coordinates`` can operate on it directly.
+        """
+        raise NotImplementedError
+
+    def corners_to_polygons(
+        self,
+        corner_x: np.ndarray,
+        corner_y: np.ndarray,
     ) -> np.ndarray:
+        """Assemble shapely polygons from a transformed corner grid.
+
+        For 1D inputs, meshgrid is applied (assumes Y-first data layout).
+        For 2D inputs, the caller must ensure the axis order matches
+        ``da.values.ravel()``.
+        """
+        if corner_x.ndim == 1:
+            corner_x, corner_y = np.meshgrid(corner_x, corner_y)
+        ny, nx = corner_x.shape[0] - 1, corner_x.shape[1] - 1
+        rings = np.empty((ny, nx, 5, 2), dtype=np.float64)
+        with NUMBA_THREADING_LOCK:
+            fill_rings_from_corners(rings, corner_x, corner_y)
+        return shapely.polygons(rings.reshape(-1, 5, 2))
+
+    def coarsen_indices(
+        self,
+        *,
+        slicers: dict[str, list],
+        coarsen_factors: dict[str, int],
+    ) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+        """Return ``{dim: (starts, ends)}`` indices into the original edge arrays.
+
+        ``starts[k]`` and ``ends[k]`` are the original-grid indices for the
+        left/bottom and right/top edges of the k-th coarsened cell along ``dim``.
+        When ``dim`` has factor 1 (or is absent from ``coarsen_factors``), this
+        returns the identity mapping (same index used for both edges per cell).
+
+        For global grids padded via wraparound, ``slicers[dim]`` can contain
+        multiple slice objects; this method flattens them into a single logical
+        range before applying the stride, so the edge count always matches the
+        coarsened data's cell count.
+        """
+        # TODO: the implementation in `_coarsen_indices_impl` is grid-agnostic;
+        # consider promoting it to a concrete method here so all grids share it.
         raise NotImplementedError
 
     def equals(self, other: object) -> bool:
@@ -1078,55 +1158,35 @@ class RectilinearMixin:
     Xdim: str
     Ydim: str
 
-    def _cell_boundaries_from_edges(
+    def coarsen_indices(
         self,
-        da: xr.DataArray,
-        slicers: dict[str, list],
         *,
-        x_left: np.ndarray | pd.Index,
-        x_right: np.ndarray | pd.Index,
-        y_left: np.ndarray | pd.Index,
-        y_right: np.ndarray | pd.Index,
-    ) -> np.ndarray:
-        """Build shapely polygons from cell edge arrays. Shared by RasterAffine and Rectilinear."""
-        xaxis = da.get_axis_num(self.Xdim)
-        nx_total = len(x_left)
-        ny_total = len(y_left)
+        slicers: dict[str, list],
+        coarsen_factors: dict[str, int],
+    ) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+        return _coarsen_indices_impl(slicers, [self.Xdim, self.Ydim], coarsen_factors)
 
-        y_slice = next(s for s in slicers[self.Ydim] if isinstance(s, slice))
-        x_slices = [
-            slice(*s.indices(nx_total))
-            for s in slicers[self.Xdim]
-            if isinstance(s, slice)
-        ]
-        y_start, y_stop, _ = y_slice.indices(ny_total)
+    def _corners_from_edges(
+        self,
+        x_edges: np.ndarray,
+        y_edges: np.ndarray,
+        *,
+        slicers: dict[str, list],
+        coarsen_factors: dict[str, int],
+    ) -> xr.DataArray:
+        """Build a synthetic DataArray with 1D X/Y corner coords from full edge arrays."""
+        cell_idx = self.coarsen_indices(slicers=slicers, coarsen_factors=coarsen_factors)
+        x_starts, x_ends = cell_idx[self.Xdim]
+        y_starts, y_ends = cell_idx[self.Ydim]
 
-        ny_sel = y_stop - y_start
-        total_nx = sum(s.stop - s.start for s in x_slices)
-        shape = [0, 0]
-        shape[xaxis] = total_nx
-        shape[1 - xaxis] = ny_sel
-        rings = np.empty((*shape, 5, 2), dtype=np.float64)
+        xc = np.asarray(x_edges)[np.append(x_starts, x_ends[-1] + 1)]
+        yc = np.asarray(y_edges)[np.append(y_starts, y_ends[-1] + 1)]
 
-        yb = y_left[y_start:y_stop]
-        yt = y_right[y_start:y_stop]
-
-        offset = 0
-        for x_slice in x_slices:
-            nx_sel = x_slice.stop - x_slice.start
-            slc = [slice(None)] * 2
-            slc[xaxis] = slice(offset, offset + nx_sel)
-            fill_rectilinear_rings(
-                rings[tuple(slc)],
-                x_left[x_slice],
-                x_right[x_slice],
-                yb,
-                yt,
-                xaxis=xaxis,
-            )
-            offset += nx_sel
-
-        return shapely.polygons(rings.reshape(-1, 5, 2))
+        return xr.DataArray(
+            np.empty((len(yc), len(xc))),
+            dims=(self.Ydim, self.Xdim),
+            coords={self.X: (self.Xdim, xc), self.Y: (self.Ydim, yc)},
+        )
 
     def _rectilinear_sel(
         self, *, bbox: BBox, y_is_increasing: bool, x_size: int, y_size: int
@@ -1254,24 +1314,24 @@ class RasterAffine(RectilinearMixin, GridSystem):
             y_size=index._xy_shape[1],
         )
 
-    def cell_boundaries(
-        self,
-        da: xr.DataArray,
-        *,
-        slicers: dict[str, list],
-    ) -> np.ndarray:
+    def _get_edge_arrays(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return full 1D edge arrays (x_edges size nx+1, y_edges size ny+1)."""
         (index,) = self.indexes
         affine = index.transform()
         nx, ny = index._xy_shape
         x_edges = affine.c + np.arange(nx + 1) * affine.a
         y_edges = affine.f + np.arange(ny + 1) * affine.e
-        return self._cell_boundaries_from_edges(
-            da,
-            slicers,
-            x_left=x_edges[:-1],
-            x_right=x_edges[1:],
-            y_left=y_edges[:-1],
-            y_right=y_edges[1:],
+        return x_edges, y_edges
+
+    def cell_corners(
+        self,
+        *,
+        slicers: dict[str, list],
+        coarsen_factors: dict[str, int],
+    ) -> xr.DataArray:
+        x_edges, y_edges = self._get_edge_arrays()
+        return self._corners_from_edges(
+            x_edges, y_edges, slicers=slicers, coarsen_factors=coarsen_factors
         )
 
     def equals(self, other: object) -> bool:
@@ -1438,22 +1498,24 @@ class Rectilinear(RectilinearMixin, GridSystem):
             y_size=y_size,
         )
 
-    def cell_boundaries(
-        self,
-        da: xr.DataArray,
-        *,
-        slicers: dict[str, list],
-    ) -> np.ndarray:
+    def _get_edge_arrays(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return full 1D edge arrays (x_edges size nx+1, y_edges size ny+1)."""
         x_index, y_index = self.indexes[0], self.indexes[-1]
         x_ii = cast(pd.IntervalIndex, x_index.index)
         y_ii = cast(pd.IntervalIndex, y_index.index)
-        return self._cell_boundaries_from_edges(
-            da,
-            slicers,
-            x_left=x_ii.left,
-            x_right=x_ii.right,
-            y_left=y_ii.left,
-            y_right=y_ii.right,
+        x_edges = np.append(np.asarray(x_ii.left), x_ii.right[-1])
+        y_edges = np.append(np.asarray(y_ii.left), y_ii.right[-1])
+        return x_edges, y_edges
+
+    def cell_corners(
+        self,
+        *,
+        slicers: dict[str, list],
+        coarsen_factors: dict[str, int],
+    ) -> xr.DataArray:
+        x_edges, y_edges = self._get_edge_arrays()
+        return self._corners_from_edges(
+            x_edges, y_edges, slicers=slicers, coarsen_factors=coarsen_factors
         )
 
     def equals(self, other: object) -> bool:
@@ -1655,55 +1717,46 @@ class Curvilinear(GridSystem):
 
         return {self.Xdim: xslicers, self.Ydim: yslicers}
 
-    def cell_boundaries(
+    def coarsen_indices(
         self,
-        da: xr.DataArray,
         *,
         slicers: dict[str, list],
-    ) -> np.ndarray:
-        """Get cell boundary polygons for curvilinear grid cells.
+        coarsen_factors: dict[str, int],
+    ) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+        return _coarsen_indices_impl(slicers, [self.Xdim, self.Ydim], coarsen_factors)
 
-        Uses the index's precomputed left/right/bottom/top bounds (which have
-        shared edges via infer_interval_breaks) sliced via the integer slicers.
-        Returns a 1D array of shapely Polygon objects in the same ravel order
-        as ``da.values``.
-        """
+    def cell_corners(
+        self,
+        *,
+        slicers: dict[str, list],
+        coarsen_factors: dict[str, int],
+    ) -> xr.DataArray:
+        """Return a synthetic DataArray with 2D X/Y corner coords."""
         index = next(iter(self.indexes))
         assert isinstance(index, CurvilinearCellIndex)
-
         xaxis, yaxis = index.xaxis, index.yaxis
-        y_slice = next(s for s in slicers[self.Ydim] if isinstance(s, slice))
-        x_slices = [s for s in slicers[self.Xdim] if isinstance(s, slice)]
 
-        ny_sel = y_slice.stop - y_slice.start
-        total_nx = sum(s.stop - s.start for s in x_slices)
-        shape = [0, 0]
-        shape[xaxis] = total_nx
-        shape[yaxis] = ny_sel
-        rings = np.empty((*shape, 5, 2), dtype=np.float64)
+        cell_idx = self.coarsen_indices(slicers=slicers, coarsen_factors=coarsen_factors)
+        x_starts, x_ends = cell_idx[self.Xdim]
+        y_starts, y_ends = cell_idx[self.Ydim]
 
-        offset = 0
-        for x_slice in x_slices:
-            nx_sel = x_slice.stop - x_slice.start
-            src = [slice(None)] * 2
-            src[yaxis] = y_slice
-            src[xaxis] = x_slice
-            dst = [slice(None)] * 2
-            dst[yaxis] = slice(None)
-            dst[xaxis] = slice(offset, offset + nx_sel)
-            src_slc, dst_slc = tuple(src), tuple(dst)
+        # Corner indices: starts plus the final end+1
+        x_ci = np.append(x_starts, x_ends[-1] + 1)
+        y_ci = np.append(y_starts, y_ends[-1] + 1)
 
-            with NUMBA_THREADING_LOCK:
-                fill_quad_rings(
-                    rings[dst_slc],
-                    index.left[src_slc],
-                    index.right[src_slc],
-                    index.bottom[src_slc],
-                    index.top[src_slc],
-                )
-            offset += nx_sel
+        # np.take preserves the original axis order, so if xaxis=0 the result
+        # is (nx_c+1, ny_c+1). Use the data's dim names so
+        # xr.transpose(*data.dims) aligns them in the caller.
+        corner_x = np.take(np.take(index.corner_x, y_ci, axis=yaxis), x_ci, axis=xaxis)
+        corner_y = np.take(np.take(index.corner_y, y_ci, axis=yaxis), x_ci, axis=xaxis)
 
-        return shapely.polygons(rings.reshape(-1, 5, 2))
+        dim0 = self.Xdim if xaxis == 0 else self.Ydim
+        dim1 = self.Ydim if xaxis == 0 else self.Xdim
+        return xr.DataArray(
+            np.empty(corner_x.shape),
+            dims=(dim0, dim1),
+            coords={self.X: ((dim0, dim1), corner_x), self.Y: ((dim0, dim1), corner_y)},
+        )
 
 
 @dataclass(kw_only=True, eq=False)
@@ -1934,23 +1987,6 @@ class Triangular(GridSystem):
         ugrid_indexer = result.dim_indexers["ugrid"]
         assert isinstance(ugrid_indexer, UgridIndexer)
         return {self.dim: [ugrid_indexer]}
-
-    def cell_boundaries(
-        self,
-        da: xr.DataArray,
-        *,
-        slicers: dict[str, list],
-    ) -> np.ndarray:
-        ugrid_indexer = next(s for s in slicers[self.dim] if isinstance(s, UgridIndexer))
-        index = cast(CellTreeIndex, next(iter(self.indexes)))
-        # connectivity contains local indices into the vertex subset, not the full tree
-        subset_vertices = index.tree.vertices[ugrid_indexer.vertices]
-        corners = subset_vertices[ugrid_indexer.connectivity]  # (n_faces, 3, 2)
-        n = corners.shape[0]
-        rings = np.empty((n, 4, 2), dtype=np.float64)
-        rings[:, :3, :] = corners
-        rings[:, 3, :] = corners[:, 0, :]
-        return shapely.polygons(rings)
 
     @classmethod
     def from_dataset(

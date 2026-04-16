@@ -597,51 +597,34 @@ def slicers_to_pad_instruction(slicers, datatype) -> dict[str, Any]:
 
 
 @numba.njit(parallel=True, cache=True, boundscheck=False)
-def fill_quad_rings(out, xl, xr, yb, yt):
-    """Fill a (a, b, 5, 2) ring array from 2D edge arrays.
+def fill_rings_from_corners(out, corner_x, corner_y):
+    """Fill a (ny, nx, 5, 2) ring array from a (ny+1, nx+1) corner grid.
 
-    All inputs must have shape ``(a, b)``. Counter-clockwise ring order:
-    SW, SE, NE, NW, SW(close). Ravel order matches the input layout.
+    Each cell (i, j) has corners at grid positions (i, j), (i, j+1),
+    (i+1, j+1), (i+1, j). Counter-clockwise ring order:
+    SW, SE, NE, NW, SW(close).
     """
-    a, b = xl.shape
-    for i in numba.prange(a):  # ty: ignore[not-iterable]
-        for j in range(b):
-            xli = xl[i, j]
-            xri = xr[i, j]
-            ybi = yb[i, j]
-            yti = yt[i, j]
-            out[i, j, 0, 0] = xli
-            out[i, j, 0, 1] = ybi
-            out[i, j, 1, 0] = xri
-            out[i, j, 1, 1] = ybi
-            out[i, j, 2, 0] = xri
-            out[i, j, 2, 1] = yti
-            out[i, j, 3, 0] = xli
-            out[i, j, 3, 1] = yti
-            out[i, j, 4, 0] = xli
-            out[i, j, 4, 1] = ybi
-
-
-def fill_rectilinear_rings(
-    out: np.ndarray,
-    xl: np.ndarray,
-    xr: np.ndarray,
-    yb: np.ndarray,
-    yt: np.ndarray,
-    *,
-    xaxis: int,
-) -> None:
-    """Fill a (..., 5, 2) ring array from 1D edge arrays.
-
-    ``xaxis`` controls whether X is axis 0 or 1 (and Y takes the other),
-    so the ravel order matches the DataArray's dimension order.
-    """
-    indexing = "ij" if xaxis == 0 else "xy"
-    xl2d, yb2d = np.meshgrid(xl, yb, indexing=indexing, copy=False)
-    xr2d, yt2d = np.meshgrid(xr, yt, indexing=indexing, copy=False)
-    # Lock is only used when tbb is not available (e.g., on macOS)
-    with NUMBA_THREADING_LOCK:
-        fill_quad_rings(out, xl2d, xr2d, yb2d, yt2d)
+    ny, nx = out.shape[0], out.shape[1]
+    for i in numba.prange(ny):  # ty: ignore[not-iterable]
+        for j in range(nx):
+            x00 = corner_x[i, j]
+            x01 = corner_x[i, j + 1]
+            x10 = corner_x[i + 1, j]
+            x11 = corner_x[i + 1, j + 1]
+            y00 = corner_y[i, j]
+            y01 = corner_y[i, j + 1]
+            y10 = corner_y[i + 1, j]
+            y11 = corner_y[i + 1, j + 1]
+            out[i, j, 0, 0] = x00
+            out[i, j, 0, 1] = y00
+            out[i, j, 1, 0] = x01
+            out[i, j, 1, 1] = y01
+            out[i, j, 2, 0] = x11
+            out[i, j, 2, 1] = y11
+            out[i, j, 3, 0] = x10
+            out[i, j, 3, 1] = y10
+            out[i, j, 4, 0] = x00
+            out[i, j, 4, 1] = y00
 
 
 def apply_range_colors(

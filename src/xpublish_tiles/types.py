@@ -159,6 +159,7 @@ class PopulatedRenderContext(RenderContext):
     cell_boundaries: np.ndarray | None = None
     # Used by cell_boundaries for polygon rendering.
     slicers: dict[str, list] = field(default_factory=dict)
+    coarsen_factors: dict[str, int] = field(default_factory=dict)
 
     async def maybe_rewrite_to_rectilinear(
         self, *, width: int, height: int, logger=None
