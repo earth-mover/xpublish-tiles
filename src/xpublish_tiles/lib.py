@@ -596,6 +596,39 @@ def slicers_to_pad_instruction(slicers, datatype) -> dict[str, Any]:
     return pad_kwargs
 
 
+def polygons_from_rings(rings: np.ndarray):
+    """Build a spatialpandas PolygonArray from a ``(N, M, 2)`` rings buffer.
+
+    Each row is one polygon with M vertices (including the closing vertex).
+
+    We choose to use `spatialpandas` instead of `geopandas` because it's internal
+    data structure (ragged arrays backed by pyarrow buffers) is what the renderer
+    requires internally.
+
+    Spatialpandas' ``PolygonArray`` stores geometries natively in ragged
+    form backed by pyarrow buffers, so we construct it directly:
+    - ``inner``: the flat coord buffer, zero-copy via ``pa.py_buffer``
+    - ``rings_arr``: list-array whose offsets are ``0, 2M, 4M, …``
+    - ``polys``: list-array of rings, one ring per polygon
+
+    Orientation (CW vs CCW) is not normalized — datashader's winding-number
+    rasterizer is orientation-agnostic, so we skip the per-polygon reorient.
+    """
+    import pyarrow as pa
+    from spatialpandas.geometry import PolygonArray
+
+    n, m, _ = rings.shape
+    flat = np.ascontiguousarray(rings.reshape(-1), dtype=np.float64)
+    ring_stride = m * 2
+
+    inner = pa.Array.from_buffers(pa.float64(), flat.size, [None, pa.py_buffer(flat)], 0)
+    ring_offsets = np.arange(0, flat.size + 1, ring_stride, dtype=np.int32)
+    rings_arr = pa.ListArray.from_arrays(pa.array(ring_offsets), inner)
+    poly_offsets = np.arange(n + 1, dtype=np.int32)
+    polys = pa.ListArray.from_arrays(pa.array(poly_offsets), rings_arr)
+    return PolygonArray(polys)
+
+
 @numba.njit(parallel=True, cache=True, boundscheck=False)
 def fill_rings_from_corners(out, corner_x, corner_y):
     """Fill a (n0, n1, 5, 2) ring array from a (n0+1, n1+1) corner grid.

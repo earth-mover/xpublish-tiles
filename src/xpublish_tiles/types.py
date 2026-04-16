@@ -156,7 +156,7 @@ class PopulatedRenderContext(RenderContext):
     bbox: OutputBBox
     ugrid_indexer: UgridIndexer | None = None
     alternate: GridMetadata | None = None
-    cell_boundaries: np.ndarray | None = None
+    cell_boundaries: Any = None
     # Used by cell_boundaries for polygon rendering.
     slicers: dict[str, list] = field(default_factory=dict)
     coarsen_factors: dict[str, int] = field(default_factory=dict)

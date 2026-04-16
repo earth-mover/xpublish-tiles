@@ -15,7 +15,6 @@ import numpy as np
 import pandas as pd
 import pyproj
 import rasterix
-import shapely
 import triangle
 from numba_celltree import CellTree2d
 from pyproj import CRS
@@ -32,6 +31,7 @@ from xpublish_tiles.lib import (
     crs_repr,
     fill_rings_from_corners,
     is_4326_like,
+    polygons_from_rings,
     unwrap,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
@@ -1075,7 +1075,7 @@ class GridSystem(ABC):
         rings = np.empty((n0, n1, 5, 2), dtype=np.float64)
         with NUMBA_THREADING_LOCK:
             fill_rings_from_corners(rings, corner_x, corner_y)
-        return shapely.polygons(rings.reshape(-1, 5, 2))
+        return polygons_from_rings(rings.reshape(-1, 5, 2))
 
     def coarsen_indices(
         self,
@@ -2044,7 +2044,7 @@ class Triangular(GridSystem):
         rings = np.empty((n, 4, 2), dtype=np.float64)
         rings[:, :3, :] = tri_corners
         rings[:, 3, :] = tri_corners[:, 0, :]
-        return shapely.polygons(rings)
+        return polygons_from_rings(rings)
 
     @classmethod
     def from_dataset(

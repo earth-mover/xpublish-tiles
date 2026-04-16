@@ -2,8 +2,8 @@ import io
 from numbers import Number
 
 import datashader as dsh
-import geopandas as gpd
 import numbagg
+import spatialpandas
 from PIL import Image
 
 from xpublish_tiles.grids import Triangular
@@ -63,15 +63,17 @@ class PolygonsRenderer(DatashaderRenderer):
         data = context.da
 
         with log_duration(f"render (polygons) {data.shape}", "⬡", logger):
-            gdf = gpd.GeoDataFrame(geometry=context.cell_boundaries)
             if isinstance(context.grid, Triangular) and context.ugrid_indexer is not None:
                 # Triangular grids: data is per-vertex, polygons are per-face.
                 # Average the 3 vertex values to get a face-center value.
                 face_vals = data.values[context.ugrid_indexer.connectivity]
                 with NUMBA_THREADING_LOCK:
-                    gdf["data"] = numbagg.nanmean(face_vals, axis=1)
+                    values = numbagg.nanmean(face_vals, axis=1)
             else:
-                gdf["data"] = data.values
+                values = data.values
+            gdf = spatialpandas.GeoDataFrame(
+                {"geometry": context.cell_boundaries, "data": values}
+            )
 
             try:
                 mesh = cvs.polygons(gdf, "geometry", agg=dsh.mean("data"))

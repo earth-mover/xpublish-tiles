@@ -29,6 +29,7 @@ from xpublish_tiles.lib import (
     TileTooBigError,
     VariableNotFoundError,
     _iter_subset_shapes,
+    apply_default_pad,
     async_run,
     coarsen_mean_pad,
     get_data_load_semaphore,
@@ -220,6 +221,7 @@ def estimate_coarsen_factors_and_slicers(
             da=da,
             grid=grid,
         )
+    new_slicers = apply_default_pad(new_slicers, da, grid)
     return coarsen_factors, new_slicers
 
 
