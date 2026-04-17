@@ -477,18 +477,10 @@ def fix_coordinate_discontinuities(
     intelligent offset corrections to make coordinates continuous.
 
     The algorithm:
-    1. Uses unwrap to fix coordinate discontinuities automatically
+    1. Uses skimage.restoration.unwrap_phase to fix coordinate discontinuities automatically
     2. Calculates the expected coordinate space width using transformer bounds
     3. Shifts the result to maximize overlap with the bbox
 
-    Parameters
-    ----------
-    coordinates : np.ndarray
-        Coordinate values to fix.
-    transformer : pyproj.Transformer
-        Transformer from source to target CRS.
-    bbox : BBox
-        Target bounding box to align coordinates to.
     Examples
     --------
     >>> import numpy as np
@@ -941,13 +933,6 @@ async def transform_for_render(
             )
         else:
             to_transform = subset
-
-        input_to_output = transformer_from_crs(alternate.crs, crs)
-        with log_duration("transform_coordinates", "🔄"):
-            newX, newY = await transform_coordinates(
-                to_transform, alternate.X, alternate.Y, input_to_output
-            )
-
         # Check for discontinuities on geographic coords before projection.
         # This is an optimization - we could also detect after projecting to the target CRS.
         # However, that would be a tax on every render. So instead we look for
@@ -970,6 +955,12 @@ async def transform_for_render(
                 raise NotImplementedError
         else:
             has_discontinuity = False
+
+        input_to_output = transformer_from_crs(alternate.crs, crs)
+        with log_duration("transform_coordinates", "🔄"):
+            newX, newY = await transform_coordinates(
+                to_transform, alternate.X, alternate.Y, input_to_output
+            )
 
         # Fix coordinate discontinuities in transformed coordinates if detected
         # For example, when transforming to WebMercator pyproj will always return values

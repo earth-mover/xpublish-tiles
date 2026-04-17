@@ -864,11 +864,11 @@ def _get_indexer_size(
     sl: "slice | Fill | UgridIndexer", dim_size: int | None = None
 ) -> int:
     """Get the size of an indexer (slice, Fill, or UgridIndexer)."""
-    from xpublish_tiles.grids import UgridIndexer as _UgridIndexer
+    from xpublish_tiles.grids import UgridIndexer
 
     if isinstance(sl, Fill):
         return sl.size
-    elif isinstance(sl, _UgridIndexer):
+    elif isinstance(sl, UgridIndexer):
         return sl.vertices.size
     elif isinstance(sl, slice):
         start = sl.start if sl.start is not None else 0
