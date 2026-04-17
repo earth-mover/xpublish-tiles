@@ -41,6 +41,7 @@ from xpublish_tiles.lib import (
     _prevent_slice_overlap,
     apply_default_pad,
     check_data_is_renderable_size,
+    normalize_slicers,
     transformer_from_crs,
 )
 from xpublish_tiles.pipeline import (
@@ -1190,6 +1191,7 @@ async def test_curvilinear_memory_limit_and_minzoom():
 
         # Apply default_pad to match actual render pipeline behavior
         slicers = apply_default_pad(slicers, ds["foo"], grid)
+        slicers = normalize_slicers(slicers, dict(ds["foo"].sizes))
 
         # Verify shapes are extracted correctly (sum of products, not product of sums)
         shapes = list(_iter_subset_shapes(slicers, ds["foo"], grid))
