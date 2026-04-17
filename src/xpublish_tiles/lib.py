@@ -459,9 +459,13 @@ async def transform_coordinates(
     # the ordering of these two fastpaths is important
     # we want to normalize to -180 -> 180 always
     if is_4326_like(transformer.source_crs) and is_4326_like(transformer.target_crs):
-        # for some reason pyproj does not normalize these to -180->180
-        newdata = inx.data.copy()
-        newdata[newdata >= 180] -= 360
+        # pyproj does not normalize these, and inputs can arrive in either the
+        # 0–360 or -180–180 convention (e.g. HEALPix corner vertices come out
+        # in 0–360). Force -180–180 in-place on a fresh copy.
+        newdata = inx.data.astype(np.float64, copy=True)
+        newdata += 180
+        np.mod(newdata, 360, out=newdata)
+        newdata -= 180
         return inx.copy(data=newdata), iny
 
     if transformer.source_crs == transformer.target_crs:
@@ -473,6 +477,8 @@ async def transform_coordinates(
         or transformer == transformer_from_crs(OTHER_4326, 3857)
     ):
         newx, newy = epsg4326to3857(inx.data, iny.data)
+        _clamp_infinite(newx)
+        _clamp_infinite(newy)
         return inx.copy(data=newx), iny.copy(data=newy)
 
     # Broadcast coordinates
@@ -500,7 +506,25 @@ async def transform_coordinates(
     else:
         newX, newY = await async_run(transformer.transform, bx.data, by.data)
 
+    if not transformer.target_crs.is_geographic:
+        _clamp_infinite(newX)
+        _clamp_infinite(newY)
+
     return bx.copy(data=newX), by.copy(data=newY)
+
+
+def _clamp_infinite(arr: np.ndarray) -> None:
+    """In-place: replace ±inf with ±float max.
+
+    Poles map to ±inf under Web Mercator (and similar projections). Datashader
+    drops polygons touching non-finite vertices, leaving holes in the polar
+    caps. Clamping to finite values lets those cells still rasterize.
+    """
+    # A value large relative to projected extents (Web Mercator ≈ ±2e7) but
+    # well inside float64 precision so downstream polygon math (datashader's
+    # ray-casting / bbox tests) stays numerically well-behaved.
+    _BIG = 1e15
+    np.nan_to_num(arr, copy=False, nan=np.nan, posinf=_BIG, neginf=-_BIG)
 
 
 def _prevent_slice_overlap(indexers: list[slice]) -> list[slice]:
