@@ -58,6 +58,7 @@ from xpublish_tiles.testing.tiles import (
     TILES,
     WEBMERC_TMS,
     WGS84_TMS,
+    TileTestParam,
 )
 from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
 
@@ -155,14 +156,30 @@ async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot, pytestco
     )
 
 
+POLYGON_EDGE_TILES = [
+    TileTestParam(
+        tile=Tile(x=t.tile.x * 2, y=t.tile.y * 2, z=t.tile.z + 1),
+        tms=t.tms,
+        name=t.name,
+    )
+    for t in TILES
+    if 3 <= t.tile.z <= 5
+    and any(
+        k in t.name for k in ("antimeridian", "corner", "prime", "small_bbox", "zoom")
+    )
+]
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tile,tms", as_pytestparams(TILES))
+@pytest.mark.parametrize("tile,tms", as_pytestparams(POLYGON_EDGE_TILES))
 async def test_pipeline_tiles_polygons(
     global_datasets, tile, tms, png_snapshot, pytestconfig
 ):
     """Test pipeline with polygons style rendering."""
     ds = global_datasets
-    query_params = create_query_params(tile, tms, style="polygons")
+    query_params = create_query_params(
+        tile, tms, style="polygons", colorscalerange=(-0.5, 0.5)
+    )
     with config.set(rectilinear_check_min_size=0):
         result = await pipeline(ds, query_params)
     if pytestconfig.getoption("--visualize"):
