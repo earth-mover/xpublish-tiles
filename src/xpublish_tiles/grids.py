@@ -25,9 +25,11 @@ from xpublish_tiles.config import config
 from xpublish_tiles.lib import (
     Fill,
     VariableNotFoundError,
+    _coarsen_indices_impl,
     _prevent_slice_overlap,
     aeqd_to_4326,
     crs_repr,
+    fill_rings_from_corners,
     is_4326_like,
     unwrap,
 )
@@ -248,36 +250,22 @@ def _convert_longitude_slice(
         return (slice(start, stop),)
 
 
-def _padded_diff(arr: np.ndarray, axis: int = -1) -> np.ndarray:
-    """
-    Compute differences along an axis and pad to match original array shape.
-    This replaces np.gradient for computing spacing between points.
+def _adjacent_pair(arr: np.ndarray, axis: int) -> tuple[np.ndarray, np.ndarray]:
+    """Return ``(arr[:-1], arr[1:])`` sliced along the given axis."""
+    lo = [slice(None)] * arr.ndim
+    hi = [slice(None)] * arr.ndim
+    lo[axis] = slice(None, -1)
+    hi[axis] = slice(1, None)
+    return arr[tuple(lo)], arr[tuple(hi)]
 
-    Similar to np.gradient but uses forward differences instead of centered differences.
-    The result represents the spacing to the next point, with the last value repeated.
 
-    Parameters
-    ----------
-    arr : np.ndarray
-        Input array
-    axis : int
-        Axis along which to compute differences. Default is -1 (last axis).
-
-    Returns
-    -------
-    np.ndarray
-        Array of same shape as input with padded differences.
-        Uses forward differences with the last value repeated.
-    """
-    # Compute forward differences
-    diff = np.diff(arr, axis=axis)
-
-    # Create padding width specification
-    pad_width = [(0, 0)] * arr.ndim
-    pad_width[axis] = (0, 1)
-
-    # Pad by repeating the last slice along the axis
-    return np.pad(diff, pad_width, mode="edge")
+def _min_nonzero_diff(hi: np.ndarray, lo: np.ndarray) -> float:
+    """Minimum of ``|hi - lo|``, treating zeros as missing (0.0 if all zero)."""
+    d = hi - lo
+    np.abs(d, out=d)
+    d[d == 0] = np.inf
+    result = numbagg.nanmin(d)
+    return 0.0 if np.isinf(result) else float(result)
 
 
 def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
@@ -679,11 +667,22 @@ class CurvilinearCellIndex(xr.Index):
         self.left_break = float(np.min(first_col))
         self.right_break = float(np.max(last_col))
 
-        # Compute cell bounds from coordinate diffs. For geographic CRS, X coordinates
-        # are already unwrapped, so diffs are continuous (no 360° jumps at antimeridian).
-        dX, dY = _padded_diff(X, axis=xaxis), _padded_diff(Y, axis=yaxis)
-        self.left, self.right = X - dX / 2, X + dX / 2
-        self.bottom, self.top = Y - dY / 2, Y + dY / 2
+        # Compute cell bounds using shared edges (midpoints between adjacent centers).
+        # This ensures right[j] == left[j+1] and top[i] == bottom[i+1], eliminating
+        # gaps between adjacent cells. For geographic CRS, X coordinates are already
+        # unwrapped so diffs are continuous (no 360° jumps at antimeridian).
+        from datashader.resampling import infer_interval_breaks
+
+        X_breaks = infer_interval_breaks(X, axis=xaxis)
+        Y_breaks = infer_interval_breaks(Y, axis=yaxis)
+        self.left, self.right = _adjacent_pair(X_breaks, xaxis)
+        self.bottom, self.top = _adjacent_pair(Y_breaks, yaxis)
+
+        # Full corner grids: break along the OTHER axis to get (ny+1, nx+1).
+        # Used by cell_corners for polygon rendering.
+        self.corner_x = infer_interval_breaks(X_breaks, axis=yaxis)
+        self.corner_y = infer_interval_breaks(Y_breaks, axis=xaxis)
+
         # Determine if Y is increasing by checking the first row.
         # Don't use .all() because tripolar grids have dY=0 in the fold region
         # which would cause the swap to trigger incorrectly.
@@ -694,16 +693,9 @@ class CurvilinearCellIndex(xr.Index):
             self.top, self.bottom = self.bottom, self.top
         self.xaxis, self.yaxis = xaxis, yaxis
 
-        # Calculate minimum spacing using in-place ops (dX/dY no longer needed)
-        np.abs(dX, out=dX)
-        dX[dX == 0] = np.inf
-        result = numbagg.nanmin(dX)
-        self._dXmin = 0.0 if np.isinf(result) else float(result)
-
-        np.abs(dY, out=dY)
-        dY[dY == 0] = np.inf
-        result = numbagg.nanmin(dY)
-        self._dYmin = 0.0 if np.isinf(result) else float(result)
+        # Minimum cell width/height using the already-computed edges.
+        self._dXmin = _min_nonzero_diff(self.right, self.left)
+        self._dYmin = _min_nonzero_diff(self.top, self.bottom)
 
     def get_min_spacing(self) -> tuple[float, float]:
         """Get minimum spacing in X and Y directions."""
@@ -802,12 +794,6 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         # Calculate and store minimum cell width
         widths = right_bounds - left_bounds
         self._dXmin = float(np.min(widths)) if len(widths) > 0 else 0.0
-
-    @property
-    def cell_bounds(self) -> np.ndarray:
-        """Get the cell bounds as an array."""
-        ii = self._interval_index
-        return np.array([ii.left, ii.right]).T
 
     @property
     def cell_centers(self) -> pd.Index:
@@ -963,6 +949,7 @@ class GridSystem(ABC):
     Y: str
     Xdim: str
     Ydim: str
+    npoints_per_geometry: int
 
     # FIXME: do we really need these Index objects on the class?
     #   - reconsider when we do curvilinear and triangular grids
@@ -989,6 +976,63 @@ class GridSystem(ABC):
 
     def assign_index(self, da: xr.DataArray) -> xr.DataArray:
         return da
+
+    def cell_corners(
+        self,
+        *,
+        slicers: dict[str, list],
+        coarsen_factors: dict[str, int],
+    ) -> xr.DataArray:
+        """Return a synthetic DataArray whose X/Y coords are the cell corner grid.
+
+        For 2D grids, the corner grid has shape ``(ny_c+1, nx_c+1)``
+        (after coarsening). ``transform_coordinates`` can operate on it directly.
+        """
+        raise NotImplementedError
+
+    def corners_to_rings(
+        self,
+        corner_x: np.ndarray,
+        corner_y: np.ndarray,
+        *,
+        ugrid_indexer: "UgridIndexer | None" = None,
+    ) -> np.ndarray:
+        """Assemble a ``(n_cells, 5, 2)`` ring buffer from a transformed corner grid.
+
+        For 1D inputs, meshgrid is applied (assumes Y-first data layout).
+        For 2D inputs, the caller must ensure the axis order matches
+        ``da.values.ravel()``.  Triangular grids override this to use
+        ``ugrid_indexer.connectivity`` for triangle assembly.
+        """
+        if corner_x.ndim == 1:
+            corner_x, corner_y = np.meshgrid(corner_x, corner_y)
+        n0, n1 = corner_x.shape[0] - 1, corner_x.shape[1] - 1
+        rings = np.empty((n0, n1, 5, 2), dtype=np.float64)
+        with NUMBA_THREADING_LOCK:
+            fill_rings_from_corners(rings, corner_x, corner_y)
+        return rings.reshape(-1, 5, 2)
+
+    def coarsen_indices(
+        self,
+        *,
+        slicers: dict[str, list],
+        coarsen_factors: dict[str, int],
+    ) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+        """Return ``{dim: (starts, ends)}`` indices into the original edge arrays.
+
+        ``starts[k]`` and ``ends[k]`` are the original-grid indices for the
+        left/bottom and right/top edges of the k-th coarsened cell along ``dim``.
+        When ``dim`` has factor 1 (or is absent from ``coarsen_factors``), this
+        returns the identity mapping (same index used for both edges per cell).
+
+        For global grids padded via wraparound, ``slicers[dim]`` can contain
+        multiple slice objects; this method flattens them into a single logical
+        range before applying the stride, so the edge count always matches the
+        coarsened data's cell count.
+        """
+        # TODO: the implementation in `_coarsen_indices_impl` is grid-agnostic;
+        # consider promoting it to a concrete method here so all grids share it.
+        raise NotImplementedError
 
     def equals(self, other: object) -> bool:
         if not isinstance(other, GridSystem):
@@ -1073,12 +1117,45 @@ class GridSystem(ABC):
         return GridMetadata(X=self.X, Y=self.Y, crs=self.crs, grid_cls=type(self))
 
 
-class RectilinearSelMixin:
-    """Mixin for generic rectilinear .sel"""
+class RectilinearMixin:
+    """Mixin for rectilinear grid operations (.sel and .corners_to_rings)."""
 
     indexes: tuple[xr.Index, ...]
     X: str
     Y: str
+    Xdim: str
+    Ydim: str
+    npoints_per_geometry: int = field(init=False, default=5)
+
+    def coarsen_indices(
+        self,
+        *,
+        slicers: dict[str, list],
+        coarsen_factors: dict[str, int],
+    ) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+        return _coarsen_indices_impl(slicers, [self.Xdim, self.Ydim], coarsen_factors)
+
+    def _corners_from_edges(
+        self,
+        x_edges: np.ndarray,
+        y_edges: np.ndarray,
+        *,
+        slicers: dict[str, list],
+        coarsen_factors: dict[str, int],
+    ) -> xr.DataArray:
+        """Build a synthetic DataArray with 1D X/Y corner coords from full edge arrays."""
+        cell_idx = self.coarsen_indices(slicers=slicers, coarsen_factors=coarsen_factors)
+        x_starts, x_ends = cell_idx[self.Xdim]
+        y_starts, y_ends = cell_idx[self.Ydim]
+
+        xc = np.asarray(x_edges)[np.append(x_starts, x_ends[-1] + 1)]
+        yc = np.asarray(y_edges)[np.append(y_starts, y_ends[-1] + 1)]
+
+        return xr.DataArray(
+            np.empty((len(yc), len(xc))),
+            dims=(self.Ydim, self.Xdim),
+            coords={self.X: (self.Xdim, xc), self.Y: (self.Ydim, yc)},
+        )
 
     def _rectilinear_sel(
         self, *, bbox: BBox, y_is_increasing: bool, x_size: int, y_size: int
@@ -1132,7 +1209,7 @@ class RectilinearSelMixin:
 
 
 @dataclass(kw_only=True, eq=False)
-class RasterAffine(RectilinearSelMixin, GridSystem):
+class RasterAffine(RectilinearMixin, GridSystem):
     """2D horizontal grid defined by an affine transform."""
 
     crs: CRS
@@ -1144,6 +1221,7 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
     indexes: tuple[rasterix.RasterIndex]
     Z: str | None = None
     lon_spans_globe: bool = field(init=False)
+    npoints_per_geometry: int = field(init=False, default=5)
     dXmin: float = field(init=False)
     dYmin: float = field(init=False)
 
@@ -1206,6 +1284,26 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
             y_size=index._xy_shape[1],
         )
 
+    def _get_edge_arrays(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return full 1D edge arrays (x_edges size nx+1, y_edges size ny+1)."""
+        (index,) = self.indexes
+        affine = index.transform()
+        nx, ny = index._xy_shape
+        x_edges = affine.c + np.arange(nx + 1) * affine.a
+        y_edges = affine.f + np.arange(ny + 1) * affine.e
+        return x_edges, y_edges
+
+    def cell_corners(
+        self,
+        *,
+        slicers: dict[str, list],
+        coarsen_factors: dict[str, int],
+    ) -> xr.DataArray:
+        x_edges, y_edges = self._get_edge_arrays()
+        return self._corners_from_edges(
+            x_edges, y_edges, slicers=slicers, coarsen_factors=coarsen_factors
+        )
+
     def equals(self, other: object) -> bool:
         if not isinstance(other, RasterAffine):
             return False
@@ -1218,7 +1316,7 @@ class RasterAffine(RectilinearSelMixin, GridSystem):
 
 
 @dataclass(kw_only=True, eq=False)
-class Rectilinear(RectilinearSelMixin, GridSystem):
+class Rectilinear(RectilinearMixin, GridSystem):
     """
     2D horizontal grid defined by two explicit 1D basis vectors.
     Assumes coordinates are cell centers.
@@ -1232,6 +1330,7 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
     Ydim: str = field(init=False)
     indexes: tuple[xr.indexes.PandasIndex | LongitudeCellIndex, xr.indexes.PandasIndex]
     Z: str | None = None
+    npoints_per_geometry: int = field(init=False, default=5)
     lon_spans_globe: bool = field(init=False)
     dXmin: float = field(init=False)
     dYmin: float = field(init=False)
@@ -1370,6 +1469,26 @@ class Rectilinear(RectilinearSelMixin, GridSystem):
             y_size=y_size,
         )
 
+    def _get_edge_arrays(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return full 1D edge arrays (x_edges size nx+1, y_edges size ny+1)."""
+        x_index, y_index = self.indexes[0], self.indexes[-1]
+        x_ii = cast(pd.IntervalIndex, x_index.index)
+        y_ii = cast(pd.IntervalIndex, y_index.index)
+        x_edges = _compute_interval_bounds(np.asarray(x_ii.mid))
+        y_edges = _compute_interval_bounds(np.asarray(y_ii.mid))
+        return x_edges, y_edges
+
+    def cell_corners(
+        self,
+        *,
+        slicers: dict[str, list],
+        coarsen_factors: dict[str, int],
+    ) -> xr.DataArray:
+        x_edges, y_edges = self._get_edge_arrays()
+        return self._corners_from_edges(
+            x_edges, y_edges, slicers=slicers, coarsen_factors=coarsen_factors
+        )
+
     def equals(self, other: object) -> bool:
         if not isinstance(other, Rectilinear):
             return False
@@ -1401,6 +1520,7 @@ class Curvilinear(GridSystem):
     lon_spans_globe: bool = field(init=False)
     dXmin: float = field(init=False)
     dYmin: float = field(init=False)
+    npoints_per_geometry: int = field(init=False, default=5)
 
     def __post_init__(self) -> None:
         index = next(iter(self.indexes))
@@ -1569,6 +1689,47 @@ class Curvilinear(GridSystem):
 
         return {self.Xdim: xslicers, self.Ydim: yslicers}
 
+    def coarsen_indices(
+        self,
+        *,
+        slicers: dict[str, list],
+        coarsen_factors: dict[str, int],
+    ) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+        return _coarsen_indices_impl(slicers, [self.Xdim, self.Ydim], coarsen_factors)
+
+    def cell_corners(
+        self,
+        *,
+        slicers: dict[str, list],
+        coarsen_factors: dict[str, int],
+    ) -> xr.DataArray:
+        """Return a synthetic DataArray with 2D X/Y corner coords."""
+        index = next(iter(self.indexes))
+        assert isinstance(index, CurvilinearCellIndex)
+        xaxis, yaxis = index.xaxis, index.yaxis
+
+        cell_idx = self.coarsen_indices(slicers=slicers, coarsen_factors=coarsen_factors)
+        x_starts, x_ends = cell_idx[self.Xdim]
+        y_starts, y_ends = cell_idx[self.Ydim]
+
+        # Corner indices: starts plus the final end+1
+        x_ci = np.append(x_starts, x_ends[-1] + 1)
+        y_ci = np.append(y_starts, y_ends[-1] + 1)
+
+        # np.take preserves the original axis order, so if xaxis=0 the result
+        # is (nx_c+1, ny_c+1). Use the data's dim names so
+        # xr.transpose(*data.dims) aligns them in the caller.
+        corner_x = np.take(np.take(index.corner_x, y_ci, axis=yaxis), x_ci, axis=xaxis)
+        corner_y = np.take(np.take(index.corner_y, y_ci, axis=yaxis), x_ci, axis=xaxis)
+
+        dim0 = self.Xdim if xaxis == 0 else self.Ydim
+        dim1 = self.Ydim if xaxis == 0 else self.Xdim
+        return xr.DataArray(
+            np.empty(corner_x.shape),
+            dims=(dim0, dim1),
+            coords={self.X: ((dim0, dim1), corner_x), self.Y: ((dim0, dim1), corner_y)},
+        )
+
 
 @dataclass(kw_only=True, eq=False)
 class Polar(GridSystem):
@@ -1592,6 +1753,7 @@ class Polar(GridSystem):
     center_lat: float
     center_lon: float
     lon_spans_globe: bool = False
+    npoints_per_geometry: int = field(init=False, default=5)
     dXmin: float = field(init=False)
     dYmin: float = field(init=False)
 
@@ -1738,6 +1900,7 @@ class Triangular(GridSystem):
     dim: str
     lon_spans_globe: bool
     indexes: tuple[xr.Index]
+    npoints_per_geometry: int = field(init=False, default=4)
 
     # these make no sense
     dXmin: float = 0
@@ -1798,6 +1961,23 @@ class Triangular(GridSystem):
         ugrid_indexer = result.dim_indexers["ugrid"]
         assert isinstance(ugrid_indexer, UgridIndexer)
         return {self.dim: [ugrid_indexer]}
+
+    def corners_to_rings(
+        self,
+        corner_x: np.ndarray,
+        corner_y: np.ndarray,
+        *,
+        ugrid_indexer: "UgridIndexer | None" = None,
+    ) -> np.ndarray:
+        """Build a ``(n_faces, 4, 2)`` triangle ring buffer from vertex coords + connectivity."""
+        assert ugrid_indexer is not None
+        verts = np.column_stack([corner_x, corner_y])
+        tri_corners = verts[ugrid_indexer.connectivity]  # (n_faces, 3, 2)
+        n = tri_corners.shape[0]
+        rings = np.empty((n, 4, 2), dtype=np.float64)
+        rings[:, :3, :] = tri_corners
+        rings[:, 3, :] = tri_corners[:, 0, :]
+        return rings
 
     @classmethod
     def from_dataset(

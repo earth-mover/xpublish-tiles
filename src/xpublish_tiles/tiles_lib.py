@@ -10,7 +10,12 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from xpublish_tiles.grids import GridSystem, GridSystem2D, Triangular
-from xpublish_tiles.lib import apply_default_pad, transformer_from_crs
+from xpublish_tiles.lib import (
+    apply_default_pad,
+    check_data_is_renderable_size,
+    normalize_slicers,
+    transformer_from_crs,
+)
 from xpublish_tiles.utils import time_debug, xarray_object_key
 
 _MIN_ZOOM_CACHE = cachetools.LRUCache(maxsize=8192)
@@ -67,9 +72,9 @@ def _compute_min_zoom(
     grid: GridSystem,
     tms: morecantile.TileMatrixSet,
     da: xr.DataArray,
+    *,
+    style: str,
 ) -> int:
-    from xpublish_tiles.pipeline import check_data_is_renderable_size
-
     tms_crs = CRS.from_wkt(tms.crs.to_wkt())
 
     geo_left, geo_bottom, geo_right, geo_top = tms.bbox
@@ -132,11 +137,15 @@ def _compute_min_zoom(
             # Handle antimeridian-crossing tiles where left > right after transform
             if grid.crs.is_geographic and left > right:
                 right += 360
+
             tile_bbox = BBox(west=left, south=bottom, east=right, north=top)
             slicers = grid.sel(bbox=tile_bbox)
             if isinstance(grid, GridSystem2D):
                 slicers = apply_default_pad(slicers, da, grid)
-            if not check_data_is_renderable_size(slicers, da, grid, alternate):
+                slicers = normalize_slicers(slicers, dict(da.sizes))
+            if not check_data_is_renderable_size(
+                slicers, da, grid, alternate, style=style
+            ):
                 return False
         return True
 
@@ -160,6 +169,7 @@ def get_min_zoom(
     grid: GridSystem,
     tms: morecantile.TileMatrixSet,
     da: xr.DataArray,
+    style: str,
     xpublish_id: str | None = None,
 ) -> int:
     """Calculate minimum zoom level that avoids TileTooBigError.
@@ -186,7 +196,7 @@ def get_min_zoom(
         Minimum safe zoom level for this grid and data
     """
     if xpublish_id is not None:
-        cache_key: tuple | None = (xpublish_id, xarray_object_key(da), tms.id)
+        cache_key: tuple | None = (xpublish_id, xarray_object_key(da), tms.id, style)
     else:
         cache_key = None
 
@@ -197,7 +207,7 @@ def get_min_zoom(
         if cache_key is not None and cache_key in _MIN_ZOOM_CACHE:
             return _MIN_ZOOM_CACHE[cache_key]
 
-        result = _compute_min_zoom(grid, tms, da)
+        result = _compute_min_zoom(grid, tms, da, style=style)
 
         if cache_key is not None:
             _MIN_ZOOM_CACHE[cache_key] = result

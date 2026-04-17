@@ -4,7 +4,7 @@ import asyncio
 import io
 import math
 import operator
-from collections.abc import Hashable, Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import lru_cache, partial
@@ -25,7 +25,7 @@ from xpublish_tiles.config import config
 from xpublish_tiles.utils import NUMBA_THREADING_LOCK
 
 if TYPE_CHECKING:
-    from xpublish_tiles.grids import UgridIndexer
+    from xpublish_tiles.grids import GridMetadata, GridSystem, UgridIndexer
 from xpublish_tiles.logger import logger
 
 WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)  # from proj
@@ -56,6 +56,62 @@ class PadDimension:
 @dataclass
 class Fill:
     size: int
+
+
+@dataclass
+class CoarsenedCoordinateIndices:
+    """Index arrays for coarsening ``total`` cells by ``factor``.
+
+    All indices are offset by ``offset`` (default 0), so they index
+    directly into the original edge/coordinate arrays.
+    ``starts`` is computed eagerly; ``centers()`` and ``ends()`` compute
+    on demand.
+    """
+
+    total: int
+    factor: int
+    offset: int = 0
+    starts: np.ndarray = field(init=False)
+
+    def __post_init__(self):
+        n = math.ceil(self.total / self.factor)
+        self.starts = np.arange(n) * self.factor + self.offset
+
+    def centers(self) -> np.ndarray:
+        return np.minimum(self.starts + self.factor // 2, self.offset + self.total - 1)
+
+    def ends(self) -> np.ndarray:
+        return np.minimum(self.starts + self.factor, self.offset + self.total) - 1
+
+
+def _coarsen_indices_impl(
+    slicers: dict[str, list],
+    dims: list[str],
+    coarsen_factors: dict[str, int],
+) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Compute left/right edge indices into the original edge arrays for each coarsened cell.
+
+    Uses :class:`CoarsenedCoordinateIndices` for the stride math.  For multi-slice
+    (wraparound) dims the slices are flattened first, because a coarsened
+    cell can span the boundary between slices.
+    """
+    result: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    for dim in dims:
+        slices = [s for s in slicers[dim] if isinstance(s, slice)]
+        factor = coarsen_factors.get(dim, 1)
+
+        if len(slices) == 1:
+            s = slices[0]
+            w = CoarsenedCoordinateIndices(s.stop - s.start, factor, offset=s.start)
+            starts, ends = w.starts, w.ends()
+        else:
+            orig = np.concatenate([np.arange(s.start, s.stop) for s in slices])
+            w = CoarsenedCoordinateIndices(orig.size, factor)
+            starts = orig[w.starts]
+            ends = orig[w.ends()]
+
+        result[dim] = (starts, ends)
+    return result
 
 
 def crs_repr(crs: CRS | None) -> str:
@@ -546,6 +602,19 @@ def pad_slicers(
     return result
 
 
+def normalize_slicers(
+    slicers: "dict[str, list[slice | Fill | UgridIndexer]]",
+    dim_sizes: "Mapping[Hashable, int]",
+) -> "dict[str, list[slice | Fill | UgridIndexer]]":
+    return {
+        dim: [
+            slice(*s.indices(dim_sizes[dim])) if isinstance(s, slice) else s
+            for s in entries
+        ]
+        for dim, entries in slicers.items()
+    }
+
+
 def apply_default_pad(slicers, da, grid):
     """Apply default padding for edge safety (floating-point roundoff protection).
 
@@ -591,6 +660,60 @@ def slicers_to_pad_instruction(slicers, datatype) -> dict[str, Any]:
         pad_kwargs["pad_width"] = pad_widths
         pad_kwargs["mode"] = "edge" if isinstance(datatype, DiscreteData) else "constant"
     return pad_kwargs
+
+
+def polygons_from_rings(rings: np.ndarray):
+    """Build a spatialpandas PolygonArray from a ``(N, M, 2)`` rings buffer.
+
+    Each row is one polygon with M vertices (including the closing vertex).
+
+    We choose to use `spatialpandas` instead of `geopandas` because it's internal
+    data structure (ragged arrays backed by pyarrow buffers) is what the renderer
+    requires internally.
+
+    Spatialpandas' ``PolygonArray`` stores geometries natively in ragged
+    form backed by pyarrow buffers, so we construct it directly:
+    - ``inner``: the flat coord buffer, zero-copy via ``pa.py_buffer``
+    - ``rings_arr``: list-array whose offsets are ``0, 2M, 4M, …``
+    - ``polys``: list-array of rings, one ring per polygon
+
+    Orientation (CW vs CCW) is not normalized — datashader's winding-number
+    rasterizer is orientation-agnostic, so we skip the per-polygon reorient.
+    """
+    import pyarrow as pa
+    from spatialpandas.geometry import PolygonArray
+
+    n, m, _ = rings.shape
+    flat = np.ascontiguousarray(rings.reshape(-1), dtype=np.float64)
+    ring_stride = m * 2
+
+    inner = pa.Array.from_buffers(pa.float64(), flat.size, [None, pa.py_buffer(flat)], 0)
+    ring_offsets = np.arange(0, flat.size + 1, ring_stride, dtype=np.int32)
+    rings_arr = pa.ListArray.from_arrays(pa.array(ring_offsets), inner)
+    poly_offsets = np.arange(n + 1, dtype=np.int32)
+    polys = pa.ListArray.from_arrays(pa.array(poly_offsets), rings_arr)
+    return PolygonArray(polys)
+
+
+@numba.njit(parallel=True, cache=True, boundscheck=False)
+def fill_rings_from_corners(out, corner_x, corner_y):
+    """Fill a (n0, n1, 5, 2) ring array from a (n0+1, n1+1) corner grid.
+
+    Ring order: (i,j), (i,j+1), (i+1,j+1), (i+1,j), (i,j) [close].
+    """
+    n0, n1 = out.shape[0], out.shape[1]
+    for i in numba.prange(n0):  # ty: ignore[not-iterable]
+        for j in range(n1):
+            out[i, j, 0, 0] = corner_x[i, j]
+            out[i, j, 0, 1] = corner_y[i, j]
+            out[i, j, 1, 0] = corner_x[i, j + 1]
+            out[i, j, 1, 1] = corner_y[i, j + 1]
+            out[i, j, 2, 0] = corner_x[i + 1, j + 1]
+            out[i, j, 2, 1] = corner_y[i + 1, j + 1]
+            out[i, j, 3, 0] = corner_x[i + 1, j]
+            out[i, j, 3, 1] = corner_y[i + 1, j]
+            out[i, j, 4, 0] = corner_x[i, j]
+            out[i, j, 4, 1] = corner_y[i, j]
 
 
 def apply_range_colors(
@@ -735,3 +858,113 @@ def coarsen_mean_pad(da: xr.DataArray, factors: dict[str, int]) -> xr.DataArray:
     with NUMBA_THREADING_LOCK:
         _coarsen_nanmean_2d(arr, fy, fx, out)
     return xr.DataArray(out, dims=dims, name=da.name)
+
+
+def _get_indexer_size(
+    sl: "slice | Fill | UgridIndexer", dim_size: int | None = None
+) -> int:
+    """Get the size of an indexer (slice, Fill, or UgridIndexer)."""
+    from xpublish_tiles.grids import UgridIndexer
+
+    if isinstance(sl, Fill):
+        return sl.size
+    elif isinstance(sl, UgridIndexer):
+        return sl.vertices.size
+    elif isinstance(sl, slice):
+        start = sl.start if sl.start is not None else 0
+        if sl.stop is not None:
+            stop = sl.stop
+        elif dim_size is not None:
+            stop = dim_size
+        else:
+            raise ValueError("dim_size is required for open-ended slices")
+        return stop - start
+    else:
+        raise TypeError(f"Unknown indexer type: {type(sl)!r}")
+
+
+def _iter_subset_shapes(
+    slicers: "dict[str, list[slice | Fill | UgridIndexer]]",
+    da: xr.DataArray,
+    grid: "GridSystem",
+):
+    """Iterate over individual subset shapes from slicers.
+
+    Yields tuple shapes for each subset that will be created.
+    For GridSystem2D, yields (x_size, y_size) for each X slice.
+    For Triangular, yields (size,) for the single slice.
+    """
+    from xpublish_tiles.grids import Triangular
+
+    if isinstance(grid, Triangular):
+        yield (_get_indexer_size(next(iter(slicers[grid.dim])), da.sizes[grid.dim]),)
+        return
+
+    yslice = None
+    for candidate in slicers[grid.Ydim]:
+        if isinstance(candidate, slice):
+            yslice = candidate
+            break
+
+    if yslice is None:
+        yslice = slicers[grid.Ydim][0]
+
+    y_size = _get_indexer_size(yslice, da.sizes[grid.Ydim])
+
+    for sl in slicers[grid.Xdim]:
+        x_size = _get_indexer_size(sl, da.sizes[grid.Xdim])
+        yield (x_size, y_size)
+
+
+def check_data_is_renderable_size(
+    slicers: "dict[str, list[slice | Fill | UgridIndexer]]",
+    da: xr.DataArray,
+    grid: "GridSystem",
+    alternate: "GridMetadata",
+    *,
+    style: str = "raster",
+) -> bool:
+    """Check if given slicers produce data of renderable size without loading data.
+
+    Parameters
+    ----------
+    slicers : dict[str, list[slice | Fill | UgridIndexer]]
+        Slicers for data selection
+    da : xr.DataArray
+        Data array (only metadata used, no data loaded)
+    grid : GridSystem
+        Grid system information
+    alternate : GridMetadata
+        Alternate grid metadata
+
+    Returns
+    -------
+    bool
+        True if data is within renderable size limits, False if too big
+    """
+    has_alternate = alternate.crs != grid.crs
+    factor = 3 if has_alternate else 1
+
+    total_size = sum(math.prod(shape) for shape in _iter_subset_shapes(slicers, da, grid))
+    if style == "polygons":
+        total_size *= grid.npoints_per_geometry
+    return total_size * da.dtype.itemsize <= factor * config.get("max_renderable_size")
+
+
+def max_render_shape(
+    *, style: str, width: int = 256, height: int = 256
+) -> tuple[int, int]:
+    """Compute the per-axis max data shape for coarsening, given the render style.
+
+    For raster: ``max_pixel_factor * tile_size`` per axis.
+    For polygons: derived from ``max_num_geometries`` so that
+    ``product(max_shape) <= max_num_geometries``.
+    """
+    if style == "polygons":
+        max_num = config.get("max_num_geometries")
+        aspect = width / height
+        max_h = int(math.sqrt(max_num / aspect))
+        max_w = int(max_h * aspect)
+        return (max_w, max_h)
+    pixel_factor = config.get("max_pixel_factor")
+    return (pixel_factor * width, pixel_factor * height)

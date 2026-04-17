@@ -1,14 +1,34 @@
 import io
 from abc import ABC, abstractmethod
+from importlib.metadata import entry_points
 from numbers import Number
 from typing import TYPE_CHECKING
 
+import datashader as dsh
+import datashader.transfer_functions as tf
+import matplotlib as mpl
+import matplotlib.colors as mcolors
+import numpy as np
 from PIL import Image, ImageDraw
 
-from xpublish_tiles.types import ImageFormat
+import xarray as xr
+from xpublish_tiles.lib import (
+    MissingParameterError,
+    apply_range_colors,
+    create_colormap_from_dict,
+    create_listed_colormap_from_dict,
+)
+from xpublish_tiles.logger import get_context_logger
+from xpublish_tiles.types import (
+    ContinuousData,
+    DiscreteData,
+    ImageFormat,
+    NullRenderContext,
+    PopulatedRenderContext,
+)
 
 if TYPE_CHECKING:
-    from xpublish_tiles.types import RenderContext
+    from xpublish_tiles.types import DataType, RenderContext
 
 
 def render_error_image(
@@ -35,8 +55,6 @@ class RenderRegistry:
         """Load renderers from entry points."""
         if cls._loaded:
             return
-
-        from importlib.metadata import entry_points
 
         eps = entry_points(group="xpublish_tiles.renderers")
         for ep in eps:
@@ -135,6 +153,112 @@ class Renderer(ABC):
 class DatashaderRenderer(Renderer):
     """Base class for datashader-based renderers with common colormap handling."""
 
+    def _prepare_render(
+        self,
+        contexts: dict[str, "RenderContext"],
+        *,
+        buffer: io.BytesIO,
+        width: int,
+        height: int,
+        variant: str,
+        format: ImageFormat = ImageFormat.PNG,
+        context_logger=None,
+    ) -> tuple | None:
+        """Common preamble for datashader renderers.
+
+        Returns ``(context, canvas, variant)`` or ``None`` if an empty tile was written.
+        """
+
+        logger = context_logger if context_logger is not None else get_context_logger()
+
+        if variant == "default":
+            variant = self.default_variant()
+
+        (context,) = contexts.values()
+        if isinstance(context, NullRenderContext):
+            logger.debug("☐ No data")
+            im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            im.save(buffer, format=str(format))
+            return None
+
+        assert isinstance(context, PopulatedRenderContext)
+        bbox = context.bbox
+        cvs = dsh.Canvas(
+            plot_height=height,
+            plot_width=width,
+            x_range=(bbox.west, bbox.east),
+            y_range=(bbox.south, bbox.north),
+        )
+        return context, cvs, variant
+
+    @staticmethod
+    def shade_mesh(
+        mesh: "xr.DataArray",
+        datatype: "DataType",
+        *,
+        variant: str,
+        colorscalerange: tuple[Number, Number] | None = None,
+        colormap: dict[str, str] | None = None,
+        abovemaxcolor: str | None = None,
+        belowmincolor: str | None = None,
+    ) -> Image.Image:
+        """Shade a datashader mesh (raster aggregation) into a PIL image.
+
+        Shared by raster and polygon renderers — everything after ``cvs.quadmesh`` /
+        ``cvs.trimesh`` / ``cvs.polygons`` is identical.
+        """
+        if isinstance(datatype, ContinuousData):
+            if colorscalerange is None:
+                valid_min = datatype.valid_min
+                valid_max = datatype.valid_max
+                if valid_min is not None and valid_max is not None:
+                    colorscalerange = (valid_min, valid_max)
+                else:
+                    raise MissingParameterError(
+                        "`colorscalerange` must be specified when array does not have valid_min and valid_max attributes specified."
+                    )
+
+            if colormap is not None:
+                cmap = create_colormap_from_dict(colormap)
+            else:
+                cmap = mpl.colormaps.get_cmap(variant)
+
+            cmap = apply_range_colors(cmap, abovemaxcolor, belowmincolor)
+
+            with np.errstate(invalid="ignore"):
+                shaded = tf.shade(
+                    mesh,
+                    cmap=cmap,
+                    how="linear",
+                    span=colorscalerange,
+                )
+            return shaded.to_pil()
+
+        elif isinstance(datatype, DiscreteData):
+            flag_values = datatype.values
+            kwargs: dict = {}
+            if colormap is not None:
+                kwargs["color_key"] = create_listed_colormap_from_dict(
+                    colormap, flag_values
+                )
+            elif datatype.colors is not None:
+                kwargs["color_key"] = dict(
+                    zip(datatype.values, datatype.colors, strict=True)
+                )
+            else:
+                minv = min(flag_values)
+                maxv = max(flag_values)
+                cmap = mpl.colormaps.get_cmap(variant)
+                kwargs["color_key"] = {
+                    v: mcolors.to_hex(cmap((v - minv) / maxv)) for v in flag_values
+                }
+            with np.errstate(invalid="ignore"):
+                shaded = tf.shade(mesh, how="linear", **kwargs)
+            return shaded.to_pil()
+
+        else:
+            raise NotImplementedError(f"Unsupported datatype: {type(datatype)}")
+
     def render_error(
         self,
         *,
@@ -155,8 +279,6 @@ class DatashaderRenderer(Renderer):
 
     @staticmethod
     def supported_variants() -> list[str]:
-        import matplotlib as mpl
-
         colormaps = list(mpl.colormaps)
         variants = [name for name in sorted(colormaps) if not name.endswith("_r")]
         variants.append("custom")

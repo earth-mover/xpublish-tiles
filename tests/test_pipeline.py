@@ -41,6 +41,7 @@ from xpublish_tiles.testing.datasets import (
     HRRR,
     IFS,
     PARA,
+    REDGAUSS_N320,
     TRIPOLE_ANTIMERIDIAN,
     create_global_dataset,
 )
@@ -57,6 +58,7 @@ from xpublish_tiles.testing.tiles import (
     TILES,
     WEBMERC_TMS,
     WGS84_TMS,
+    TileTestParam,
 )
 from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
 
@@ -151,6 +153,42 @@ async def test_pipeline_tiles(global_datasets, tile, tms, png_snapshot, pytestco
         perceptual_threshold=0.99
         if ds.attrs["name"] == "reduced_gaussian_n320"
         else None,
+    )
+
+
+POLYGON_EDGE_TILES = [
+    TileTestParam(
+        tile=Tile(x=t.tile.x * 2, y=t.tile.y * 2, z=t.tile.z + 1),
+        tms=t.tms,
+        name=t.name,
+    )
+    for t in TILES
+    if 3 <= t.tile.z <= 5
+    and any(
+        k in t.name for k in ("antimeridian", "corner", "prime", "small_bbox", "zoom")
+    )
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tile,tms", as_pytestparams(POLYGON_EDGE_TILES))
+async def test_pipeline_tiles_polygons(
+    global_datasets, tile, tms, png_snapshot, pytestconfig
+):
+    """Test pipeline with polygons style rendering."""
+    ds = global_datasets
+    query_params = create_query_params(
+        tile, tms, style="polygons", colorscalerange=(-0.5, 0.5)
+    )
+    with config.set(rectilinear_check_min_size=0):
+        result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    is_global = ds.attrs["name"] == "reduced_gaussian_n320"
+    assert_render_matches_snapshot(
+        result,
+        png_snapshot,
+        skip_transparency_check=not is_global,
     )
 
 
@@ -277,6 +315,58 @@ async def test_radar_data(radar_dataset_and_tile, png_snapshot, pytestconfig):
     assert_render_matches_snapshot(
         result, png_snapshot, tile=tile, tms=tms, skip_transparency_check=True
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tile",
+    [
+        Tile(x=16, y=23, z=6),
+        Tile(x=17, y=23, z=6),
+        Tile(x=14, y=23, z=6),
+        Tile(x=3, y=5, z=4),
+        Tile(x=3, y=7, z=4),
+        # edge-case where there is not data in the tile but the bbox overlaps
+        Tile(x=4, y=7, z=4),
+    ],
+)
+async def test_curvilinear_polygons(tile, png_snapshot, pytestconfig):
+    ds = CURVILINEAR.create()
+    query_params = create_query_params(tile, WEBMERC_TMS, style="polygons")
+    result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(
+        result, png_snapshot, tile=tile, tms=WEBMERC_TMS, skip_transparency_check=True
+    )
+
+
+@pytest.fixture(scope="module")
+def n320_dataset():
+    return REDGAUSS_N320.create()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tile,colorscalerange",
+    [
+        # Near-polar tiles where the N320 reduced Gaussian grid has sparse
+        # longitudinal coverage, so individual triangles are large enough
+        # to be clearly visible in the rendered output.
+        (Tile(x=0, y=0, z=5), (-0.5, 0.5)),
+        (Tile(x=32, y=8, z=6), (0.6, 0.8)),
+    ],
+)
+async def test_n320_polygons_triangles_visible(
+    n320_dataset, tile, colorscalerange, png_snapshot, pytestconfig
+):
+    query_params = create_query_params(
+        tile, WEBMERC_TMS, style="polygons", colorscalerange=colorscalerange
+    )
+    result = await pipeline(n320_dataset, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(result, png_snapshot, tile=tile, tms=WEBMERC_TMS)
 
 
 @pytest.mark.parametrize("tile,tms", as_pytestparams(PARA_TILES))

@@ -35,6 +35,13 @@ Here `lat[lat]` means a coordinate variable named `lat` with one dimension named
 We attempt to require as little metadata as possible, and attempts to infer as much as possible. However, it is *always* better
 for you to annotate your dataset using the CF & ACDD conventions as well as possible.
 
+### Styles
+
+Two rendering styles are supported:
+
+- `raster` — cells are rasterized onto the output grid using [datashader's mesh rasterizers](https://datashader.org/api.html#datashader.Canvas.quadmesh) (`quadmesh` for rectilinear/curvilinear, `trimesh` for unstructured). Used for raster, rectilinear, curvilinear, and unstructured grids.
+- `polygons` — the mesh is passed to [datashader's polygon rasterizer](https://datashader.org/api.html#datashader.Canvas.polygons) as explicit polygon geometries, which rasterizes them onto the tile. This is the only style supported for HEALPix.
+
 ### Categorical Data support
 
 By default all data is treated as continuous. Discrete data are assumed to be encoded with the CF flag variable convention i.e., arrays with the `flag_values` and `flag_meanings`

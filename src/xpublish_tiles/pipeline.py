@@ -1,6 +1,5 @@
 import asyncio
 import io
-import math
 from functools import partial
 from typing import Any, cast
 
@@ -22,16 +21,20 @@ from xpublish_tiles.grids import (
 )
 from xpublish_tiles.lib import (
     AsyncLoadTimeoutError,
+    CoarsenedCoordinateIndices,
     Fill,
     IndexingError,
     MissingParameterError,
     PadDimension,
     TileTooBigError,
     VariableNotFoundError,
+    _iter_subset_shapes,
     apply_default_pad,
     async_run,
     coarsen_mean_pad,
     get_data_load_semaphore,
+    max_render_shape,
+    normalize_slicers,
     pad_slicers,
     transform_coordinates,
     transformer_from_crs,
@@ -68,104 +71,6 @@ def round_bbox(bbox: BBox) -> BBox:
 
 def sum_tuples(*tuples):
     return tuple(sum(values) for values in zip(*tuples, strict=False))
-
-
-def check_data_is_renderable_size(
-    slicers: dict[str, list[slice | Fill | UgridIndexer]],
-    da: xr.DataArray,
-    grid: GridSystem,
-    alternate: GridMetadata,
-) -> bool:
-    """
-    Check if given slicers produce data of renderable size without loading data.
-
-    This replicates the logic from apply_slicers that checks for tile size limits.
-    But is less accurate because we aren't careful about coordinate variables.
-    We do *not* want to apply isel here because this function is used in a loop to determine
-    minzoom for many TMS-es on the metadata route.
-
-    Parameters
-    ----------
-    slicers : dict[str, list[slice | Fill | UgridIndexer]]
-        Slicers for data selection
-    da : xr.DataArray
-        Data array (only metadata used, no data loaded)
-    grid : GridSystem2D
-        Grid system information
-    alternate : GridMetadata
-        Alternate grid metadata
-
-    Returns
-    -------
-    bool
-        True if data is within renderable size limits, False if too big
-    """
-    has_alternate = alternate.crs != grid.crs
-    # Factor calculation matches apply_slicers logic:
-    # if we have crs matching the desired CRS,
-    # then we load that data from disk;
-    # and double the limit to allow slightly larger tiles
-    # = (1 data var + 2 coord vars) * 2
-    factor = 3 if has_alternate else 1
-
-    # Get individual shapes for each subset and compute sum of products (not product of sums)
-    total_size = sum(math.prod(shape) for shape in _iter_subset_shapes(slicers, da, grid))
-
-    # Check if it's within the limit
-    return total_size * da.dtype.itemsize <= factor * config.get("max_renderable_size")
-
-
-def _get_indexer_size(
-    sl: slice | Fill | UgridIndexer, dim_size: int | None = None
-) -> int:
-    """Get the size of an indexer (slice, Fill, or UgridIndexer)."""
-    if isinstance(sl, Fill):
-        return sl.size
-    elif isinstance(sl, UgridIndexer):
-        return sl.vertices.size
-    elif isinstance(sl, slice):
-        if dim_size is None:
-            if sl.start is None or sl.stop is None or sl.start < 0 or sl.stop < 0:
-                raise ValueError("dim_size is required for open-ended or negative slices")
-            return sl.stop - sl.start
-        start, stop, _ = sl.indices(dim_size)
-        return stop - start
-    else:
-        raise TypeError(f"Unknown indexer type: {type(sl)!r}")
-
-
-def _iter_subset_shapes(
-    slicers: dict[str, list[slice | Fill | UgridIndexer]],
-    da: xr.DataArray,
-    grid: GridSystem,
-):
-    """
-    Iterate over individual subset shapes from slicers.
-
-    Yields tuple shapes for each subset that will be created.
-    For GridSystem2D, yields (x_size, y_size) for each X slice.
-    For Triangular, yields (size,) for the single slice.
-    """
-    if isinstance(grid, Triangular):
-        yield (_get_indexer_size(next(iter(slicers[grid.dim])), da.sizes[grid.dim]),)
-        return
-
-    # Find the one Y slice that's actually a slice (not Fill)
-    yslice = None
-    for candidate in slicers[grid.Ydim]:
-        if isinstance(candidate, slice):
-            yslice = candidate
-            break
-
-    if yslice is None:
-        # If no slice found, take the first item (should be a Fill or slice)
-        yslice = slicers[grid.Ydim][0]
-
-    y_size = _get_indexer_size(yslice, da.sizes[grid.Ydim])
-
-    for sl in slicers[grid.Xdim]:
-        x_size = _get_indexer_size(sl, da.sizes[grid.Xdim])
-        yield (x_size, y_size)
 
 
 def shape_from_slicers(
@@ -317,10 +222,7 @@ def estimate_coarsen_factors_and_slicers(
             da=da,
             grid=grid,
         )
-
-    # Always apply default_pad for edge safety (floating-point roundoff protection)
     new_slicers = apply_default_pad(new_slicers, da, grid)
-
     return coarsen_factors, new_slicers
 
 
@@ -331,6 +233,7 @@ async def apply_slicers(
     alternate: GridMetadata,
     slicers: dict[str, list[slice | Fill | UgridIndexer]],
     datatype: DataType,
+    min_dim_size: int = 2,
 ) -> xr.DataArray:
     logger = get_context_logger()
 
@@ -401,8 +304,7 @@ async def apply_slicers(
         raise TileTooBigError(msg)
 
     nvars = sum(len(subset.data_vars) for subset in subsets)
-    # if any subset has shape < (2, 2) raise.
-    if any(total_size < 2 * nvars for total_size in total_shape):
+    if any(total_size < min_dim_size * nvars for total_size in total_shape):
         logger.error("Tile request resulted in insufficient data for rendering.")
         raise AssertionError("Tile request resulted in insufficient data for rendering.")
 
@@ -464,26 +366,11 @@ def coarsen(
 
         coarsened = coarsen_mean_pad(da_no_coords, coarsen_factors)
 
-        # Build indexers once for all coarsened dimensions
+        # Subselect coordinates at window centers
         indexers = {}
         for dim, factor in coarsen_factors.items():
             assert factor % 2 == 1, f"{factor} should be odd."
-            center_offset = factor // 2
-            n_windows = coarsened.sizes[dim]
-            dim_size = da.sizes[dim]
-            indices = np.arange(n_windows) * factor + center_offset
-            # For incomplete last window: use midpoint if present, else last element
-            # 'midpoint' is the point that would've been used if the window was complete.
-            if indices[-1] >= dim_size:
-                last_window_start = (n_windows - 1) * factor
-                last_window_size = dim_size - last_window_start
-                if last_window_size > center_offset:
-                    # Midpoint exists, use it
-                    indices[-1] = last_window_start + center_offset
-                else:
-                    # Midpoint doesn't exist, use last element
-                    indices[-1] = dim_size - 1
-            indexers[dim] = indices
+            indexers[dim] = CoarsenedCoordinateIndices(da.sizes[dim], factor).centers()
 
         # Subselect coordinates using relevant indexers
         new_coords = {}
@@ -555,8 +442,31 @@ def has_coordinate_discontinuity(
     return False
 
 
+def fix_antimeridian_vertices(
+    x_data: np.ndarray,
+    anti: dict[str, np.ndarray],
+    transformer: pyproj.Transformer,
+    *,
+    bbox: BBox,
+) -> None:
+    """Fix antimeridian discontinuities in-place for the given vertex indices.
+
+    Used by both the raster and polygon paths for triangular grids.
+    ``anti`` is ``UgridIndexer.antimeridian_vertices``, mapping "pos"/"neg"
+    to arrays of indices into ``x_data``.
+    """
+    for verts in [anti["pos"], anti["neg"]]:
+        if verts.size > 0:
+            x_data[verts] = fix_coordinate_discontinuities(
+                x_data[verts], transformer, bbox=bbox
+            )
+
+
 def fix_coordinate_discontinuities(
-    coordinates: np.ndarray, transformer: pyproj.Transformer, *, bbox: BBox
+    coordinates: np.ndarray,
+    transformer: pyproj.Transformer,
+    *,
+    bbox: BBox,
 ) -> np.ndarray:
     """
     Fix coordinate discontinuities that occur during coordinate transformation.
@@ -699,18 +609,25 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = await async_run(
         partial(apply_query, ds, variables=query.variables, selectors=query.selectors)
     )
-    pixel_factor = config.get("max_pixel_factor")
-    max_shape = (pixel_factor * query.width, pixel_factor * query.height)
+    max_shape = max_render_shape(
+        style=query.style, width=query.width, height=query.height
+    )
 
     # Capture the context logger before entering thread pool
     context_logger = get_context_logger()
 
     subsets = await subset_to_bbox(
-        validated, bbox=query.bbox, crs=query.crs, max_shape=max_shape
+        validated,
+        bbox=query.bbox,
+        crs=query.crs,
+        max_shape=max_shape,
+        style=query.style,
     )
 
     # Transform coordinates to output CRS
-    subsets = await transform_for_render(subsets, bbox=query.bbox, crs=query.crs)
+    subsets = await transform_for_render(
+        subsets, bbox=query.bbox, crs=query.crs, style=query.style
+    )
     renderer = query.get_renderer()
 
     tasks = [
@@ -908,6 +825,7 @@ async def subset_to_bbox(
     bbox: OutputBBox,
     crs: OutputCRS,
     max_shape: tuple[int, int],
+    style: str = "raster",
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:
     result = {}
     for var_name, array in validated.items():
@@ -940,7 +858,6 @@ async def subset_to_bbox(
         slicers = grid.sel(bbox=input_bbox)
         da = grid.assign_index(array.da)
 
-        # Estimate coarsen factors and adjusted slicers
         coarsen_factors, new_slicers = estimate_coarsen_factors_and_slicers(
             da,
             grid=grid,
@@ -948,6 +865,7 @@ async def subset_to_bbox(
             max_shape=max_shape,
             datatype=array.datatype,
         )
+        new_slicers = normalize_slicers(new_slicers, dict(da.sizes))
         alternate = grid.pick_alternate_grid(crs, coarsen_factors=coarsen_factors)
 
         subset = await apply_slicers(
@@ -956,6 +874,7 @@ async def subset_to_bbox(
             alternate=alternate,
             slicers=new_slicers,
             datatype=array.datatype,
+            min_dim_size=1 if style == "polygons" else 2,
         )
 
         # For Polar, compute lon/lat coordinates after subsetting
@@ -974,6 +893,8 @@ async def subset_to_bbox(
             if isinstance(grid, Triangular)
             else None,
             alternate=alternate,
+            slicers=new_slicers,
+            coarsen_factors=coarsen_factors,
         )
     return result
 
@@ -983,13 +904,14 @@ async def transform_for_render(
     *,
     bbox: OutputBBox,
     crs: OutputCRS,
+    style: str,
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:
-    """Transform coordinates based on rendering style.
+    """Transform coordinates to output CRS.
 
-    For raster styles: transform X/Y coordinates to output CRS.
-    For polygon styles: transform cell boundary geometries to output CRS.
+    For raster style: transform X/Y center coordinates to output CRS.
+    For polygons style: transform cell corner coordinates, then assemble polygons.
+    Both share the same transform + discontinuity-fix machinery.
     """
-    # Raster-style coordinate transformation
     result = {}
     for var_name, context in contexts.items():
         if isinstance(context, NullRenderContext):
@@ -1004,19 +926,25 @@ async def transform_for_render(
             result[var_name] = context
             continue
 
-        # Detect discontinuity for geographic CRS
+        if style == "polygons" and isinstance(grid, GridSystem2D):
+            to_transform = grid.cell_corners(
+                slicers=context.slicers,
+                coarsen_factors=context.coarsen_factors,
+            )
+        else:
+            to_transform = subset
+        # Check for discontinuities on geographic coords before projection.
+        # This is an optimization - we could also detect after projecting to the target CRS.
+        # However, that would be a tax on every render. So instead we look for
+        # the anti-meridian discontinuity specifically.
         if grid.crs.is_geographic:
             if isinstance(grid, Polar):
                 has_discontinuity = False
             elif isinstance(grid, GridSystem2D):
-                # Check for discontinuities on geographic coords before projection.
-                # This is an optimization - we could also detect after projecting to the target CRS.
-                # However, that would be a tax on every render. So instead we look for
-                # the anti-meridian discontinuity specifically.
                 has_discontinuity = has_coordinate_discontinuity(
-                    subset[grid.X].data,
+                    to_transform[grid.X].data,
                     360.0,
-                    axis=subset[grid.X].get_axis_num(grid.Xdim),
+                    axis=to_transform[grid.X].get_axis_num(grid.Xdim),
                     check_antimeridian=True,
                 )
             elif isinstance(grid, Triangular):
@@ -1028,9 +956,10 @@ async def transform_for_render(
         else:
             has_discontinuity = False
 
+        input_to_output = transformer_from_crs(alternate.crs, crs)
         with log_duration("transform_coordinates", "🔄"):
             newX, newY = await transform_coordinates(
-                subset, alternate.X, alternate.Y, transformer_from_crs(alternate.crs, crs)
+                to_transform, alternate.X, alternate.Y, input_to_output
             )
 
         # Fix coordinate discontinuities in transformed coordinates if detected
@@ -1039,32 +968,45 @@ async def transform_for_render(
         # discontinuity is in the tile; it will be preserved by the transformation,
         # regardless of how we may modify the coordinates *before* transforming.
         if has_discontinuity:
-            input_to_output = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
-            if isinstance(grid, GridSystem2D):
-                fixed = fix_coordinate_discontinuities(
+            if isinstance(grid, Triangular):
+                assert context.ugrid_indexer is not None
+                fix_antimeridian_vertices(
                     newX.data,
+                    context.ugrid_indexer.antimeridian_vertices,
                     input_to_output,
                     bbox=bbox,
                 )
-                newX = newX.copy(data=fixed)
+            else:
+                newX = newX.copy(
+                    data=fix_coordinate_discontinuities(
+                        newX.data,
+                        input_to_output,
+                        bbox=bbox,
+                    )
+                )
 
-            elif isinstance(grid, Triangular):
-                assert context.ugrid_indexer is not None
-                anti = context.ugrid_indexer.antimeridian_vertices
-                for verts in [anti["pos"], anti["neg"]]:
-                    if verts.size > 0:
-                        newX.data[verts] = fix_coordinate_discontinuities(
-                            newX.data[verts],
-                            input_to_output,
-                            bbox=bbox,
-                        )
-        newda = subset.assign_coords({grid.X: newX, grid.Y: newY})
+        if style == "polygons":
+            if newX.ndim == 2:
+                newX = newX.transpose(*subset.dims)
+                newY = newY.transpose(*subset.dims)
+            cell_rings = grid.corners_to_rings(
+                newX.data, newY.data, ugrid_indexer=context.ugrid_indexer
+            )
+            # Flatten 2D data to match the 1D ring array from corners_to_rings.
+            da = context.da
+            if da.values.ndim > 1:
+                da = xr.DataArray(da.values.ravel(), dims=["cell"])
+        else:
+            cell_rings = None
+            da = subset.assign_coords({grid.X: newX, grid.Y: newY})
+
         result[var_name] = PopulatedRenderContext(
-            da=newda,
+            da=da,
             grid=grid,
             datatype=context.datatype,
             bbox=bbox,
             ugrid_indexer=context.ugrid_indexer,
             alternate=alternate,
+            cell_rings=cell_rings,
         )
     return result
