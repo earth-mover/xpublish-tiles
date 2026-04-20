@@ -33,6 +33,7 @@ from xpublish_tiles.pipeline import (
     pipeline,
 )
 from xpublish_tiles.testing.datasets import (
+    CUBED_SPHERE,
     CURVILINEAR,
     FORECAST,
     GLOBAL_6KM,
@@ -998,3 +999,31 @@ async def test_healpix_regional_na(tile, png_snapshot, pytestconfig):
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
     assert_render_matches_snapshot(result, png_snapshot, skip_transparency_check=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tile",
+    [
+        pytest.param(Tile(x=0, y=0, z=0), id="0/0/0"),  # full globe
+        pytest.param(Tile(x=0, y=0, z=1), id="1/0/0"),  # NW quadrant
+        pytest.param(Tile(x=1, y=1, z=1), id="1/1/1"),  # SE quadrant
+        pytest.param(Tile(x=1, y=1, z=2), id="2/1/1"),  # equatorial face 0
+        pytest.param(Tile(x=0, y=0, z=2), id="2/0/0"),  # north polar cap
+        pytest.param(Tile(x=0, y=3, z=2), id="2/0/3"),  # south polar cap
+        pytest.param(Tile(x=0, y=1, z=2), id="2/0/1"),  # antimeridian west
+        pytest.param(Tile(x=3, y=1, z=2), id="2/3/1"),  # antimeridian east
+        pytest.param(Tile(x=2, y=3, z=2), id="2/2/3"),  # south polar, east hemisphere
+        pytest.param(Tile(x=7, y=5, z=3), id="3/7/5"),  # rendering artifact
+        pytest.param(Tile(x=4, y=4, z=4), id="4/4/4"),  # rendering artifact
+        pytest.param(Tile(x=1, y=2, z=3), id="3/1/2"),  # rendering artifact
+    ],
+)
+async def test_cubed_sphere_tile(tile, png_snapshot, pytestconfig):
+    """Render cubed-sphere tiles via the polygons pipeline."""
+    ds = CUBED_SPHERE.create().compute()
+    query_params = create_query_params(tile, WEBMERC_TMS, style="polygons")
+    result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(result, png_snapshot)

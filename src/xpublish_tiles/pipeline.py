@@ -12,12 +12,16 @@ from pyproj.aoi import BBox
 import xarray as xr
 from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
+    Curvilinear,
+    FacetedGridSystem,
+    FacetedIndexer,
     GridMetadata,
     GridSystem,
     GridSystem2D,
     Healpix,
     HealpixIndexer,
     Polar,
+    Slicers,
     Triangular,
     UgridIndexer,
     guess_grid_system,
@@ -25,7 +29,6 @@ from xpublish_tiles.grids import (
 from xpublish_tiles.lib import (
     AsyncLoadTimeoutError,
     CoarsenedCoordinateIndices,
-    Fill,
     IndexingError,
     MissingParameterError,
     PadDimension,
@@ -48,6 +51,7 @@ from xpublish_tiles.types import (
     ContinuousData,
     DataType,
     DiscreteData,
+    FaceRenderData,
     NullRenderContext,
     OutputBBox,
     OutputCRS,
@@ -77,7 +81,7 @@ def sum_tuples(*tuples):
 
 
 def shape_from_slicers(
-    slicers: dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]],
+    slicers: Slicers,
     da: xr.DataArray,
     grid: GridSystem,
 ) -> tuple[int, ...]:
@@ -86,7 +90,7 @@ def shape_from_slicers(
 
     Parameters
     ----------
-    slicers : dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]
+    slicers : Slicers
         Slicers for data selection
     da : xr.DataArray
         Data array (only metadata used, no data loaded)
@@ -105,13 +109,10 @@ def get_coarsen_factors(
     shape: tuple[int, ...],
     max_shape: tuple[int, ...],
     dims: list[str],
-    slicers: dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]],
+    slicers: Slicers,
     da: xr.DataArray,
     grid: GridSystem,
-) -> tuple[
-    dict[str, int],
-    dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]],
-]:
+) -> tuple[dict[str, int], Slicers]:
     """
     Calculate coarsening factors and adjust slicers for data to fit within maximum shape constraints.
 
@@ -123,7 +124,7 @@ def get_coarsen_factors(
         Maximum allowed shape (width, height)
     dims : list[str]
         Dimension names corresponding to shape elements
-    slicers : dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]
+    slicers : Slicers
         Original slicers for data selection
     ds : xr.Dataset
         Dataset being processed
@@ -132,7 +133,7 @@ def get_coarsen_factors(
 
     Returns
     -------
-    tuple[dict[str, int], dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]]
+    tuple[dict[str, int], Slicers]
         Coarsening factors (>= 2) and adjusted slicers with padding
     """
 
@@ -185,13 +186,10 @@ def estimate_coarsen_factors_and_slicers(
     da: xr.DataArray,
     *,
     grid: GridSystem,
-    slicers: dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]],
+    slicers: Slicers,
     max_shape: tuple[int, int],
     datatype: DataType,
-) -> tuple[
-    dict[str, int],
-    dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]],
-]:
+) -> tuple[dict[str, int], Slicers]:
     """
     Estimate coarsening factors and adjusted slicers for the given data array.
 
@@ -201,7 +199,7 @@ def estimate_coarsen_factors_and_slicers(
         Data array to process
     grid : GridSystem
         Grid system information
-    slicers : dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]
+    slicers : Slicers
         Original slicers for data selection
     max_shape : tuple[int, int]
         Maximum allowed shape (width, height)
@@ -210,7 +208,7 @@ def estimate_coarsen_factors_and_slicers(
 
     Returns
     -------
-    tuple[dict[str, int], dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]]
+    tuple[dict[str, int], Slicers]
         Coarsening factors and adjusted slicers
     """
     # Triangular grids can't be coarsened and don't need default_pad
@@ -240,7 +238,7 @@ async def apply_slicers(
     *,
     grid: GridSystem,
     alternate: GridMetadata,
-    slicers: dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]],
+    slicers: Slicers,
     datatype: DataType,
     min_dim_size: int = 2,
 ) -> xr.DataArray:
@@ -504,20 +502,23 @@ def fix_healpix_discontinuity(
     """
     am_idxs = np.flatnonzero(antimeridian_mask)
     x_data = x_data.copy()
+    left, _, right, _ = transformer.transform_bounds(-180, -90, 180, 90)
+    width = abs(right - left)
     if style == "polygons":
-        # corners laid out (n_cells * 4,); unwrap each cell's 4 separately
-        groups = [i * 4 + np.arange(4) for i in am_idxs]
+        # Corners laid out (n_cells * 4,). AM-cell vertices split across the
+        # seam by sign of projected x: pull the negative side by +width so each
+        # cell is self-consistent. Vectorized over all seam cells (no per-cell
+        # loop).
+        am_verts = (am_idxs[:, None] * 4 + np.arange(4)).ravel()
+        neg = x_data[am_verts] < 0
+        x_data[am_verts[neg]] += width
     else:
-        groups = [am_idxs]
-    fix_triangular_discontinuity(x_data, groups, transformer, bbox=bbox)
+        fix_triangular_discontinuity(x_data, [am_idxs], transformer, bbox=bbox)
 
     if style != "polygons" or not am_idxs.size:
         return x_data, y_data, slice(None)
 
     # now pad with cells that cross the anti-meridian
-    left, _, right, _ = transformer.transform_bounds(-180, -90, 180, 90)
-    width = abs(right - left)
-    am_verts = (am_idxs[:, None] * 4 + np.arange(4)).ravel()
     dup_x = x_data[am_verts]
     dup_y = y_data[am_verts]
     x_data = np.concatenate([x_data, dup_x - width, dup_x + width])
@@ -884,6 +885,60 @@ def apply_query(
     return validated
 
 
+async def _subset_faceted(
+    array: ValidatedArray,
+    *,
+    grid: FacetedGridSystem,
+    bbox: OutputBBox,
+    crs: OutputCRS,
+) -> PopulatedRenderContext | NullRenderContext:
+    """Per-face subset for cubed-sphere-style grids (polygons renderer only)."""
+    output_to_input = transformer_from_crs(crs_from=crs, crs_to=grid.crs)
+    west, south, east, north = output_to_input.transform_bounds(
+        left=bbox.west, right=bbox.east, top=bbox.north, bottom=bbox.south
+    )
+    if grid.crs.is_geographic:
+        west = west - 360 if west > east else west
+    input_bbox = round_bbox(BBox(west=west, south=south, east=east, north=north))
+    if input_bbox.west > input_bbox.east:
+        raise ValueError(f"Invalid Bbox after transformation: {input_bbox!r}")
+
+    slicers = grid.sel(bbox=input_bbox)
+    indexer = cast(FacetedIndexer, next(iter(slicers[grid.face_dim])))
+    face_selections = indexer.selections
+    if not face_selections:
+        return NullRenderContext()
+
+    face_subsets: list[FaceRenderData] = []
+    for fs in face_selections:
+        face_grid = grid.faces[fs.face_index]
+        face_da = array.da.isel({grid.face_dim: fs.face_index})
+        face_slicers = normalize_slicers(fs.slicers, dict(face_da.sizes))
+        face_subset = await apply_slicers(
+            face_da,
+            grid=face_grid,
+            alternate=face_grid.to_metadata(),
+            slicers=face_slicers,
+            datatype=array.datatype,
+            min_dim_size=1,
+        )
+        face_subsets.append(
+            FaceRenderData(face_grid=face_grid, subset=face_subset, slicers=face_slicers)
+        )
+
+    if not face_subsets:
+        return NullRenderContext()
+
+    return PopulatedRenderContext(
+        da=face_subsets[0].subset,  # placeholder; replaced in transform_for_render
+        grid=grid,
+        datatype=array.datatype,
+        bbox=bbox,
+        alternate=None,
+        face_subsets=face_subsets,
+    )
+
+
 async def subset_to_bbox(
     validated: dict[str, ValidatedArray],
     *,
@@ -895,6 +950,14 @@ async def subset_to_bbox(
     result = {}
     for var_name, array in validated.items():
         grid = array.grid
+        if isinstance(grid, FacetedGridSystem):
+            if style != "polygons":
+                raise NotImplementedError(
+                    f"FacetedGridSystem (cubed sphere) only supports style='polygons'; got {style!r}."
+                )
+            result[var_name] = await _subset_faceted(array, grid=grid, bbox=bbox, crs=crs)
+            continue
+
         if (ndim := array.da.ndim) > 2:
             raise ValueError(f"Attempting to visualize array with {ndim=!r} > 2.")
         # Check for insufficient data - either dimension has too few points
@@ -975,6 +1038,111 @@ async def subset_to_bbox(
     return result
 
 
+async def _transform_faceted_polygons(
+    context: PopulatedRenderContext,
+    *,
+    grid: FacetedGridSystem,
+    bbox: OutputBBox,
+    crs: OutputCRS,
+) -> PopulatedRenderContext | NullRenderContext:
+    """Per-face polygon assembly for FacetedGridSystem (polygons style only).
+
+    For each face, transforms the face's cell corners to output CRS, builds
+    per-cell 5-vertex rings, and concatenates across faces into a single
+    ``(N_total, 5, 2)`` ring array plus a flattened 1D value array.
+    """
+    assert context.face_subsets is not None
+    input_to_output = transformer_from_crs(grid.crs, crs)
+
+    rings_per_face: list[np.ndarray] = []
+    values_per_face: list[np.ndarray] = []
+
+    out_left, _, out_right, _ = input_to_output.transform_bounds(-180, -90, 180, 90)
+    out_width = abs(out_right - out_left)
+
+    for face in context.face_subsets:
+        face_grid = face.face_grid
+        subset = face.subset
+        is_polar_cap = isinstance(face_grid, Curvilinear) and face_grid.is_polar_cap
+
+        to_transform = face_grid.cell_corners(slicers=face.slicers, coarsen_factors={})
+
+        has_discontinuity = False
+        if face_grid.crs.is_geographic and not is_polar_cap:
+            has_discontinuity = has_coordinate_discontinuity(
+                to_transform[face_grid.X].data,
+                360.0,
+                axis=to_transform[face_grid.X].get_axis_num(face_grid.Xdim),
+                check_antimeridian=True,
+            )
+
+        newX, newY = await transform_coordinates(
+            to_transform, face_grid.X, face_grid.Y, input_to_output
+        )
+
+        if has_discontinuity:
+            newX = newX.copy(
+                data=fix_coordinate_discontinuities(newX.data, input_to_output, bbox=bbox)
+            )
+
+        if newX.ndim == 2:
+            newX = newX.transpose(*subset.dims)
+            newY = newY.transpose(*subset.dims)
+
+        face_rings = face_grid.corners_to_rings(newX.data, newY.data)
+        face_values = np.asarray(subset.values).ravel()
+
+        if is_polar_cap:
+            # A polar cap has a genuine topological singularity at the pole, so
+            # the 2D `unwrap_phase` in `fix_coordinate_discontinuities` produces
+            # garbage across large regions. pyproj has already normalized each
+            # corner's x into one period; only cells straddling the antimeridian
+            # need fixing. Within each such cell the vertices split into two
+            # sign-groups across the seam; shift the negative side by
+            # `+out_width` so each seam cell becomes self-consistent on one
+            # side, then append ±out_width copies so the wrapped side renders.
+            xs = face_rings[..., 0]
+            seam_mask = (xs.max(axis=1) - xs.min(axis=1)) > out_width / 2
+            if seam_mask.any():
+                # Shift neg-side verts of seam cells in place through the view.
+                xs[seam_mask[:, None] & (xs < 0)] += out_width
+                seam = face_rings[seam_mask]
+                shift = np.array([out_width, 0.0])
+                face_rings = np.concatenate(
+                    [face_rings, seam - shift, seam + shift], axis=0
+                )
+                seam_values = face_values[seam_mask]
+                face_values = np.concatenate([face_values, seam_values, seam_values])
+        elif has_discontinuity:
+            # The face straddles the antimeridian. fix_coordinate_discontinuities
+            # unwraps to one side of the output CRS, so append ±width-shifted copies
+            # to cover the wrapped side; off-canvas copies clip naturally.
+            shift = np.array([out_width, 0.0])
+            face_rings = np.concatenate(
+                [face_rings, face_rings - shift, face_rings + shift], axis=0
+            )
+            face_values = np.concatenate([face_values, face_values, face_values])
+
+        rings_per_face.append(face_rings)
+        values_per_face.append(face_values)
+
+    if not rings_per_face:
+        return NullRenderContext()
+
+    cell_rings = np.concatenate(rings_per_face, axis=0)
+    values = np.concatenate(values_per_face, axis=0)
+
+    return PopulatedRenderContext(
+        da=xr.DataArray(values, dims=["cell"]),
+        grid=grid,
+        datatype=context.datatype,
+        bbox=bbox,
+        alternate=None,
+        cell_rings=cell_rings,
+        face_subsets=None,
+    )
+
+
 async def transform_for_render(
     contexts: dict[str, PopulatedRenderContext | NullRenderContext],
     *,
@@ -995,6 +1163,13 @@ async def transform_for_render(
             continue
 
         grid = context.grid
+        if context.face_subsets is not None:
+            assert isinstance(grid, FacetedGridSystem)
+            result[var_name] = await _transform_faceted_polygons(
+                context, grid=grid, bbox=bbox, crs=crs
+            )
+            continue
+
         alternate = context.alternate
         subset = context.da
 

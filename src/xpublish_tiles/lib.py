@@ -28,8 +28,8 @@ if TYPE_CHECKING:
     from xpublish_tiles.grids import (
         GridMetadata,
         GridSystem,
-        HealpixIndexer,
-        UgridIndexer,
+        Slicer,
+        Slicers,
     )
 from xpublish_tiles.logger import logger
 
@@ -555,10 +555,10 @@ def _prevent_slice_overlap(indexers: list[slice]) -> list[slice]:
 
 
 def pad_slicers(
-    slicers: "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]",
+    slicers: "Slicers",
     *,
     dimensions: list[PadDimension] | None = None,
-) -> "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]":
+) -> "Slicers":
     """
     Apply padding to slicers for specified dimensions.
 
@@ -635,9 +635,9 @@ def pad_slicers(
 
 
 def normalize_slicers(
-    slicers: "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]",
+    slicers: "Slicers",
     dim_sizes: "Mapping[Hashable, int]",
-) -> "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]":
+) -> "Slicers":
     return {
         dim: [
             slice(*s.indices(dim_sizes[dim])) if isinstance(s, slice) else s
@@ -892,10 +892,7 @@ def coarsen_mean_pad(da: xr.DataArray, factors: dict[str, int]) -> xr.DataArray:
     return xr.DataArray(out, dims=dims, name=da.name)
 
 
-def _get_indexer_size(
-    sl: "slice | Fill | UgridIndexer | HealpixIndexer",
-    dim_size: int | None = None,
-) -> int:
+def _get_indexer_size(sl: "Slicer", dim_size: int | None = None) -> int:
     """Get the size of an indexer (slice, Fill, UgridIndexer, or ndarray)."""
     from xpublish_tiles.grids import HealpixIndexer, UgridIndexer
 
@@ -917,7 +914,7 @@ def _get_indexer_size(
 
 
 def _iter_subset_shapes(
-    slicers: "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]",
+    slicers: "Slicers",
     da: xr.DataArray,
     grid: "GridSystem",
 ):
@@ -927,10 +924,21 @@ def _iter_subset_shapes(
     For GridSystem2D, yields (x_size, y_size) for each X slice.
     For Triangular, yields (size,) for the single slice.
     """
-    from xpublish_tiles.grids import Triangular
+    from xpublish_tiles.grids import FacetedGridSystem, FacetedIndexer, Triangular
 
     if isinstance(grid, Triangular):
         yield (_get_indexer_size(next(iter(slicers[grid.dim])), da.sizes[grid.dim]),)
+        return
+
+    if isinstance(grid, FacetedGridSystem):
+        indexer = slicers[grid.face_dim][0]
+        assert isinstance(indexer, FacetedIndexer)
+        for face_sel in indexer.selections:
+            face = grid.faces[face_sel.face_index]
+            face_slicers = face_sel.slicers
+            y_size = _get_indexer_size(face_slicers[face.Ydim][0], da.sizes[face.Ydim])
+            for sl in face_slicers[face.Xdim]:
+                yield (_get_indexer_size(sl, da.sizes[face.Xdim]), y_size)
         return
 
     yslice = None
@@ -950,7 +958,7 @@ def _iter_subset_shapes(
 
 
 def check_data_is_renderable_size(
-    slicers: "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]",
+    slicers: "Slicers",
     da: xr.DataArray,
     grid: "GridSystem",
     alternate: "GridMetadata",

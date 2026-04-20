@@ -26,6 +26,7 @@ from xpublish_tiles.grids import Rectilinear
 from xpublish_tiles.lib import TileTooBigError, check_transparent_pixels
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.testing.datasets import (
+    CUBED_SPHERE,
     EU3035_HIRES,
     HRRR,
     HRRR_MULTIPLE,
@@ -172,6 +173,14 @@ def global_healpix_datasets(draw: DrawFn) -> xr.Dataset:
 
 
 @st.composite
+def global_cubed_sphere_datasets(draw: DrawFn) -> xr.Dataset:
+    """Strategy that returns a global cubed-sphere (Faceted) grid dataset."""
+    ds = CUBED_SPHERE.create().copy(deep=True)
+    ds.attrs["_xpublish_id"] = "cubed_sphere_proptest"
+    return ds
+
+
+@st.composite
 def global_unstructured_datasets(draw: DrawFn) -> xr.Dataset:
     """Strategy that returns global unstructured grid datasets.
 
@@ -205,11 +214,12 @@ def global_unstructured_datasets(draw: DrawFn) -> xr.Dataset:
     return ds
 
 
-# Combine regular, unstructured, and healpix global datasets
+# Combine regular, unstructured, healpix, and cubed-sphere global datasets
 all_global_datasets = st.one_of(
     global_rectilinear_datasets(allow_categorical=False),
     global_unstructured_datasets(),
     global_healpix_datasets(),
+    global_cubed_sphere_datasets(),
 )
 
 

@@ -7,7 +7,7 @@ import numpy as np
 
 import xarray as xr
 from xarray import Dataset
-from xpublish_tiles.grids import Healpix, guess_grid_system
+from xpublish_tiles.grids import FacetedGridSystem, Healpix, guess_grid_system
 from xpublish_tiles.lib import VariableNotFoundError, async_run
 from xpublish_tiles.logger import logger
 from xpublish_tiles.pipeline import transformer_from_crs
@@ -34,8 +34,8 @@ from xpublish_tiles.xpublish.tiles.types import (
 def allowed_styles(dataset: Dataset | None = None) -> list[str]:
     """Return the style IDs supported by ``dataset``'s grid.
 
-    Healpix grids only support ``polygons``; every other grid supports both
-    ``raster`` and ``polygons``.
+    Healpix and Faceted grids (e.g. cubed sphere) only support ``polygons``;
+    every other grid supports both ``raster`` and ``polygons``.
     """
     if dataset is not None:
         for var_name, var_data in dataset.data_vars.items():
@@ -45,7 +45,7 @@ def allowed_styles(dataset: Dataset | None = None) -> list[str]:
                 grid = guess_grid_system(dataset, str(var_name))
             except Exception:
                 continue
-            if isinstance(grid, Healpix):
+            if isinstance(grid, (Healpix, FacetedGridSystem)):
                 return ["polygons"]
     return ["raster", "polygons"]
 

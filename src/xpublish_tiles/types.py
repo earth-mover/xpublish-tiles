@@ -12,6 +12,7 @@ import pyproj.aoi
 import xarray as xr
 from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
+    Curvilinear,
     GridMetadata,
     GridSystem,
     GridSystem2D,
@@ -148,6 +149,20 @@ class NullRenderContext(RenderContext):
 
 
 @dataclass
+class FaceRenderData:
+    """Per-face state carried between subset_to_bbox and transform_for_render.
+
+    ``subset`` is the 2D data array for this face after bbox subsetting;
+    ``slicers`` are the per-face slicers used, needed for reconstructing
+    cell corners in the polygon path.
+    """
+
+    face_grid: Curvilinear
+    subset: xr.DataArray
+    slicers: dict[str, list]
+
+
+@dataclass
 class PopulatedRenderContext(RenderContext):
     """all information needed to render the output."""
 
@@ -161,6 +176,7 @@ class PopulatedRenderContext(RenderContext):
     cell_rings: np.ndarray | None = None
     slicers: dict[str, list] = field(default_factory=dict)
     coarsen_factors: dict[str, int] = field(default_factory=dict)
+    face_subsets: list[FaceRenderData] | None = None
 
     async def maybe_rewrite_to_rectilinear(
         self, *, width: int, height: int, logger=None
