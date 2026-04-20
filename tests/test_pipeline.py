@@ -45,6 +45,7 @@ from xpublish_tiles.testing.datasets import (
     REDGAUSS_N320,
     REGIONAL_HEALPIX_NA,
     TRIPOLE_ANTIMERIDIAN,
+    _create_global_healpix,
     create_global_dataset,
 )
 from xpublish_tiles.testing.lib import (
@@ -941,6 +942,25 @@ async def test_healpix_tile(tile, png_snapshot, pytestconfig):
     assert_render_matches_snapshot(
         result, png_snapshot, skip_transparency_check=tile.y == 0
     )
+
+
+@pytest.mark.asyncio
+async def test_healpix_crs84_nonzero_lon_convention(png_snapshot):
+    """HEALPix vertices come out in the 0–360° lon convention. The CRS84 target
+    is geographic-but-not-exact-EPSG:4326, so pyproj preserves lon values
+    as-is (no wrap). Without a general degree-geographic fastpath, every cell
+    lands off a western-hemisphere canvas.
+
+    Regression for the fully-transparent Tile(1,1,2) at CRS84 / HEALPix L2.
+    """
+    import morecantile
+
+    ds = _create_global_healpix(level=2, dtype=np.float64)
+    tms = morecantile.tms.get("WorldCRS84Quad")
+    tile = Tile(x=1, y=1, z=2)
+    query_params = create_query_params(tile, tms, style="polygons")
+    result = await pipeline(ds, query_params)
+    assert_render_matches_snapshot(result, png_snapshot)
 
 
 @pytest.mark.asyncio

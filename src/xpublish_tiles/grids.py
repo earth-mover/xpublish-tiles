@@ -30,7 +30,7 @@ from xpublish_tiles.lib import (
     aeqd_to_4326,
     crs_repr,
     fill_rings_from_corners,
-    is_4326_like,
+    is_degree_geographic,
     unwrap,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
@@ -1138,7 +1138,7 @@ class GridSystem(ABC):
 
         # Check if any alternate grid is 4326-like
         for alt in self.alternates:
-            if is_4326_like(alt.crs):
+            if is_degree_geographic(alt.crs):
                 logger.debug(f"🔀 picking alternate grid system: {alt!r}")
                 return alt
 

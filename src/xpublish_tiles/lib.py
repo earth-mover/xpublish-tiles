@@ -268,8 +268,14 @@ def get_transform_chunk_size(da: xr.DataArray):
     return (max(chunk_size * chunk_size // da.shape[-1], 1), da.shape[-1])
 
 
-def is_4326_like(crs: CRS) -> bool:
-    return crs == pyproj.CRS.from_epsg(4326) or crs == OTHER_4326
+def is_degree_geographic(crs: CRS) -> bool:
+    """True for any geographic CRS with lon/lat axes in degrees (EPSG:4326,
+    CRS84, custom spherical datums like HEALPix's, etc.). The 4326-fastpath
+    in :func:`transform_coordinates` uses this to skip the pyproj roundtrip
+    and just wrap lon to [-180, 180], which is valid for all such CRSes —
+    any residual datum shift is sub-meter and below pixel resolution.
+    """
+    return crs.is_geographic and all(ax.unit_name == "degree" for ax in crs.axis_info)
 
 
 def epsg4326to3857(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -458,7 +464,9 @@ async def transform_coordinates(
 
     # the ordering of these two fastpaths is important
     # we want to normalize to -180 -> 180 always
-    if is_4326_like(transformer.source_crs) and is_4326_like(transformer.target_crs):
+    if is_degree_geographic(transformer.source_crs) and is_degree_geographic(
+        transformer.target_crs
+    ):
         # pyproj does not normalize these, and inputs can arrive in either the
         # 0–360 or -180–180 convention (e.g. HEALPix corner vertices come out
         # in 0–360). Preserve dtype; shift any out-of-range values.
