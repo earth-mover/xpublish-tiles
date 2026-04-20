@@ -461,11 +461,10 @@ async def transform_coordinates(
     if is_4326_like(transformer.source_crs) and is_4326_like(transformer.target_crs):
         # pyproj does not normalize these, and inputs can arrive in either the
         # 0–360 or -180–180 convention (e.g. HEALPix corner vertices come out
-        # in 0–360). Force -180–180 in-place on a fresh copy.
-        newdata = inx.data.astype(np.float64, copy=True)
-        newdata += 180
-        np.mod(newdata, 360, out=newdata)
-        newdata -= 180
+        # in 0–360). Preserve dtype; shift any out-of-range values.
+        newdata = inx.data.copy()
+        np.subtract(newdata, 360, out=newdata, where=newdata >= 180)
+        np.add(newdata, 360, out=newdata, where=newdata < -180)
         return inx.copy(data=newdata), iny
 
     if transformer.source_crs == transformer.target_crs:

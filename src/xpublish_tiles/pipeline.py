@@ -460,7 +460,7 @@ def has_coordinate_discontinuity(
     return False
 
 
-def fix_antimeridian_vertices(
+def fix_triangular_discontinuity(
     x_data: np.ndarray,
     groups: Iterable[np.ndarray],
     transformer: pyproj.Transformer,
@@ -481,6 +481,50 @@ def fix_antimeridian_vertices(
             x_data[verts] = fix_coordinate_discontinuities(
                 x_data[verts], transformer, bbox=bbox
             )
+
+
+def fix_healpix_discontinuity(
+    x_data: np.ndarray,
+    y_data: np.ndarray,
+    *,
+    antimeridian_mask: np.ndarray,
+    transformer: pyproj.Transformer,
+    bbox: BBox,
+    style: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | slice]:
+    """Unwrap antimeridian-crossing HEALPix cell vertices, and for polygons
+    also append ±width-shifted copies of those cells so whole-canvas tiles
+    (e.g. WebMercator z=0) render both Cartesian sides. Non-spanning tiles
+    clip the shifted copies off-canvas at no cost. ugrid achieves the same
+    via duplicated pos/neg vertices baked into the CellTree.
+
+    Returns ``(x, y, cell_indexer)``. ``cell_indexer`` is a per-cell index
+    into the original data array — ``np.arange(n_cells)`` with AM cells
+    appended twice when polygon cells were duplicated, else ``slice(None)``.
+    """
+    am_idxs = np.flatnonzero(antimeridian_mask)
+    x_data = x_data.copy()
+    if style == "polygons":
+        # corners laid out (n_cells * 4,); unwrap each cell's 4 separately
+        groups = [i * 4 + np.arange(4) for i in am_idxs]
+    else:
+        groups = [am_idxs]
+    fix_triangular_discontinuity(x_data, groups, transformer, bbox=bbox)
+
+    if style != "polygons" or not am_idxs.size:
+        return x_data, y_data, slice(None)
+
+    # now pad with cells that cross the anti-meridian
+    left, _, right, _ = transformer.transform_bounds(-180, -90, 180, 90)
+    width = abs(right - left)
+    am_verts = (am_idxs[:, None] * 4 + np.arange(4)).ravel()
+    dup_x = x_data[am_verts]
+    dup_y = y_data[am_verts]
+    x_data = np.concatenate([x_data, dup_x - width, dup_x + width])
+    y_data = np.concatenate([y_data, dup_y, dup_y])
+    n_cells = antimeridian_mask.size
+    cell_indexer = np.concatenate([np.arange(n_cells), am_idxs, am_idxs])
+    return x_data, y_data, cell_indexer
 
 
 def fix_coordinate_discontinuities(
@@ -1003,11 +1047,12 @@ async def transform_for_render(
         # in the approximate range -20e6 -> 20e6 m range. So if the dataset's anti-meridian
         # discontinuity is in the tile; it will be preserved by the transformation,
         # regardless of how we may modify the coordinates *before* transforming.
+        healpix_cell_indexer: np.ndarray | slice = slice(None)
         if has_discontinuity:
             if isinstance(grid, Triangular):
                 assert context.ugrid_indexer is not None
                 anti = context.ugrid_indexer.antimeridian_vertices
-                fix_antimeridian_vertices(
+                fix_triangular_discontinuity(
                     newX.data,
                     [anti["pos"], anti["neg"]],
                     input_to_output,
@@ -1015,15 +1060,16 @@ async def transform_for_render(
                 )
             elif isinstance(grid, Healpix):
                 assert context.hp_indexer is not None
-                am_idxs = np.flatnonzero(context.hp_indexer.antimeridian_mask)
-                new_data = newX.data.copy()
-                if style == "polygons":
-                    # corners laid out (n_cells * 4,); unwrap each cell's 4 separately
-                    groups = [i * 4 + np.arange(4) for i in am_idxs]
-                else:
-                    groups = [am_idxs]
-                fix_antimeridian_vertices(new_data, groups, input_to_output, bbox=bbox)
-                newX = newX.copy(data=new_data)
+                x_aug, y_aug, healpix_cell_indexer = fix_healpix_discontinuity(
+                    newX.data,
+                    newY.data,
+                    antimeridian_mask=context.hp_indexer.antimeridian_mask,
+                    transformer=input_to_output,
+                    bbox=bbox,
+                    style=style,
+                )
+                newX = xr.DataArray(x_aug, dims=newX.dims)
+                newY = xr.DataArray(y_aug, dims=newY.dims)
             else:
                 newX = newX.copy(
                     data=fix_coordinate_discontinuities(
@@ -1037,13 +1083,16 @@ async def transform_for_render(
             if newX.ndim == 2:
                 newX = newX.transpose(*subset.dims)
                 newY = newY.transpose(*subset.dims)
+            if isinstance(grid, Healpix):
+                da = context.da.isel({context.da.dims[0]: healpix_cell_indexer})
+            else:
+                # Flatten 2D data to match the 1D ring array from corners_to_rings.
+                da = context.da
+                if da.values.ndim > 1:
+                    da = xr.DataArray(da.values.ravel(), dims=["cell"])
             cell_rings = grid.corners_to_rings(
                 newX.data, newY.data, ugrid_indexer=context.ugrid_indexer
             )
-            # Flatten 2D data to match the 1D ring array from corners_to_rings.
-            da = context.da
-            if da.values.ndim > 1:
-                da = xr.DataArray(da.values.ravel(), dims=["cell"])
         else:
             cell_rings = None
             da = subset.assign_coords({grid.X: newX, grid.Y: newY})
