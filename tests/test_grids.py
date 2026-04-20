@@ -643,7 +643,7 @@ class TestLongitudeCellIndex:
         assert lon_index.is_global
 
         result = lon_index.sel({"longitude": slice(0, 1)})
-        assert result.dim_indexers == {"longitude": [slice(2, 4)]}
+        assert result.dim_indexers == {"longitude": [slice(2, 3)]}
 
         result = lon_index.sel({"longitude": slice(-185, 1)})
         assert result.dim_indexers == {"longitude": [slice(3, 4), slice(0, 3)]}

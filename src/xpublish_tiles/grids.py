@@ -900,6 +900,16 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
             result = self._xrindex.sel(sel_dict, method=method, tolerance=tolerance)
             indexer = next(iter(result.dim_indexers.values()))
             start, stop, _ = indexer.indices(len(self))
+            # Treat the stop endpoint as exclusive at exact cell boundaries:
+            # if the last selected cell's left edge equals the query stop, its
+            # center lies entirely past bbox.east and it should be excluded.
+            # Otherwise two grids representing the same physical data but with
+            # different longitude offsets (e.g. rolled) can select different
+            # numbers of cells when the query lands on a cell edge.
+            if stop > start and slice_part.stop is not None:
+                last_left = self._interval_index[stop - 1].left
+                if last_left == slice_part.stop:
+                    stop -= 1
             all_indexers.append(slice(start, stop))
 
         # Prevent overlap between adjacent slices
