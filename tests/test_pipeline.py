@@ -944,6 +944,23 @@ async def test_healpix_tile(tile, png_snapshot, pytestconfig):
     )
 
 
+@pytest.mark.xfail(reason="HEALPix L1 polar base cell not covering tile at z=9")
+@pytest.mark.asyncio
+async def test_healpix_l1_polar_high_zoom(png_snapshot):
+    """HEALPix L1 has only 48 global cells (~60° across). A high-zoom
+    WebMercator tile sitting inside a polar base cell should still render the
+    cell — the polygon must cover the tile even though pole vertices project
+    to y≈∞ (clamped).
+
+    Regression for fully-transparent Tile(1, 0, 9) at HEALPix L1.
+    """
+    ds = _create_global_healpix(level=1, dtype=np.float64)
+    tile = Tile(x=1, y=0, z=9)
+    query_params = create_query_params(tile, WEBMERC_TMS, style="polygons")
+    result = await pipeline(ds, query_params)
+    assert_render_matches_snapshot(result, png_snapshot)
+
+
 @pytest.mark.asyncio
 async def test_healpix_crs84_nonzero_lon_convention(png_snapshot):
     """HEALPix vertices come out in the 0–360° lon convention. The CRS84 target
@@ -951,7 +968,7 @@ async def test_healpix_crs84_nonzero_lon_convention(png_snapshot):
     as-is (no wrap). Without a general degree-geographic fastpath, every cell
     lands off a western-hemisphere canvas.
 
-    Regression for the fully-transparent Tile(1,1,2) at CRS84 / HEALPix L2.
+    Regression for fully-transparent Tile(1,1,2) at CRS84 / HEALPix L2.
     """
     import morecantile
 
