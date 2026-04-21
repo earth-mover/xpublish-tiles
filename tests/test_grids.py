@@ -35,9 +35,9 @@ from xpublish_tiles.grids import (
     Rectilinear,
     Triangular,
     UgridIndexer,
+    find_cubed_sphere_face_dim,
     guess_coordinate_vars,
     guess_grid_system,
-    is_cubed_sphere,
 )
 from xpublish_tiles.lib import (
     TileTooBigError,
@@ -1244,60 +1244,31 @@ async def test_curvilinear_memory_limit_and_minzoom():
             await pipeline(ds, query_params)
 
 
-class TestCubedSphere:
-    def test_is_cubed_sphere_detects(self):
-        ds = CUBED_SPHERE.create()
-        assert is_cubed_sphere(ds, "foo") == "nf"
+def test_cubed_sphere_grid():
+    ds = CUBED_SPHERE.create()
+    assert find_cubed_sphere_face_dim(ds, "foo") == "nf"
+    del ds.attrs["grid_mapping_name"]
+    assert find_cubed_sphere_face_dim(ds, "foo") is None
 
-    def test_is_cubed_sphere_rejects_without_attr(self):
-        ds = CUBED_SPHERE.create()
-        del ds.attrs["grid_mapping_name"]
-        assert is_cubed_sphere(ds, "foo") is None
+    ds = CUBED_SPHERE.create()
+    grid = guess_grid_system(ds, "foo")
+    assert isinstance(grid, CubedSphere)
+    assert len(grid.faces) == 6
+    assert grid.face_dim == "nf"
+    assert grid.bbox.west == -180
+    assert grid.bbox.east == 180
+    assert grid.bbox.south == -90
+    assert grid.bbox.north == 90
 
-    def test_guess_grid_returns_cubed_sphere(self):
-        ds = CUBED_SPHERE.create()
-        grid = guess_grid_system(ds, "foo")
-        assert isinstance(grid, CubedSphere)
-        assert len(grid.faces) == 6
-        assert grid.face_dim == "nf"
-        assert grid.bbox.west == -180
-        assert grid.bbox.east == 180
-        assert grid.bbox.south == -90
-        assert grid.bbox.north == 90
+    slicers = grid.sel(bbox=BBox(west=10, south=-10, east=20, north=10))
+    assert list(slicers) == [grid.face_dim]
+    indexer = slicers[grid.face_dim][0]
+    assert isinstance(indexer, FacetedIndexer)
+    # Equatorial face 0 (lon 0..90, lat -45..45) must be in the hit set
+    assert len(indexer.selections) >= 1
+    assert 0 in {s.face_index for s in indexer.selections}
 
-    def test_sel_narrow_bbox(self):
-        ds = CUBED_SPHERE.create()
-        grid = guess_grid_system(ds, "foo")
-        assert isinstance(grid, CubedSphere)
-        slicers = grid.sel(bbox=BBox(west=10, south=-10, east=20, north=10))
-        assert list(slicers) == [grid.face_dim]
-        indexer = slicers[grid.face_dim][0]
-        assert isinstance(indexer, FacetedIndexer)
-        # Equatorial face 0 (lon 0..90, lat -45..45) must be in the hit set
-        assert len(indexer.selections) >= 1
-        assert 0 in {s.face_index for s in indexer.selections}
-
-    def test_sel_global_bbox_hits_all(self):
-        ds = CUBED_SPHERE.create()
-        grid = guess_grid_system(ds, "foo")
-        assert isinstance(grid, CubedSphere)
-        slicers = grid.sel(bbox=BBox(west=-180, south=-90, east=180, north=90))
-        indexer = slicers[grid.face_dim][0]
-        assert isinstance(indexer, FacetedIndexer)
-        assert len(indexer.selections) == 6
-
-    async def test_pipeline_polygons_tile(self):
-        """End-to-end polygons render at z=0 should succeed without error."""
-        ds = CUBED_SPHERE.create()
-        tms = morecantile.tms.get("WebMercatorQuad")
-        tile = morecantile.Tile(x=0, y=0, z=0)
-        query_params = create_query_params(tile, tms, style="polygons")
-        await pipeline(ds, query_params)
-
-    async def test_pipeline_raster_style_not_supported(self):
-        ds = CUBED_SPHERE.create()
-        tms = morecantile.tms.get("WebMercatorQuad")
-        tile = morecantile.Tile(x=0, y=0, z=0)
-        query_params = create_query_params(tile, tms, style="raster")
-        with pytest.raises(NotImplementedError, match="polygons"):
-            await pipeline(ds, query_params)
+    slicers = grid.sel(bbox=BBox(west=-180, south=-90, east=180, north=90))
+    indexer = slicers[grid.face_dim][0]
+    assert isinstance(indexer, FacetedIndexer)
+    assert len(indexer.selections) == 6

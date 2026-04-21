@@ -1027,3 +1027,12 @@ async def test_cubed_sphere_tile(tile, png_snapshot, pytestconfig):
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
     assert_render_matches_snapshot(result, png_snapshot)
+
+
+async def test_pipeline_raster_style_not_supported(self):
+    ds = CUBED_SPHERE.create()
+    tms = morecantile.tms.get("WebMercatorQuad")
+    tile = morecantile.Tile(x=0, y=0, z=0)
+    query_params = create_query_params(tile, tms, style="raster")
+    with pytest.raises(NotImplementedError, match="polygons"):
+        await pipeline(ds, query_params)

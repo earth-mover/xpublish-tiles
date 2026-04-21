@@ -2516,7 +2516,7 @@ class FacetedGridSystem(GridSystem, ABC):
 class CubedSphere(FacetedGridSystem):
     """Six-face cubed-sphere grid (GFDL/GMAO Mosaic Gridspec layout).
 
-    At the moment, detection is deliberately narrow — see ``is_cubed_sphere``.
+    At the moment, detection is deliberately narrow — see ``find_cubed_sphere_face_dim``.
     """
 
     @classmethod
@@ -2594,7 +2594,9 @@ class CubedSphere(FacetedGridSystem):
 _CUBED_SPHERE_PATTERN = re.compile(r"cubed?[-_ ]sphere", re.IGNORECASE)
 
 
-def is_cubed_sphere(ds: xr.Dataset, var_name: Hashable | None = None) -> str | None:
+def find_cubed_sphere_face_dim(
+    ds: xr.Dataset, var_name: Hashable | None = None
+) -> str | None:
     """Detect GFDL/GMAO Mosaic Gridspec cubed-sphere layout.
 
     Returns the face-dimension name if detected, else ``None``. Both of these
@@ -3007,7 +3009,7 @@ def guess_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
         if cache_key is not None and cache_key in _GRID_CACHE:
             return _GRID_CACHE[cache_key]
 
-        face_dim = is_cubed_sphere(ds, name)
+        face_dim = find_cubed_sphere_face_dim(ds, name)
         if face_dim is not None:
             coords = ds.cf.coordinates
             lon_name = next(
@@ -3019,7 +3021,7 @@ def guess_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
                 None,
             )
             assert lon_name is not None and lat_name is not None, (
-                "is_cubed_sphere() matched but 2D lon/lat aux coords vanished"
+                "find_cubed_sphere_face_dim() matched but 2D lon/lat aux coords vanished"
             )
             grid = CubedSphere.from_dataset(
                 ds, DEFAULT_CRS, lon_name, lat_name, face_dim=face_dim
