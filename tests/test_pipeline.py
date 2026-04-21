@@ -37,12 +37,15 @@ from xpublish_tiles.testing.datasets import (
     FORECAST,
     GLOBAL_6KM,
     GLOBAL_6KM_360,
+    GLOBAL_HEALPIX_L3,
     GLOBAL_NANS,
     HRRR,
     IFS,
     PARA,
     REDGAUSS_N320,
+    REGIONAL_HEALPIX_NA,
     TRIPOLE_ANTIMERIDIAN,
+    _create_global_healpix,
     create_global_dataset,
 )
 from xpublish_tiles.testing.lib import (
@@ -901,6 +904,96 @@ async def test_async_load_timeout():
 async def test_tripole(ds, tile, png_snapshot, pytestconfig):
     tms = WEBMERC_TMS
     query_params = create_query_params(tile, tms)
+    result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    # this dataset does not have global coverage, so we must skip the transparency check
+    assert_render_matches_snapshot(result, png_snapshot, skip_transparency_check=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tile",
+    [
+        pytest.param(Tile(x=0, y=0, z=0), id="0/0/0"),  # full image
+        pytest.param(Tile(x=3, y=0, z=2), id="2/0/3"),  # antimeridian, north
+        pytest.param(Tile(x=1, y=2, z=2), id="2/2/1"),  # no overlap
+        pytest.param(Tile(x=7, y=7, z=4), id="4/7/7"),  # no overlap
+        pytest.param(Tile(x=8, y=12, z=5), id="5/8/12"),  # artifacts?
+        pytest.param(Tile(x=7, y=12, z=5), id="5/7/12"),  # artifacts?
+        # Antimeridian coverage (WebMercator wraps at 180°; x=0 and x=2^z-1 at the seam).
+        pytest.param(Tile(x=0, y=15, z=5), id="5/0/15"),  # west side of antimeridian
+        pytest.param(Tile(x=31, y=15, z=5), id="5/31/15"),  # east side of antimeridian
+        pytest.param(
+            Tile(x=148, y=134, z=9), id="9/134/148"
+        ),  # fully zoomed in, one pixel
+    ],
+)
+async def test_healpix_tile(tile, png_snapshot, pytestconfig):
+    """Test rendering a global healpix dataset tile."""
+    ds = GLOBAL_HEALPIX_L3.create().compute()
+    query_params = create_query_params(tile, WEBMERC_TMS, style="polygons")
+    result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    # Pole-touching Healpix cells project to y≈∞ in Mercator, leaving a
+    # handful of sliver pixels (<0.01%) uncovered at the tile's top edge.
+    # Only tiles abutting the top of the map (y=0) are affected.
+    assert_render_matches_snapshot(
+        result, png_snapshot, skip_transparency_check=tile.y == 0
+    )
+
+
+@pytest.mark.xfail(reason="HEALPix L1 polar base cell not covering tile at z=9")
+@pytest.mark.asyncio
+async def test_healpix_l1_polar_high_zoom(png_snapshot):
+    """HEALPix L1 has only 48 global cells (~60° across). A high-zoom
+    WebMercator tile sitting inside a polar base cell should still render the
+    cell — the polygon must cover the tile even though pole vertices project
+    to y≈∞ (clamped).
+
+    Regression for fully-transparent Tile(1, 0, 9) at HEALPix L1.
+    """
+    ds = _create_global_healpix(level=1, dtype=np.float64)
+    tile = Tile(x=1, y=0, z=9)
+    query_params = create_query_params(tile, WEBMERC_TMS, style="polygons")
+    result = await pipeline(ds, query_params)
+    assert_render_matches_snapshot(result, png_snapshot)
+
+
+@pytest.mark.asyncio
+async def test_healpix_crs84_nonzero_lon_convention(png_snapshot):
+    """HEALPix vertices come out in the 0–360° lon convention. The CRS84 target
+    is geographic-but-not-exact-EPSG:4326, so pyproj preserves lon values
+    as-is (no wrap). Without a general degree-geographic fastpath, every cell
+    lands off a western-hemisphere canvas.
+
+    Regression for fully-transparent Tile(1,1,2) at CRS84 / HEALPix L2.
+    """
+    import morecantile
+
+    ds = _create_global_healpix(level=2, dtype=np.float64)
+    tms = morecantile.tms.get("WorldCRS84Quad")
+    tile = Tile(x=1, y=1, z=2)
+    query_params = create_query_params(tile, tms, style="polygons")
+    result = await pipeline(ds, query_params)
+    assert_render_matches_snapshot(result, png_snapshot)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tile",
+    [
+        pytest.param(Tile(x=0, y=0, z=0), id="0/0/0"),  # full globe, NA visible
+        pytest.param(Tile(x=1, y=1, z=2), id="2/1/1"),  # NA tile
+        pytest.param(Tile(x=5, y=6, z=4), id="4/5/6"),  # zoomed over NA
+        pytest.param(Tile(x=0, y=0, z=2), id="2/0/0"),  # outside NA (Pacific)
+    ],
+)
+async def test_healpix_regional_na(tile, png_snapshot, pytestconfig):
+    """Test rendering a regional (North America) healpix subset."""
+    ds = REGIONAL_HEALPIX_NA.create().compute()
+    query_params = create_query_params(tile, WEBMERC_TMS, style="polygons")
     result = await pipeline(ds, query_params)
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)

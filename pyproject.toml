@@ -13,7 +13,7 @@ classifiers = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "cf-xarray>=0.10.8",
+    "cf-xarray>=0.10.11",
     "cftime>=1.6.4.post1",
     "datashader>=0.19",
     "donfig>=0.8.0",
@@ -63,6 +63,13 @@ allow-direct-references = true
 packages = ["src/xpublish_tiles"]
 
 [project.optional-dependencies]
+healpix = [
+    "xdggs>=0.5.0",
+    "healpix-geo>=0.0.10",
+]
+complete = [
+    "xpublish-tiles[healpix]",
+]
 testing = [
     "pytest>=8.4.1",
     "pytest-asyncio>=1.1.0",
@@ -87,7 +94,8 @@ dev = [
     "icechunk",
     "dask",
     "ipython>=9.4.0",
-    "xpublish-tiles[testing]",
+    "ipykernel>=6.29.0",
+    "xpublish-tiles[testing,healpix]",
     "coiled>=1.118.3",
     "memray>=1.18.0",
     "py-spy>=0.4.1",

@@ -174,13 +174,19 @@ def extract_dimensions(dataset: xr.Dataset) -> list[WMSDimensionResponse]:
     return dimensions
 
 
-def get_available_wms_styles() -> list[WMSStyleResponse]:
-    """Get all available styles from registered renderers."""
+def get_available_wms_styles(
+    dataset: xr.Dataset | None = None,
+) -> list[WMSStyleResponse]:
+    """Get all available styles from registered renderers, filtered for ``dataset``'s grid."""
     from xpublish_tiles.render import RenderRegistry
+    from xpublish_tiles.xpublish.tiles.metadata import allowed_styles
 
+    allowed = set(allowed_styles(dataset))
     styles = []
 
     for renderer_cls in RenderRegistry.all().values():
+        if renderer_cls.style_id() not in allowed:
+            continue
         # Add default variant alias
         default_variant = renderer_cls.default_variant()
         default_style_info = renderer_cls.describe_style("default")
@@ -335,7 +341,7 @@ def create_capabilities_response(
     layers = extract_layers(dataset, base_url)
 
     # Create root layer containing all data layers and styles
-    available_styles = get_available_wms_styles()
+    available_styles = get_available_wms_styles(dataset)
 
     # Extract dataset attributes for root layer
     dataset_wms_attributes = convert_attributes_to_wms(dataset.attrs)

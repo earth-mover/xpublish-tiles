@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import lru_cache, partial
 from itertools import product
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import matplotlib.colors as mcolors
 import numba
@@ -25,7 +25,12 @@ from xpublish_tiles.config import config
 from xpublish_tiles.utils import NUMBA_THREADING_LOCK
 
 if TYPE_CHECKING:
-    from xpublish_tiles.grids import GridMetadata, GridSystem, UgridIndexer
+    from xpublish_tiles.grids import (
+        GridMetadata,
+        GridSystem,
+        HealpixIndexer,
+        UgridIndexer,
+    )
 from xpublish_tiles.logger import logger
 
 WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)  # from proj
@@ -263,8 +268,14 @@ def get_transform_chunk_size(da: xr.DataArray):
     return (max(chunk_size * chunk_size // da.shape[-1], 1), da.shape[-1])
 
 
-def is_4326_like(crs: CRS) -> bool:
-    return crs == pyproj.CRS.from_epsg(4326) or crs == OTHER_4326
+def is_degree_geographic(crs: CRS) -> bool:
+    """True for any geographic CRS with lon/lat axes in degrees (EPSG:4326,
+    CRS84, custom spherical datums like HEALPix's, etc.). The 4326-fastpath
+    in :func:`transform_coordinates` uses this to skip the pyproj roundtrip
+    and just wrap lon to [-180, 180], which is valid for all such CRSes —
+    any residual datum shift is sub-meter and below pixel resolution.
+    """
+    return crs.is_geographic and all(ax.unit_name == "degree" for ax in crs.axis_info)
 
 
 def epsg4326to3857(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -453,10 +464,15 @@ async def transform_coordinates(
 
     # the ordering of these two fastpaths is important
     # we want to normalize to -180 -> 180 always
-    if is_4326_like(transformer.source_crs) and is_4326_like(transformer.target_crs):
-        # for some reason pyproj does not normalize these to -180->180
+    if is_degree_geographic(transformer.source_crs) and is_degree_geographic(
+        transformer.target_crs
+    ):
+        # pyproj does not normalize these, and inputs can arrive in either the
+        # 0–360 or -180–180 convention (e.g. HEALPix corner vertices come out
+        # in 0–360). Preserve dtype; shift any out-of-range values.
         newdata = inx.data.copy()
-        newdata[newdata >= 180] -= 360
+        np.subtract(newdata, 360, out=newdata, where=newdata >= 180)
+        np.add(newdata, 360, out=newdata, where=newdata < -180)
         return inx.copy(data=newdata), iny
 
     if transformer.source_crs == transformer.target_crs:
@@ -468,6 +484,8 @@ async def transform_coordinates(
         or transformer == transformer_from_crs(OTHER_4326, 3857)
     ):
         newx, newy = epsg4326to3857(inx.data, iny.data)
+        _clamp_infinite(newx)
+        _clamp_infinite(newy)
         return inx.copy(data=newx), iny.copy(data=newy)
 
     # Broadcast coordinates
@@ -495,7 +513,25 @@ async def transform_coordinates(
     else:
         newX, newY = await async_run(transformer.transform, bx.data, by.data)
 
+    if not transformer.target_crs.is_geographic:
+        _clamp_infinite(newX)
+        _clamp_infinite(newY)
+
     return bx.copy(data=newX), by.copy(data=newY)
+
+
+def _clamp_infinite(arr: np.ndarray) -> None:
+    """In-place: replace ±inf with ±float max.
+
+    Poles map to ±inf under Web Mercator (and similar projections). Datashader
+    drops polygons touching non-finite vertices, leaving holes in the polar
+    caps. Clamping to finite values lets those cells still rasterize.
+    """
+    # A value large relative to projected extents (Web Mercator ≈ ±2e7) but
+    # well inside float64 precision so downstream polygon math (datashader's
+    # ray-casting / bbox tests) stays numerically well-behaved.
+    _BIG = 1e15
+    np.nan_to_num(arr, copy=False, nan=np.nan, posinf=_BIG, neginf=-_BIG)
 
 
 def _prevent_slice_overlap(indexers: list[slice]) -> list[slice]:
@@ -519,10 +555,10 @@ def _prevent_slice_overlap(indexers: list[slice]) -> list[slice]:
 
 
 def pad_slicers(
-    slicers: "dict[str, list[slice | Fill | UgridIndexer]]",
+    slicers: "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]",
     *,
     dimensions: list[PadDimension] | None = None,
-) -> "dict[str, list[slice | Fill | UgridIndexer]]":
+) -> "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]":
     """
     Apply padding to slicers for specified dimensions.
 
@@ -547,12 +583,8 @@ def pad_slicers(
         if dim.name not in slicers:
             continue
 
-        dim_slicers = slicers[dim.name]
-        # Convert to proper slice objects with dimension size
-        indexers = [
-            slice(*idxr.indices(dim.size))  # ty: ignore[unresolved-attribute]
-            for idxr in dim_slicers
-        ]
+        dim_slicers = cast(list[slice], slicers[dim.name])
+        indexers = [slice(*idxr.indices(dim.size)) for idxr in dim_slicers]
 
         # Prevent overlap if requested (before padding)
         if dim.prevent_overlap:
@@ -603,9 +635,9 @@ def pad_slicers(
 
 
 def normalize_slicers(
-    slicers: "dict[str, list[slice | Fill | UgridIndexer]]",
+    slicers: "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]",
     dim_sizes: "Mapping[Hashable, int]",
-) -> "dict[str, list[slice | Fill | UgridIndexer]]":
+) -> "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]":
     return {
         dim: [
             slice(*s.indices(dim_sizes[dim])) if isinstance(s, slice) else s
@@ -623,7 +655,7 @@ def apply_default_pad(slicers, da, grid):
 
     Parameters
     ----------
-    slicers : dict[str, list[slice | Fill | UgridIndexer]]
+    slicers : dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]
         Raw slicers from grid.sel()
     da : xr.DataArray
         Data array (for dimension sizes)
@@ -632,7 +664,7 @@ def apply_default_pad(slicers, da, grid):
 
     Returns
     -------
-    dict[str, list[slice | Fill | UgridIndexer]]
+    dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]
         Slicers with default_pad applied
     """
     default_padders = [
@@ -861,15 +893,16 @@ def coarsen_mean_pad(da: xr.DataArray, factors: dict[str, int]) -> xr.DataArray:
 
 
 def _get_indexer_size(
-    sl: "slice | Fill | UgridIndexer", dim_size: int | None = None
+    sl: "slice | Fill | UgridIndexer | HealpixIndexer",
+    dim_size: int | None = None,
 ) -> int:
-    """Get the size of an indexer (slice, Fill, or UgridIndexer)."""
-    from xpublish_tiles.grids import UgridIndexer
+    """Get the size of an indexer (slice, Fill, UgridIndexer, or ndarray)."""
+    from xpublish_tiles.grids import HealpixIndexer, UgridIndexer
 
-    if isinstance(sl, Fill):
+    if isinstance(sl, Fill | UgridIndexer):
         return sl.size
-    elif isinstance(sl, UgridIndexer):
-        return sl.vertices.size
+    elif isinstance(sl, HealpixIndexer):
+        return sl.size(dim_size)
     elif isinstance(sl, slice):
         start = sl.start if sl.start is not None else 0
         if sl.stop is not None:
@@ -884,7 +917,7 @@ def _get_indexer_size(
 
 
 def _iter_subset_shapes(
-    slicers: "dict[str, list[slice | Fill | UgridIndexer]]",
+    slicers: "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]",
     da: xr.DataArray,
     grid: "GridSystem",
 ):
@@ -917,7 +950,7 @@ def _iter_subset_shapes(
 
 
 def check_data_is_renderable_size(
-    slicers: "dict[str, list[slice | Fill | UgridIndexer]]",
+    slicers: "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]",
     da: xr.DataArray,
     grid: "GridSystem",
     alternate: "GridMetadata",
@@ -928,7 +961,7 @@ def check_data_is_renderable_size(
 
     Parameters
     ----------
-    slicers : dict[str, list[slice | Fill | UgridIndexer]]
+    slicers : dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]
         Slicers for data selection
     da : xr.DataArray
         Data array (only metadata used, no data loaded)

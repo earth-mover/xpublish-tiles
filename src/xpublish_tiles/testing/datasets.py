@@ -1421,6 +1421,150 @@ REDGAUSS_N320 = Dataset(
 )
 
 
+def _create_global_healpix(*, level: int, dtype: npt.DTypeLike) -> xr.Dataset:
+    """Build a global HEALPix grid at the given nested refinement level.
+
+    n_cells = 12 * 4**level. Values are a smooth lon/lat function so visual
+    checks can verify antimeridian handling.
+    """
+    import healpix_geo.nested as hpn
+    import xdggs
+
+    info = xdggs.HealpixInfo(level=level, indexing_scheme="nested")
+    ellipsoid = info._format_ellipsoid()
+    n_cells = 12 * 4**level
+    cell_ids = np.arange(n_cells, dtype=np.int64)
+    lon, lat = hpn.healpix_to_lonlat(cell_ids, depth=level, ellipsoid=ellipsoid)
+    lon = ((lon + 180) % 360) - 180
+
+    data = (np.cos(np.deg2rad(lat)) * np.sin(np.deg2rad(lon))).astype(dtype)
+
+    return _build_healpix_ds(level=level, cell_ids=cell_ids, lon=lon, lat=lat, data=data)
+
+
+def _build_healpix_ds(
+    *,
+    level: int,
+    cell_ids: np.ndarray,
+    lon: np.ndarray,
+    lat: np.ndarray,
+    data: np.ndarray,
+) -> xr.Dataset:
+    """Assemble a CF-conformant HEALPix dataset from precomputed arrays.
+
+    Stores ``cell_ids`` as a dimension coordinate (monotonic), per CF recommendation
+    (PR cf-convention/cf-conventions#605).
+    """
+    ds = xr.Dataset(
+        {
+            "foo": (
+                ("cell_ids",),
+                data,
+                {
+                    "grid_mapping": "healpix",
+                    "coordinates": "lon lat",
+                },
+            )
+        },
+        coords={
+            "cell_ids": (
+                "cell_ids",
+                cell_ids,
+                {"standard_name": "healpix_index"},
+            ),
+            "lon": ("cell_ids", lon, {"standard_name": "longitude"}),
+            "lat": ("cell_ids", lat, {"standard_name": "latitude"}),
+            "healpix": (
+                (),
+                np.int64(0),
+                {
+                    "grid_mapping_name": "healpix",
+                    "refinement_level": level,
+                    "indexing_scheme": "nested",
+                },
+            ),
+        },
+    )
+    vmin, vmax = float(data.min()), float(data.max())
+    ds.attrs["valid_min"] = vmin
+    ds.attrs["valid_max"] = vmax
+    ds["foo"].attrs["valid_min"] = vmin
+    ds["foo"].attrs["valid_max"] = vmax
+    return ds
+
+
+def _create_regional_healpix(
+    *, level: int, dtype: npt.DTypeLike, bbox: tuple[float, float, float, float]
+) -> xr.Dataset:
+    """Build a regional HEALPix subset whose cell centers fall inside ``bbox``.
+
+    bbox = (west, south, east, north). Cell indices remain the global ``nested``
+    ones at the given level, so downstream HEALPix math stays valid.
+    """
+    import healpix_geo.nested as hpn
+    import xdggs
+
+    info = xdggs.HealpixInfo(level=level, indexing_scheme="nested")
+    ellipsoid = info._format_ellipsoid()
+    n_cells = 12 * 4**level
+    all_ids = np.arange(n_cells, dtype=np.int64)
+    lon, lat = hpn.healpix_to_lonlat(all_ids, depth=level, ellipsoid=ellipsoid)
+    lon = ((lon + 180) % 360) - 180
+    west, south, east, north = bbox
+    mask = (lon >= west) & (lon <= east) & (lat >= south) & (lat <= north)
+    cell_ids = all_ids[mask]
+    lon, lat = lon[mask], lat[mask]
+    data = (np.cos(np.deg2rad(lat)) * np.sin(np.deg2rad(lon))).astype(dtype)
+    return _build_healpix_ds(level=level, cell_ids=cell_ids, lon=lon, lat=lat, data=data)
+
+
+def create_healpix(
+    *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
+) -> xr.Dataset:
+    """Create a global HEALPix dataset. Level inferred from the cell_ids dim size."""
+    (dim,) = dims
+    level = round(np.log2(dim.size / 12) / 2)
+    assert 12 * 4**level == dim.size, (
+        f"dim size {dim.size} is not a valid healpix n_cells (12 * 4**level)"
+    )
+    return _create_global_healpix(level=level, dtype=dtype)
+
+
+# North America bbox: approx (-170, 15, -50, 75). At level 5 this yields ~1400 cells.
+_NA_BBOX = (-170.0, 15.0, -50.0, 75.0)
+
+
+def create_regional_healpix_na(
+    *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
+) -> xr.Dataset:
+    return _create_regional_healpix(level=5, dtype=dtype, bbox=_NA_BBOX)
+
+
+GLOBAL_HEALPIX_L3 = Dataset(
+    name="global_healpix_l3",
+    dims=(Dim(name="cell_ids", size=12 * 4**3, chunk_size=12 * 4**3),),
+    setup=create_healpix,
+    dtype=np.float64,
+    benchmark_tiles=GLOBAL_BENCHMARK_TILES,
+)
+
+GLOBAL_HEALPIX_L5 = Dataset(
+    name="global_healpix_l5",
+    dims=(Dim(name="cell_ids", size=12 * 4**5, chunk_size=12 * 4**5),),
+    setup=create_healpix,
+    dtype=np.float64,
+    benchmark_tiles=GLOBAL_BENCHMARK_TILES,
+)
+
+REGIONAL_HEALPIX_NA = Dataset(
+    name="regional_healpix_na",
+    dims=(Dim(name="cell_ids", size=1, chunk_size=1),),
+    setup=create_regional_healpix_na,
+    dtype=np.float64,
+    benchmark_tiles=GLOBAL_BENCHMARK_TILES,
+)
+
+
 # Lookup dictionary for all available datasets
 DATASET_LOOKUP = {
     "hrrr": HRRR,
@@ -1440,4 +1584,7 @@ DATASET_LOOKUP = {
     "global_nans": GLOBAL_NANS,
     "redgauss_n320": REDGAUSS_N320,
     "tripole_antimeridian": TRIPOLE_ANTIMERIDIAN,
+    "global_healpix_l3": GLOBAL_HEALPIX_L3,
+    "global_healpix_l5": GLOBAL_HEALPIX_L5,
+    "regional_healpix_na": REGIONAL_HEALPIX_NA,
 }

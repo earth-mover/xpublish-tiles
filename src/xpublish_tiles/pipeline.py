@@ -1,5 +1,6 @@
 import asyncio
 import io
+from collections.abc import Iterable
 from functools import partial
 from typing import Any, cast
 
@@ -14,6 +15,8 @@ from xpublish_tiles.grids import (
     GridMetadata,
     GridSystem,
     GridSystem2D,
+    Healpix,
+    HealpixIndexer,
     Polar,
     Triangular,
     UgridIndexer,
@@ -74,7 +77,7 @@ def sum_tuples(*tuples):
 
 
 def shape_from_slicers(
-    slicers: dict[str, list[slice | Fill | UgridIndexer]],
+    slicers: dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]],
     da: xr.DataArray,
     grid: GridSystem,
 ) -> tuple[int, ...]:
@@ -83,7 +86,7 @@ def shape_from_slicers(
 
     Parameters
     ----------
-    slicers : dict[str, list[slice | Fill | UgridIndexer]]
+    slicers : dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]
         Slicers for data selection
     da : xr.DataArray
         Data array (only metadata used, no data loaded)
@@ -102,10 +105,13 @@ def get_coarsen_factors(
     shape: tuple[int, ...],
     max_shape: tuple[int, ...],
     dims: list[str],
-    slicers: dict[str, list[slice | Fill | UgridIndexer]],
+    slicers: dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]],
     da: xr.DataArray,
     grid: GridSystem,
-) -> tuple[dict[str, int], dict[str, list[slice | Fill | UgridIndexer]]]:
+) -> tuple[
+    dict[str, int],
+    dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]],
+]:
     """
     Calculate coarsening factors and adjust slicers for data to fit within maximum shape constraints.
 
@@ -117,7 +123,7 @@ def get_coarsen_factors(
         Maximum allowed shape (width, height)
     dims : list[str]
         Dimension names corresponding to shape elements
-    slicers : dict[str, list[slice | Fill | UgridIndexer]]
+    slicers : dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]
         Original slicers for data selection
     ds : xr.Dataset
         Dataset being processed
@@ -126,7 +132,7 @@ def get_coarsen_factors(
 
     Returns
     -------
-    tuple[dict[str, int], dict[str, list[slice | Fill | UgridIndexer]]]
+    tuple[dict[str, int], dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]]
         Coarsening factors (>= 2) and adjusted slicers with padding
     """
 
@@ -179,10 +185,13 @@ def estimate_coarsen_factors_and_slicers(
     da: xr.DataArray,
     *,
     grid: GridSystem,
-    slicers: dict[str, list[slice | Fill | UgridIndexer]],
+    slicers: dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]],
     max_shape: tuple[int, int],
     datatype: DataType,
-) -> tuple[dict[str, int], dict[str, list[slice | Fill | UgridIndexer]]]:
+) -> tuple[
+    dict[str, int],
+    dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]],
+]:
     """
     Estimate coarsening factors and adjusted slicers for the given data array.
 
@@ -192,7 +201,7 @@ def estimate_coarsen_factors_and_slicers(
         Data array to process
     grid : GridSystem
         Grid system information
-    slicers : dict[str, list[slice | Fill | UgridIndexer]]
+    slicers : dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]
         Original slicers for data selection
     max_shape : tuple[int, int]
         Maximum allowed shape (width, height)
@@ -201,7 +210,7 @@ def estimate_coarsen_factors_and_slicers(
 
     Returns
     -------
-    tuple[dict[str, int], dict[str, list[slice | Fill | UgridIndexer]]]
+    tuple[dict[str, int], dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]]
         Coarsening factors and adjusted slicers
     """
     # Triangular grids can't be coarsened and don't need default_pad
@@ -231,7 +240,7 @@ async def apply_slicers(
     *,
     grid: GridSystem,
     alternate: GridMetadata,
-    slicers: dict[str, list[slice | Fill | UgridIndexer]],
+    slicers: dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]],
     datatype: DataType,
     min_dim_size: int = 2,
 ) -> xr.DataArray:
@@ -239,6 +248,9 @@ async def apply_slicers(
 
     has_alternate = alternate.crs != grid.crs
     pick = [alternate.X, alternate.Y]
+    # For Healpix, also keep the cell_ids coordinate
+    if isinstance(grid, Healpix):
+        pick.append(grid.cell_ids_name)
     ds = (
         da.to_dataset()
         # drop any coordinate vars we don't need
@@ -265,6 +277,12 @@ async def apply_slicers(
             ds.isel({grid.Xdim: sl.vertices})
             for sl in slicers[grid.Xdim]
             if isinstance(sl, UgridIndexer)
+        ]
+    elif isinstance(grid, Healpix):
+        subsets = [
+            ds.isel({grid.dim: sl.indices})
+            for sl in slicers[grid.dim]
+            if isinstance(sl, HealpixIndexer)
         ]
     else:
         raise TypeError(f"Unknown grid system type: {type(grid)!r}")
@@ -442,24 +460,71 @@ def has_coordinate_discontinuity(
     return False
 
 
-def fix_antimeridian_vertices(
+def fix_triangular_discontinuity(
     x_data: np.ndarray,
-    anti: dict[str, np.ndarray],
+    groups: Iterable[np.ndarray],
     transformer: pyproj.Transformer,
     *,
     bbox: BBox,
 ) -> None:
-    """Fix antimeridian discontinuities in-place for the given vertex indices.
+    """Fix antimeridian discontinuities in-place, per group.
 
-    Used by both the raster and polygon paths for triangular grids.
-    ``anti`` is ``UgridIndexer.antimeridian_vertices``, mapping "pos"/"neg"
-    to arrays of indices into ``x_data``.
+    Each element of ``groups`` is a 1-D index array into ``x_data``; the
+    corresponding slice is unwrapped independently so the ``unwrap_phase``
+    pass in :func:`fix_coordinate_discontinuities` doesn't bleed between
+    unrelated sets of vertices (e.g. distinct Healpix cells).
+
+    Used by the raster and polygon paths for triangular and healpix grids.
     """
-    for verts in [anti["pos"], anti["neg"]]:
+    for verts in groups:
         if verts.size > 0:
             x_data[verts] = fix_coordinate_discontinuities(
                 x_data[verts], transformer, bbox=bbox
             )
+
+
+def fix_healpix_discontinuity(
+    x_data: np.ndarray,
+    y_data: np.ndarray,
+    *,
+    antimeridian_mask: np.ndarray,
+    transformer: pyproj.Transformer,
+    bbox: BBox,
+    style: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | slice]:
+    """Unwrap antimeridian-crossing HEALPix cell vertices, and for polygons
+    also append ±width-shifted copies of those cells so whole-canvas tiles
+    (e.g. WebMercator z=0) render both Cartesian sides. Non-spanning tiles
+    clip the shifted copies off-canvas at no cost. ugrid achieves the same
+    via duplicated pos/neg vertices baked into the CellTree.
+
+    Returns ``(x, y, cell_indexer)``. ``cell_indexer`` is a per-cell index
+    into the original data array — ``np.arange(n_cells)`` with AM cells
+    appended twice when polygon cells were duplicated, else ``slice(None)``.
+    """
+    am_idxs = np.flatnonzero(antimeridian_mask)
+    x_data = x_data.copy()
+    if style == "polygons":
+        # corners laid out (n_cells * 4,); unwrap each cell's 4 separately
+        groups = [i * 4 + np.arange(4) for i in am_idxs]
+    else:
+        groups = [am_idxs]
+    fix_triangular_discontinuity(x_data, groups, transformer, bbox=bbox)
+
+    if style != "polygons" or not am_idxs.size:
+        return x_data, y_data, slice(None)
+
+    # now pad with cells that cross the anti-meridian
+    left, _, right, _ = transformer.transform_bounds(-180, -90, 180, 90)
+    width = abs(right - left)
+    am_verts = (am_idxs[:, None] * 4 + np.arange(4)).ravel()
+    dup_x = x_data[am_verts]
+    dup_y = y_data[am_verts]
+    x_data = np.concatenate([x_data, dup_x - width, dup_x + width])
+    y_data = np.concatenate([y_data, dup_y, dup_y])
+    n_cells = antimeridian_mask.size
+    cell_indexer = np.concatenate([np.arange(n_cells), am_idxs, am_idxs])
+    return x_data, y_data, cell_indexer
 
 
 def fix_coordinate_discontinuities(
@@ -625,10 +690,10 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     )
 
     # Transform coordinates to output CRS
-    subsets = await transform_for_render(
-        subsets, bbox=query.bbox, crs=query.crs, style=query.style
-    )
     renderer = query.get_renderer()
+    subsets = await transform_for_render(
+        subsets, bbox=query.bbox, crs=query.crs, style=renderer.style_id()
+    )
 
     tasks = [
         async_run(
@@ -856,6 +921,14 @@ async def subset_to_bbox(
             continue
 
         slicers = grid.sel(bbox=input_bbox)
+
+        # Check if sel() returned empty slicers (no data in bbox)
+        if isinstance(grid, Healpix) and all(
+            isinstance(s, HealpixIndexer) and s.is_empty for s in slicers[grid.dim]
+        ):
+            result[var_name] = NullRenderContext()
+            continue
+
         da = grid.assign_index(array.da)
 
         coarsen_factors, new_slicers = estimate_coarsen_factors_and_slicers(
@@ -892,6 +965,9 @@ async def subset_to_bbox(
             ugrid_indexer=cast(UgridIndexer, next(iter(slicers[grid.Xdim])))
             if isinstance(grid, Triangular)
             else None,
+            hp_indexer=cast(HealpixIndexer, next(iter(slicers[grid.dim])))
+            if isinstance(grid, Healpix)
+            else None,
             alternate=alternate,
             slicers=new_slicers,
             coarsen_factors=coarsen_factors,
@@ -926,12 +1002,13 @@ async def transform_for_render(
             result[var_name] = context
             continue
 
-        if style == "polygons" and isinstance(grid, GridSystem2D):
+        if style == "polygons" and isinstance(grid, (GridSystem2D, Healpix)):
             to_transform = grid.cell_corners(
                 slicers=context.slicers,
                 coarsen_factors=context.coarsen_factors,
             )
         else:
+            # We have vertices already for Triangular, Healpix
             to_transform = subset
         # Check for discontinuities on geographic coords before projection.
         # This is an optimization - we could also detect after projecting to the target CRS.
@@ -951,6 +1028,9 @@ async def transform_for_render(
                 assert context.ugrid_indexer is not None
                 anti = context.ugrid_indexer.antimeridian_vertices
                 has_discontinuity = anti["pos"].size > 0 or anti["neg"].size > 0
+            elif isinstance(grid, Healpix):
+                assert context.hp_indexer is not None
+                has_discontinuity = context.hp_indexer.antimeridian_mask.any()
             else:
                 raise NotImplementedError
         else:
@@ -967,15 +1047,29 @@ async def transform_for_render(
         # in the approximate range -20e6 -> 20e6 m range. So if the dataset's anti-meridian
         # discontinuity is in the tile; it will be preserved by the transformation,
         # regardless of how we may modify the coordinates *before* transforming.
+        healpix_cell_indexer: np.ndarray | slice = slice(None)
         if has_discontinuity:
             if isinstance(grid, Triangular):
                 assert context.ugrid_indexer is not None
-                fix_antimeridian_vertices(
+                anti = context.ugrid_indexer.antimeridian_vertices
+                fix_triangular_discontinuity(
                     newX.data,
-                    context.ugrid_indexer.antimeridian_vertices,
+                    [anti["pos"], anti["neg"]],
                     input_to_output,
                     bbox=bbox,
                 )
+            elif isinstance(grid, Healpix):
+                assert context.hp_indexer is not None
+                x_aug, y_aug, healpix_cell_indexer = fix_healpix_discontinuity(
+                    newX.data,
+                    newY.data,
+                    antimeridian_mask=context.hp_indexer.antimeridian_mask,
+                    transformer=input_to_output,
+                    bbox=bbox,
+                    style=style,
+                )
+                newX = xr.DataArray(x_aug, dims=newX.dims)
+                newY = xr.DataArray(y_aug, dims=newY.dims)
             else:
                 newX = newX.copy(
                     data=fix_coordinate_discontinuities(
@@ -989,13 +1083,16 @@ async def transform_for_render(
             if newX.ndim == 2:
                 newX = newX.transpose(*subset.dims)
                 newY = newY.transpose(*subset.dims)
+            if isinstance(grid, Healpix):
+                da = context.da.isel({context.da.dims[0]: healpix_cell_indexer})
+            else:
+                # Flatten 2D data to match the 1D ring array from corners_to_rings.
+                da = context.da
+                if da.values.ndim > 1:
+                    da = xr.DataArray(da.values.ravel(), dims=["cell"])
             cell_rings = grid.corners_to_rings(
                 newX.data, newY.data, ugrid_indexer=context.ugrid_indexer
             )
-            # Flatten 2D data to match the 1D ring array from corners_to_rings.
-            da = context.da
-            if da.values.ndim > 1:
-                da = xr.DataArray(da.values.ravel(), dims=["cell"])
         else:
             cell_rings = None
             da = subset.assign_coords({grid.X: newX, grid.Y: newY})
@@ -1006,6 +1103,7 @@ async def transform_for_render(
             datatype=context.datatype,
             bbox=bbox,
             ugrid_indexer=context.ugrid_indexer,
+            hp_indexer=context.hp_indexer,
             alternate=alternate,
             cell_rings=cell_rings,
         )

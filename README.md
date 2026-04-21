@@ -21,11 +21,15 @@ The goal of this project is to transform xarray datasets to raster, vector and o
 
 ### Extensive grid support
 
-`xpublish-tiles` supports handling a wide variety of grids including:
-1. Raster grids specified using an Affine transform specified in the `GeoTransform` attribute of the grid mapping variable (`spatial_ref`)
-2. Rectilinear grids specified using two 1D orthogonal coordinates `lat[lat], lon[lon]`.
-3. Curvilinear grids specified using two 2D coordinates `lat[nlat, nlon], lon[nlat, nlon]`.
-4. Unstructured grids specified using two 1D coordinates, interpreted as vertices and triangulated using `scipy.spatial.Delaunay` : `lat[point], lon[point]`.
+`xpublish-tiles` supports handling a wide variety of grids:
+
+| Grid type    | Coordinate signature               | Detection / notes                                                                                                     | Supported styles |
+|--------------|------------------------------------|-----------------------------------------------------------------------------------------------------------------------|------------------|
+| Raster       | Affine transform                   | `GeoTransform` attribute on the grid mapping variable (`spatial_ref`).                                                | All              |
+| Rectilinear  | `lat[lat], lon[lon]`               | Two 1D orthogonal coordinates.                                                                                        | All              |
+| Curvilinear  | `lat[nlat, nlon], lon[nlat, nlon]` | Two 2D coordinates.                                                                                                   | All              |
+| Unstructured | `lat[point], lon[point]`           | Two 1D coordinates interpreted as vertices, triangulated using `scipy.spatial.Delaunay`.                              | All              |
+| HEALPix      | cell-index coordinate              | Nested indexing scheme, following [CF Conventions PR #605](https://github.com/cf-convention/cf-conventions/pull/605). | `polygons` only  |
 
 Here `lat[lat]` means a coordinate variable named `lat` with one dimension named `lat`.
 

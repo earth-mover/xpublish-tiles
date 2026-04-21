@@ -15,6 +15,7 @@ from xpublish_tiles.grids import (
     GridMetadata,
     GridSystem,
     GridSystem2D,
+    HealpixIndexer,
     Rectilinear,
     UgridIndexer,
 )
@@ -155,6 +156,7 @@ class PopulatedRenderContext(RenderContext):
     grid: GridSystem
     bbox: OutputBBox
     ugrid_indexer: UgridIndexer | None = None
+    hp_indexer: HealpixIndexer | None = None
     alternate: GridMetadata | None = None
     cell_rings: np.ndarray | None = None
     slicers: dict[str, list] = field(default_factory=dict)
