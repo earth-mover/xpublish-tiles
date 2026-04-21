@@ -22,8 +22,10 @@ from xpublish_tiles.grids import (
     _GRID_CACHE,
     X_COORD_PATTERN,
     Y_COORD_PATTERN,
+    CubedSphere,
     Curvilinear,
     CurvilinearCellIndex,
+    FacetedIndexer,
     GridSystem,
     GridSystem2D,
     Healpix,
@@ -35,6 +37,7 @@ from xpublish_tiles.grids import (
     UgridIndexer,
     guess_coordinate_vars,
     guess_grid_system,
+    is_cubed_sphere,
 )
 from xpublish_tiles.lib import (
     TileTooBigError,
@@ -51,6 +54,7 @@ from xpublish_tiles.pipeline import (
     pipeline,
 )
 from xpublish_tiles.testing.datasets import (
+    CUBED_SPHERE,
     CURVILINEAR,
     ERA5,
     EU3035,
@@ -166,10 +170,10 @@ HEALPIX_SENTINEL = 2
             Curvilinear(
                 crs=CRS.from_user_input(4326),
                 bbox=BBox(
-                    south=20.752128720086883,
-                    north=59.74090498966864,
-                    east=-82.20037103061796,
-                    west=-117.87869841416263,
+                    south=20.75137708075283,
+                    north=59.74181114527747,
+                    east=-82.1990937931533,
+                    west=-117.87994462073223,
                 ),
                 X="lon",
                 Y="lat",
@@ -1237,4 +1241,63 @@ async def test_curvilinear_memory_limit_and_minzoom():
         tile = morecantile.Tile(x=0, y=0, z=minzoom - 2)
         query_params = create_query_params(tile, tms)
         with pytest.raises(TileTooBigError):
+            await pipeline(ds, query_params)
+
+
+class TestCubedSphere:
+    def test_is_cubed_sphere_detects(self):
+        ds = CUBED_SPHERE.create()
+        assert is_cubed_sphere(ds, "foo") == "nf"
+
+    def test_is_cubed_sphere_rejects_without_attr(self):
+        ds = CUBED_SPHERE.create()
+        del ds.attrs["grid_mapping_name"]
+        assert is_cubed_sphere(ds, "foo") is None
+
+    def test_guess_grid_returns_cubed_sphere(self):
+        ds = CUBED_SPHERE.create()
+        grid = guess_grid_system(ds, "foo")
+        assert isinstance(grid, CubedSphere)
+        assert len(grid.faces) == 6
+        assert grid.face_dim == "nf"
+        assert grid.bbox.west == -180
+        assert grid.bbox.east == 180
+        assert grid.bbox.south == -90
+        assert grid.bbox.north == 90
+
+    def test_sel_narrow_bbox(self):
+        ds = CUBED_SPHERE.create()
+        grid = guess_grid_system(ds, "foo")
+        assert isinstance(grid, CubedSphere)
+        slicers = grid.sel(bbox=BBox(west=10, south=-10, east=20, north=10))
+        assert list(slicers) == [grid.face_dim]
+        indexer = slicers[grid.face_dim][0]
+        assert isinstance(indexer, FacetedIndexer)
+        # Equatorial face 0 (lon 0..90, lat -45..45) must be in the hit set
+        assert len(indexer.selections) >= 1
+        assert 0 in {s.face_index for s in indexer.selections}
+
+    def test_sel_global_bbox_hits_all(self):
+        ds = CUBED_SPHERE.create()
+        grid = guess_grid_system(ds, "foo")
+        assert isinstance(grid, CubedSphere)
+        slicers = grid.sel(bbox=BBox(west=-180, south=-90, east=180, north=90))
+        indexer = slicers[grid.face_dim][0]
+        assert isinstance(indexer, FacetedIndexer)
+        assert len(indexer.selections) == 6
+
+    async def test_pipeline_polygons_tile(self):
+        """End-to-end polygons render at z=0 should succeed without error."""
+        ds = CUBED_SPHERE.create()
+        tms = morecantile.tms.get("WebMercatorQuad")
+        tile = morecantile.Tile(x=0, y=0, z=0)
+        query_params = create_query_params(tile, tms, style="polygons")
+        await pipeline(ds, query_params)
+
+    async def test_pipeline_raster_style_not_supported(self):
+        ds = CUBED_SPHERE.create()
+        tms = morecantile.tms.get("WebMercatorQuad")
+        tile = morecantile.Tile(x=0, y=0, z=0)
+        query_params = create_query_params(tile, tms, style="raster")
+        with pytest.raises(NotImplementedError, match="polygons"):
             await pipeline(ds, query_params)

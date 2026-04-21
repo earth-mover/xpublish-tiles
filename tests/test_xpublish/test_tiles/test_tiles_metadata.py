@@ -10,6 +10,7 @@ from syrupy.extensions.json import JSONSnapshotExtension
 import xarray as xr
 from xpublish_tiles.lib import VariableNotFoundError
 from xpublish_tiles.testing.datasets import (
+    CUBED_SPHERE,
     ERA5,
     GLOBAL_HEALPIX_L3,
     HRRR,
@@ -820,6 +821,14 @@ def test_allowed_styles_healpix_only_polygons():
         assert style_ids == {"polygons"}
 
 
+def test_allowed_styles_cubed_sphere_only_polygons():
+    """Cubed-sphere (Faceted) datasets must advertise only the polygons style."""
+    ds = CUBED_SPHERE.create()
+    assert allowed_styles(ds) == ["polygons"]
+    style_ids = {s.id.split("/")[0] for s in get_styles(ds)}
+    assert style_ids == {"polygons"}
+
+
 def test_allowed_styles_default_grid():
     """Non-Healpix grids advertise both raster and polygons."""
     dataset = xr.Dataset(
@@ -881,6 +890,7 @@ def _summarize_tilesets_list(data: dict) -> dict:
         pytest.param(IFS, id="ifs"),
         pytest.param(GLOBAL_HEALPIX_L3, id="global_healpix_l3"),
         pytest.param(REGIONAL_HEALPIX_NA, id="regional_healpix_na"),
+        pytest.param(CUBED_SPHERE, id="cubed_sphere"),
     ],
 )
 def test_tiles_endpoint_snapshot(fixture, snapshot):
