@@ -1,6 +1,7 @@
 import asyncio
 import io
-from collections.abc import Iterable
+from collections.abc import Hashable, Iterable
+from dataclasses import dataclass
 from functools import partial
 from typing import Any, cast
 
@@ -233,7 +234,17 @@ def estimate_coarsen_factors_and_slicers(
     return coarsen_factors, new_slicers
 
 
-async def apply_slicers(
+@dataclass
+class SubsetPlan:
+    da_name: Hashable
+    subsets: list[xr.Dataset]
+    concat_dim: str
+    pick: list[str]
+    total_shape: tuple[int, ...]
+    size_bytes: int
+
+
+def apply_slicers(
     da: xr.DataArray,
     *,
     grid: GridSystem,
@@ -241,20 +252,20 @@ async def apply_slicers(
     slicers: Slicers,
     datatype: DataType,
     min_dim_size: int = 2,
-) -> xr.DataArray:
-    logger = get_context_logger()
-
+) -> SubsetPlan:
     has_alternate = alternate.crs != grid.crs
     pick = [alternate.X, alternate.Y]
     # For Healpix, also keep the cell_ids coordinate
     if isinstance(grid, Healpix):
         pick.append(grid.cell_ids_name)
-    ds = (
+    ds = cast(
+        xr.Dataset,
         da.to_dataset()
         # drop any coordinate vars we don't need
-        .reset_coords()[[da.name, *pick]]
+        .reset_coords()[[da.name, *pick]],
     )
 
+    subsets: list[xr.Dataset]
     if isinstance(grid, GridSystem2D):
         # Find the one Y slice that's actually a slice (not Fill)
         y_slice = None
@@ -270,18 +281,21 @@ async def apply_slicers(
             for x_slice in slicers[grid.Xdim]
             if isinstance(x_slice, slice)
         ]
+        concat_dim = grid.Xdim
     elif isinstance(grid, Triangular):
         subsets = [
             ds.isel({grid.Xdim: sl.vertices})
             for sl in slicers[grid.Xdim]
             if isinstance(sl, UgridIndexer)
         ]
+        concat_dim = grid.Xdim
     elif isinstance(grid, Healpix):
         subsets = [
             ds.isel({grid.dim: sl.indices})
             for sl in slicers[grid.dim]
             if isinstance(sl, HealpixIndexer)
         ]
+        concat_dim = grid.dim
     else:
         raise TypeError(f"Unknown grid system type: {type(grid)!r}")
 
@@ -301,28 +315,54 @@ async def apply_slicers(
     total_size = sum(
         sum([var.size for var in subset.data_vars.values()]) for subset in subsets
     )
-    # Slightly larger just in case the subset required for some tiles at the advertised minzoom
-    # is just slightly too big
-    fudge_factor = 1.1
-    if total_size * da.dtype.itemsize > fudge_factor * factor * config.get(
-        "max_renderable_size"
-    ):
-        msg = (
-            f"Tile request too big, requires loading data of total shape: {total_shape!r} "
-            f"and total size: {total_size / 1024 / 1024}MB. Please choose a higher zoom level."
+
+    nvars = sum(len(subset.data_vars) for subset in subsets)
+    if any(dim_total < min_dim_size * nvars for dim_total in total_shape):
+        get_context_logger().error(
+            "Tile request resulted in insufficient data for rendering."
         )
-        logger = get_context_logger()
-        logger.error(
+        raise AssertionError("Tile request resulted in insufficient data for rendering.")
+
+    return SubsetPlan(
+        da_name=da.name,
+        subsets=subsets,
+        concat_dim=concat_dim,
+        pick=pick,
+        total_shape=total_shape,
+        size_bytes=total_size * da.dtype.itemsize * factor,
+    )
+
+
+async def load_plans(plans: list[SubsetPlan]) -> list[xr.DataArray]:
+    """Aggregate TileTooBigError budget across ``plans`` and load everything
+    in one TaskGroup; returns one xr.DataArray per plan, same order.
+    """
+    # Slight slack so subsets at the advertised minzoom that are just barely
+    # over the limit are still served.
+    fudge_factor = 1.1
+    max_size = config.get("max_renderable_size")
+    total_bytes = sum(p.size_bytes for p in plans)
+    if total_bytes > fudge_factor * max_size:
+        shapes = [p.total_shape for p in plans]
+        msg = (
+            f"Tile request too big, requires loading data of total size: "
+            f"{total_bytes / 1024 / 1024}MB across shapes {shapes!r}. "
+            "Please choose a higher zoom level."
+        )
+        get_context_logger().error(
             "Tile request too big",
-            total_shape=total_shape,
-            max_renderable_size=config.get("max_renderable_size"),
+            total_bytes=total_bytes,
+            max_renderable_size=max_size,
+            shapes=shapes,
         )
         raise TileTooBigError(msg)
 
-    nvars = sum(len(subset.data_vars) for subset in subsets)
-    if any(total_size < min_dim_size * nvars for total_size in total_shape):
-        logger.error("Tile request resulted in insufficient data for rendering.")
-        raise AssertionError("Tile request resulted in insufficient data for rendering.")
+    logger = get_context_logger()
+    subsets: list[xr.Dataset] = []
+    offsets: list[int] = [0]
+    for plan in plans:
+        subsets.extend(plan.subsets)
+        offsets.append(len(subsets))
 
     async with get_data_load_semaphore():
         if config.get("async_load"):
@@ -339,7 +379,7 @@ async def apply_slicers(
                             tasks = [
                                 tg.create_task(subset.load_async()) for subset in subsets
                             ]
-                    results = [task.result() for task in tasks]
+                    loaded_flat = [task.result() for task in tasks]
                 except TimeoutError as e:
                     logger.error(
                         "Async data loading timed out", timeout=timeout, exc_info=e
@@ -356,10 +396,14 @@ async def apply_slicers(
                     raise
         else:
             with log_duration("load data subsets", "📥"):
-                results = [subset.load() for subset in subsets]
-    subset = xr.concat(results, dim=grid.Xdim) if len(results) > 1 else results[0]
-    subset_da = subset.set_coords(pick)[da.name]
-    return subset_da
+                loaded_flat = [s.load() for s in subsets]
+
+    results: list[xr.DataArray] = []
+    for i, plan in enumerate(plans):
+        chunk = loaded_flat[offsets[i] : offsets[i + 1]]
+        merged = xr.concat(chunk, dim=plan.concat_dim) if len(chunk) > 1 else chunk[0]
+        results.append(merged.set_coords(plan.pick)[plan.da_name])
+    return results
 
 
 def coarsen(
@@ -885,60 +929,6 @@ def apply_query(
     return validated
 
 
-async def _subset_faceted(
-    array: ValidatedArray,
-    *,
-    grid: FacetedGridSystem,
-    bbox: OutputBBox,
-    crs: OutputCRS,
-) -> PopulatedRenderContext | NullRenderContext:
-    """Per-face subset for cubed-sphere-style grids (polygons renderer only)."""
-    output_to_input = transformer_from_crs(crs_from=crs, crs_to=grid.crs)
-    west, south, east, north = output_to_input.transform_bounds(
-        left=bbox.west, right=bbox.east, top=bbox.north, bottom=bbox.south
-    )
-    if grid.crs.is_geographic:
-        west = west - 360 if west > east else west
-    input_bbox = round_bbox(BBox(west=west, south=south, east=east, north=north))
-    if input_bbox.west > input_bbox.east:
-        raise ValueError(f"Invalid Bbox after transformation: {input_bbox!r}")
-
-    slicers = grid.sel(bbox=input_bbox)
-    indexer = cast(FacetedIndexer, next(iter(slicers[grid.face_dim])))
-    face_selections = indexer.selections
-    if not face_selections:
-        return NullRenderContext()
-
-    face_subsets: list[FaceRenderData] = []
-    for fs in face_selections:
-        face_grid = grid.faces[fs.face_index]
-        face_da = array.da.isel({grid.face_dim: fs.face_index})
-        face_slicers = normalize_slicers(fs.slicers, dict(face_da.sizes))
-        face_subset = await apply_slicers(
-            face_da,
-            grid=face_grid,
-            alternate=face_grid.to_metadata(),
-            slicers=face_slicers,
-            datatype=array.datatype,
-            min_dim_size=1,
-        )
-        face_subsets.append(
-            FaceRenderData(face_grid=face_grid, subset=face_subset, slicers=face_slicers)
-        )
-
-    if not face_subsets:
-        return NullRenderContext()
-
-    return PopulatedRenderContext(
-        da=face_subsets[0].subset,  # placeholder; replaced in transform_for_render
-        grid=grid,
-        datatype=array.datatype,
-        bbox=bbox,
-        alternate=None,
-        face_subsets=face_subsets,
-    )
-
-
 async def subset_to_bbox(
     validated: dict[str, ValidatedArray],
     *,
@@ -947,22 +937,27 @@ async def subset_to_bbox(
     max_shape: tuple[int, int],
     style: str = "raster",
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:
-    result = {}
+    result: dict[str, PopulatedRenderContext | NullRenderContext] = {}
+    plans: list[SubsetPlan] = []
+    # (var_name, plan_start, plan_count, finalize): finalize is an async
+    # callable taking the loaded DataArrays for this var's plans and
+    # returning a PopulatedRenderContext.
+    pending: list[tuple[str, int, int, Any]] = []
+
     for var_name, array in validated.items():
         grid = array.grid
-        if isinstance(grid, FacetedGridSystem):
-            if style != "polygons":
-                raise NotImplementedError(
-                    f"FacetedGridSystem (cubed sphere) only supports style='polygons'; got {style!r}."
-                )
-            result[var_name] = await _subset_faceted(array, grid=grid, bbox=bbox, crs=crs)
-            continue
+        is_faceted = isinstance(grid, FacetedGridSystem)
 
-        if (ndim := array.da.ndim) > 2:
-            raise ValueError(f"Attempting to visualize array with {ndim=!r} > 2.")
-        # Check for insufficient data - either dimension has too few points
-        if min(array.da.shape) < 2:
-            raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
+        if is_faceted and style != "polygons":
+            raise ValueError(
+                f"FacetedGridSystem (e.g. cubed sphere) only supports style='polygons'; got {style!r}."
+            )
+
+        if not is_faceted:
+            if (ndim := array.da.ndim) > 2:
+                raise ValueError(f"Attempting to visualize array with {ndim=!r} > 2.")
+            if min(array.da.shape) < 2:
+                raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
 
         output_to_input = transformer_from_crs(crs_from=crs, crs_to=grid.crs)
 
@@ -970,22 +965,72 @@ async def subset_to_bbox(
             left=bbox.west, right=bbox.east, top=bbox.north, bottom=bbox.south
         )
         if grid.crs.is_geographic:
-            # Handle antimeridian crossing: west > east means bbox crosses -180/180
             west = west - 360 if west > east else west
 
-        input_bbox = BBox(west=west, south=south, east=east, north=north)
-        input_bbox = round_bbox(input_bbox)
+        input_bbox = round_bbox(BBox(west=west, south=south, east=east, north=north))
 
         if input_bbox.west > input_bbox.east:
             raise ValueError(f"Invalid Bbox after transformation: {input_bbox!r}")
 
-        if not bbox_overlap(input_bbox, grid.bbox, grid.crs.is_geographic):
+        if not is_faceted and not bbox_overlap(
+            input_bbox, grid.bbox, grid.crs.is_geographic
+        ):
             result[var_name] = NullRenderContext()
             continue
 
         slicers = grid.sel(bbox=input_bbox)
 
-        # Check if sel() returned empty slicers (no data in bbox)
+        if isinstance(grid, FacetedGridSystem):
+            indexer = cast(FacetedIndexer, next(iter(slicers[grid.face_dim])))
+            face_selections = indexer.selections
+            if not face_selections:
+                result[var_name] = NullRenderContext()
+                continue
+
+            start = len(plans)
+            face_metas: list[tuple[Curvilinear, dict]] = []
+            for fs in face_selections:
+                face_grid = grid.faces[fs.face_index]
+                face_da = array.da.isel({grid.face_dim: fs.face_index})
+                face_slicers = normalize_slicers(fs.slicers, dict(face_da.sizes))
+                plans.append(
+                    apply_slicers(
+                        face_da,
+                        grid=face_grid,
+                        alternate=face_grid.to_metadata(),
+                        slicers=face_slicers,
+                        datatype=array.datatype,
+                        min_dim_size=1,
+                    )
+                )
+                face_metas.append((face_grid, face_slicers))
+            count = len(plans) - start
+
+            async def _finalize_faceted(
+                loaded,
+                *,
+                grid=grid,
+                face_metas=face_metas,
+                datatype=array.datatype,
+                bbox=bbox,
+            ):
+                face_subsets = [
+                    FaceRenderData(face_grid=fg, subset=ld, slicers=fsl)
+                    for ld, (fg, fsl) in zip(loaded, face_metas, strict=True)
+                ]
+                return PopulatedRenderContext(
+                    # placeholder; replaced in transform_for_render
+                    da=face_subsets[0].subset,
+                    grid=grid,
+                    datatype=datatype,
+                    bbox=bbox,
+                    alternate=None,
+                    face_subsets=face_subsets,
+                )
+
+            pending.append((var_name, start, count, _finalize_faceted))
+            continue
+
         if isinstance(grid, Healpix) and all(
             isinstance(s, HealpixIndexer) and s.is_empty for s in slicers[grid.dim]
         ):
@@ -1004,37 +1049,59 @@ async def subset_to_bbox(
         new_slicers = normalize_slicers(new_slicers, dict(da.sizes))
         alternate = grid.pick_alternate_grid(crs, coarsen_factors=coarsen_factors)
 
-        subset = await apply_slicers(
-            da,
-            grid=grid,
-            alternate=alternate,
-            slicers=new_slicers,
-            datatype=array.datatype,
-            min_dim_size=1 if style == "polygons" else 2,
+        start = len(plans)
+        plans.append(
+            apply_slicers(
+                da,
+                grid=grid,
+                alternate=alternate,
+                slicers=new_slicers,
+                datatype=array.datatype,
+                min_dim_size=1 if style == "polygons" else 2,
+            )
         )
 
-        # For Polar, compute lon/lat coordinates after subsetting
-        if isinstance(grid, Polar):
-            subset = grid.assign_index(subset)
-
-        if coarsen_factors:
-            subset = await async_run(partial(coarsen, subset, coarsen_factors, grid=grid))
-
-        result[var_name] = PopulatedRenderContext(
-            da=subset,
+        async def _finalize_regular(
+            loaded,
+            *,
             grid=grid,
+            alternate=alternate,
             datatype=array.datatype,
             bbox=bbox,
-            ugrid_indexer=cast(UgridIndexer, next(iter(slicers[grid.Xdim])))
-            if isinstance(grid, Triangular)
-            else None,
-            hp_indexer=cast(HealpixIndexer, next(iter(slicers[grid.dim])))
-            if isinstance(grid, Healpix)
-            else None,
-            alternate=alternate,
-            slicers=new_slicers,
+            sel_slicers=slicers,
+            new_slicers=new_slicers,
             coarsen_factors=coarsen_factors,
-        )
+        ):
+            subset = loaded[0]
+            if isinstance(grid, Polar):
+                subset = grid.assign_index(subset)
+            if coarsen_factors:
+                subset = await async_run(
+                    partial(coarsen, subset, coarsen_factors, grid=grid)
+                )
+            return PopulatedRenderContext(
+                da=subset,
+                grid=grid,
+                datatype=datatype,
+                bbox=bbox,
+                ugrid_indexer=cast(UgridIndexer, next(iter(sel_slicers[grid.Xdim])))
+                if isinstance(grid, Triangular)
+                else None,
+                hp_indexer=cast(HealpixIndexer, next(iter(sel_slicers[grid.dim])))
+                if isinstance(grid, Healpix)
+                else None,
+                alternate=alternate,
+                slicers=new_slicers,
+                coarsen_factors=coarsen_factors,
+            )
+
+        pending.append((var_name, start, 1, _finalize_regular))
+
+    loaded = await load_plans(plans) if plans else []
+
+    finalized = await asyncio.gather(*(fn(loaded[s : s + c]) for _, s, c, fn in pending))
+    for (var_name, *_), ctx in zip(pending, finalized, strict=True):
+        result[var_name] = ctx
     return result
 
 

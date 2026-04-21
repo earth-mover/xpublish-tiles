@@ -51,6 +51,7 @@ from xpublish_tiles.lib import (
 from xpublish_tiles.pipeline import (
     apply_slicers,
     fix_coordinate_discontinuities,
+    load_plans,
     pipeline,
 )
 from xpublish_tiles.testing.datasets import (
@@ -556,13 +557,19 @@ async def test_subset(global_datasets, tile, tms):
         slicers = apply_default_pad(slicers, ds.foo, grid)
 
     # Check that coordinates are within expected bounds (exact matching with controlled grid)
-    actual = await apply_slicers(
-        ds.foo,
-        grid=grid,
-        alternate=grid.to_metadata(),
-        slicers=slicers,
-        datatype=ContinuousData(valid_min=0, valid_max=1),
-    )
+    actual = (
+        await load_plans(
+            [
+                apply_slicers(
+                    ds.foo,
+                    grid=grid,
+                    alternate=grid.to_metadata(),
+                    slicers=slicers,
+                    datatype=ContinuousData(valid_min=0, valid_max=1),
+                )
+            ]
+        )
+    )[0]
     lat_min, lat_max = actual.latitude.min().item(), actual.latitude.max().item()
     assert lat_min <= bbox_geo.south, f"Latitude too low: {lat_min} < {bbox_geo.south}"
     assert lat_max >= bbox_geo.north, f"Latitude too high: {lat_max} > {bbox_geo.north}"
