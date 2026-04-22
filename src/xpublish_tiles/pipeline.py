@@ -1105,6 +1105,143 @@ async def subset_to_bbox(
     return result
 
 
+def _fix_discontinuity(
+    grid: GridSystem,
+    newX: xr.DataArray,
+    newY: xr.DataArray,
+    *,
+    has_discontinuity: bool,
+    transformer: pyproj.Transformer,
+    bbox: OutputBBox,
+    style: str,
+    ugrid_indexer: UgridIndexer | None = None,
+    hp_indexer: HealpixIndexer | None = None,
+) -> tuple[xr.DataArray, xr.DataArray, np.ndarray | slice]:
+    """Dispatch the post-transform antimeridian/discontinuity fix by grid type.
+
+    Returns ``(newX, newY, healpix_cell_indexer)``. The third element is a
+    slice/index array for Healpix augmentation (to apply to the values array);
+    all other grids return ``slice(None)``.
+    """
+    if not has_discontinuity:
+        return newX, newY, slice(None)
+    if isinstance(grid, Triangular):
+        assert ugrid_indexer is not None
+        anti = ugrid_indexer.antimeridian_vertices
+        fix_triangular_discontinuity(
+            newX.data, [anti["pos"], anti["neg"]], transformer, bbox=bbox
+        )
+        return newX, newY, slice(None)
+    if isinstance(grid, Healpix):
+        assert hp_indexer is not None
+        x_aug, y_aug, cell_idx = fix_healpix_discontinuity(
+            newX.data,
+            newY.data,
+            antimeridian_mask=hp_indexer.antimeridian_mask,
+            transformer=transformer,
+            bbox=bbox,
+            style=style,
+        )
+        return (
+            xr.DataArray(x_aug, dims=newX.dims),
+            xr.DataArray(y_aug, dims=newY.dims),
+            cell_idx,
+        )
+    newX = newX.copy(
+        data=fix_coordinate_discontinuities(newX.data, transformer, bbox=bbox)
+    )
+    return newX, newY, slice(None)
+
+
+async def _transform_one_grid_polygons(
+    grid: GridSystem2D,
+    subset: xr.DataArray,
+    *,
+    slicers: Slicers,
+    coarsen_factors: dict[str, int],
+    bbox: OutputBBox,
+    source_crs: pyproj.CRS,
+    output_crs: OutputCRS,
+    is_polar_cap: bool = False,
+    out_width: float | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Transform one 2D grid's cell corners into output-CRS polygon rings.
+
+    Shared core between the non-faceted polygons path in
+    :func:`transform_for_render` and the per-face loop in
+    :func:`_transform_faceted_polygons`: cell_corners → discontinuity detect
+    → transform → fix → corners_to_rings.
+
+    When ``out_width`` is given (the faceted per-face case), also applies the
+    ring-level fixups that a local face patch needs: polar-cap seam shift or
+    antimeridian ±width copy-stamping, so callers don't touch rings again.
+
+    Returns ``(rings (N, 5, 2), values_1d (N,))``.
+    """
+    to_transform = grid.cell_corners(slicers=slicers, coarsen_factors=coarsen_factors)
+
+    has_discontinuity = False
+    if not is_polar_cap and source_crs.is_geographic:
+        has_discontinuity = has_coordinate_discontinuity(
+            to_transform[grid.X].data,
+            360.0,
+            axis=to_transform[grid.X].get_axis_num(grid.Xdim),
+            check_antimeridian=True,
+        )
+
+    input_to_output = transformer_from_crs(source_crs, output_crs)
+    with log_duration("transform_coordinates", "🔄"):
+        newX, newY = await transform_coordinates(
+            to_transform, grid.X, grid.Y, input_to_output
+        )
+
+    newX, newY, _ = _fix_discontinuity(
+        grid,
+        newX,
+        newY,
+        has_discontinuity=has_discontinuity,
+        transformer=input_to_output,
+        bbox=bbox,
+        style="polygons",
+    )
+
+    if newX.ndim == 2:
+        newX = newX.transpose(*subset.dims)
+        newY = newY.transpose(*subset.dims)
+
+    rings = grid.corners_to_rings(newX.data, newY.data)
+    values = np.asarray(subset.values).ravel()
+
+    if out_width is not None:
+        if is_polar_cap:
+            # A polar cap has a genuine topological singularity at the pole, so
+            # the 2D `unwrap_phase` in `fix_coordinate_discontinuities` produces
+            # garbage across large regions. pyproj has already normalized each
+            # corner's x into one period; only cells straddling the antimeridian
+            # need fixing. Within each such cell the vertices split into two
+            # sign-groups across the seam; shift the negative side by
+            # `+out_width` so each seam cell becomes self-consistent on one
+            # side, then append ±out_width copies so the wrapped side renders.
+            xs = rings[..., 0]
+            seam_mask = (xs.max(axis=1) - xs.min(axis=1)) > out_width / 2
+            if seam_mask.any():
+                xs[seam_mask[:, None] & (xs < 0)] += out_width
+                seam = rings[seam_mask]
+                shift = np.array([out_width, 0.0])
+                rings = np.concatenate([rings, seam - shift, seam + shift], axis=0)
+                seam_values = values[seam_mask]
+                values = np.concatenate([values, seam_values, seam_values])
+        elif has_discontinuity:
+            # The face straddles the antimeridian. fix_coordinate_discontinuities
+            # unwraps to one side of the output CRS, so append ±width-shifted copies
+            # to cover the wrapped side; off-canvas copies clip naturally.
+            shift = np.array([out_width, 0.0])
+            rings = np.concatenate([rings, rings - shift, rings + shift], axis=0)
+            values = np.concatenate([values, values, values])
+
+    return rings, values
+
+
 async def _transform_faceted_polygons(
     context: PopulatedRenderContext,
     *,
@@ -1119,76 +1256,29 @@ async def _transform_faceted_polygons(
     ``(N_total, 5, 2)`` ring array plus a flattened 1D value array.
     """
     assert context.face_subsets is not None
-    input_to_output = transformer_from_crs(grid.crs, crs)
 
     rings_per_face: list[np.ndarray] = []
     values_per_face: list[np.ndarray] = []
 
-    out_left, _, out_right, _ = input_to_output.transform_bounds(-180, -90, 180, 90)
+    out_tx = transformer_from_crs(grid.crs, crs)
+    out_left, _, out_right, _ = out_tx.transform_bounds(-180, -90, 180, 90)
     out_width = abs(out_right - out_left)
 
     for face in context.face_subsets:
         face_grid = face.face_grid
-        subset = face.subset
         is_polar_cap = isinstance(face_grid, Curvilinear) and face_grid.is_polar_cap
 
-        to_transform = face_grid.cell_corners(slicers=face.slicers, coarsen_factors={})
-
-        has_discontinuity = False
-        if face_grid.crs.is_geographic and not is_polar_cap:
-            has_discontinuity = has_coordinate_discontinuity(
-                to_transform[face_grid.X].data,
-                360.0,
-                axis=to_transform[face_grid.X].get_axis_num(face_grid.Xdim),
-                check_antimeridian=True,
-            )
-
-        newX, newY = await transform_coordinates(
-            to_transform, face_grid.X, face_grid.Y, input_to_output
+        face_rings, face_values = await _transform_one_grid_polygons(
+            face_grid,
+            face.subset,
+            slicers=face.slicers,
+            coarsen_factors={},
+            bbox=bbox,
+            source_crs=face_grid.crs,
+            output_crs=crs,
+            is_polar_cap=is_polar_cap,
+            out_width=out_width,
         )
-
-        if has_discontinuity:
-            newX = newX.copy(
-                data=fix_coordinate_discontinuities(newX.data, input_to_output, bbox=bbox)
-            )
-
-        if newX.ndim == 2:
-            newX = newX.transpose(*subset.dims)
-            newY = newY.transpose(*subset.dims)
-
-        face_rings = face_grid.corners_to_rings(newX.data, newY.data)
-        face_values = np.asarray(subset.values).ravel()
-
-        if is_polar_cap:
-            # A polar cap has a genuine topological singularity at the pole, so
-            # the 2D `unwrap_phase` in `fix_coordinate_discontinuities` produces
-            # garbage across large regions. pyproj has already normalized each
-            # corner's x into one period; only cells straddling the antimeridian
-            # need fixing. Within each such cell the vertices split into two
-            # sign-groups across the seam; shift the negative side by
-            # `+out_width` so each seam cell becomes self-consistent on one
-            # side, then append ±out_width copies so the wrapped side renders.
-            xs = face_rings[..., 0]
-            seam_mask = (xs.max(axis=1) - xs.min(axis=1)) > out_width / 2
-            if seam_mask.any():
-                # Shift neg-side verts of seam cells in place through the view.
-                xs[seam_mask[:, None] & (xs < 0)] += out_width
-                seam = face_rings[seam_mask]
-                shift = np.array([out_width, 0.0])
-                face_rings = np.concatenate(
-                    [face_rings, seam - shift, seam + shift], axis=0
-                )
-                seam_values = face_values[seam_mask]
-                face_values = np.concatenate([face_values, seam_values, seam_values])
-        elif has_discontinuity:
-            # The face straddles the antimeridian. fix_coordinate_discontinuities
-            # unwraps to one side of the output CRS, so append ±width-shifted copies
-            # to cover the wrapped side; off-canvas copies clip naturally.
-            shift = np.array([out_width, 0.0])
-            face_rings = np.concatenate(
-                [face_rings, face_rings - shift, face_rings + shift], axis=0
-            )
-            face_values = np.concatenate([face_values, face_values, face_values])
 
         rings_per_face.append(face_rings)
         values_per_face.append(face_values)
@@ -1244,7 +1334,29 @@ async def transform_for_render(
             result[var_name] = context
             continue
 
-        if style == "polygons" and isinstance(grid, (GridSystem2D, Healpix)):
+        if style == "polygons" and isinstance(grid, GridSystem2D):
+            rings, values_1d = await _transform_one_grid_polygons(
+                grid,
+                subset,
+                slicers=context.slicers,
+                coarsen_factors=context.coarsen_factors,
+                bbox=bbox,
+                source_crs=alternate.crs,
+                output_crs=crs,
+            )
+            result[var_name] = PopulatedRenderContext(
+                da=xr.DataArray(values_1d, dims=["cell"]),
+                grid=grid,
+                datatype=context.datatype,
+                bbox=bbox,
+                ugrid_indexer=context.ugrid_indexer,
+                hp_indexer=context.hp_indexer,
+                alternate=alternate,
+                cell_rings=rings,
+            )
+            continue
+
+        if style == "polygons" and isinstance(grid, Healpix):
             to_transform = grid.cell_corners(
                 slicers=context.slicers,
                 coarsen_factors=context.coarsen_factors,
@@ -1252,6 +1364,7 @@ async def transform_for_render(
         else:
             # We have vertices already for Triangular, Healpix
             to_transform = subset
+
         # Check for discontinuities on geographic coords before projection.
         # This is an optimization - we could also detect after projecting to the target CRS.
         # However, that would be a tax on every render. So instead we look for
@@ -1289,37 +1402,17 @@ async def transform_for_render(
         # in the approximate range -20e6 -> 20e6 m range. So if the dataset's anti-meridian
         # discontinuity is in the tile; it will be preserved by the transformation,
         # regardless of how we may modify the coordinates *before* transforming.
-        healpix_cell_indexer: np.ndarray | slice = slice(None)
-        if has_discontinuity:
-            if isinstance(grid, Triangular):
-                assert context.ugrid_indexer is not None
-                anti = context.ugrid_indexer.antimeridian_vertices
-                fix_triangular_discontinuity(
-                    newX.data,
-                    [anti["pos"], anti["neg"]],
-                    input_to_output,
-                    bbox=bbox,
-                )
-            elif isinstance(grid, Healpix):
-                assert context.hp_indexer is not None
-                x_aug, y_aug, healpix_cell_indexer = fix_healpix_discontinuity(
-                    newX.data,
-                    newY.data,
-                    antimeridian_mask=context.hp_indexer.antimeridian_mask,
-                    transformer=input_to_output,
-                    bbox=bbox,
-                    style=style,
-                )
-                newX = xr.DataArray(x_aug, dims=newX.dims)
-                newY = xr.DataArray(y_aug, dims=newY.dims)
-            else:
-                newX = newX.copy(
-                    data=fix_coordinate_discontinuities(
-                        newX.data,
-                        input_to_output,
-                        bbox=bbox,
-                    )
-                )
+        newX, newY, healpix_cell_indexer = _fix_discontinuity(
+            grid,
+            newX,
+            newY,
+            has_discontinuity=bool(has_discontinuity),
+            transformer=input_to_output,
+            bbox=bbox,
+            ugrid_indexer=context.ugrid_indexer,
+            hp_indexer=context.hp_indexer,
+            style=style,
+        )
 
         if style == "polygons":
             if newX.ndim == 2:
