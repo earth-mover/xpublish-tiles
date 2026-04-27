@@ -52,10 +52,10 @@ from xpublish_tiles.types import (
     ContinuousData,
     DataType,
     DiscreteData,
-    FaceRenderData,
     NullRenderContext,
     OutputBBox,
     OutputCRS,
+    Patch,
     PopulatedRenderContext,
     QueryParams,
     SelectionMethod,
@@ -939,25 +939,15 @@ async def subset_to_bbox(
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:
     result: dict[str, PopulatedRenderContext | NullRenderContext] = {}
     plans: list[SubsetPlan] = []
-    # (var_name, plan_start, plan_count, finalize): finalize is an async
-    # callable taking the loaded DataArrays for this var's plans and
-    # returning a PopulatedRenderContext.
-    pending: list[tuple[str, int, int, Any]] = []
+    # ``plan_patches`` is aligned with ``plans``: each entry's loaded
+    # DataArray is mutated back onto the patch's ``.da`` after ``load_plans``
+    # returns. ``pending`` carries the per-var bookkeeping needed to build
+    # the ``PopulatedRenderContext`` once data has loaded.
+    plan_patches: list[Patch] = []
+    pending: list[tuple[str, GridSystem, DataType, list[Patch]]] = []
 
     for var_name, array in validated.items():
         grid = array.grid
-        is_faceted = isinstance(grid, FacetedGridSystem)
-
-        if is_faceted and style != "polygons":
-            raise ValueError(
-                f"FacetedGridSystem (e.g. cubed sphere) only supports style='polygons'; got {style!r}."
-            )
-
-        if not is_faceted:
-            if (ndim := array.da.ndim) > 2:
-                raise ValueError(f"Attempting to visualize array with {ndim=!r} > 2.")
-            if min(array.da.shape) < 2:
-                raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
 
         output_to_input = transformer_from_crs(crs_from=crs, crs_to=grid.crs)
 
@@ -972,136 +962,123 @@ async def subset_to_bbox(
         if input_bbox.west > input_bbox.east:
             raise ValueError(f"Invalid Bbox after transformation: {input_bbox!r}")
 
-        if not is_faceted and not bbox_overlap(
-            input_bbox, grid.bbox, grid.crs.is_geographic
-        ):
-            result[var_name] = NullRenderContext()
-            continue
-
-        slicers = grid.sel(bbox=input_bbox)
+        # Build patches: one per overlapping face for FacetedGridSystem, one
+        # patch for everything else.
+        # Pre-load ``patch.da`` is the unloaded source array fed to ``apply_slicers``;
+        # ``_post_load`` below mutates it to the loaded subset once ``load_plans`` returns.
+        patches: list[Patch] = []
 
         if isinstance(grid, FacetedGridSystem):
-            indexer = cast(FacetedIndexer, next(iter(slicers[grid.face_dim])))
-            face_selections = indexer.selections
-            if not face_selections:
+            if style != "polygons":
+                raise ValueError(
+                    f"FacetedGridSystem (e.g. cubed sphere) only supports style='polygons'; got {style!r}."
+                )
+            slicers = grid.sel(bbox=input_bbox)
+            face_indexer = cast(FacetedIndexer, next(iter(slicers[grid.face_dim])))
+            for sel_slicers in face_indexer.selections:
+                face_index = cast(slice, sel_slicers[grid.face_dim][0]).start
+                face_grid = grid.faces[face_index]
+                face_da = array.da.isel({grid.face_dim: face_index})
+                face_slicers = normalize_slicers(
+                    {k: v for k, v in sel_slicers.items() if k != grid.face_dim},
+                    dict(face_da.sizes),
+                )
+                patches.append(
+                    Patch(
+                        grid=face_grid,
+                        da=face_da,
+                        slicers=face_slicers,
+                        alternate=face_grid.to_metadata(),
+                    )
+                )
+        else:
+            if (ndim := array.da.ndim) > 2:
+                raise ValueError(f"Attempting to visualize array with {ndim=!r} > 2.")
+            if min(array.da.shape) < 2:
+                raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
+
+            if not bbox_overlap(input_bbox, grid.bbox, grid.crs.is_geographic):
                 result[var_name] = NullRenderContext()
                 continue
 
-            start = len(plans)
-            face_metas: list[tuple[Curvilinear, dict]] = []
-            for fs in face_selections:
-                face_grid = grid.faces[fs.face_index]
-                face_da = array.da.isel({grid.face_dim: fs.face_index})
-                face_slicers = normalize_slicers(fs.slicers, dict(face_da.sizes))
-                plans.append(
-                    apply_slicers(
-                        face_da,
-                        grid=face_grid,
-                        alternate=face_grid.to_metadata(),
-                        slicers=face_slicers,
-                        datatype=array.datatype,
-                        min_dim_size=1,
-                    )
-                )
-                face_metas.append((face_grid, face_slicers))
-            count = len(plans) - start
+            slicers = grid.sel(bbox=input_bbox)
 
-            async def _finalize_faceted(
-                loaded,
-                *,
-                grid=grid,
-                face_metas=face_metas,
-                datatype=array.datatype,
-                bbox=bbox,
+            # ugly; figure out how to get rid of this
+            if isinstance(grid, Healpix) and all(
+                isinstance(s, HealpixIndexer) and s.is_empty for s in slicers[grid.dim]
             ):
-                face_subsets = [
-                    FaceRenderData(face_grid=fg, subset=ld, slicers=fsl)
-                    for ld, (fg, fsl) in zip(loaded, face_metas, strict=True)
-                ]
-                return PopulatedRenderContext(
-                    # placeholder; replaced in transform_for_render
-                    da=face_subsets[0].subset,
+                result[var_name] = NullRenderContext()
+                continue
+
+            da = grid.assign_index(array.da)
+            coarsen_factors, new_slicers = estimate_coarsen_factors_and_slicers(
+                da,
+                grid=grid,
+                slicers=slicers,
+                max_shape=max_shape,
+                datatype=array.datatype,
+            )
+            new_slicers = normalize_slicers(new_slicers, dict(da.sizes))
+            alternate = grid.pick_alternate_grid(crs, coarsen_factors=coarsen_factors)
+
+            # Note: These are handled specially inside apply_slicers.
+            patch_indexer: UgridIndexer | HealpixIndexer | None = None
+            if isinstance(grid, Triangular):
+                patch_indexer = cast(UgridIndexer, next(iter(slicers[grid.Xdim])))
+            elif isinstance(grid, Healpix):
+                patch_indexer = cast(HealpixIndexer, next(iter(slicers[grid.dim])))
+
+            patches.append(
+                Patch(
                     grid=grid,
-                    datatype=datatype,
-                    bbox=bbox,
-                    alternate=None,
-                    face_subsets=face_subsets,
+                    da=da,
+                    slicers=new_slicers,
+                    coarsen_factors=coarsen_factors,
+                    alternate=alternate,
+                    indexer=patch_indexer,
                 )
+            )
 
-            pending.append((var_name, start, count, _finalize_faceted))
-            continue
-
-        if isinstance(grid, Healpix) and all(
-            isinstance(s, HealpixIndexer) and s.is_empty for s in slicers[grid.dim]
-        ):
+        if not patches:
             result[var_name] = NullRenderContext()
             continue
 
-        da = grid.assign_index(array.da)
-
-        coarsen_factors, new_slicers = estimate_coarsen_factors_and_slicers(
-            da,
-            grid=grid,
-            slicers=slicers,
-            max_shape=max_shape,
-            datatype=array.datatype,
-        )
-        new_slicers = normalize_slicers(new_slicers, dict(da.sizes))
-        alternate = grid.pick_alternate_grid(crs, coarsen_factors=coarsen_factors)
-
-        start = len(plans)
-        plans.append(
+        plans.extend(
             apply_slicers(
-                da,
-                grid=grid,
-                alternate=alternate,
-                slicers=new_slicers,
+                patch.da,
+                grid=patch.grid,
+                alternate=patch.alternate or patch.grid.to_metadata(),
+                slicers=patch.slicers,
                 datatype=array.datatype,
                 min_dim_size=1 if style == "polygons" else 2,
             )
+            for patch in patches
         )
-
-        async def _finalize_regular(
-            loaded,
-            *,
-            grid=grid,
-            alternate=alternate,
-            datatype=array.datatype,
-            bbox=bbox,
-            sel_slicers=slicers,
-            new_slicers=new_slicers,
-            coarsen_factors=coarsen_factors,
-        ):
-            subset = loaded[0]
-            if isinstance(grid, Polar):
-                subset = grid.assign_index(subset)
-            if coarsen_factors:
-                subset = await async_run(
-                    partial(coarsen, subset, coarsen_factors, grid=grid)
-                )
-            return PopulatedRenderContext(
-                da=subset,
-                grid=grid,
-                datatype=datatype,
-                bbox=bbox,
-                ugrid_indexer=cast(UgridIndexer, next(iter(sel_slicers[grid.Xdim])))
-                if isinstance(grid, Triangular)
-                else None,
-                hp_indexer=cast(HealpixIndexer, next(iter(sel_slicers[grid.dim])))
-                if isinstance(grid, Healpix)
-                else None,
-                alternate=alternate,
-                slicers=new_slicers,
-                coarsen_factors=coarsen_factors,
-            )
-
-        pending.append((var_name, start, 1, _finalize_regular))
+        plan_patches.extend(patches)
+        pending.append((var_name, grid, array.datatype, patches))
 
     loaded = await load_plans(plans) if plans else []
 
-    finalized = await asyncio.gather(*(fn(loaded[s : s + c]) for _, s, c, fn in pending))
-    for (var_name, *_), ctx in zip(pending, finalized, strict=True):
-        result[var_name] = ctx
+    async def _post_load(patch: Patch, ld: xr.DataArray) -> None:
+        if isinstance(patch.grid, Polar):
+            ld = patch.grid.assign_index(ld)
+        if patch.coarsen_factors:
+            ld = await async_run(
+                partial(coarsen, ld, patch.coarsen_factors, grid=patch.grid)
+            )
+        patch.da = ld
+
+    await asyncio.gather(
+        *(_post_load(p, ld) for p, ld in zip(plan_patches, loaded, strict=True))
+    )
+
+    for var_name, grid, datatype, patches in pending:
+        result[var_name] = PopulatedRenderContext(
+            grid=grid,
+            datatype=datatype,
+            bbox=bbox,
+            patches=patches,
+        )
     return result
 
 
@@ -1167,13 +1144,11 @@ async def _transform_one_grid_polygons(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Transform one 2D grid's cell corners into output-CRS polygon rings.
 
-    Shared core between the non-faceted polygons path in
-    :func:`transform_for_render` and the per-face loop in
-    :func:`_transform_faceted_polygons`: cell_corners → discontinuity detect
-    → transform → fix → corners_to_rings.
+    Per-patch core for the polygons path in :func:`transform_for_render`:
+    cell_corners → discontinuity detect → transform → fix → corners_to_rings.
 
-    When ``out_width`` is given (the faceted per-face case), also applies the
-    ring-level fixups that a local face patch needs: polar-cap seam shift or
+    When ``out_width`` is given (the faceted multi-patch case), also applies
+    the ring-level fixups a local face patch needs: polar-cap seam shift or
     antimeridian ±width copy-stamping, so callers don't touch rings again.
 
     Returns ``(rings (N, 5, 2), values_1d (N,))``.
@@ -1242,62 +1217,155 @@ async def _transform_one_grid_polygons(
     return rings, values
 
 
-async def _transform_faceted_polygons(
-    context: PopulatedRenderContext,
+async def _transform_polygon_patch(
+    patch: Patch,
     *,
-    grid: FacetedGridSystem,
     bbox: OutputBBox,
-    crs: OutputCRS,
-) -> PopulatedRenderContext | NullRenderContext:
-    """Per-face polygon assembly for FacetedGridSystem (polygons style only).
+    output_crs: OutputCRS,
+    out_width: float | None = None,
+) -> tuple[np.ndarray, np.ndarray, xr.DataArray]:
+    """Transform one patch into ``(rings, values_1d, da)`` for the polygons style.
 
-    For each face, transforms the face's cell corners to output CRS, builds
-    per-cell 5-vertex rings, and concatenates across faces into a single
-    ``(N_total, 5, 2)`` ring array plus a flattened 1D value array.
+    Dispatches by patch grid type: GridSystem2D goes through the shared
+    cell-corners → transform → corners-to-rings core; Triangular/Healpix have
+    their own vertex/cell-corner machinery preserved here.
+
+    ``out_width`` triggers the ring-level seam handling for Curvilinear face
+    patches (polar caps and antimeridian-straddling faces); pass ``None`` for
+    single-patch contexts.
     """
-    assert context.face_subsets is not None
+    grid = patch.grid
+    subset = patch.da
+    source_crs = patch.source_crs
 
-    rings_per_face: list[np.ndarray] = []
-    values_per_face: list[np.ndarray] = []
-
-    out_tx = transformer_from_crs(grid.crs, crs)
-    out_left, _, out_right, _ = out_tx.transform_bounds(-180, -90, 180, 90)
-    out_width = abs(out_right - out_left)
-
-    for face in context.face_subsets:
-        face_grid = face.face_grid
-        is_polar_cap = isinstance(face_grid, Curvilinear) and face_grid.is_polar_cap
-
-        face_rings, face_values = await _transform_one_grid_polygons(
-            face_grid,
-            face.subset,
-            slicers=face.slicers,
-            coarsen_factors={},
+    if isinstance(grid, GridSystem2D):
+        is_polar_cap = isinstance(grid, Curvilinear) and grid.is_polar_cap
+        rings, values = await _transform_one_grid_polygons(
+            grid,
+            subset,
+            slicers=patch.slicers,
+            coarsen_factors=patch.coarsen_factors,
             bbox=bbox,
-            source_crs=face_grid.crs,
-            output_crs=crs,
+            source_crs=source_crs,
+            output_crs=output_crs,
             is_polar_cap=is_polar_cap,
             out_width=out_width,
         )
+        return rings, values, xr.DataArray(values, dims=["cell"])
 
-        rings_per_face.append(face_rings)
-        values_per_face.append(face_values)
+    # Triangular / Healpix polygon path. Source data is 1D per-vertex/per-cell;
+    # cell_corners (Healpix) or pre-existing vertices (Triangular) feed the
+    # transform.
+    alternate = patch.alternate or grid.to_metadata()
+    if isinstance(grid, Healpix):
+        to_transform = grid.cell_corners(
+            slicers=patch.slicers, coarsen_factors=patch.coarsen_factors
+        )
+    else:
+        to_transform = subset
 
-    if not rings_per_face:
-        return NullRenderContext()
+    has_discontinuity = False
+    if source_crs.is_geographic:
+        if isinstance(grid, Triangular):
+            assert isinstance(patch.indexer, UgridIndexer)
+            anti = patch.indexer.antimeridian_vertices
+            has_discontinuity = anti["pos"].size > 0 or anti["neg"].size > 0
+        elif isinstance(grid, Healpix):
+            assert isinstance(patch.indexer, HealpixIndexer)
+            has_discontinuity = bool(patch.indexer.antimeridian_mask.any())
 
-    cell_rings = np.concatenate(rings_per_face, axis=0)
-    values = np.concatenate(values_per_face, axis=0)
+    input_to_output = transformer_from_crs(source_crs, output_crs)
+    with log_duration("transform_coordinates", "🔄"):
+        newX, newY = await transform_coordinates(
+            to_transform, alternate.X, alternate.Y, input_to_output
+        )
 
-    return PopulatedRenderContext(
-        da=xr.DataArray(values, dims=["cell"]),
-        grid=grid,
-        datatype=context.datatype,
+    ugrid_indexer = patch.indexer if isinstance(patch.indexer, UgridIndexer) else None
+    hp_indexer = patch.indexer if isinstance(patch.indexer, HealpixIndexer) else None
+    newX, newY, healpix_cell_indexer = _fix_discontinuity(
+        grid,
+        newX,
+        newY,
+        has_discontinuity=has_discontinuity,
+        transformer=input_to_output,
         bbox=bbox,
-        alternate=None,
-        cell_rings=cell_rings,
-        face_subsets=None,
+        ugrid_indexer=ugrid_indexer,
+        hp_indexer=hp_indexer,
+        style="polygons",
     )
+
+    if isinstance(grid, Healpix):
+        da = subset.isel({subset.dims[0]: healpix_cell_indexer})
+    else:
+        # Triangular: per-vertex values, renderer averages via connectivity.
+        da = subset
+
+    cell_rings = grid.corners_to_rings(newX.data, newY.data, ugrid_indexer=ugrid_indexer)
+    values = (
+        np.asarray(da.values).ravel() if da.values.ndim > 1 else np.asarray(da.values)
+    )
+    return cell_rings, values, da
+
+
+async def _transform_raster_patch(
+    patch: Patch,
+    *,
+    bbox: OutputBBox,
+    output_crs: OutputCRS,
+) -> xr.DataArray:
+    """Transform one patch's coordinates for the raster style.
+
+    Replaces the patch's X/Y center coords with the output-CRS values, with
+    antimeridian/discontinuity fix applied. Returns the data array with new
+    coords; the renderer consumes it via ``data[grid.X]``.
+    """
+    grid = patch.grid
+    subset = patch.da
+    source_crs = patch.source_crs
+    alternate = patch.alternate or grid.to_metadata()
+
+    has_discontinuity = False
+    if source_crs.is_geographic:
+        if isinstance(grid, Polar):
+            has_discontinuity = False
+        elif isinstance(grid, GridSystem2D):
+            has_discontinuity = has_coordinate_discontinuity(
+                subset[grid.X].data,
+                360.0,
+                axis=subset[grid.X].get_axis_num(grid.Xdim),
+                check_antimeridian=True,
+            )
+        elif isinstance(grid, Triangular):
+            assert isinstance(patch.indexer, UgridIndexer)
+            anti = patch.indexer.antimeridian_vertices
+            has_discontinuity = anti["pos"].size > 0 or anti["neg"].size > 0
+        elif isinstance(grid, Healpix):
+            assert isinstance(patch.indexer, HealpixIndexer)
+            has_discontinuity = bool(patch.indexer.antimeridian_mask.any())
+        else:
+            raise NotImplementedError
+
+    input_to_output = transformer_from_crs(source_crs, output_crs)
+    with log_duration("transform_coordinates", "🔄"):
+        newX, newY = await transform_coordinates(
+            subset, alternate.X, alternate.Y, input_to_output
+        )
+
+    ugrid_indexer = patch.indexer if isinstance(patch.indexer, UgridIndexer) else None
+    hp_indexer = patch.indexer if isinstance(patch.indexer, HealpixIndexer) else None
+    newX, newY, _ = _fix_discontinuity(
+        grid,
+        newX,
+        newY,
+        has_discontinuity=has_discontinuity,
+        transformer=input_to_output,
+        bbox=bbox,
+        ugrid_indexer=ugrid_indexer,
+        hp_indexer=hp_indexer,
+        style="raster",
+    )
+
+    return subset.assign_coords({grid.X: newX, grid.Y: newY})
 
 
 async def transform_for_render(
@@ -1311,135 +1379,79 @@ async def transform_for_render(
 
     For raster style: transform X/Y center coordinates to output CRS.
     For polygons style: transform cell corner coordinates, then assemble polygons.
-    Both share the same transform + discontinuity-fix machinery.
+
+    Iterates over ``context.patches`` uniformly: a non-faceted grid carries one
+    patch, a FacetedGridSystem carries one per overlapping face. The polygons
+    path concatenates rings/values across patches. The raster path requires a
+    single patch (faceted-raster is rejected upstream).
     """
-    result = {}
+    result: dict[str, PopulatedRenderContext | NullRenderContext] = {}
     for var_name, context in contexts.items():
         if isinstance(context, NullRenderContext):
             result[var_name] = context
             continue
 
+        if not context.patches:
+            result[var_name] = NullRenderContext()
+            continue
+
         grid = context.grid
-        if context.face_subsets is not None:
-            assert isinstance(grid, FacetedGridSystem)
-            result[var_name] = await _transform_faceted_polygons(
-                context, grid=grid, bbox=bbox, crs=crs
-            )
-            continue
+        if style == "polygons":
+            # Faceted grids need the output-CRS width for face seam handling
+            # (polar caps and antimeridian-straddling faces) regardless of how
+            # many faces overlap the tile. Non-faceted grids let
+            # _transform_one_grid_polygons handle antimeridian via the standard
+            # discontinuity-fix path.
+            out_width: float | None = None
+            if isinstance(grid, FacetedGridSystem):
+                out_tx = transformer_from_crs(grid.crs, crs)
+                out_left, _, out_right, _ = out_tx.transform_bounds(-180, -90, 180, 90)
+                out_width = abs(out_right - out_left)
 
-        alternate = context.alternate
-        subset = context.da
+            rings_list: list[np.ndarray] = []
+            values_list: list[np.ndarray] = []
+            last_da: xr.DataArray | None = None
+            for patch in context.patches:
+                rings, values, da = await _transform_polygon_patch(
+                    patch, bbox=bbox, output_crs=crs, out_width=out_width
+                )
+                rings_list.append(rings)
+                values_list.append(values)
+                last_da = da
 
-        if alternate is None:
-            result[var_name] = context
-            continue
+            cell_rings = np.concatenate(rings_list, axis=0)
+            # Triangular patches keep per-vertex values (renderer averages
+            # via connectivity); single-patch case preserves the original
+            # DataArray so the renderer's connectivity lookup works.
+            single = context.patches[0].grid if len(context.patches) == 1 else None
+            if isinstance(single, Triangular):
+                assert last_da is not None
+                da_out = last_da
+            else:
+                values_concat = np.concatenate(values_list, axis=0)
+                da_out = xr.DataArray(values_concat, dims=["cell"])
 
-        if style == "polygons" and isinstance(grid, GridSystem2D):
-            rings, values_1d = await _transform_one_grid_polygons(
-                grid,
-                subset,
-                slicers=context.slicers,
-                coarsen_factors=context.coarsen_factors,
-                bbox=bbox,
-                source_crs=alternate.crs,
-                output_crs=crs,
-            )
             result[var_name] = PopulatedRenderContext(
-                da=xr.DataArray(values_1d, dims=["cell"]),
                 grid=grid,
                 datatype=context.datatype,
                 bbox=bbox,
-                ugrid_indexer=context.ugrid_indexer,
-                hp_indexer=context.hp_indexer,
-                alternate=alternate,
-                cell_rings=rings,
+                patches=context.patches,
+                da=da_out,
+                cell_rings=cell_rings,
             )
             continue
 
-        if style == "polygons" and isinstance(grid, Healpix):
-            to_transform = grid.cell_corners(
-                slicers=context.slicers,
-                coarsen_factors=context.coarsen_factors,
-            )
-        else:
-            # We have vertices already for Triangular, Healpix
-            to_transform = subset
-
-        # Check for discontinuities on geographic coords before projection.
-        # This is an optimization - we could also detect after projecting to the target CRS.
-        # However, that would be a tax on every render. So instead we look for
-        # the anti-meridian discontinuity specifically.
-        if grid.crs.is_geographic:
-            if isinstance(grid, Polar):
-                has_discontinuity = False
-            elif isinstance(grid, GridSystem2D):
-                has_discontinuity = has_coordinate_discontinuity(
-                    to_transform[grid.X].data,
-                    360.0,
-                    axis=to_transform[grid.X].get_axis_num(grid.Xdim),
-                    check_antimeridian=True,
-                )
-            elif isinstance(grid, Triangular):
-                assert context.ugrid_indexer is not None
-                anti = context.ugrid_indexer.antimeridian_vertices
-                has_discontinuity = anti["pos"].size > 0 or anti["neg"].size > 0
-            elif isinstance(grid, Healpix):
-                assert context.hp_indexer is not None
-                has_discontinuity = context.hp_indexer.antimeridian_mask.any()
-            else:
-                raise NotImplementedError
-        else:
-            has_discontinuity = False
-
-        input_to_output = transformer_from_crs(alternate.crs, crs)
-        with log_duration("transform_coordinates", "🔄"):
-            newX, newY = await transform_coordinates(
-                to_transform, alternate.X, alternate.Y, input_to_output
-            )
-
-        # Fix coordinate discontinuities in transformed coordinates if detected
-        # For example, when transforming to WebMercator pyproj will always return values
-        # in the approximate range -20e6 -> 20e6 m range. So if the dataset's anti-meridian
-        # discontinuity is in the tile; it will be preserved by the transformation,
-        # regardless of how we may modify the coordinates *before* transforming.
-        newX, newY, healpix_cell_indexer = _fix_discontinuity(
-            grid,
-            newX,
-            newY,
-            has_discontinuity=bool(has_discontinuity),
-            transformer=input_to_output,
-            bbox=bbox,
-            ugrid_indexer=context.ugrid_indexer,
-            hp_indexer=context.hp_indexer,
-            style=style,
+        # Raster: single patch only (faceted-raster rejected in subset_to_bbox).
+        assert len(context.patches) == 1, (
+            f"raster style requires a single patch; got {len(context.patches)}"
         )
-
-        if style == "polygons":
-            if newX.ndim == 2:
-                newX = newX.transpose(*subset.dims)
-                newY = newY.transpose(*subset.dims)
-            if isinstance(grid, Healpix):
-                da = context.da.isel({context.da.dims[0]: healpix_cell_indexer})
-            else:
-                # Flatten 2D data to match the 1D ring array from corners_to_rings.
-                da = context.da
-                if da.values.ndim > 1:
-                    da = xr.DataArray(da.values.ravel(), dims=["cell"])
-            cell_rings = grid.corners_to_rings(
-                newX.data, newY.data, ugrid_indexer=context.ugrid_indexer
-            )
-        else:
-            cell_rings = None
-            da = subset.assign_coords({grid.X: newX, grid.Y: newY})
-
+        (patch,) = context.patches
+        da = await _transform_raster_patch(patch, bbox=bbox, output_crs=crs)
         result[var_name] = PopulatedRenderContext(
-            da=da,
             grid=grid,
             datatype=context.datatype,
             bbox=bbox,
-            ugrid_indexer=context.ugrid_indexer,
-            hp_indexer=context.hp_indexer,
-            alternate=alternate,
-            cell_rings=cell_rings,
+            patches=context.patches,
+            da=da,
         )
     return result

@@ -12,12 +12,12 @@ import pyproj.aoi
 import xarray as xr
 from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
-    Curvilinear,
     GridMetadata,
     GridSystem,
     GridSystem2D,
     HealpixIndexer,
     Rectilinear,
+    Slicers,
     UgridIndexer,
 )
 from xpublish_tiles.logger import get_context_logger
@@ -149,34 +149,46 @@ class NullRenderContext(RenderContext):
 
 
 @dataclass
-class FaceRenderData:
-    """Per-face state carried between subset_to_bbox and transform_for_render.
+class Patch:
+    """One independently-renderable subset of a tile request.
 
-    ``subset`` is the 2D data array for this face after bbox subsetting;
-    ``slicers`` are the per-face slicers used, needed for reconstructing
-    cell corners in the polygon path.
+    A non-faceted grid produces a single Patch; a FacetedGridSystem produces
+    one Patch per overlapping face.
     """
 
-    face_grid: Curvilinear
-    subset: xr.DataArray
-    slicers: dict[str, list]
+    grid: GridSystem
+    da: xr.DataArray
+    slicers: Slicers = field(default_factory=dict)
+    coarsen_factors: dict[str, int] = field(default_factory=dict)
+    alternate: GridMetadata | None = None
+    indexer: UgridIndexer | HealpixIndexer | None = None
+
+    @property
+    def source_crs(self):
+        return self.alternate.crs if self.alternate is not None else self.grid.crs
 
 
 @dataclass
 class PopulatedRenderContext(RenderContext):
     """all information needed to render the output."""
 
-    da: xr.DataArray
-    datatype: DataType
     grid: GridSystem
+    datatype: DataType
     bbox: OutputBBox
-    ugrid_indexer: UgridIndexer | None = None
-    hp_indexer: HealpixIndexer | None = None
-    alternate: GridMetadata | None = None
+    patches: list[Patch] = field(default_factory=list)
+    # Set by transform_for_render for the renderer:
+    da: xr.DataArray | None = None
     cell_rings: np.ndarray | None = None
-    slicers: dict[str, list] = field(default_factory=dict)
-    coarsen_factors: dict[str, int] = field(default_factory=dict)
-    face_subsets: list[FaceRenderData] | None = None
+
+    @property
+    def ugrid_indexer(self) -> UgridIndexer | None:
+        ix = self.patches[0].indexer
+        return ix if isinstance(ix, UgridIndexer) else None
+
+    @property
+    def hp_indexer(self) -> HealpixIndexer | None:
+        ix = self.patches[0].indexer
+        return ix if isinstance(ix, HealpixIndexer) else None
 
     async def maybe_rewrite_to_rectilinear(
         self, *, width: int, height: int, logger=None
@@ -186,6 +198,8 @@ class PopulatedRenderContext(RenderContext):
         bbox = self.bbox
 
         if self.cell_rings is not None:
+            return self
+        if data is None:
             return self
 
         # Check if approximate rectilinear detection is enabled

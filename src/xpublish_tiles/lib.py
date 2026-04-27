@@ -933,9 +933,10 @@ def _iter_subset_shapes(
     if isinstance(grid, FacetedGridSystem):
         indexer = slicers[grid.face_dim][0]
         assert isinstance(indexer, FacetedIndexer)
-        for face_sel in indexer.selections:
-            face = grid.faces[face_sel.face_index]
-            face_slicers = face_sel.slicers
+        for face_slicers in indexer.selections:
+            face_slice = face_slicers[grid.face_dim][0]
+            assert isinstance(face_slice, slice)
+            face = grid.faces[face_slice.start]
             y_size = _get_indexer_size(face_slicers[face.Ydim][0], da.sizes[face.Ydim])
             for sl in face_slicers[face.Xdim]:
                 yield (_get_indexer_size(sl, da.sizes[face.Xdim]), y_size)

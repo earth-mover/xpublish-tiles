@@ -90,23 +90,14 @@ class HealpixIndexer:
 
 @dataclass
 class FacetedIndexer:
-    """Wraps per-face bbox selections so FacetedGridSystem.sel() can conform
-    to the base ``GridSystem.sel()`` contract.
+    """Wraps per-face bbox selections for FacetedGridSystem.sel().
 
-    Mirrors the ``UgridIndexer`` pattern: a custom slicer that rides inside
-    the standard ``dict[dim, list[...]]`` return shape, pulled out by the
-    pipeline via ``isinstance`` dispatch on the parent grid.
+    Each entry in ``selections`` is a per-face ``Slicers`` dict carrying the
+    face's X/Y slicers plus a ``face_dim → [slice(i, i+1)]`` entry that
+    encodes which face it is.``.
     """
 
-    selections: "list[FaceSelection]"
-
-
-@dataclass
-class FaceSelection:
-    """Per-face bbox selection result for a FacetedGridSystem."""
-
-    face_index: int
-    slicers: "Slicers"
+    selections: "list[Slicers]"
 
 
 # Union type for a single slicer entry returned by GridSystem.sel().
@@ -2500,15 +2491,20 @@ class FacetedGridSystem(GridSystem, ABC):
         grid's own special dim (``face_dim``), inside the standard
         ``dict[dim, list[...]]`` return shape. The pipeline pulls the indexer
         out via ``isinstance`` dispatch on ``FacetedGridSystem``.
+
+        Each per-face Slicers dict carries the face's X/Y slicers plus a
+        ``face_dim`` entry holding ``slice(i, i+1)``; consumers parse the
+        face index from that slice.
         """
-        selections: list[FaceSelection] = []
+        selections: list[Slicers] = []
         for i, face in enumerate(self.faces):
             if not self._face_overlaps(bbox, face.bbox):
                 continue
             face_slicers = face.sel(bbox=bbox)
             if _face_slicers_are_empty(face_slicers):
                 continue
-            selections.append(FaceSelection(face_index=i, slicers=face_slicers))
+            face_slicers[self.face_dim] = [slice(i, i + 1)]
+            selections.append(face_slicers)
         return {self.face_dim: [FacetedIndexer(selections=selections)]}
 
 

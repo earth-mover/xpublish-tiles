@@ -1273,7 +1273,8 @@ def test_cubed_sphere_grid():
     assert isinstance(indexer, FacetedIndexer)
     # Equatorial face 0 (lon 0..90, lat -45..45) must be in the hit set
     assert len(indexer.selections) >= 1
-    assert 0 in {s.face_index for s in indexer.selections}
+    face_indices = {cast(slice, s[grid.face_dim][0]).start for s in indexer.selections}
+    assert 0 in face_indices
 
     slicers = grid.sel(bbox=BBox(west=-180, south=-90, east=180, north=90))
     indexer = slicers[grid.face_dim][0]
