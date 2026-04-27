@@ -43,6 +43,8 @@ from xpublish_tiles.lib import (
     max_render_shape,
     normalize_slicers,
     pad_slicers,
+    round_bbox,
+    sum_tuples,
     transform_coordinates,
     transformer_from_crs,
     unwrap,
@@ -127,24 +129,6 @@ def _apply_polar_pole_split(
         out[ridx] = new
 
     return out
-
-
-def round_bbox(bbox: BBox) -> BBox:
-    # https://github.com/developmentseed/morecantile/issues/175
-    # the precision in morecantile tile bounds isn't perfect,
-    # a good way to test is `tms.bounds(Tile(0,0,0))` which should
-    # match the spec exactly: https://docs.ogc.org/is/17-083r4/17-083r4.html#toc48
-    # Example: tests/test_pipeline.py::test_pipeline_tiles[-90->90,0->360-wgs84_prime_meridian(2/2/1)]
-    return BBox(
-        west=round(bbox.west, 8),
-        south=round(bbox.south, 8),
-        east=round(bbox.east, 8),
-        north=round(bbox.north, 8),
-    )
-
-
-def sum_tuples(*tuples):
-    return tuple(sum(values) for values in zip(*tuples, strict=False))
 
 
 def shape_from_slicers(

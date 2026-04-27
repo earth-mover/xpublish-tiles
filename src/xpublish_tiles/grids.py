@@ -31,6 +31,7 @@ from xpublish_tiles.lib import (
     crs_repr,
     fill_rings_from_corners,
     is_degree_geographic,
+    round_bbox,
     unwrap,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
@@ -872,23 +873,42 @@ class CurvilinearCellIndex(xr.Index):
             # in lon. Per-cell lon bounds can land on either the [-180, 180]
             # or the [0, 360] branch, so OR both conventions into one 2D
             # overlap mask and take its (i, j) bounding extent.
+            # We are working with "axis-aligned bounding boxes" (AABB).
+            # This is cheap but wrong near the poles, where the cells are curving.
+            # A ppint in polygon test would be more correct but presumably expensive.
+            #
+            # TODO: A more principled approach is to inverse-project the query bbox into each face's
+            # local gnomonic (x, y). A cubed-sphere face is rectilinear in its native coords,
+            # so selection becomes exact AABB on a regular grid. We would instead introduce a new
+            # CubedSphereFace GridSystem instead of piggybacking on Curvilinear for the polar caps.
             lon_mask = np.zeros_like(lat_mask)
+            t1 = np.empty_like(lat_mask)
+            t2 = np.empty_like(lat_mask)
             for left_break, right_break in ((-180.0, 180.0), (0.0, 360.0)):
                 for sl in _convert_longitude_slice(
                     slice(bbox.west, bbox.east),
                     left_break=left_break,
                     right_break=right_break,
                 ):
-                    lon_mask |= x_min <= sl.stop
-                    lon_mask &= x_max >= sl.start
-            lat_mask &= lon_mask
+                    np.less_equal(x_min, sl.stop, out=t1)
+                    np.greater_equal(x_max, sl.start, out=t2)
+                    t1 &= t2
+                    lon_mask |= t1
+            # When lat_mask and lon_mask are disjoint the bbox sits on a
+            # cube-edge seam: per-cell AABB lon ranges abut the seam but
+            # don't span it, so the true cell lies "between" the two
+            # candidate sets. Union them so `_bounds_from_mask` returns an
+            # i,j box covering both.
+            mask = lat_mask & lon_mask
+            if not mask.any():
+                mask = lat_mask | lon_mask
             if self.tripolar_fold_row is not None:
-                fold = [slice(None)] * lat_mask.ndim
+                fold = [slice(None)] * mask.ndim
                 fold[yaxis] = slice(0, Ylen)
-                lat_mask = lat_mask[tuple(fold)]
+                mask = mask[tuple(fold)]
 
-            y_start, y_stop = _bounds_from_mask(lat_mask, axis=xaxis, size=Ylen)
-            x_start, x_stop = _bounds_from_mask(lat_mask, axis=yaxis, size=Xlen)
+            y_start, y_stop = _bounds_from_mask(mask, axis=xaxis, size=Ylen)
+            x_start, x_stop = _bounds_from_mask(mask, axis=yaxis, size=Xlen)
             all_indexers = [slice(x_start, x_stop)]
         else:
             y_start, y_stop = _bounds_from_mask(lat_mask, axis=xaxis, size=Ylen)
@@ -2518,6 +2538,8 @@ class FacetedGridSystem(GridSystem, ABC):
         must filter faces ourselves. Face bboxes may be in 0–360 or -180–180
         convention; mod-360 collapses both onto the same circle.
         """
+        face_bbox = round_bbox(face_bbox)
+        input_bbox = round_bbox(input_bbox)
         if input_bbox.south >= face_bbox.north or input_bbox.north <= face_bbox.south:
             return False
         if not self.crs.is_geographic:

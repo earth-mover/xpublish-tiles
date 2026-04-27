@@ -322,18 +322,14 @@ async def test_property_global_render_no_transparent_tile(
 ):
     """Property test that global datasets should never produce transparent pixels."""
     tile, tms = tile_tms
-    # TODO: cubed-sphere cell selection misses cells at the cube-edge lon
-    # boundary at high zoom — round-trip pyproj precision puts the query
-    # ~4e-5° past every candidate cell's `cx_max`, which lands exactly on the
-    # cube edge, and the AABB test rejects all of them. Skip z>=16 until that
-    # AABB precision fix is in place.
-    is_cubed_sphere = ds.attrs.get("_xpublish_id", "").startswith("cubed_sphere")
-    assume(not is_cubed_sphere or tile.z < 16)
+    n_rows = 2**tile.z
     # HEALPix polar base cells don't reliably cover near-polar tiles (see
-    # ``test_healpix_l1_polar_high_zoom`` xfail). Skip the top/bottom two
-    # tile rows where this manifests.
+    # ``test_healpix_l1_polar_high_zoom`` xfail). L3's polar pixel centre is
+    # at ~84.4° and the uncovered band widens (in tile-rows) with zoom; scale
+    # the polar-row skip accordingly. At z=6: 3 rows; z=8: 4; z=10: 16; etc.
     is_healpix = ds.attrs.get("_xpublish_id", "").startswith("global_healpix")
-    assume(not is_healpix or (1 < tile.y < 2**tile.z - 2))
+    hp_margin = max(3, n_rows // 64)
+    assume(not is_healpix or (hp_margin <= tile.y < n_rows - hp_margin))
     style = data.draw(st.sampled_from(allowed_styles(ds)))
     query_params = create_query_params(
         tile,

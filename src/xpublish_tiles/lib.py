@@ -18,6 +18,7 @@ import pyproj
 import toolz as tlz
 from PIL import Image
 from pyproj import CRS
+from pyproj.aoi import BBox
 from skimage.restoration import unwrap_phase
 
 import xarray as xr
@@ -1010,3 +1011,21 @@ def max_render_shape(
         return (max_w, max_h)
     pixel_factor = config.get("max_pixel_factor")
     return (pixel_factor * width, pixel_factor * height)
+
+
+def round_bbox(bbox: BBox) -> BBox:
+    # https://github.com/developmentseed/morecantile/issues/175
+    # the precision in morecantile tile bounds isn't perfect,
+    # a good way to test is `tms.bounds(Tile(0,0,0))` which should
+    # match the spec exactly: https://docs.ogc.org/is/17-083r4/17-083r4.html#toc48
+    # Example: tests/test_pipeline.py::test_pipeline_tiles[-90->90,0->360-wgs84_prime_meridian(2/2/1)]
+    return BBox(
+        west=round(bbox.west, 8),
+        south=round(bbox.south, 8),
+        east=round(bbox.east, 8),
+        north=round(bbox.north, 8),
+    )
+
+
+def sum_tuples(*tuples):
+    return tuple(sum(values) for values in zip(*tuples, strict=False))
