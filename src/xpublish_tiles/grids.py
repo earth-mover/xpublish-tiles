@@ -790,19 +790,6 @@ class CurvilinearCellIndex(xr.Index):
         xaxis = self.X.get_axis_num(self.Xdim)
         yaxis = self.Y.get_axis_num(self.Ydim)
 
-        # Store coordinate bounds for longitude slice conversion.
-        # For geographic CRS, X coordinates are already unwrapped by Curvilinear.from_dataset,
-        # so left_break/right_break represent the continuous range (e.g., 74° to 434°).
-        # _convert_longitude_slice uses these to map tile requests to grid indices.
-        # Use first/last columns along x-axis for the breaks.
-        # For tripolar grids, exclude the fold row since it has distorted coordinates.
-        first_col = np.take(X, 0, axis=xaxis)
-        last_col = np.take(X, -1, axis=xaxis)
-        if tripolar_fold_row is not None:
-            first_col = first_col[:tripolar_fold_row]
-            last_col = last_col[:tripolar_fold_row]
-        self.left_break = float(np.min(first_col))
-        self.right_break = float(np.max(last_col))
         # Polar-cap faces wind around the pole; `_convert_longitude_slice`'s
         # 1D-monotonic window-shift logic does not apply. Callers that know
         # the face geometry (e.g. `CubedSphere.from_dataset`) should pass
@@ -826,6 +813,19 @@ class CurvilinearCellIndex(xr.Index):
             self.corner_y = infer_interval_breaks(Y_breaks, axis=xaxis)
 
         self.xaxis, self.yaxis = xaxis, yaxis
+
+        # Store coordinate bounds for longitude slice conversion.
+        # For geographic CRS, X coordinates are already unwrapped by Curvilinear.from_dataset,
+        # so left_break/right_break represent the continuous range (e.g., 74° to 434°).
+        # _convert_longitude_slice uses these to map tile requests to grid indices.
+        # Use first/last columns along x-axis for the breaks.
+        first_col = np.take(self.corner_x, 0, axis=xaxis)
+        last_col = np.take(self.corner_x, -1, axis=xaxis)
+        if tripolar_fold_row is not None:
+            first_col = first_col[:tripolar_fold_row]
+            last_col = last_col[:tripolar_fold_row]
+        self.left_break = float(np.min(first_col))
+        self.right_break = float(np.max(last_col))
 
         # Determine if Y is increasing along the Y axis by checking the first
         # row. Don't use .all() because tripolar grids have dY=0 in the fold
