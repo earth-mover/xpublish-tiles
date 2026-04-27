@@ -1805,6 +1805,10 @@ class Curvilinear(GridSystem):
         # here to avoid repeated allocations when transforming.
         X, Y = ds[Xname].astype(np.float64), ds[Yname].astype(np.float64)
         Xdim, Ydim = Curvilinear._guess_dims(ds, X=X, Y=Y)
+        # Normalize Y (and corner-Y) to X's dim order so a single (xaxis, yaxis)
+        # pair is valid for both.
+        if Y.dims != X.dims:
+            Y = Y.transpose(*X.dims)
         yaxis = X.get_axis_num(Ydim)
 
         # Detect tripolar grid BEFORE unwrapping (the fold row detection relies on
