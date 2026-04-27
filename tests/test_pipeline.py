@@ -1034,5 +1034,5 @@ async def test_pipeline_raster_style_not_supported():
     tms = morecantile.tms.get("WebMercatorQuad")
     tile = morecantile.Tile(x=0, y=0, z=0)
     query_params = create_query_params(tile, tms, style="raster")
-    with pytest.raises(NotImplementedError, match="polygons"):
+    with pytest.raises(ValueError, match="polygons"):
         await pipeline(ds, query_params)

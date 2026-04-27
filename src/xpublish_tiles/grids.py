@@ -2477,7 +2477,7 @@ class FacetedGridSystem(GridSystem, ABC):
 
     Each face is an independent `GridSystem` in its own right.
     patch. Currently only the ``polygons`` style renderer is supported;
-    raster styles will raise ``NotImplementedError``.
+    raster styles will raise ``ValueError``.
 
     With polygons, all we need to do is convert the selection to a vector of geometries.
     Note that in many cases, there is no way to create a rectangular 2d mesh that will
