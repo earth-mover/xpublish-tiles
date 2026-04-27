@@ -333,29 +333,10 @@ async def test_property_global_render_no_transparent_tile(
         result = await pipeline(ds, query_params)
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
-    is_healpix = ds.attrs.get("_xpublish_id", "").startswith("global_healpix")
-    is_cubed_sphere = ds.attrs.get("_xpublish_id", "").startswith("cubed_sphere")
-    # TODO: HEALPix polar base cells don't reliably cover near-polar tiles
-    # (see ``test_healpix_l1_polar_high_zoom`` xfail). Skip the top/bottom
-    # two tile rows where this manifests.
-    assume(not is_healpix or (1 < tile.y < 2**tile.z - 2))
     transparent_percent = check_transparent_pixels(result.getvalue())
-    if is_healpix:
-        # HEALPix polygon rendering leaves sub-pixel seams along shared cell
-        # edges. See https://github.com/holoviz/datashader/issues/1494
-        assert transparent_percent < 100, (
-            f"Tile {tile} is fully transparent for HEALPix dataset"
-        )
-    elif is_cubed_sphere:
-        # TODO: upstream bug — cubed-sphere face-seam rendering leaves a
-        # small fraction of transparent pixels along shared face edges.
-        assert transparent_percent < 10, (
-            f"Found {transparent_percent:.1f}% transparent pixels in tile {tile}"
-        )
-    else:
-        assert transparent_percent == 0, (
-            f"Found {transparent_percent:.1f}% transparent pixels in tile {tile}"
-        )
+    assert transparent_percent == 0, (
+        f"Found {transparent_percent:.1f}% transparent pixels in tile {tile}"
+    )
 
 
 @pytest.mark.asyncio

@@ -62,6 +62,9 @@ allow-direct-references = true
 [tool.hatch.build.targets.wheel]
 packages = ["src/xpublish_tiles"]
 
+[tool.uv.sources]
+datashader = { git = "https://github.com/holoviz/datashader.git", rev = "2ff83af86022f667015488d2b2d602409b931cf4" }
+
 [project.optional-dependencies]
 healpix = [
     "xdggs>=0.5.0",
