@@ -1029,7 +1029,7 @@ async def test_cubed_sphere_tile(tile, png_snapshot, pytestconfig):
     assert_render_matches_snapshot(result, png_snapshot)
 
 
-async def test_pipeline_raster_style_not_supported(self):
+async def test_pipeline_raster_style_not_supported():
     ds = CUBED_SPHERE.create()
     tms = morecantile.tms.get("WebMercatorQuad")
     tile = morecantile.Tile(x=0, y=0, z=0)
