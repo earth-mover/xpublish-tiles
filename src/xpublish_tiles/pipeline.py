@@ -63,6 +63,72 @@ from xpublish_tiles.types import (
 )
 
 
+def _apply_polar_pole_split(
+    rings: np.ndarray, *, axis: int, pole_lat_tol: float = 1e-3
+) -> np.ndarray:
+    """Expand each pole-touching ring's apex into a horizontal edge at lat=±90.
+
+    Polar-cap cells share a single corner with the geographic pole. In flat
+    (lat, lon) rasterization that corner is a degenerate point, so only the
+    pole-vertex pixel of the lat=±90 row is filled. Replace that vertex with
+    two vertices at ``(ring_neighbour_lon, ±90)`` (one per adjacent ring edge),
+    turning the apex into a horizontal segment along ``lat=±90`` that fills
+    the cell's lon arc on the pole row.
+
+    Input rings: ``(N, 5, 2)`` — 4 corners + closing vertex. The trailing
+    pair holds ``(x, y)`` in the output CRS; ``axis`` (0 or 1) selects which
+    entry holds the latitude — typically ``1`` (i.e. ``y`` is lat) for
+    geographic output CRSes such as ``WorldCRS84Quad``. The other entry holds
+    longitude.
+
+    Output rings: ``(N, 6, 2)`` — pole rings carry the split; non-pole rings
+    are padded with a repeat of the closing vertex (a zero-length edge that
+    does not change rasterization) so the array stays uniform-width.
+
+    Note: this is not triggered for WebMercator (which is limited to |lat| < 85°).
+          It *is* triggered for WorldCRS84.
+    """
+    assert axis in (0, 1), axis
+    lon_axis = 1 - axis
+    n, m_in, _ = rings.shape
+    assert m_in == 5
+
+    interior = rings[:, :4, :]
+    pole_mask = np.abs(np.abs(interior[..., axis]) - 90.0) < pole_lat_tol
+    ring_has_pole = pole_mask.any(axis=1)
+
+    out = np.empty((n, 6, 2), dtype=rings.dtype)
+    out[:, :5, :] = rings
+    out[:, 5, :] = rings[:, 4, :]
+
+    pole_idx = np.where(ring_has_pole)[0]
+    k_arr = np.argmax(pole_mask[pole_idx], axis=1)
+    # Tiny loop: at most one cubed-sphere corner sits at each pole, so up to
+    # 4 cells per pole share that vertex (8 total in a complete cubed-sphere).
+    for ridx, k in zip(pole_idx.tolist(), k_arr.tolist(), strict=True):
+        v = interior[ridx]
+        pole_val = v[k, axis]
+        lon_prev = v[(k - 1) % 4, lon_axis]
+        lon_next = v[(k + 1) % 4, lon_axis]
+        new = np.empty((6, 2), dtype=rings.dtype)
+        j = 0
+        for i in range(4):
+            if i == k:
+                new[j, lon_axis] = lon_prev
+                new[j, axis] = pole_val
+                j += 1
+                new[j, lon_axis] = lon_next
+                new[j, axis] = pole_val
+                j += 1
+            else:
+                new[j] = v[i]
+                j += 1
+        new[j] = new[0]
+        out[ridx] = new
+
+    return out
+
+
 def round_bbox(bbox: BBox) -> BBox:
     # https://github.com/developmentseed/morecantile/issues/175
     # the precision in morecantile tile bounds isn't perfect,
@@ -1197,6 +1263,11 @@ async def _transform_one_grid_polygons(
             # sign-groups across the seam; shift the negative side by
             # `+out_width` so each seam cell becomes self-consistent on one
             # side, then append ±out_width copies so the wrapped side renders.
+            #
+            # First, split pole-vertex apexes into horizontal edges at lat=±90
+            # so the four cells per pole tile the lat=±90 row instead of all
+            # converging to a single pixel. Widens rings from M=5 to M=6.
+            rings = _apply_polar_pole_split(rings, axis=1)
             xs = rings[..., 0]
             seam_mask = (xs.max(axis=1) - xs.min(axis=1)) > out_width / 2
             if seam_mask.any():
@@ -1419,7 +1490,20 @@ async def transform_for_render(
                 values_list.append(values)
                 last_da = da
 
+            # Different patches may emit different ring widths (polar-cap
+            # patches widen to M=6 to carry the pole-edge split; equatorial
+            # cubed-sphere faces stay at M=5). Pad each by repeating the
+            # closing vertex so that they are all a consistent size.
+            # DC: if this ends up being a performance concern we could
+            #     pass `rings_list` to the renderer where we convert each
+            #     member of the list to a PolygonArray and then concatenate there.
+            max_m = max(r.shape[1] for r in rings_list)
+            for i, r in enumerate(rings_list):
+                if r.shape[1] < max_m:
+                    pad = np.repeat(r[:, -1:, :], max_m - r.shape[1], axis=1)
+                    rings_list[i] = np.concatenate([r, pad], axis=1)
             cell_rings = np.concatenate(rings_list, axis=0)
+
             # Triangular patches keep per-vertex values (renderer averages
             # via connectivity); single-patch case preserves the original
             # DataArray so the renderer's connectivity lookup works.
