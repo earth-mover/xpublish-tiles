@@ -1261,6 +1261,23 @@ def cubed_sphere_grid(
     )
     ds["foo"].encoding["chunks"] = foo_chunks
     ds["foo"].attrs["coordinates"] = "lons lats"
+    ds["foo"].attrs["grid"] = "grid_topology"
+    ds["foo"].attrs["location"] = "face"
+
+    ds["grid_topology"] = xr.DataArray(
+        np.int32(0),
+        attrs={
+            "cf_role": "grid_topology",
+            "topology_dimension": 2,
+            "node_dimensions": f"{corner_x_dim} {corner_y_dim}",
+            "face_dimensions": (
+                f"{x_dim.name}: {corner_x_dim} (padding: none) "
+                f"{y_dim.name}: {corner_y_dim} (padding: none)"
+            ),
+            "node_coordinates": "corner_lons corner_lats",
+            "face_coordinates": "lons lats",
+        },
+    )
 
     ds.attrs["grid_mapping_name"] = "gnomonic cubed-sphere"
     ds.attrs["Conventions"] = "CF"

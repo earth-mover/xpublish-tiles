@@ -319,17 +319,68 @@ def _convert_longitude_slice(
         return (slice(start, stop),)
 
 
+def _sgrid_topology_var(ds: xr.Dataset) -> str | None:
+    """Return the name of the SGRID grid topology variable in ``ds``, or
+    ``None`` if there isn't one. Asserts there is at most one — multiple
+    topologies in a single dataset would need explicit per-variable resolution
+    via the data variable's ``grid`` attribute, which we don't support here.
+    """
+    topology_vars = ds.cf.cf_roles.get("grid_topology", [])
+    if not topology_vars:
+        return None
+    assert len(topology_vars) == 1, (
+        f"expected at most one cf_role=grid_topology variable, found {topology_vars}"
+    )
+    return str(topology_vars[0])
+
+
+def _sgrid_node_for_face(ds: xr.Dataset, face_coord_name: str) -> str | None:
+    """Resolve a face-located coord name to its node-located counterpart via
+    SGRID metadata. Returns the parallel entry from ``node_coordinates`` by
+    position in ``face_coordinates``. SGRID's spec example pairs them
+    positionally (lon-lon, lat-lat); we add a length precondition to fail
+    closed.
+    """
+    topology_name = _sgrid_topology_var(ds)
+    if topology_name is None:
+        return None
+    var = ds[topology_name]
+    face_coords = str(var.attrs.get("face_coordinates", "")).split()
+    node_coords = str(var.attrs.get("node_coordinates", "")).split()
+    if face_coord_name not in face_coords:
+        return None
+    if len(face_coords) != len(node_coords):
+        return None
+    return node_coords[face_coords.index(face_coord_name)]
+
+
+def _resolve_corner_name(ds: xr.Dataset, name: str) -> str | None:
+    """Return the corner/vertex variable name paired with ``name`` if present.
+
+    Prefers SGRID ``node_coordinates`` (paired with ``face_coordinates`` on a
+    ``cf_role: grid_topology`` variable); falls back to the GMAO
+    ``corner_<name>`` naming convention.
+    """
+    sgrid_name = _sgrid_node_for_face(ds, name)
+    if sgrid_name is not None and sgrid_name in ds.variables:
+        return sgrid_name
+    fallback = f"corner_{name}"
+    if fallback in ds.variables:
+        return fallback
+    return None
+
+
 def _corner_mesh(ds: xr.Dataset, name: str) -> np.ndarray | None:
     """Return a ``(ny+1, nx+1)`` vertex-mesh corner array for ``ds[name]``
-    if the dataset provides one via the GMAO ``corner_*`` naming convention
-    (e.g. ``corner_lons`` / ``corner_lats``). Returns ``None`` otherwise.
+    if the dataset provides one via either SGRID ``node_coordinates`` or the
+    GMAO ``corner_*`` naming convention. Returns ``None`` otherwise.
 
     This is distinct from CF ``bounds``, which uses a ``(n, 2)`` (1D) or
     ``(ny, nx, 4)`` (2D) cell-bounds layout — a different convention we
     don't consume here.
     """
-    corner_name = f"corner_{name}"
-    if corner_name not in ds.variables:
+    corner_name = _resolve_corner_name(ds, name)
+    if corner_name is None:
         return None
     return ds[corner_name].astype(np.float64).data
 
@@ -2529,17 +2580,21 @@ class CubedSphere(FacetedGridSystem):
         # Keep only the 2D lon/lat aux coords; Curvilinear.from_dataset does
         # a cf-xarray axis scan so trimming down avoids pulling in unrelated
         # variables and their attrs. Also keep vertex-mesh corner variables
-        # (GMAO `corner_*` convention) if present, so Curvilinear can use
-        # true shared-vertex corners instead of per-face extrapolation.
-        keep = [
-            Xname,
-            Yname,
-            *(
-                cname
-                for cname in (f"corner_{Xname}", f"corner_{Yname}")
-                if cname in ds.variables
-            ),
-        ]
+        # (resolved via SGRID node_coordinates or the GMAO `corner_*`
+        # convention) so Curvilinear can use true shared-vertex corners
+        # instead of per-face extrapolation, plus the SGRID grid_topology
+        # variable (a scalar that survives the per-face isel) so per-face
+        # Curvilinear.from_dataset can re-resolve via SGRID.
+        corner_x_name = _resolve_corner_name(ds, Xname)
+        corner_y_name = _resolve_corner_name(ds, Yname)
+        keep = [Xname, Yname]
+        if corner_x_name is not None:
+            keep.append(corner_x_name)
+        if corner_y_name is not None:
+            keep.append(corner_y_name)
+        topology_name = _sgrid_topology_var(ds)
+        if topology_name is not None:
+            keep.append(topology_name)
         coord_ds = ds.reset_coords()[keep]
         faces: list[Curvilinear] = []
         for i in range(face_size):
@@ -2551,7 +2606,11 @@ class CubedSphere(FacetedGridSystem):
             # N=32). Checked against raw (pre-unwrap) coords; independent of
             # lon convention.
             if crs.is_geographic:
-                lats = face_ds.variables.get(f"corner_{Yname}", face_ds.variables[Yname])
+                lats = (
+                    face_ds.variables[corner_y_name]
+                    if corner_y_name is not None and corner_y_name in face_ds.variables
+                    else face_ds.variables[Yname]
+                )
                 cap_lat = float(np.nanmax(np.abs(lats.data)))
                 is_polar_cap = cap_lat > 80.0
             else:

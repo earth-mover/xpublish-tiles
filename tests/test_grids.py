@@ -1251,13 +1251,22 @@ async def test_curvilinear_memory_limit_and_minzoom():
             await pipeline(ds, query_params)
 
 
-def test_cubed_sphere_grid():
+@pytest.mark.parametrize("use_sgrid", [True, False])
+def test_cubed_sphere_grid(use_sgrid):
     ds = CUBED_SPHERE.create()
+    if not use_sgrid:
+        ds = ds.drop_vars("grid_topology")
+        ds["foo"].attrs.pop("grid", None)
+        ds["foo"].attrs.pop("location", None)
     assert find_cubed_sphere_face_dim(ds, "foo") == "nf"
     del ds.attrs["grid_mapping_name"]
     assert find_cubed_sphere_face_dim(ds, "foo") is None
 
     ds = CUBED_SPHERE.create()
+    if not use_sgrid:
+        ds = ds.drop_vars("grid_topology")
+        ds["foo"].attrs.pop("grid", None)
+        ds["foo"].attrs.pop("location", None)
     grid = guess_grid_system(ds, "foo")
     assert isinstance(grid, CubedSphere)
     assert len(grid.faces) == 6
