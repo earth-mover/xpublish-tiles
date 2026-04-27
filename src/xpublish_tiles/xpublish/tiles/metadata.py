@@ -373,6 +373,8 @@ async def create_tileset_for_tms(
         if var_data.ndim == 0:
             continue
         var_name = str(var_name_)
+        if var_name not in layer_extents:
+            continue
         extents = layer_extents[var_name]
 
         # Extract variable-specific bounding box, fallback to dataset bounds
