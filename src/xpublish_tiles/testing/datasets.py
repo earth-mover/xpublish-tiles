@@ -1123,6 +1123,179 @@ TRIPOLE_ANTIMERIDIAN = Dataset(
 )
 
 
+def cubed_sphere_grid(
+    *,
+    dims: tuple[Dim, ...],
+    dtype: npt.DTypeLike,
+    attrs: dict[str, Any],
+) -> xr.Dataset:
+    """Create a synthetic GMAO-style equidistant gnomonic cubed-sphere dataset.
+
+    Construction follows the GEOS C-grid convention
+    (https://gmao.gsfc.nasa.gov/media/gmao_products/IqPeIBhIWLGrweILfVPj9Vmdoc/CS_Description_c180_v1_1c8ute6qgsxi3z7fho0kwjdyp.pdf)
+    a cube inscribed in the unit sphere, rotated 10° about the z-axis so its 8 corners
+    sit at longitudes {35°, 125°, 215°, 305°} × latitudes ±arcsin(1/√3).
+    Edge points are equally spaced in the face-local angle φ ∈ [-α, α]; interior
+    grid points come from the gnomonic map
+    ``cube_pt = n + √2·tan(φ_i)·e_i + √2·tan(φ_j)·e_j`` then normalized to the
+    sphere. Per-face ``(n, e_i, e_j)`` bases are chosen so the resulting corner
+    lon/lats reproduce the GMAO face layout — equatorial faces 0,1 and the
+    rotated equatorial faces 3,4, plus north cap (face 2) and south cap (face 5).
+    """
+    ds = uniform_grid(dims=dims, dtype=dtype, attrs=attrs)
+
+    face_dim, y_dim, x_dim = dims[0], dims[1], dims[2]
+    n_faces, ny, nx = face_dim.size, y_dim.size, x_dim.size
+    assert n_faces == 6
+    assert nx == ny
+    N = nx
+
+    alpha = np.arcsin(1.0 / np.sqrt(3.0))
+    step = 2 * alpha / N
+    phi_c = np.linspace(-alpha + step / 2, alpha - step / 2, N)
+    u = np.sqrt(2.0) * np.tan(phi_c)
+
+    x_ax = np.array([1.0, 0.0, 0.0])
+    y_ax = np.array([0.0, 1.0, 0.0])
+    z_ax = np.array([0.0, 0.0, 1.0])
+    faces = [
+        (x_ax, y_ax, z_ax),
+        (y_ax, -x_ax, z_ax),
+        (z_ax, -x_ax, -y_ax),
+        (-x_ax, -z_ax, -y_ax),
+        (-y_ax, -z_ax, x_ax),
+        (-z_ax, y_ax, x_ax),
+    ]
+
+    theta = np.radians(-10.0)
+    cz, sz = np.cos(theta), np.sin(theta)
+    Rz = np.array([[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]])
+
+    # Corner phi values: N+1 equally-spaced points from -α to +α. Cell-center
+    # values lie halfway between them. Corner and center meshes use the same
+    # per-face (n, e_i, e_j) basis so adjacent faces share exact vertex values
+    # at the seams (the cube's 8 corners are shared sphere points).
+    phi_corner = np.linspace(-alpha, alpha, N + 1)
+    u_corner = np.sqrt(2.0) * np.tan(phi_corner)
+
+    def _project(u_vec: np.ndarray, v_vec: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        U_, V_ = np.meshgrid(u_vec, v_vec, indexing="xy")
+        lon_arr = np.empty((n_faces,) + U_.shape, dtype=np.float64)
+        lat_arr = np.empty((n_faces,) + U_.shape, dtype=np.float64)
+        for f, (n, ei, ej) in enumerate(faces):
+            pts = (
+                n[None, None, :]
+                + U_[..., None] * ei[None, None, :]
+                + V_[..., None] * ej[None, None, :]
+            )
+            pts = pts @ Rz.T
+            pts /= np.linalg.norm(pts, axis=-1, keepdims=True)
+            lat_arr[f] = np.degrees(np.arcsin(pts[..., 2]))
+            lon_arr[f] = np.degrees(np.arctan2(pts[..., 1], pts[..., 0])) % 360.0
+        return lon_arr, lat_arr
+
+    lons, lats = _project(u, u)
+    corner_lons, corner_lats = _project(u_corner, u_corner)
+
+    # 1D Xdim/Ydim coords follow the GMAO convention: face-0 center-row lons
+    # and face-0 center-col lats.
+    ds = ds.assign_coords(
+        {
+            x_dim.name: (x_dim.name, lons[0, ny // 2, :]),
+            y_dim.name: (y_dim.name, lats[0, :, nx // 2]),
+        }
+    )
+
+    coord_dims = (face_dim.name, y_dim.name, x_dim.name)
+    corner_y_dim = f"{y_dim.name}C"
+    corner_x_dim = f"{x_dim.name}C"
+    corner_dims = (face_dim.name, corner_y_dim, corner_x_dim)
+    ds.coords["lons"] = (
+        coord_dims,
+        lons,
+        {"units": "degrees_east", "long_name": "longitude"},
+    )
+    ds.coords["lats"] = (
+        coord_dims,
+        lats,
+        {"units": "degrees_north", "long_name": "latitude"},
+    )
+    # Corner variables carry no axis-detectable units (`degrees_east`/`north`
+    # would make cf-xarray list them as additional longitude/latitude
+    # candidates, confusing CubedSphere.from_dataset). CF identifies them via
+    # the `bounds` attribute on the parent lons/lats coords.
+    ds.coords["corner_lons"] = (
+        corner_dims,
+        corner_lons,
+        {"long_name": "longitude at cell corners"},
+    )
+    ds.coords["corner_lats"] = (
+        corner_dims,
+        corner_lats,
+        {"long_name": "latitude at cell corners"},
+    )
+
+    # Smooth spherical field expressed in Cartesian (x, y, z) so it is
+    # continuous everywhere on the sphere — including across face seams and at
+    # the poles where longitude is ill-defined. A lon/lat-based field like
+    # sin(k·lon) creates face-seam artifacts near the poles because neighboring
+    # cells on different faces can have very different longitudes.
+    lon_rad = np.radians(lons)
+    lat_rad = np.radians(lats)
+    cos_lat = np.cos(lat_rad)
+    x = cos_lat * np.cos(lon_rad)
+    y = cos_lat * np.sin(lon_rad)
+    z = np.sin(lat_rad)
+    foo = (
+        np.tanh(2.0 * (x * y + y * z + z * x))
+        + 0.5 * np.sin(4 * np.pi * x) * np.sin(4 * np.pi * y) * np.sin(4 * np.pi * z)
+        + 0.3 * np.cos(8 * np.pi * x * y * z)
+    )
+    foo_min, foo_max = float(foo.min()), float(foo.max())
+    foo = (2.0 * (foo - foo_min) / (foo_max - foo_min) - 1.0).astype(ds["foo"].dtype)
+    foo_chunks = ds["foo"].encoding.get("chunks", foo.shape)
+    ds["foo"] = (
+        coord_dims,
+        dask.array.from_array(foo, chunks=foo_chunks),
+        ds["foo"].attrs,
+    )
+    ds["foo"].encoding["chunks"] = foo_chunks
+    ds["foo"].attrs["coordinates"] = "lons lats"
+    ds["foo"].attrs["grid"] = "grid_topology"
+    ds["foo"].attrs["location"] = "face"
+
+    ds["grid_topology"] = xr.DataArray(
+        np.int32(0),
+        attrs={
+            "cf_role": "grid_topology",
+            "topology_dimension": 2,
+            "node_dimensions": f"{corner_x_dim} {corner_y_dim}",
+            "face_dimensions": (
+                f"{x_dim.name}: {corner_x_dim} (padding: none) "
+                f"{y_dim.name}: {corner_y_dim} (padding: none)"
+            ),
+            "node_coordinates": "corner_lons corner_lats",
+            "face_coordinates": "lons lats",
+        },
+    )
+
+    ds.attrs["grid_mapping_name"] = "gnomonic cubed-sphere"
+    ds.attrs["Conventions"] = "CF"
+    return ds
+
+
+CUBED_SPHERE = Dataset(
+    name="cubed_sphere",
+    dims=(
+        Dim(name="nf", size=6, chunk_size=6, data=np.arange(1, 7)),
+        Dim(name="Ydim", size=32, chunk_size=32, data=None),
+        Dim(name="Xdim", size=32, chunk_size=32, data=None),
+    ),
+    dtype=np.float32,
+    setup=cubed_sphere_grid,
+)
+
+
 def radar_polar_grid(
     *,
     dims: tuple[Dim, ...],
@@ -1584,6 +1757,7 @@ DATASET_LOOKUP = {
     "global_nans": GLOBAL_NANS,
     "redgauss_n320": REDGAUSS_N320,
     "tripole_antimeridian": TRIPOLE_ANTIMERIDIAN,
+    "cubed_sphere": CUBED_SPHERE,
     "global_healpix_l3": GLOBAL_HEALPIX_L3,
     "global_healpix_l5": GLOBAL_HEALPIX_L5,
     "regional_healpix_na": REGIONAL_HEALPIX_NA,

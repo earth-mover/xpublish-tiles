@@ -22,8 +22,10 @@ from xpublish_tiles.grids import (
     _GRID_CACHE,
     X_COORD_PATTERN,
     Y_COORD_PATTERN,
+    CubedSphere,
     Curvilinear,
     CurvilinearCellIndex,
+    FacetedIndexer,
     GridSystem,
     GridSystem2D,
     Healpix,
@@ -33,6 +35,7 @@ from xpublish_tiles.grids import (
     Rectilinear,
     Triangular,
     UgridIndexer,
+    find_cubed_sphere_face_dim,
     guess_coordinate_vars,
     guess_grid_system,
 )
@@ -48,9 +51,11 @@ from xpublish_tiles.lib import (
 from xpublish_tiles.pipeline import (
     apply_slicers,
     fix_coordinate_discontinuities,
+    load_plans,
     pipeline,
 )
 from xpublish_tiles.testing.datasets import (
+    CUBED_SPHERE,
     CURVILINEAR,
     ERA5,
     EU3035,
@@ -166,10 +171,10 @@ HEALPIX_SENTINEL = 2
             Curvilinear(
                 crs=CRS.from_user_input(4326),
                 bbox=BBox(
-                    south=20.752128720086883,
-                    north=59.74090498966864,
-                    east=-82.20037103061796,
-                    west=-117.87869841416263,
+                    south=20.75137708075283,
+                    north=59.74181114527747,
+                    east=-82.1990937931533,
+                    west=-117.87994462073223,
                 ),
                 X="lon",
                 Y="lat",
@@ -552,13 +557,19 @@ async def test_subset(global_datasets, tile, tms):
         slicers = apply_default_pad(slicers, ds.foo, grid)
 
     # Check that coordinates are within expected bounds (exact matching with controlled grid)
-    actual = await apply_slicers(
-        ds.foo,
-        grid=grid,
-        alternate=grid.to_metadata(),
-        slicers=slicers,
-        datatype=ContinuousData(valid_min=0, valid_max=1),
-    )
+    actual = (
+        await load_plans(
+            [
+                apply_slicers(
+                    ds.foo,
+                    grid=grid,
+                    alternate=grid.to_metadata(),
+                    slicers=slicers,
+                    datatype=ContinuousData(valid_min=0, valid_max=1),
+                )
+            ]
+        )
+    )[0]
     lat_min, lat_max = actual.latitude.min().item(), actual.latitude.max().item()
     assert lat_min <= bbox_geo.south, f"Latitude too low: {lat_min} < {bbox_geo.south}"
     assert lat_max >= bbox_geo.north, f"Latitude too high: {lat_max} > {bbox_geo.north}"
@@ -1238,3 +1249,43 @@ async def test_curvilinear_memory_limit_and_minzoom():
         query_params = create_query_params(tile, tms)
         with pytest.raises(TileTooBigError):
             await pipeline(ds, query_params)
+
+
+@pytest.mark.parametrize("use_sgrid", [True, False])
+def test_cubed_sphere_grid(use_sgrid):
+    ds = CUBED_SPHERE.create()
+    if not use_sgrid:
+        ds = ds.drop_vars("grid_topology")
+        ds["foo"].attrs.pop("grid", None)
+        ds["foo"].attrs.pop("location", None)
+    assert find_cubed_sphere_face_dim(ds, "foo") == "nf"
+    del ds.attrs["grid_mapping_name"]
+    assert find_cubed_sphere_face_dim(ds, "foo") is None
+
+    ds = CUBED_SPHERE.create()
+    if not use_sgrid:
+        ds = ds.drop_vars("grid_topology")
+        ds["foo"].attrs.pop("grid", None)
+        ds["foo"].attrs.pop("location", None)
+    grid = guess_grid_system(ds, "foo")
+    assert isinstance(grid, CubedSphere)
+    assert len(grid.faces) == 6
+    assert grid.face_dim == "nf"
+    assert grid.bbox.west == -180
+    assert grid.bbox.east == 180
+    assert grid.bbox.south == -90
+    assert grid.bbox.north == 90
+
+    slicers = grid.sel(bbox=BBox(west=10, south=-10, east=20, north=10))
+    assert list(slicers) == [grid.face_dim]
+    indexer = slicers[grid.face_dim][0]
+    assert isinstance(indexer, FacetedIndexer)
+    # Equatorial face 0 (lon 0..90, lat -45..45) must be in the hit set
+    assert len(indexer.selections) >= 1
+    face_indices = {cast(slice, s[grid.face_dim][0]).start for s in indexer.selections}
+    assert 0 in face_indices
+
+    slicers = grid.sel(bbox=BBox(west=-180, south=-90, east=180, north=90))
+    indexer = slicers[grid.face_dim][0]
+    assert isinstance(indexer, FacetedIndexer)
+    assert len(indexer.selections) == 6

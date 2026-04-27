@@ -31,6 +31,7 @@ from xpublish_tiles.lib import (
     crs_repr,
     fill_rings_from_corners,
     is_degree_geographic,
+    round_bbox,
     unwrap,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
@@ -89,6 +90,43 @@ class HealpixIndexer:
 
 
 @dataclass
+class FacetedIndexer:
+    """Wraps per-face bbox selections for FacetedGridSystem.sel().
+
+    Each entry in ``selections`` is a per-face ``Slicers`` dict carrying the
+    face's X/Y slicers plus a ``face_dim → [slice(i, i+1)]`` entry that
+    encodes which face it is.``.
+    """
+
+    selections: "list[Slicers]"
+
+
+# Union type for a single slicer entry returned by GridSystem.sel().
+# Each dim maps to a list of these (see DimSlicers / Slicers below).
+Slicer = slice | Fill | UgridIndexer | HealpixIndexer | FacetedIndexer
+DimSlicers = list[Slicer]
+Slicers = dict[str, DimSlicers]
+
+
+def _face_slicers_are_empty(slicers: dict[str, list]) -> bool:
+    """Return True if any dim in the slicers resolves to zero-size."""
+    for slicer_list in slicers.values():
+        if not slicer_list:
+            return True
+        total = 0
+        for s in slicer_list:
+            if isinstance(s, slice):
+                start = s.start or 0
+                stop = s.stop if s.stop is not None else 0
+                total += max(0, stop - start)
+            else:
+                total += 1
+        if total == 0:
+            return True
+    return False
+
+
+@dataclass
 class GridMetadata:
     """Grid metadata with coordinate names, CRS, and grid class."""
 
@@ -137,48 +175,44 @@ Y_COORD_PATTERN = re.compile(
 _GRID_CACHE = cachetools.LRUCache(maxsize=config["grid_cache_max_size"])
 
 
-def _last_true_along_axis(mask: np.ndarray, axis: int, default: int) -> int:
-    """Find the last True index along axis, or default if no True values."""
-    reduced = cast(np.ndarray, mask.any(axis=1 - axis))
-    if not reduced.any():
-        return default
-    return int(reduced.size - 1 - np.argmax(reduced[::-1]))
+def _cell_min_max(
+    corners: np.ndarray, *, xaxis: int, yaxis: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per-cell element-wise (min, max) over the 4 corners of each cell.
+
+    ``corners`` has shape ``(ny+1, nx+1)`` in ``(yaxis, xaxis)`` order. Returns
+    arrays shaped ``(ny, nx)`` in the same axis order, direction-agnostic.
+    """
+    assert corners.ndim == 2
+
+    def pick(y: slice, x: slice) -> tuple[slice, slice]:
+        return (y, x) if yaxis == 0 else (x, y)
+
+    sl0, sl1 = slice(None, -1), slice(1, None)
+    c00 = corners[pick(sl0, sl0)]
+    c01 = corners[pick(sl0, sl1)]
+    c10 = corners[pick(sl1, sl0)]
+    c11 = corners[pick(sl1, sl1)]
+    mn = np.minimum(c00, c01)
+    np.minimum(mn, c10, out=mn)
+    np.minimum(mn, c11, out=mn)
+    mx = np.maximum(c00, c01)
+    np.maximum(mx, c10, out=mx)
+    np.maximum(mx, c11, out=mx)
+    return mn, mx
 
 
-def _first_true_along_axis(mask: np.ndarray, axis: int, default: int) -> int:
-    """Find the first True index along axis, or default if no True values."""
-    reduced = mask.any(axis=1 - axis)
-    if not reduced.any():
-        return default
-    return int(np.argmax(reduced))
+def _bounds_from_mask(mask: np.ndarray, *, axis: int, size: int) -> tuple[int, int]:
+    """Bounding (start, stop) indices along the axis *perpendicular* to ``axis``
+    of the True region in ``mask``, clamped to ``[0, size]``.
 
-
-def _grab_edges(
-    left: np.ndarray,
-    right: np.ndarray,
-    *,
-    slicer: slice,
-    axis: int,
-    size: int,
-    increasing: bool,
-) -> list:
-    # bottom edge is inclusive; similar to IntervalIndex used in Rectilinear grids
-    assert slicer.start <= slicer.stop, slicer
-    if increasing:
-        ys = [
-            _last_true_along_axis(left <= slicer.stop, axis, 0),
-            _first_true_along_axis(right > slicer.stop, axis, size),
-            _last_true_along_axis(left <= slicer.start, axis, 0),
-            _first_true_along_axis(right > slicer.start, axis, size),
-        ]
-    else:
-        ys = [
-            _first_true_along_axis(left < slicer.stop, axis, size),
-            _last_true_along_axis(right >= slicer.stop, axis, 0),
-            _first_true_along_axis(left < slicer.start, axis, size),
-            _last_true_along_axis(right >= slicer.start, axis, 0),
-        ]
-    return ys
+    ``axis`` is the axis to reduce over (collapse via ``.any``). Returns
+    ``(0, 0)`` if no cell is True.
+    """
+    idx = np.flatnonzero(mask.any(axis=axis))
+    if idx.size == 0:
+        return 0, 0
+    return int(idx[0]), min(int(idx[-1]) + 1, size)
 
 
 def _get_xy_pad(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
@@ -284,6 +318,72 @@ def _convert_longitude_slice(
         # Both within valid range
         # [L===[start,stop]===R]
         return (slice(start, stop),)
+
+
+def _sgrid_topology_var(ds: xr.Dataset) -> str | None:
+    """Return the name of the SGRID grid topology variable in ``ds``, or
+    ``None`` if there isn't one. Asserts there is at most one — multiple
+    topologies in a single dataset would need explicit per-variable resolution
+    via the data variable's ``grid`` attribute, which we don't support here.
+    """
+    topology_vars = ds.cf.cf_roles.get("grid_topology", [])
+    if not topology_vars:
+        return None
+    assert len(topology_vars) == 1, (
+        f"expected at most one cf_role=grid_topology variable, found {topology_vars}"
+    )
+    return str(topology_vars[0])
+
+
+def _sgrid_node_for_face(ds: xr.Dataset, face_coord_name: str) -> str | None:
+    """Resolve a face-located coord name to its node-located counterpart via
+    SGRID metadata. Returns the parallel entry from ``node_coordinates`` by
+    position in ``face_coordinates``. SGRID's spec example pairs them
+    positionally (lon-lon, lat-lat); we add a length precondition to fail
+    closed.
+    """
+    topology_name = _sgrid_topology_var(ds)
+    if topology_name is None:
+        return None
+    var = ds[topology_name]
+    face_coords = str(var.attrs.get("face_coordinates", "")).split()
+    node_coords = str(var.attrs.get("node_coordinates", "")).split()
+    if face_coord_name not in face_coords:
+        return None
+    if len(face_coords) != len(node_coords):
+        return None
+    return node_coords[face_coords.index(face_coord_name)]
+
+
+def _resolve_corner_name(ds: xr.Dataset, name: str) -> str | None:
+    """Return the corner/vertex variable name paired with ``name`` if present.
+
+    Prefers SGRID ``node_coordinates`` (paired with ``face_coordinates`` on a
+    ``cf_role: grid_topology`` variable); falls back to the GMAO
+    ``corner_<name>`` naming convention.
+    """
+    sgrid_name = _sgrid_node_for_face(ds, name)
+    if sgrid_name is not None and sgrid_name in ds.variables:
+        return sgrid_name
+    fallback = f"corner_{name}"
+    if fallback in ds.variables:
+        return fallback
+    return None
+
+
+def _corner_mesh(ds: xr.Dataset, name: str) -> np.ndarray | None:
+    """Return a ``(ny+1, nx+1)`` vertex-mesh corner array for ``ds[name]``
+    if the dataset provides one via either SGRID ``node_coordinates`` or the
+    GMAO ``corner_*`` naming convention. Returns ``None`` otherwise.
+
+    This is distinct from CF ``bounds``, which uses a ``(n, 2)`` (1D) or
+    ``(ny, nx, 4)`` (2D) cell-bounds layout — a different convention we
+    don't consume here.
+    """
+    corner_name = _resolve_corner_name(ds, name)
+    if corner_name is None:
+        return None
+    return ds[corner_name].astype(np.float64).data
 
 
 def _adjacent_pair(arr: np.ndarray, axis: int) -> tuple[np.ndarray, np.ndarray]:
@@ -659,13 +759,12 @@ class CurvilinearCellIndex(xr.Index):
     xaxis: int
     yaxis: int
     y_is_increasing: bool
-    left: np.ndarray
-    right: np.ndarray
-    bottom: np.ndarray
-    top: np.ndarray
+    corner_x: np.ndarray
+    corner_y: np.ndarray
     _dXmin: float
     _dYmin: float
     tripolar_fold_row: int | None
+    is_polar_cap: bool
 
     def __init__(
         self,
@@ -675,6 +774,9 @@ class CurvilinearCellIndex(xr.Index):
         Xdim: str,
         Ydim: str,
         tripolar_fold_row: int | None = None,
+        corner_x: np.ndarray | None = None,
+        corner_y: np.ndarray | None = None,
+        is_polar_cap: bool = False,
     ):
         if Y.nbytes > MAX_COORD_VAR_NBYTES or X.nbytes > MAX_COORD_VAR_NBYTES:
             raise ValueError(
@@ -689,49 +791,57 @@ class CurvilinearCellIndex(xr.Index):
         xaxis = self.X.get_axis_num(self.Xdim)
         yaxis = self.Y.get_axis_num(self.Ydim)
 
+        # Polar-cap faces wind around the pole; `_convert_longitude_slice`'s
+        # 1D-monotonic window-shift logic does not apply. Callers that know
+        # the face geometry (e.g. `CubedSphere.from_dataset`) should pass
+        # `is_polar_cap` explicitly.
+        self.is_polar_cap = is_polar_cap
+
+        # Corner mesh (ny+1, nx+1): the single source of truth for cell
+        # geometry. Fall back to `infer_interval_breaks` on cell centers if
+        # not provided. Per-cell overlap masks are derived on demand in
+        # `sel` from diagonally opposite corners.
+        if corner_x is not None and corner_y is not None:
+            self.corner_x = np.asarray(corner_x)
+            self.corner_y = np.asarray(corner_y)
+        else:
+            # reusing datashader's code ensure we are consistent throughout the pipeline.
+            from datashader.resampling import infer_interval_breaks
+
+            X_breaks = infer_interval_breaks(X, axis=xaxis)
+            Y_breaks = infer_interval_breaks(Y, axis=yaxis)
+            self.corner_x = infer_interval_breaks(X_breaks, axis=yaxis)
+            self.corner_y = infer_interval_breaks(Y_breaks, axis=xaxis)
+
+        self.xaxis, self.yaxis = xaxis, yaxis
+
         # Store coordinate bounds for longitude slice conversion.
         # For geographic CRS, X coordinates are already unwrapped by Curvilinear.from_dataset,
         # so left_break/right_break represent the continuous range (e.g., 74° to 434°).
         # _convert_longitude_slice uses these to map tile requests to grid indices.
         # Use first/last columns along x-axis for the breaks.
-        # For tripolar grids, exclude the fold row since it has distorted coordinates.
-        first_col = np.take(X, 0, axis=xaxis)
-        last_col = np.take(X, -1, axis=xaxis)
+        first_col = np.take(self.corner_x, 0, axis=xaxis)
+        last_col = np.take(self.corner_x, -1, axis=xaxis)
         if tripolar_fold_row is not None:
             first_col = first_col[:tripolar_fold_row]
             last_col = last_col[:tripolar_fold_row]
         self.left_break = float(np.min(first_col))
         self.right_break = float(np.max(last_col))
 
-        # Compute cell bounds using shared edges (midpoints between adjacent centers).
-        # This ensures right[j] == left[j+1] and top[i] == bottom[i+1], eliminating
-        # gaps between adjacent cells. For geographic CRS, X coordinates are already
-        # unwrapped so diffs are continuous (no 360° jumps at antimeridian).
-        from datashader.resampling import infer_interval_breaks
+        # Determine if Y is increasing along the Y axis by checking the first
+        # row. Don't use .all() because tripolar grids have dY=0 in the fold
+        # region which would cause the swap to trigger incorrectly.
+        row0 = np.take(self.corner_y, 0, axis=yaxis)
+        row1 = np.take(self.corner_y, 1, axis=yaxis)
+        self.y_is_increasing = (row0 < row1).all()
 
-        X_breaks = infer_interval_breaks(X, axis=xaxis)
-        Y_breaks = infer_interval_breaks(Y, axis=yaxis)
-        self.left, self.right = _adjacent_pair(X_breaks, xaxis)
-        self.bottom, self.top = _adjacent_pair(Y_breaks, yaxis)
-
-        # Full corner grids: break along the OTHER axis to get (ny+1, nx+1).
-        # Used by cell_corners for polygon rendering.
-        self.corner_x = infer_interval_breaks(X_breaks, axis=yaxis)
-        self.corner_y = infer_interval_breaks(Y_breaks, axis=xaxis)
-
-        # Determine if Y is increasing by checking the first row.
-        # Don't use .all() because tripolar grids have dY=0 in the fold region
-        # which would cause the swap to trigger incorrectly.
-        first_row_bottom = np.take(self.bottom, 0, axis=yaxis)
-        first_row_top = np.take(self.top, 0, axis=yaxis)
-        self.y_is_increasing = (first_row_bottom < first_row_top).all()
-        if not self.y_is_increasing:
-            self.top, self.bottom = self.bottom, self.top
-        self.xaxis, self.yaxis = xaxis, yaxis
-
-        # Minimum cell width/height using the already-computed edges.
-        self._dXmin = _min_nonzero_diff(self.right, self.left)
-        self._dYmin = _min_nonzero_diff(self.top, self.bottom)
+        # Minimum cell width/height approximated from adjacent corner diffs.
+        # Exact for rectilinear cells; looser on rotated cells (cubed-sphere,
+        # tripolar fold) — good enough for coarsening decisions.
+        xlo, xhi = _adjacent_pair(self.corner_x, xaxis)
+        ylo, yhi = _adjacent_pair(self.corner_y, yaxis)
+        self._dXmin = _min_nonzero_diff(xhi, xlo)
+        self._dYmin = _min_nonzero_diff(yhi, ylo)
 
     def get_min_spacing(self) -> tuple[float, float]:
         """Get minimum spacing in X and Y directions."""
@@ -740,7 +850,6 @@ class CurvilinearCellIndex(xr.Index):
     def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
         X, Y = self.X.data, self.Y.data
         xaxis, yaxis = self.xaxis, self.yaxis
-        bottom, top, left, right = self.bottom, self.top, self.left, self.right
         Xlen = X.shape[xaxis]
         # For tripolar grids, exclude the fold row from consideration
         Ylen = self.tripolar_fold_row or Y.shape[yaxis]
@@ -749,35 +858,70 @@ class CurvilinearCellIndex(xr.Index):
         bbox = next(iter(labels.values()))
         assert isinstance(bbox, BBox)
 
-        slices = _convert_longitude_slice(
-            slice(bbox.west, bbox.east),
-            left_break=self.left_break,
-            right_break=self.right_break,
-        )
+        # Per-cell lat/lon bounds from 4 corners. Direction-agnostic (handles
+        # y-decreasing grids) and exact for rotated cells (cubed-sphere,
+        # tripolar fold).
+        y_min, y_max = _cell_min_max(self.corner_y, xaxis=xaxis, yaxis=yaxis)
+        x_min, x_max = _cell_min_max(self.corner_x, xaxis=xaxis, yaxis=yaxis)
 
-        ys = _grab_edges(
-            bottom,
-            top,
-            slicer=slice(bbox.south, bbox.north),
-            axis=yaxis,
-            size=Ylen,
-            increasing=self.y_is_increasing,
-        )
+        lat_mask = y_min <= bbox.north
+        lat_mask &= y_max >= bbox.south
 
-        # add 1 to account for slice upper end being exclusive
-        y_start, y_stop = min(ys), max(ys) + 1
-        # Clamp Y slice to exclude tripolar fold row, if applicable
-        y_stop = min(y_stop, Ylen)
+        all_indexers: list[slice]
+        if self.is_polar_cap:
+            # Polar-cap faces wind around the pole; neither axis is monotonic
+            # in lon. Per-cell lon bounds can land on either the [-180, 180]
+            # or the [0, 360] branch, so OR both conventions into one 2D
+            # overlap mask and take its (i, j) bounding extent.
+            # We are working with "axis-aligned bounding boxes" (AABB).
+            # This is cheap but wrong near the poles, where the cells are curving.
+            # A ppint in polygon test would be more correct but presumably expensive.
+            #
+            # TODO: A more principled approach is to inverse-project the query bbox into each face's
+            # local gnomonic (x, y). A cubed-sphere face is rectilinear in its native coords,
+            # so selection becomes exact AABB on a regular grid. We would instead introduce a new
+            # CubedSphereFace GridSystem instead of piggybacking on Curvilinear for the polar caps.
+            lon_mask = np.zeros_like(lat_mask)
+            t1 = np.empty_like(lat_mask)
+            t2 = np.empty_like(lat_mask)
+            for left_break, right_break in ((-180.0, 180.0), (0.0, 360.0)):
+                for sl in _convert_longitude_slice(
+                    slice(bbox.west, bbox.east),
+                    left_break=left_break,
+                    right_break=right_break,
+                ):
+                    np.less_equal(x_min, sl.stop, out=t1)
+                    np.greater_equal(x_max, sl.start, out=t2)
+                    t1 &= t2
+                    lon_mask |= t1
+            # When lat_mask and lon_mask are disjoint the bbox sits on a
+            # cube-edge seam: per-cell AABB lon ranges abut the seam but
+            # don't span it, so the true cell lies "between" the two
+            # candidate sets. Union them so `_bounds_from_mask` returns an
+            # i,j box covering both.
+            mask = lat_mask & lon_mask
+            if not mask.any():
+                mask = lat_mask | lon_mask
+            if self.tripolar_fold_row is not None:
+                fold = [slice(None)] * mask.ndim
+                fold[yaxis] = slice(0, Ylen)
+                mask = mask[tuple(fold)]
 
-        all_indexers: list[slice] = []
-        for sl in slices:
-            xs = _grab_edges(
-                left, right, slicer=sl, axis=xaxis, size=Xlen, increasing=True
-            )
-            # add 1 to account for slice upper end being exclusive
-            indexer = slice(min(xs), max(xs) + 1)
-            start, stop, _ = indexer.indices(X.shape[xaxis])
-            all_indexers.append(slice(start, stop))
+            y_start, y_stop = _bounds_from_mask(mask, axis=xaxis, size=Ylen)
+            x_start, x_stop = _bounds_from_mask(mask, axis=yaxis, size=Xlen)
+            all_indexers = [slice(x_start, x_stop)]
+        else:
+            y_start, y_stop = _bounds_from_mask(lat_mask, axis=xaxis, size=Ylen)
+            all_indexers = []
+            for sl in _convert_longitude_slice(
+                slice(bbox.west, bbox.east),
+                left_break=self.left_break,
+                right_break=self.right_break,
+            ):
+                lon_mask = x_min <= sl.stop
+                lon_mask &= x_max >= sl.start
+                x_start, x_stop = _bounds_from_mask(lon_mask, axis=yaxis, size=Xlen)
+                all_indexers.append(slice(x_start, x_stop))
 
         # Prevent overlap between adjacent slices
         all_indexers = _prevent_slice_overlap(all_indexers)
@@ -1111,9 +1255,7 @@ class GridSystem(ABC):
         return self.equals(other)
 
     @abstractmethod
-    def sel(
-        self, *, bbox: BBox
-    ) -> dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]:
+    def sel(self, *, bbox: BBox) -> Slicers:
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("Subclasses must implement sel method")
 
@@ -1207,7 +1349,7 @@ class RectilinearMixin:
 
     def _rectilinear_sel(
         self, *, bbox: BBox, y_is_increasing: bool, x_size: int, y_size: int
-    ) -> dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]:
+    ) -> Slicers:
         """
         This method handles coordinate selection for rectilinear grids, automatically
         converting between different longitude conventions (0→360 vs -180→180).
@@ -1321,9 +1463,7 @@ class RasterAffine(RectilinearMixin, GridSystem):
         (index,) = self.indexes
         return da.assign_coords(xr.Coordinates.from_xindex(index))
 
-    def sel(
-        self, *, bbox: BBox
-    ) -> dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]:
+    def sel(self, *, bbox: BBox) -> Slicers:
         (index,) = self.indexes
         affine = index.transform()
 
@@ -1445,7 +1585,7 @@ class Rectilinear(RectilinearMixin, GridSystem):
 
         x_data = X.data
         if crs.is_geographic:
-            # Use np.unwrap to fix longitude discontinuities without centering
+            # Fix longitude discontinuities without centering
             # This ensures datasets with the meridian discontinuitiy in the "middle"
             # of the dataset maintain a continuous coordinate system
             x_data = unwrap(x_data, width=360)
@@ -1489,9 +1629,7 @@ class Rectilinear(RectilinearMixin, GridSystem):
             indexes=(x_index, y_index),
         )
 
-    def sel(
-        self, *, bbox: BBox
-    ) -> dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]:
+    def sel(self, *, bbox: BBox) -> Slicers:
         """
         Select a subset of the data array using a bounding box.
         """
@@ -1580,18 +1718,24 @@ class Curvilinear(GridSystem):
 
         # Compute bbox from index if not provided (sentinel)
         if self.bbox is _CURVILINEAR_BBOX_SENTINEL:
-            west = numbagg.nanmin(index.left)
-            east = numbagg.nanmax(index.right)
-            south = numbagg.nanmin(index.bottom)
-            north = numbagg.nanmax(index.top)
+            cx, cy = index.corner_x, index.corner_y
+            west = numbagg.nanmin(cx)
+            east = numbagg.nanmax(cx)
+            south = numbagg.nanmin(cy)
+            north = numbagg.nanmax(cy)
 
             if self.crs.is_geographic:
-                # This handling is necessary for subsets of tripolar grids;
-                # where the anti-meridian discontinuity is not present in some, but not all, rows.
-                lon_span = (
-                    index.right.max(axis=index.xaxis) - index.left.min(axis=index.xaxis)
-                ).max()
-                self.lon_spans_globe = lon_span >= 350
+                # Detect whether any cell-row spans the globe (≥350°). Reduce
+                # cx along xaxis first for per corner-row min/max, then combine
+                # adjacent corner rows — each cell spans 2 corner rows. Catches
+                # anti-meridian discontinuities that only appear in some
+                # cell-rows (tripolar subsets).
+                row_max = cx.max(axis=index.xaxis)
+                row_min = cx.min(axis=index.xaxis)
+                cell_span = np.maximum(row_max[:-1], row_max[1:]) - np.minimum(
+                    row_min[:-1], row_min[1:]
+                )
+                self.lon_spans_globe = bool((cell_span >= 350).any())
                 # Normalize bbox to -180->180 for global grids
                 if self.lon_spans_globe:
                     west, east = -180, 180
@@ -1611,6 +1755,11 @@ class Curvilinear(GridSystem):
     def is_tripolar(self) -> bool:
         index = next(iter(self.indexes))
         return getattr(index, "tripolar_fold_row", None) is not None
+
+    @property
+    def is_polar_cap(self) -> bool:
+        index = next(iter(self.indexes))
+        return bool(getattr(index, "is_polar_cap", False))
 
     def _guess_dims(
         ds: xr.Dataset, *, X: xr.DataArray, Y: xr.DataArray
@@ -1661,13 +1810,25 @@ class Curvilinear(GridSystem):
         return Xdim, Ydim
 
     @classmethod
-    def from_dataset(cls, ds: xr.Dataset, crs: CRS, Xname: str, Yname: str) -> Self:
+    def from_dataset(
+        cls,
+        ds: xr.Dataset,
+        crs: CRS,
+        Xname: str,
+        Yname: str,
+        *,
+        is_polar_cap: bool = False,
+    ) -> Self:
         # Cast coordinates to float64 to avoid repeated conversions during transforms
         # Note that pyproj requires float64 C-contiguous arrays for in-place transforms.
         # Since Curvilinear grid transforms are quite expensive; we trade the memory cost
         # here to avoid repeated allocations when transforming.
         X, Y = ds[Xname].astype(np.float64), ds[Yname].astype(np.float64)
         Xdim, Ydim = Curvilinear._guess_dims(ds, X=X, Y=Y)
+        # Normalize Y (and corner-Y) to X's dim order so a single (xaxis, yaxis)
+        # pair is valid for both.
+        if Y.dims != X.dims:
+            Y = Y.transpose(*X.dims)
         yaxis = X.get_axis_num(Ydim)
 
         # Detect tripolar grid BEFORE unwrapping (the fold row detection relies on
@@ -1675,11 +1836,22 @@ class Curvilinear(GridSystem):
         # holds true before unwrap modifies the coordinates)
         tripolar_fold_row = _detect_tripolar_fold_row(X.data, yaxis=yaxis)
 
-        if crs.is_geographic:
-            # Use np.unwrap to fix longitude discontinuities without centering
-            # This ensures datasets with the meridian discontinuity in the "middle"
-            # of the dataset maintain a continuous coordinate system
+        # Vertex-mesh corners (GMAO `corner_{name}` convention), if provided —
+        # true vertex coordinates that share exact values across adjacent
+        # faces in faceted grids.
+        corner_x = _corner_mesh(ds, Xname)
+        corner_y = _corner_mesh(ds, Yname)
+
+        if crs.is_geographic and not is_polar_cap:
+            # Fix longitude discontinuities without centering. Ensures datasets
+            # with the meridian discontinuity in the "middle" of the dataset
+            # maintain a continuous coordinate system. Skip for polar-cap faces:
+            # lon is not monotonic along either axis near the pole, so unwrap
+            # can stretch values into spurious ranges. The polar-cap path in
+            # `CurvilinearCellIndex.sel` handles wrap with a 2-convention test.
             X = X.copy(data=unwrap(X.data, width=360))
+            if corner_x is not None:
+                corner_x = unwrap(corner_x, width=360)
 
         index = CurvilinearCellIndex(
             X=X,
@@ -1687,6 +1859,9 @@ class Curvilinear(GridSystem):
             Xdim=Xdim,
             Ydim=Ydim,
             tripolar_fold_row=tripolar_fold_row,
+            corner_x=corner_x,
+            corner_y=corner_y,
+            is_polar_cap=is_polar_cap,
         )
         return cls(
             crs=crs,
@@ -1714,9 +1889,7 @@ class Curvilinear(GridSystem):
         else:
             return False
 
-    def sel(
-        self, *, bbox: BBox
-    ) -> dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]:
+    def sel(self, *, bbox: BBox) -> Slicers:
         """
         Select a subset of the data array using a bounding box.
 
@@ -1870,9 +2043,7 @@ class Polar(GridSystem):
     def dims(self) -> set[str]:
         return {self.Xdim, self.Ydim}
 
-    def sel(
-        self, *, bbox: BBox
-    ) -> dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]:
+    def sel(self, *, bbox: BBox) -> Slicers:
         index = self.indexes[0]
         sel_result = index.sel({self.Xdim: bbox})
         az_slices = sel_result.dim_indexers[self.Xdim]
@@ -2008,9 +2179,7 @@ class Triangular(GridSystem):
     def dims(self) -> set[str]:
         return {self.dim}
 
-    def sel(
-        self, *, bbox: BBox
-    ) -> dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]:
+    def sel(self, *, bbox: BBox) -> Slicers:
         index = next(iter(self.indexes))
         result = index.sel(
             {self.X: slice(bbox.west, bbox.east), self.Y: slice(bbox.south, bbox.north)}
@@ -2149,9 +2318,7 @@ class Healpix(GridSystem):
     def dims(self) -> set[str]:
         return {self.dim}
 
-    def sel(
-        self, *, bbox: BBox
-    ) -> dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]:
+    def sel(self, *, bbox: BBox) -> Slicers:
         """Select cells within the bounding box.
 
         Uses healpix_geo to find HEALPix cells that intersect the bbox,
@@ -2326,6 +2493,224 @@ class Healpix(GridSystem):
             cell_ids=cell_ids,
             bbox=bbox,
         )
+
+
+@dataclass(kw_only=True, eq=False)
+class FacetedGridSystem(GridSystem, ABC):
+    """Grid composed of multiple logically faces.
+
+    Each face is an independent `GridSystem` in its own right.
+    patch. Currently only the ``polygons`` style renderer is supported;
+    raster styles will raise ``ValueError``.
+
+    With polygons, all we need to do is convert the selection to a vector of geometries.
+    Note that in many cases, there is no way to create a rectangular 2d mesh that will
+    render correctly with quadmesh.
+    """
+
+    crs: CRS
+    bbox: BBox
+    X: str
+    Y: str
+    Xdim: str
+    Ydim: str
+    face_dim: str
+    faces: tuple[Curvilinear, ...]
+    indexes: tuple[xr.Index, ...] = field(default_factory=tuple)
+    Z: str | None = None
+    dXmin: float = field(init=False)
+    dYmin: float = field(init=False)
+    npoints_per_geometry: int = field(init=False, default=5)
+
+    def __post_init__(self) -> None:
+        self.dXmin = min(f.dXmin for f in self.faces)
+        self.dYmin = min(f.dYmin for f in self.faces)
+
+    @property
+    def dims(self) -> set[str]:
+        return {self.face_dim, self.Xdim, self.Ydim}
+
+    def _face_overlaps(self, input_bbox: BBox, face_bbox: BBox) -> bool:
+        """Lat + (lon-wrap-aware for geographic CRS) overlap test for a face.
+
+        ``Curvilinear.sel`` edge-clamps for non-overlapping bboxes (load-bearing
+        for its normal caller, which pre-filters via ``bbox_overlap``), so we
+        must filter faces ourselves. Face bboxes may be in 0–360 or -180–180
+        convention; mod-360 collapses both onto the same circle.
+        """
+        face_bbox = round_bbox(face_bbox)
+        input_bbox = round_bbox(input_bbox)
+        if input_bbox.south >= face_bbox.north or input_bbox.north <= face_bbox.south:
+            return False
+        if not self.crs.is_geographic:
+            return input_bbox.west < face_bbox.east and input_bbox.east > face_bbox.west
+
+        def intervals(west: float, east: float) -> list[tuple[float, float]]:
+            if east - west >= 360:
+                return [(0.0, 360.0)]
+            w, e = west % 360, east % 360
+            if w == e:
+                return [(0.0, 360.0)] if east > west else []
+            if w < e:
+                return [(w, e)]
+            return [(w, 360.0), (0.0, e)]
+
+        for iw, ie in intervals(input_bbox.west, input_bbox.east):
+            for fw, fe in intervals(face_bbox.west, face_bbox.east):
+                if iw < fe and ie > fw:
+                    return True
+        return False
+
+    def sel(self, *, bbox: BBox) -> Slicers:
+        """Return per-face selections wrapped in a ``FacetedIndexer``.
+
+        Follows the ``UgridIndexer`` pattern: a single slicer entry on the
+        grid's own special dim (``face_dim``), inside the standard
+        ``dict[dim, list[...]]`` return shape. The pipeline pulls the indexer
+        out via ``isinstance`` dispatch on ``FacetedGridSystem``.
+
+        Each per-face Slicers dict carries the face's X/Y slicers plus a
+        ``face_dim`` entry holding ``slice(i, i+1)``; consumers parse the
+        face index from that slice.
+        """
+        selections: list[Slicers] = []
+        for i, face in enumerate(self.faces):
+            if not self._face_overlaps(bbox, face.bbox):
+                continue
+            face_slicers = face.sel(bbox=bbox)
+            if _face_slicers_are_empty(face_slicers):
+                continue
+            face_slicers[self.face_dim] = [slice(i, i + 1)]
+            selections.append(face_slicers)
+        return {self.face_dim: [FacetedIndexer(selections=selections)]}
+
+
+@dataclass(kw_only=True, eq=False)
+class CubedSphere(FacetedGridSystem):
+    """Six-face cubed-sphere grid (GFDL/GMAO Mosaic Gridspec layout).
+
+    At the moment, detection is deliberately narrow — see ``find_cubed_sphere_face_dim``.
+    """
+
+    @classmethod
+    def from_dataset(
+        cls,
+        ds: xr.Dataset,
+        crs: CRS,
+        Xname: str,
+        Yname: str,
+        *,
+        face_dim: str = "nf",
+    ) -> Self:
+        face_size = ds.sizes[face_dim]
+        # Keep only the 2D lon/lat aux coords; Curvilinear.from_dataset does
+        # a cf-xarray axis scan so trimming down avoids pulling in unrelated
+        # variables and their attrs. Also keep vertex-mesh corner variables
+        # (resolved via SGRID node_coordinates or the GMAO `corner_*`
+        # convention) so Curvilinear can use true shared-vertex corners
+        # instead of per-face extrapolation, plus the SGRID grid_topology
+        # variable (a scalar that survives the per-face isel) so per-face
+        # Curvilinear.from_dataset can re-resolve via SGRID.
+        corner_x_name = _resolve_corner_name(ds, Xname)
+        corner_y_name = _resolve_corner_name(ds, Yname)
+        keep = [Xname, Yname]
+        if corner_x_name is not None:
+            keep.append(corner_x_name)
+        if corner_y_name is not None:
+            keep.append(corner_y_name)
+        topology_name = _sgrid_topology_var(ds)
+        if topology_name is not None:
+            keep.append(topology_name)
+        coord_ds = ds.reset_coords()[keep]
+        faces: list[Curvilinear] = []
+        for i in range(face_size):
+            face_ds = cast(xr.Dataset, coord_ds.isel({face_dim: i}))
+            # A face is a polar cap if its lat mesh reaches a pole. Prefer
+            # corner lats (which hit 90° exactly on cubed-sphere caps); fall
+            # back to centers with a looser threshold since center-cell max
+            # |lat| on an N×N face is bounded well away from 90° (~87.8° at
+            # N=32). Checked against raw (pre-unwrap) coords; independent of
+            # lon convention.
+            if crs.is_geographic:
+                lats = (
+                    face_ds.variables[corner_y_name]
+                    if corner_y_name is not None and corner_y_name in face_ds.variables
+                    else face_ds.variables[Yname]
+                )
+                cap_lat = float(np.nanmax(np.abs(lats.data)))
+                is_polar_cap = cap_lat > 80.0
+            else:
+                is_polar_cap = False
+            faces.append(
+                Curvilinear.from_dataset(
+                    face_ds, crs, Xname, Yname, is_polar_cap=is_polar_cap
+                )
+            )
+
+        Xdim = faces[0].Xdim
+        Ydim = faces[0].Ydim
+
+        west = min(f.bbox.west for f in faces)
+        east = max(f.bbox.east for f in faces)
+        south = min(f.bbox.south for f in faces)
+        north = max(f.bbox.north for f in faces)
+        if crs.is_geographic and ((east - west) >= 350 or face_size == 6):
+            # Whole-globe cubed sphere
+            west, east = -180.0, 180.0
+            south, north = -90.0, 90.0
+        bbox = BBox(west=west, south=south, east=east, north=north)
+
+        return cls(
+            crs=crs,
+            bbox=bbox,
+            X=Xname,
+            Y=Yname,
+            Xdim=Xdim,
+            Ydim=Ydim,
+            face_dim=face_dim,
+            faces=tuple(faces),
+        )
+
+
+_CUBED_SPHERE_PATTERN = re.compile(r"cubed?[-_ ]sphere", re.IGNORECASE)
+
+
+def find_cubed_sphere_face_dim(
+    ds: xr.Dataset, var_name: Hashable | None = None
+) -> str | None:
+    """Detect GFDL/GMAO Mosaic Gridspec cubed-sphere layout.
+
+    Returns the face-dimension name if detected, else ``None``. Both of these
+    must hold:
+
+    1. Global attr ``grid_mapping_name`` matches ``cubed?-sphere`` (e.g.
+       GMAO files set ``"gnomonic cubed-sphere"``).
+    2. There exists a dim of size 6 shared between the 2D-or-higher
+       ``longitude`` and ``latitude`` auxiliary coords, and (if ``var_name``
+       is given) also present on that data variable.
+    """
+    gmn = ds.attrs.get("grid_mapping_name", "")
+    if not isinstance(gmn, str) or not _CUBED_SPHERE_PATTERN.search(gmn):
+        return None
+    coords = ds.cf.coordinates
+    lon_candidates = coords.get("longitude", [])
+    lat_candidates = coords.get("latitude", [])
+    for lon_name in lon_candidates:
+        for lat_name in lat_candidates:
+            lon = ds[lon_name]
+            lat = ds[lat_name]
+            if lon.ndim < 3 or lat.ndim < 3:
+                continue
+            shared = set(lon.dims) & set(lat.dims)
+            face_candidates = [d for d in shared if ds.sizes.get(d) == 6]
+            if not face_candidates:
+                continue
+            face_dim = str(face_candidates[0])
+            if var_name is not None and var_name in ds.variables:
+                if face_dim not in ds[var_name].dims:
+                    continue
+            return face_dim
+    return None
 
 
 # Type alias for 1D grid systems
@@ -2704,6 +3089,28 @@ def guess_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
         # Double-check in case another thread populated cache while we waited
         if cache_key is not None and cache_key in _GRID_CACHE:
             return _GRID_CACHE[cache_key]
+
+        face_dim = find_cubed_sphere_face_dim(ds, name)
+        if face_dim is not None:
+            coords = ds.cf.coordinates
+            lon_name = next(
+                (str(c) for c in coords.get("longitude", []) if face_dim in ds[c].dims),
+                None,
+            )
+            lat_name = next(
+                (str(c) for c in coords.get("latitude", []) if face_dim in ds[c].dims),
+                None,
+            )
+            assert lon_name is not None and lat_name is not None, (
+                "find_cubed_sphere_face_dim() matched but 2D lon/lat aux coords vanished"
+            )
+            grid = CubedSphere.from_dataset(
+                ds, DEFAULT_CRS, lon_name, lat_name, face_dim=face_dim
+            )
+            grid.Z = _guess_z_dimension(ds[name])
+            if cache_key is not None:
+                _GRID_CACHE[cache_key] = grid
+            return grid
 
         try:
             grid = _guess_grid_for_dataset(ds.cf[[name]])

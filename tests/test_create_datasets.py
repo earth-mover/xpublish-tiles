@@ -2,6 +2,7 @@ import pytest
 
 from icechunk.xarray import to_icechunk
 from xpublish_tiles.testing.datasets import (
+    CUBED_SPHERE,
     CURVILINEAR,
     EU3035,
     EU3035_HIRES,
@@ -36,6 +37,7 @@ from xpublish_tiles.testing.datasets import (
         pytest.param(REDGAUSS_N320, id="redgauss_n320"),
         pytest.param(TRIPOLE_ANTIMERIDIAN, id="tripole_antimeridian"),
         pytest.param(CURVILINEAR, id="curvilinear"),
+        pytest.param(CUBED_SPHERE, id="cubed_sphere"),
     ]
 )
 def dataset(request):

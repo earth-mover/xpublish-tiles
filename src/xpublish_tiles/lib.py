@@ -18,6 +18,7 @@ import pyproj
 import toolz as tlz
 from PIL import Image
 from pyproj import CRS
+from pyproj.aoi import BBox
 from skimage.restoration import unwrap_phase
 
 import xarray as xr
@@ -28,8 +29,8 @@ if TYPE_CHECKING:
     from xpublish_tiles.grids import (
         GridMetadata,
         GridSystem,
-        HealpixIndexer,
-        UgridIndexer,
+        Slicer,
+        Slicers,
     )
 from xpublish_tiles.logger import logger
 
@@ -555,10 +556,10 @@ def _prevent_slice_overlap(indexers: list[slice]) -> list[slice]:
 
 
 def pad_slicers(
-    slicers: "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]",
+    slicers: "Slicers",
     *,
     dimensions: list[PadDimension] | None = None,
-) -> "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]":
+) -> "Slicers":
     """
     Apply padding to slicers for specified dimensions.
 
@@ -635,9 +636,9 @@ def pad_slicers(
 
 
 def normalize_slicers(
-    slicers: "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]",
+    slicers: "Slicers",
     dim_sizes: "Mapping[Hashable, int]",
-) -> "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]":
+) -> "Slicers":
     return {
         dim: [
             slice(*s.indices(dim_sizes[dim])) if isinstance(s, slice) else s
@@ -892,10 +893,7 @@ def coarsen_mean_pad(da: xr.DataArray, factors: dict[str, int]) -> xr.DataArray:
     return xr.DataArray(out, dims=dims, name=da.name)
 
 
-def _get_indexer_size(
-    sl: "slice | Fill | UgridIndexer | HealpixIndexer",
-    dim_size: int | None = None,
-) -> int:
+def _get_indexer_size(sl: "Slicer", dim_size: int | None = None) -> int:
     """Get the size of an indexer (slice, Fill, UgridIndexer, or ndarray)."""
     from xpublish_tiles.grids import HealpixIndexer, UgridIndexer
 
@@ -917,7 +915,7 @@ def _get_indexer_size(
 
 
 def _iter_subset_shapes(
-    slicers: "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]",
+    slicers: "Slicers",
     da: xr.DataArray,
     grid: "GridSystem",
 ):
@@ -927,10 +925,22 @@ def _iter_subset_shapes(
     For GridSystem2D, yields (x_size, y_size) for each X slice.
     For Triangular, yields (size,) for the single slice.
     """
-    from xpublish_tiles.grids import Triangular
+    from xpublish_tiles.grids import FacetedGridSystem, FacetedIndexer, Triangular
 
     if isinstance(grid, Triangular):
         yield (_get_indexer_size(next(iter(slicers[grid.dim])), da.sizes[grid.dim]),)
+        return
+
+    if isinstance(grid, FacetedGridSystem):
+        indexer = slicers[grid.face_dim][0]
+        assert isinstance(indexer, FacetedIndexer)
+        for face_slicers in indexer.selections:
+            face_slice = face_slicers[grid.face_dim][0]
+            assert isinstance(face_slice, slice)
+            face = grid.faces[face_slice.start]
+            y_size = _get_indexer_size(face_slicers[face.Ydim][0], da.sizes[face.Ydim])
+            for sl in face_slicers[face.Xdim]:
+                yield (_get_indexer_size(sl, da.sizes[face.Xdim]), y_size)
         return
 
     yslice = None
@@ -950,7 +960,7 @@ def _iter_subset_shapes(
 
 
 def check_data_is_renderable_size(
-    slicers: "dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]",
+    slicers: "Slicers",
     da: xr.DataArray,
     grid: "GridSystem",
     alternate: "GridMetadata",
@@ -1001,3 +1011,21 @@ def max_render_shape(
         return (max_w, max_h)
     pixel_factor = config.get("max_pixel_factor")
     return (pixel_factor * width, pixel_factor * height)
+
+
+def round_bbox(bbox: BBox) -> BBox:
+    # https://github.com/developmentseed/morecantile/issues/175
+    # the precision in morecantile tile bounds isn't perfect,
+    # a good way to test is `tms.bounds(Tile(0,0,0))` which should
+    # match the spec exactly: https://docs.ogc.org/is/17-083r4/17-083r4.html#toc48
+    # Example: tests/test_pipeline.py::test_pipeline_tiles[-90->90,0->360-wgs84_prime_meridian(2/2/1)]
+    return BBox(
+        west=round(bbox.west, 8),
+        south=round(bbox.south, 8),
+        east=round(bbox.east, 8),
+        north=round(bbox.north, 8),
+    )
+
+
+def sum_tuples(*tuples):
+    return tuple(sum(values) for values in zip(*tuples, strict=False))

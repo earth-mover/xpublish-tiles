@@ -33,6 +33,7 @@ from xpublish_tiles.pipeline import (
     pipeline,
 )
 from xpublish_tiles.testing.datasets import (
+    CUBED_SPHERE,
     CURVILINEAR,
     FORECAST,
     GLOBAL_6KM,
@@ -998,3 +999,51 @@ async def test_healpix_regional_na(tile, png_snapshot, pytestconfig):
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
     assert_render_matches_snapshot(result, png_snapshot, skip_transparency_check=True)
+
+
+_WORLDCRS84_TMS = morecantile.tms.get("WorldCRS84Quad")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tile", "tms"),
+    [
+        pytest.param(Tile(x=0, y=0, z=0), WEBMERC_TMS, id="0/0/0"),  # full globe
+        pytest.param(Tile(x=0, y=0, z=1), WEBMERC_TMS, id="1/0/0"),  # NW quadrant
+        pytest.param(Tile(x=1, y=1, z=1), WEBMERC_TMS, id="1/1/1"),  # SE quadrant
+        pytest.param(Tile(x=1, y=1, z=2), WEBMERC_TMS, id="2/1/1"),  # equatorial face 0
+        pytest.param(Tile(x=0, y=0, z=2), WEBMERC_TMS, id="2/0/0"),  # north polar cap
+        pytest.param(Tile(x=0, y=3, z=2), WEBMERC_TMS, id="2/0/3"),  # south polar cap
+        pytest.param(Tile(x=0, y=1, z=2), WEBMERC_TMS, id="2/0/1"),  # antimeridian west
+        pytest.param(Tile(x=3, y=1, z=2), WEBMERC_TMS, id="2/3/1"),  # antimeridian east
+        pytest.param(
+            Tile(x=2, y=3, z=2), WEBMERC_TMS, id="2/2/3"
+        ),  # south polar, east hemisphere
+        pytest.param(Tile(x=7, y=5, z=3), WEBMERC_TMS, id="3/7/5"),  # rendering artifact
+        pytest.param(Tile(x=4, y=4, z=4), WEBMERC_TMS, id="4/4/4"),  # rendering artifact
+        pytest.param(Tile(x=1, y=2, z=3), WEBMERC_TMS, id="3/1/2"),  # rendering artifact
+        pytest.param(Tile(x=6158, y=25779, z=16), WEBMERC_TMS, id="16/6158/25779"),
+        # WorldCRS84Quad reaches lat=±90 so these exercise the polar pole-edge
+        # split; the high-zoom WebMercator tile sits on a face-cell edge that
+        # was previously dropped by the cell-center-based lon break.
+        pytest.param(Tile(x=0, y=0, z=0), _WORLDCRS84_TMS, id="wcrs84-0/0/0"),
+        pytest.param(Tile(x=1, y=0, z=0), _WORLDCRS84_TMS, id="wcrs84-0/1/0"),
+    ],
+)
+async def test_cubed_sphere_tile(tile, tms, png_snapshot, pytestconfig):
+    """Render cubed-sphere tiles via the polygons pipeline."""
+    ds = CUBED_SPHERE.create().compute()
+    query_params = create_query_params(tile, tms, style="polygons")
+    result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(result, png_snapshot)
+
+
+async def test_pipeline_raster_style_not_supported():
+    ds = CUBED_SPHERE.create()
+    tms = morecantile.tms.get("WebMercatorQuad")
+    tile = morecantile.Tile(x=0, y=0, z=0)
+    query_params = create_query_params(tile, tms, style="raster")
+    with pytest.raises(ValueError, match="polygons"):
+        await pipeline(ds, query_params)
