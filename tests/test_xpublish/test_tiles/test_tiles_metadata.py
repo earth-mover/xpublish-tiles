@@ -902,3 +902,52 @@ def test_tiles_endpoint_snapshot(fixture, snapshot):
     assert response.status_code == 200
     summary = _summarize_tilesets_list(response.json())
     assert summary == snapshot.use_extension(JSONSnapshotExtension)
+
+
+def test_tiles_endpoint_skips_non_spatial_data_vars():
+    """Auxiliary non-scalar data vars without a tileable grid should be skipped,
+    not crash the /tiles/ listing.
+
+    Mirrors the GMAO cubed-sphere case where vars like ``anchor``/``contacts``
+    have non-spatial dims (e.g. ``ncontact``) and fail grid detection when the
+    dataset is subset to that variable alone.
+    """
+    ds = CUBED_SPHERE.create()
+    nf = ds.sizes["nf"]
+    ds = ds.assign(
+        contacts=xr.DataArray(np.zeros((nf, 4), dtype=np.int32), dims=("nf", "ncontact")),
+        anchor=xr.DataArray(
+            np.zeros((nf, 4, 4), dtype=np.float64),
+            dims=("nf", "ncontact", "ncontact_b"),
+        ),
+    )
+
+    rest = xpublish.Rest({"ds": ds}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+    response = client.get("/datasets/ds/tiles/")
+    assert response.status_code == 200
+
+    body = response.json()
+    tilesets = body.get("tilesets", [])
+    assert tilesets, "expected at least one tileset"
+    layer_ids = {layer["id"] for ts in tilesets for layer in (ts.get("layers") or [])}
+    assert "foo" in layer_ids
+    assert "contacts" not in layer_ids
+    assert "anchor" not in layer_ids
+
+
+def test_tiles_endpoint_no_renderable_vars_returns_422():
+    """If every data variable fails grid detection, the listing should 422."""
+    dataset = xr.Dataset(
+        {
+            "contacts": xr.DataArray(
+                np.zeros((6, 4), dtype=np.int32), dims=("nf", "ncontact")
+            ),
+        },
+        coords={"nf": np.arange(6), "ncontact": np.arange(4)},
+    )
+    rest = xpublish.Rest({"ds": dataset}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+    response = client.get("/datasets/ds/tiles/")
+    assert response.status_code == 422
+    assert "No renderable variables" in response.json()["detail"]

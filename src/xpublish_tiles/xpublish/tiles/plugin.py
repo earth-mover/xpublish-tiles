@@ -145,8 +145,18 @@ class TilesPlugin(Plugin):
                 if dataset[var_name_].ndim == 0:
                     continue
                 var_name = str(var_name_)
-                extents = await extract_dataset_extents(dataset, var_name)
+                try:
+                    extents = await extract_dataset_extents(dataset, var_name)
+                except Exception as e:
+                    logger.info(f"Skipping non-renderable variable {var_name!r}: {e}")
+                    continue
                 layer_extents[var_name] = extents
+
+            if not layer_extents:
+                raise HTTPException(
+                    status_code=422,
+                    detail="No renderable variables found in dataset.",
+                )
 
             # Create one tileset entry per supported tile matrix set
             supported_tms = get_all_tile_matrix_set_ids()
