@@ -6,17 +6,7 @@
       "description": "Tiles for Dataset in CDB1GlobalGrid projection",
       "layers": [
         {
-          "boundingBox": {
-            "crs": "http://www.opengis.net/def/crs/EPSG/0/4326",
-            "lowerLeft": [
-              -134.121428,
-              21.122193
-            ],
-            "upperRight": [
-              -60.891245,
-              52.628703
-            ]
-          },
+          "boundingBox": "<elided>",
           "crs": "http://www.opengis.net/def/crs/EPSG/0/4326",
           "dataType": "coverage",
           "description": "",
@@ -1217,17 +1207,7 @@
       "description": "Tiles for Dataset in CanadianNAD83_LCC projection",
       "layers": [
         {
-          "boundingBox": {
-            "crs": "http://www.opengis.net/def/crs/EPSG/0/3978",
-            "lowerLeft": [
-              -3385881.77176,
-              -2949564.195126
-            ],
-            "upperRight": [
-              2803456.710637,
-              747851.885216
-            ]
-          },
+          "boundingBox": "<elided>",
           "crs": "http://www.opengis.net/def/crs/EPSG/0/3978",
           "dataType": "coverage",
           "description": "",
@@ -2386,17 +2366,7 @@
       "description": "Tiles for Dataset in EuropeanETRS89_LAEAQuad projection",
       "layers": [
         {
-          "boundingBox": {
-            "crs": "http://www.opengis.net/def/crs/EPSG/0/3035",
-            "lowerLeft": [
-              -3016595.498637,
-              4159992.112042
-            ],
-            "upperRight": [
-              1136335.979321,
-              10433600.634621
-            ]
-          },
+          "boundingBox": "<elided>",
           "crs": "http://www.opengis.net/def/crs/EPSG/0/3035",
           "dataType": "coverage",
           "description": "",
@@ -3485,17 +3455,7 @@
       "description": "Tiles for Dataset in GNOSISGlobalGrid projection",
       "layers": [
         {
-          "boundingBox": {
-            "crs": "http://www.opengis.net/def/crs/EPSG/0/4326",
-            "lowerLeft": [
-              -134.121428,
-              21.122193
-            ],
-            "upperRight": [
-              -60.891245,
-              52.628703
-            ]
-          },
+          "boundingBox": "<elided>",
           "crs": "http://www.opengis.net/def/crs/EPSG/0/4326",
           "dataType": "coverage",
           "description": "",
@@ -4675,17 +4635,7 @@
       "description": "Tiles for Dataset in LINZAntarticaMapTilegrid projection",
       "layers": [
         {
-          "boundingBox": {
-            "crs": "urn:ogc:def:crs:EPSG::5482",
-            "lowerLeft": [
-              20466180.950045,
-              -14873399.708602
-            ],
-            "upperRight": [
-              42034283.77577,
-              23714176.491933
-            ]
-          },
+          "boundingBox": "<elided>",
           "crs": "urn:ogc:def:crs:EPSG::5482",
           "dataType": "coverage",
           "description": "",
@@ -5759,17 +5709,7 @@
       "description": "Tiles for Dataset in NZTM2000Quad projection",
       "layers": [
         {
-          "boundingBox": {
-            "crs": "urn:ogc:def:crs:EPSG::2193",
-            "lowerLeft": [
-              5415090.273905,
-              14638268.531243
-            ],
-            "upperRight": [
-              11341956.075411,
-              25237274.883702
-            ]
-          },
+          "boundingBox": "<elided>",
           "crs": "urn:ogc:def:crs:EPSG::2193",
           "dataType": "coverage",
           "description": "",
@@ -6899,17 +6839,7 @@
       "description": "Tiles for Dataset in UPSAntarcticWGS84Quad projection",
       "layers": [
         {
-          "boundingBox": {
-            "crs": "http://www.opengis.net/def/crs/EPSG/0/5042",
-            "lowerLeft": [
-              -35034283.777344,
-              -20714176.492859
-            ],
-            "upperRight": [
-              -13466180.950481,
-              17873399.709249
-            ]
-          },
+          "boundingBox": "<elided>",
           "crs": "http://www.opengis.net/def/crs/EPSG/0/5042",
           "dataType": "coverage",
           "description": "",
@@ -8061,17 +7991,7 @@
       "description": "Tiles for Dataset in UPSArcticWGS84Quad projection",
       "layers": [
         {
-          "boundingBox": {
-            "crs": "http://www.opengis.net/def/crs/EPSG/0/5041",
-            "lowerLeft": [
-              -6289165.630421,
-              -643732.52193
-            ],
-            "upperRight": [
-              -1513812.687222,
-              6696509.807643
-            ]
-          },
+          "boundingBox": "<elided>",
           "crs": "http://www.opengis.net/def/crs/EPSG/0/5041",
           "dataType": "coverage",
           "description": "",
@@ -9223,17 +9143,7 @@
       "description": "Tiles for Dataset in UTM31WGS84Quad projection",
       "layers": [
         {
-          "boundingBox": {
-            "crs": "http://www.opengis.net/def/crs/EPSG/0/32631",
-            "lowerLeft": [
-              -9441231.423262,
-              6323183.303272
-            ],
-            "upperRight": [
-              -2649650.425241,
-              16277408.610477
-            ]
-          },
+          "boundingBox": "<elided>",
           "crs": "http://www.opengis.net/def/crs/EPSG/0/32631",
           "dataType": "coverage",
           "description": "",
@@ -10378,17 +10288,7 @@
       "description": "Tiles for Dataset in WGS1984Quad projection",
       "layers": [
         {
-          "boundingBox": {
-            "crs": "http://www.opengis.net/def/crs/EPSG/0/4326",
-            "lowerLeft": [
-              -134.121428,
-              21.122193
-            ],
-            "upperRight": [
-              -60.891245,
-              52.628703
-            ]
-          },
+          "boundingBox": "<elided>",
           "crs": "http://www.opengis.net/def/crs/EPSG/0/4326",
           "dataType": "coverage",
           "description": "",
@@ -11533,17 +11433,7 @@
       "description": "Tiles for Dataset in WebMercatorQuad projection",
       "layers": [
         {
-          "boundingBox": {
-            "crs": "http://www.opengis.net/def/crs/EPSG/0/3857",
-            "lowerLeft": [
-              -14930329.062342,
-              2406454.741824
-            ],
-            "upperRight": [
-              -6778382.335928,
-              6914611.244914
-            ]
-          },
+          "boundingBox": "<elided>",
           "crs": "http://www.opengis.net/def/crs/EPSG/0/3857",
           "dataType": "coverage",
           "description": "",
@@ -12695,17 +12585,7 @@
       "description": "Tiles for Dataset in WorldCRS84Quad projection",
       "layers": [
         {
-          "boundingBox": {
-            "crs": "http://www.opengis.net/def/crs/OGC/1.3/CRS84",
-            "lowerLeft": [
-              -134.121428,
-              21.122193
-            ],
-            "upperRight": [
-              -60.891245,
-              52.628703
-            ]
-          },
+          "boundingBox": "<elided>",
           "crs": "http://www.opengis.net/def/crs/OGC/1.3/CRS84",
           "dataType": "coverage",
           "description": "",
@@ -13850,17 +13730,7 @@
       "description": "Tiles for Dataset in WorldMercatorWGS84Quad projection",
       "layers": [
         {
-          "boundingBox": {
-            "crs": "http://www.opengis.net/def/crs/EPSG/0/3395",
-            "lowerLeft": [
-              -14930329.062342,
-              2391063.826678
-            ],
-            "upperRight": [
-              -6778382.335928,
-              6880630.657492
-            ]
-          },
+          "boundingBox": "<elided>",
           "crs": "http://www.opengis.net/def/crs/EPSG/0/3395",
           "dataType": "coverage",
           "description": "",

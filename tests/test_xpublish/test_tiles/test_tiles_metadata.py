@@ -866,12 +866,17 @@ def test_healpix_tileset_metadata_styles():
 def _normalize_for_snapshot(obj):
     """Normalize a /tiles/ response so snapshots are stable across platforms.
 
-    Why: float values from coordinate transforms differ in their last bits
-    between macOS and Linux, and ``RenderRegistry.all()`` iterates entry
-    points in load order, which is also platform-dependent.
+    Why: ``RenderRegistry.all()`` iterates entry points in load order, which
+    differs across platforms. And bounding-box values come from pyproj
+    reprojections that diverge between PROJ versions on macOS vs Linux —
+    by megameters when reprojecting global data into regional CRSes (UTM,
+    LAEA, polar) — so we elide them and keep the rest of the structure.
     """
     if isinstance(obj, dict):
-        return {k: _normalize_for_snapshot(v) for k, v in obj.items()}
+        return {
+            k: ("<elided>" if k == "boundingBox" else _normalize_for_snapshot(v))
+            for k, v in obj.items()
+        }
     if isinstance(obj, list):
         items = [_normalize_for_snapshot(x) for x in obj]
         if items and all(isinstance(x, dict) and "id" in x for x in items):
