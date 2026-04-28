@@ -895,10 +895,13 @@ def _summarize_tilesets_list(data: dict) -> dict:
 )
 def test_tiles_endpoint_snapshot(fixture, snapshot):
     """Snapshot the /tiles/ endpoint response across diverse grid types."""
+    # Publish under the fixture's name so each parametrized run gets a unique
+    # ``_xpublish_id`` — otherwise the grid cache (keyed on xpublish_id +
+    # dim names) returns the previous fixture's grid for this one.
     ds = fixture.create()
-    rest = xpublish.Rest({"ds": ds}, plugins={"tiles": TilesPlugin()})
+    rest = xpublish.Rest({fixture.name: ds}, plugins={"tiles": TilesPlugin()})
     client = TestClient(rest.app)
-    response = client.get("/datasets/ds/tiles/")
+    response = client.get(f"/datasets/{fixture.name}/tiles/")
     assert response.status_code == 200
     summary = _summarize_tilesets_list(response.json())
     assert summary == snapshot.use_extension(JSONSnapshotExtension)
