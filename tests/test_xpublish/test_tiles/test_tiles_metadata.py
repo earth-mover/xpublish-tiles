@@ -821,12 +821,17 @@ def test_allowed_styles_healpix_only_polygons():
         assert style_ids == {"polygons"}
 
 
-def test_allowed_styles_cubed_sphere_only_polygons():
-    """Cubed-sphere (Faceted) datasets must advertise only the polygons style."""
+async def test_cubed_sphere_metadata():
+    """Cubed-sphere (Faceted) datasets must advertise only the polygons style,
+    and must not expose ``face_dim`` as a custom dimension extent."""
     ds = CUBED_SPHERE.create()
     assert allowed_styles(ds) == ["polygons"]
     style_ids = {s.id.split("/")[0] for s in get_styles(ds)}
     assert style_ids == {"polygons"}
+
+    extents = await extract_dataset_extents(ds, "foo")
+    assert "nf" not in extents
+    assert len(extents) == 0
 
 
 def test_allowed_styles_default_grid():
@@ -858,30 +863,6 @@ def test_healpix_tileset_metadata_styles():
     assert style_ids == {"polygons"}
 
 
-def _summarize_tilesets_list(data: dict) -> dict:
-    """Reduce a /tiles/ response to the stable, grid-relevant bits."""
-    tilesets = data.get("tilesets", [])
-    # Styles are defined at the root level on every tileset; they're identical
-    # across TMS entries. Pull from the first tileset.
-    first_styles = tilesets[0].get("styles", []) if tilesets else []
-    layers = (tilesets[0].get("layers") if tilesets else None) or []
-    layer_ids: list[str] = [layer["id"] for layer in layers]
-    return {
-        "tms_ids": sorted(
-            {
-                link["title"].replace("Tileset metadata for ", "")
-                for ts in tilesets
-                for link in ts.get("links", [])
-                if link.get("rel") == "self"
-            }
-        ),
-        "tileset_count": len(tilesets),
-        "layer_ids": sorted(set(layer_ids)),
-        "style_ids": sorted({s["id"] for s in first_styles}),
-        "style_titles": sorted({s["title"] for s in first_styles}),
-    }
-
-
 @pytest.mark.parametrize(
     "fixture",
     [
@@ -900,8 +881,7 @@ def test_tiles_endpoint_snapshot(fixture, snapshot):
     client = TestClient(rest.app)
     response = client.get("/datasets/ds/tiles/")
     assert response.status_code == 200
-    summary = _summarize_tilesets_list(response.json())
-    assert summary == snapshot.use_extension(JSONSnapshotExtension)
+    assert response.json() == snapshot.use_extension(JSONSnapshotExtension)
 
 
 def test_tiles_endpoint_skips_non_spatial_data_vars():
