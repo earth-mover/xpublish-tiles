@@ -863,6 +863,25 @@ def test_healpix_tileset_metadata_styles():
     assert style_ids == {"polygons"}
 
 
+def _normalize_for_snapshot(obj):
+    """Normalize a /tiles/ response so snapshots are stable across platforms.
+
+    Why: float values from coordinate transforms differ in their last bits
+    between macOS and Linux, and ``RenderRegistry.all()`` iterates entry
+    points in load order, which is also platform-dependent.
+    """
+    if isinstance(obj, dict):
+        return {k: _normalize_for_snapshot(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        items = [_normalize_for_snapshot(x) for x in obj]
+        if items and all(isinstance(x, dict) and "id" in x for x in items):
+            items.sort(key=lambda x: x["id"])
+        return items
+    if isinstance(obj, float):
+        return round(obj, 6)
+    return obj
+
+
 @pytest.mark.parametrize(
     "fixture",
     [
@@ -881,7 +900,9 @@ def test_tiles_endpoint_snapshot(fixture, snapshot):
     client = TestClient(rest.app)
     response = client.get("/datasets/ds/tiles/")
     assert response.status_code == 200
-    assert response.json() == snapshot.use_extension(JSONSnapshotExtension)
+    assert _normalize_for_snapshot(response.json()) == snapshot.use_extension(
+        JSONSnapshotExtension
+    )
 
 
 def test_tiles_endpoint_skips_non_spatial_data_vars():

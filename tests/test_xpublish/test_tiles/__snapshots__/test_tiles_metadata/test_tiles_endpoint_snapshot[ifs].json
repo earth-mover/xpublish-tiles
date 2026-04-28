@@ -70,11 +70,6 @@
       ],
       "styles": [
         {
-          "description": "Default polygons rendering (alias for viridis)",
-          "id": "polygons/default",
-          "title": "Polygons - Default (Viridis)"
-        },
-        {
           "description": "Polygons rendering using Accent colormap",
           "id": "polygons/Accent",
           "title": "Polygons - Accent"
@@ -325,6 +320,16 @@
           "title": "Polygons - Cubehelix"
         },
         {
+          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "polygons/custom",
+          "title": "Polygons - Custom"
+        },
+        {
+          "description": "Default polygons rendering (alias for viridis)",
+          "id": "polygons/default",
+          "title": "Polygons - Default (Viridis)"
+        },
+        {
           "description": "Polygons rendering using flag colormap",
           "id": "polygons/flag",
           "title": "Polygons - Flag"
@@ -523,16 +528,6 @@
           "description": "Polygons rendering using winter colormap",
           "id": "polygons/winter",
           "title": "Polygons - Winter"
-        },
-        {
-          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "polygons/custom",
-          "title": "Polygons - Custom"
-        },
-        {
-          "description": "Default raster rendering (alias for viridis)",
-          "id": "raster/default",
-          "title": "Raster - Default (Viridis)"
         },
         {
           "description": "Raster rendering using Accent colormap",
@@ -785,6 +780,16 @@
           "title": "Raster - Cubehelix"
         },
         {
+          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "raster/custom",
+          "title": "Raster - Custom"
+        },
+        {
+          "description": "Default raster rendering (alias for viridis)",
+          "id": "raster/default",
+          "title": "Raster - Default (Viridis)"
+        },
+        {
           "description": "Raster rendering using flag colormap",
           "id": "raster/flag",
           "title": "Raster - Flag"
@@ -983,11 +988,6 @@
           "description": "Raster rendering using winter colormap",
           "id": "raster/winter",
           "title": "Raster - Winter"
-        },
-        {
-          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "raster/custom",
-          "title": "Raster - Custom"
         }
       ],
       "tileMatrixSetLimits": [
@@ -1221,12 +1221,12 @@
           "boundingBox": {
             "crs": "http://www.opengis.net/def/crs/EPSG/0/3978",
             "lowerLeft": [
-              -116951416.94641778,
-              -23278434.758641493
+              -116951416.946418,
+              -23278434.758641
             ],
             "upperRight": [
               0.0,
-              4654175.264342438
+              4654175.264342
             ]
           },
           "crs": "http://www.opengis.net/def/crs/EPSG/0/3978",
@@ -1281,11 +1281,6 @@
         "image/jpeg"
       ],
       "styles": [
-        {
-          "description": "Default polygons rendering (alias for viridis)",
-          "id": "polygons/default",
-          "title": "Polygons - Default (Viridis)"
-        },
         {
           "description": "Polygons rendering using Accent colormap",
           "id": "polygons/Accent",
@@ -1537,6 +1532,16 @@
           "title": "Polygons - Cubehelix"
         },
         {
+          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "polygons/custom",
+          "title": "Polygons - Custom"
+        },
+        {
+          "description": "Default polygons rendering (alias for viridis)",
+          "id": "polygons/default",
+          "title": "Polygons - Default (Viridis)"
+        },
+        {
           "description": "Polygons rendering using flag colormap",
           "id": "polygons/flag",
           "title": "Polygons - Flag"
@@ -1735,16 +1740,6 @@
           "description": "Polygons rendering using winter colormap",
           "id": "polygons/winter",
           "title": "Polygons - Winter"
-        },
-        {
-          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "polygons/custom",
-          "title": "Polygons - Custom"
-        },
-        {
-          "description": "Default raster rendering (alias for viridis)",
-          "id": "raster/default",
-          "title": "Raster - Default (Viridis)"
         },
         {
           "description": "Raster rendering using Accent colormap",
@@ -1997,6 +1992,16 @@
           "title": "Raster - Cubehelix"
         },
         {
+          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "raster/custom",
+          "title": "Raster - Custom"
+        },
+        {
+          "description": "Default raster rendering (alias for viridis)",
+          "id": "raster/default",
+          "title": "Raster - Default (Viridis)"
+        },
+        {
           "description": "Raster rendering using flag colormap",
           "id": "raster/flag",
           "title": "Raster - Flag"
@@ -2195,11 +2200,6 @@
           "description": "Raster rendering using winter colormap",
           "id": "raster/winter",
           "title": "Raster - Winter"
-        },
-        {
-          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "raster/custom",
-          "title": "Raster - Custom"
         }
       ],
       "tileMatrixSetLimits": [
@@ -2392,11 +2392,11 @@
             "crs": "http://www.opengis.net/def/crs/EPSG/0/3035",
             "lowerLeft": [
               4321000.0,
-              -9183455.648083963
+              -9183455.648084
             ],
             "upperRight": [
-              16227805.585781647,
-              14856987.712334659
+              16227805.585782,
+              14856987.712335
             ]
           },
           "crs": "http://www.opengis.net/def/crs/EPSG/0/3035",
@@ -2451,11 +2451,6 @@
         "image/jpeg"
       ],
       "styles": [
-        {
-          "description": "Default polygons rendering (alias for viridis)",
-          "id": "polygons/default",
-          "title": "Polygons - Default (Viridis)"
-        },
         {
           "description": "Polygons rendering using Accent colormap",
           "id": "polygons/Accent",
@@ -2707,6 +2702,16 @@
           "title": "Polygons - Cubehelix"
         },
         {
+          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "polygons/custom",
+          "title": "Polygons - Custom"
+        },
+        {
+          "description": "Default polygons rendering (alias for viridis)",
+          "id": "polygons/default",
+          "title": "Polygons - Default (Viridis)"
+        },
+        {
           "description": "Polygons rendering using flag colormap",
           "id": "polygons/flag",
           "title": "Polygons - Flag"
@@ -2905,16 +2910,6 @@
           "description": "Polygons rendering using winter colormap",
           "id": "polygons/winter",
           "title": "Polygons - Winter"
-        },
-        {
-          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "polygons/custom",
-          "title": "Polygons - Custom"
-        },
-        {
-          "description": "Default raster rendering (alias for viridis)",
-          "id": "raster/default",
-          "title": "Raster - Default (Viridis)"
         },
         {
           "description": "Raster rendering using Accent colormap",
@@ -3167,6 +3162,16 @@
           "title": "Raster - Cubehelix"
         },
         {
+          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "raster/custom",
+          "title": "Raster - Custom"
+        },
+        {
+          "description": "Default raster rendering (alias for viridis)",
+          "id": "raster/default",
+          "title": "Raster - Default (Viridis)"
+        },
+        {
           "description": "Raster rendering using flag colormap",
           "id": "raster/flag",
           "title": "Raster - Flag"
@@ -3365,11 +3370,6 @@
           "description": "Raster rendering using winter colormap",
           "id": "raster/winter",
           "title": "Raster - Winter"
-        },
-        {
-          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "raster/custom",
-          "title": "Raster - Custom"
         }
       ],
       "tileMatrixSetLimits": [
@@ -3552,11 +3552,6 @@
       ],
       "styles": [
         {
-          "description": "Default polygons rendering (alias for viridis)",
-          "id": "polygons/default",
-          "title": "Polygons - Default (Viridis)"
-        },
-        {
           "description": "Polygons rendering using Accent colormap",
           "id": "polygons/Accent",
           "title": "Polygons - Accent"
@@ -3807,6 +3802,16 @@
           "title": "Polygons - Cubehelix"
         },
         {
+          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "polygons/custom",
+          "title": "Polygons - Custom"
+        },
+        {
+          "description": "Default polygons rendering (alias for viridis)",
+          "id": "polygons/default",
+          "title": "Polygons - Default (Viridis)"
+        },
+        {
           "description": "Polygons rendering using flag colormap",
           "id": "polygons/flag",
           "title": "Polygons - Flag"
@@ -4005,16 +4010,6 @@
           "description": "Polygons rendering using winter colormap",
           "id": "polygons/winter",
           "title": "Polygons - Winter"
-        },
-        {
-          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "polygons/custom",
-          "title": "Polygons - Custom"
-        },
-        {
-          "description": "Default raster rendering (alias for viridis)",
-          "id": "raster/default",
-          "title": "Raster - Default (Viridis)"
         },
         {
           "description": "Raster rendering using Accent colormap",
@@ -4267,6 +4262,16 @@
           "title": "Raster - Cubehelix"
         },
         {
+          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "raster/custom",
+          "title": "Raster - Custom"
+        },
+        {
+          "description": "Default raster rendering (alias for viridis)",
+          "id": "raster/default",
+          "title": "Raster - Default (Viridis)"
+        },
+        {
           "description": "Raster rendering using flag colormap",
           "id": "raster/flag",
           "title": "Raster - Flag"
@@ -4465,11 +4470,6 @@
           "description": "Raster rendering using winter colormap",
           "id": "raster/winter",
           "title": "Raster - Winter"
-        },
-        {
-          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "raster/custom",
-          "title": "Raster - Custom"
         }
       ],
       "tileMatrixSetLimits": [
@@ -4743,11 +4743,6 @@
       ],
       "styles": [
         {
-          "description": "Default polygons rendering (alias for viridis)",
-          "id": "polygons/default",
-          "title": "Polygons - Default (Viridis)"
-        },
-        {
           "description": "Polygons rendering using Accent colormap",
           "id": "polygons/Accent",
           "title": "Polygons - Accent"
@@ -4998,6 +4993,16 @@
           "title": "Polygons - Cubehelix"
         },
         {
+          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "polygons/custom",
+          "title": "Polygons - Custom"
+        },
+        {
+          "description": "Default polygons rendering (alias for viridis)",
+          "id": "polygons/default",
+          "title": "Polygons - Default (Viridis)"
+        },
+        {
           "description": "Polygons rendering using flag colormap",
           "id": "polygons/flag",
           "title": "Polygons - Flag"
@@ -5196,16 +5201,6 @@
           "description": "Polygons rendering using winter colormap",
           "id": "polygons/winter",
           "title": "Polygons - Winter"
-        },
-        {
-          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "polygons/custom",
-          "title": "Polygons - Custom"
-        },
-        {
-          "description": "Default raster rendering (alias for viridis)",
-          "id": "raster/default",
-          "title": "Raster - Default (Viridis)"
         },
         {
           "description": "Raster rendering using Accent colormap",
@@ -5458,6 +5453,16 @@
           "title": "Raster - Cubehelix"
         },
         {
+          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "raster/custom",
+          "title": "Raster - Custom"
+        },
+        {
+          "description": "Default raster rendering (alias for viridis)",
+          "id": "raster/default",
+          "title": "Raster - Default (Viridis)"
+        },
+        {
           "description": "Raster rendering using flag colormap",
           "id": "raster/flag",
           "title": "Raster - Flag"
@@ -5656,11 +5661,6 @@
           "description": "Raster rendering using winter colormap",
           "id": "raster/winter",
           "title": "Raster - Winter"
-        },
-        {
-          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "raster/custom",
-          "title": "Raster - Custom"
         }
       ],
       "tileMatrixSetLimits": [
@@ -5767,12 +5767,12 @@
           "boundingBox": {
             "crs": "urn:ogc:def:crs:EPSG::2193",
             "lowerLeft": [
-              1599999.9999999995,
-              2035.0570612289011
+              1600000.0,
+              2035.057061
             ],
             "upperRight": [
-              2380882.9391592243,
-              19997964.94293877
+              2380882.939159,
+              19997964.942939
             ]
           },
           "crs": "urn:ogc:def:crs:EPSG::2193",
@@ -5827,11 +5827,6 @@
         "image/jpeg"
       ],
       "styles": [
-        {
-          "description": "Default polygons rendering (alias for viridis)",
-          "id": "polygons/default",
-          "title": "Polygons - Default (Viridis)"
-        },
         {
           "description": "Polygons rendering using Accent colormap",
           "id": "polygons/Accent",
@@ -6083,6 +6078,16 @@
           "title": "Polygons - Cubehelix"
         },
         {
+          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "polygons/custom",
+          "title": "Polygons - Custom"
+        },
+        {
+          "description": "Default polygons rendering (alias for viridis)",
+          "id": "polygons/default",
+          "title": "Polygons - Default (Viridis)"
+        },
+        {
           "description": "Polygons rendering using flag colormap",
           "id": "polygons/flag",
           "title": "Polygons - Flag"
@@ -6281,16 +6286,6 @@
           "description": "Polygons rendering using winter colormap",
           "id": "polygons/winter",
           "title": "Polygons - Winter"
-        },
-        {
-          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "polygons/custom",
-          "title": "Polygons - Custom"
-        },
-        {
-          "description": "Default raster rendering (alias for viridis)",
-          "id": "raster/default",
-          "title": "Raster - Default (Viridis)"
         },
         {
           "description": "Raster rendering using Accent colormap",
@@ -6543,6 +6538,16 @@
           "title": "Raster - Cubehelix"
         },
         {
+          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "raster/custom",
+          "title": "Raster - Custom"
+        },
+        {
+          "description": "Default raster rendering (alias for viridis)",
+          "id": "raster/default",
+          "title": "Raster - Default (Viridis)"
+        },
+        {
           "description": "Raster rendering using flag colormap",
           "id": "raster/flag",
           "title": "Raster - Flag"
@@ -6741,11 +6746,6 @@
           "description": "Raster rendering using winter colormap",
           "id": "raster/winter",
           "title": "Raster - Winter"
-        },
-        {
-          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "raster/custom",
-          "title": "Raster - Custom"
         }
       ],
       "tileMatrixSetLimits": [
@@ -6969,11 +6969,6 @@
       ],
       "styles": [
         {
-          "description": "Default polygons rendering (alias for viridis)",
-          "id": "polygons/default",
-          "title": "Polygons - Default (Viridis)"
-        },
-        {
           "description": "Polygons rendering using Accent colormap",
           "id": "polygons/Accent",
           "title": "Polygons - Accent"
@@ -7224,6 +7219,16 @@
           "title": "Polygons - Cubehelix"
         },
         {
+          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "polygons/custom",
+          "title": "Polygons - Custom"
+        },
+        {
+          "description": "Default polygons rendering (alias for viridis)",
+          "id": "polygons/default",
+          "title": "Polygons - Default (Viridis)"
+        },
+        {
           "description": "Polygons rendering using flag colormap",
           "id": "polygons/flag",
           "title": "Polygons - Flag"
@@ -7422,16 +7427,6 @@
           "description": "Polygons rendering using winter colormap",
           "id": "polygons/winter",
           "title": "Polygons - Winter"
-        },
-        {
-          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "polygons/custom",
-          "title": "Polygons - Custom"
-        },
-        {
-          "description": "Default raster rendering (alias for viridis)",
-          "id": "raster/default",
-          "title": "Raster - Default (Viridis)"
         },
         {
           "description": "Raster rendering using Accent colormap",
@@ -7684,6 +7679,16 @@
           "title": "Raster - Cubehelix"
         },
         {
+          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "raster/custom",
+          "title": "Raster - Custom"
+        },
+        {
+          "description": "Default raster rendering (alias for viridis)",
+          "id": "raster/default",
+          "title": "Raster - Default (Viridis)"
+        },
+        {
           "description": "Raster rendering using flag colormap",
           "id": "raster/flag",
           "title": "Raster - Flag"
@@ -7882,11 +7887,6 @@
           "description": "Raster rendering using winter colormap",
           "id": "raster/winter",
           "title": "Raster - Winter"
-        },
-        {
-          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "raster/custom",
-          "title": "Raster - Custom"
         }
       ],
       "tileMatrixSetLimits": [
@@ -8132,11 +8132,6 @@
       ],
       "styles": [
         {
-          "description": "Default polygons rendering (alias for viridis)",
-          "id": "polygons/default",
-          "title": "Polygons - Default (Viridis)"
-        },
-        {
           "description": "Polygons rendering using Accent colormap",
           "id": "polygons/Accent",
           "title": "Polygons - Accent"
@@ -8387,6 +8382,16 @@
           "title": "Polygons - Cubehelix"
         },
         {
+          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "polygons/custom",
+          "title": "Polygons - Custom"
+        },
+        {
+          "description": "Default polygons rendering (alias for viridis)",
+          "id": "polygons/default",
+          "title": "Polygons - Default (Viridis)"
+        },
+        {
           "description": "Polygons rendering using flag colormap",
           "id": "polygons/flag",
           "title": "Polygons - Flag"
@@ -8585,16 +8590,6 @@
           "description": "Polygons rendering using winter colormap",
           "id": "polygons/winter",
           "title": "Polygons - Winter"
-        },
-        {
-          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "polygons/custom",
-          "title": "Polygons - Custom"
-        },
-        {
-          "description": "Default raster rendering (alias for viridis)",
-          "id": "raster/default",
-          "title": "Raster - Default (Viridis)"
         },
         {
           "description": "Raster rendering using Accent colormap",
@@ -8847,6 +8842,16 @@
           "title": "Raster - Cubehelix"
         },
         {
+          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "raster/custom",
+          "title": "Raster - Custom"
+        },
+        {
+          "description": "Default raster rendering (alias for viridis)",
+          "id": "raster/default",
+          "title": "Raster - Default (Viridis)"
+        },
+        {
           "description": "Raster rendering using flag colormap",
           "id": "raster/flag",
           "title": "Raster - Flag"
@@ -9045,11 +9050,6 @@
           "description": "Raster rendering using winter colormap",
           "id": "raster/winter",
           "title": "Raster - Winter"
-        },
-        {
-          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "raster/custom",
-          "title": "Raster - Custom"
         }
       ],
       "tileMatrixSetLimits": [
@@ -9234,12 +9234,12 @@
           "boundingBox": {
             "crs": "http://www.opengis.net/def/crs/EPSG/0/32631",
             "lowerLeft": [
-              499999.9999999996,
-              -19995929.886041995
+              500000.0,
+              -19995929.886042
             ],
             "upperRight": [
-              833978.5569194631,
-              19995929.886041995
+              833978.556919,
+              19995929.886042
             ]
           },
           "crs": "http://www.opengis.net/def/crs/EPSG/0/32631",
@@ -9294,11 +9294,6 @@
         "image/jpeg"
       ],
       "styles": [
-        {
-          "description": "Default polygons rendering (alias for viridis)",
-          "id": "polygons/default",
-          "title": "Polygons - Default (Viridis)"
-        },
         {
           "description": "Polygons rendering using Accent colormap",
           "id": "polygons/Accent",
@@ -9550,6 +9545,16 @@
           "title": "Polygons - Cubehelix"
         },
         {
+          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "polygons/custom",
+          "title": "Polygons - Custom"
+        },
+        {
+          "description": "Default polygons rendering (alias for viridis)",
+          "id": "polygons/default",
+          "title": "Polygons - Default (Viridis)"
+        },
+        {
           "description": "Polygons rendering using flag colormap",
           "id": "polygons/flag",
           "title": "Polygons - Flag"
@@ -9748,16 +9753,6 @@
           "description": "Polygons rendering using winter colormap",
           "id": "polygons/winter",
           "title": "Polygons - Winter"
-        },
-        {
-          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "polygons/custom",
-          "title": "Polygons - Custom"
-        },
-        {
-          "description": "Default raster rendering (alias for viridis)",
-          "id": "raster/default",
-          "title": "Raster - Default (Viridis)"
         },
         {
           "description": "Raster rendering using Accent colormap",
@@ -10010,6 +10005,16 @@
           "title": "Raster - Cubehelix"
         },
         {
+          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "raster/custom",
+          "title": "Raster - Custom"
+        },
+        {
+          "description": "Default raster rendering (alias for viridis)",
+          "id": "raster/default",
+          "title": "Raster - Default (Viridis)"
+        },
+        {
           "description": "Raster rendering using flag colormap",
           "id": "raster/flag",
           "title": "Raster - Flag"
@@ -10208,11 +10213,6 @@
           "description": "Raster rendering using winter colormap",
           "id": "raster/winter",
           "title": "Raster - Winter"
-        },
-        {
-          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "raster/custom",
-          "title": "Raster - Custom"
         }
       ],
       "tileMatrixSetLimits": [
@@ -10451,11 +10451,6 @@
       ],
       "styles": [
         {
-          "description": "Default polygons rendering (alias for viridis)",
-          "id": "polygons/default",
-          "title": "Polygons - Default (Viridis)"
-        },
-        {
           "description": "Polygons rendering using Accent colormap",
           "id": "polygons/Accent",
           "title": "Polygons - Accent"
@@ -10706,6 +10701,16 @@
           "title": "Polygons - Cubehelix"
         },
         {
+          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "polygons/custom",
+          "title": "Polygons - Custom"
+        },
+        {
+          "description": "Default polygons rendering (alias for viridis)",
+          "id": "polygons/default",
+          "title": "Polygons - Default (Viridis)"
+        },
+        {
           "description": "Polygons rendering using flag colormap",
           "id": "polygons/flag",
           "title": "Polygons - Flag"
@@ -10904,16 +10909,6 @@
           "description": "Polygons rendering using winter colormap",
           "id": "polygons/winter",
           "title": "Polygons - Winter"
-        },
-        {
-          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "polygons/custom",
-          "title": "Polygons - Custom"
-        },
-        {
-          "description": "Default raster rendering (alias for viridis)",
-          "id": "raster/default",
-          "title": "Raster - Default (Viridis)"
         },
         {
           "description": "Raster rendering using Accent colormap",
@@ -11166,6 +11161,16 @@
           "title": "Raster - Cubehelix"
         },
         {
+          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "raster/custom",
+          "title": "Raster - Custom"
+        },
+        {
+          "description": "Default raster rendering (alias for viridis)",
+          "id": "raster/default",
+          "title": "Raster - Default (Viridis)"
+        },
+        {
           "description": "Raster rendering using flag colormap",
           "id": "raster/flag",
           "title": "Raster - Flag"
@@ -11364,11 +11369,6 @@
           "description": "Raster rendering using winter colormap",
           "id": "raster/winter",
           "title": "Raster - Winter"
-        },
-        {
-          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "raster/custom",
-          "title": "Raster - Custom"
         }
       ],
       "tileMatrixSetLimits": [
@@ -11546,12 +11546,12 @@
           "boundingBox": {
             "crs": "http://www.opengis.net/def/crs/EPSG/0/3857",
             "lowerLeft": [
-              -20037508.342789244,
-              -242528680.94374272
+              -20037508.342789,
+              -242528680.943743
             ],
             "upperRight": [
-              20037508.342789244,
-              242528680.94374272
+              20037508.342789,
+              242528680.943743
             ]
           },
           "crs": "http://www.opengis.net/def/crs/EPSG/0/3857",
@@ -11606,11 +11606,6 @@
         "image/jpeg"
       ],
       "styles": [
-        {
-          "description": "Default polygons rendering (alias for viridis)",
-          "id": "polygons/default",
-          "title": "Polygons - Default (Viridis)"
-        },
         {
           "description": "Polygons rendering using Accent colormap",
           "id": "polygons/Accent",
@@ -11862,6 +11857,16 @@
           "title": "Polygons - Cubehelix"
         },
         {
+          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "polygons/custom",
+          "title": "Polygons - Custom"
+        },
+        {
+          "description": "Default polygons rendering (alias for viridis)",
+          "id": "polygons/default",
+          "title": "Polygons - Default (Viridis)"
+        },
+        {
           "description": "Polygons rendering using flag colormap",
           "id": "polygons/flag",
           "title": "Polygons - Flag"
@@ -12060,16 +12065,6 @@
           "description": "Polygons rendering using winter colormap",
           "id": "polygons/winter",
           "title": "Polygons - Winter"
-        },
-        {
-          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "polygons/custom",
-          "title": "Polygons - Custom"
-        },
-        {
-          "description": "Default raster rendering (alias for viridis)",
-          "id": "raster/default",
-          "title": "Raster - Default (Viridis)"
         },
         {
           "description": "Raster rendering using Accent colormap",
@@ -12322,6 +12317,16 @@
           "title": "Raster - Cubehelix"
         },
         {
+          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "raster/custom",
+          "title": "Raster - Custom"
+        },
+        {
+          "description": "Default raster rendering (alias for viridis)",
+          "id": "raster/default",
+          "title": "Raster - Default (Viridis)"
+        },
+        {
           "description": "Raster rendering using flag colormap",
           "id": "raster/flag",
           "title": "Raster - Flag"
@@ -12520,11 +12525,6 @@
           "description": "Raster rendering using winter colormap",
           "id": "raster/winter",
           "title": "Raster - Winter"
-        },
-        {
-          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "raster/custom",
-          "title": "Raster - Custom"
         }
       ],
       "tileMatrixSetLimits": [
@@ -12770,11 +12770,6 @@
       ],
       "styles": [
         {
-          "description": "Default polygons rendering (alias for viridis)",
-          "id": "polygons/default",
-          "title": "Polygons - Default (Viridis)"
-        },
-        {
           "description": "Polygons rendering using Accent colormap",
           "id": "polygons/Accent",
           "title": "Polygons - Accent"
@@ -13025,6 +13020,16 @@
           "title": "Polygons - Cubehelix"
         },
         {
+          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "polygons/custom",
+          "title": "Polygons - Custom"
+        },
+        {
+          "description": "Default polygons rendering (alias for viridis)",
+          "id": "polygons/default",
+          "title": "Polygons - Default (Viridis)"
+        },
+        {
           "description": "Polygons rendering using flag colormap",
           "id": "polygons/flag",
           "title": "Polygons - Flag"
@@ -13223,16 +13228,6 @@
           "description": "Polygons rendering using winter colormap",
           "id": "polygons/winter",
           "title": "Polygons - Winter"
-        },
-        {
-          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "polygons/custom",
-          "title": "Polygons - Custom"
-        },
-        {
-          "description": "Default raster rendering (alias for viridis)",
-          "id": "raster/default",
-          "title": "Raster - Default (Viridis)"
         },
         {
           "description": "Raster rendering using Accent colormap",
@@ -13485,6 +13480,16 @@
           "title": "Raster - Cubehelix"
         },
         {
+          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "raster/custom",
+          "title": "Raster - Custom"
+        },
+        {
+          "description": "Default raster rendering (alias for viridis)",
+          "id": "raster/default",
+          "title": "Raster - Default (Viridis)"
+        },
+        {
           "description": "Raster rendering using flag colormap",
           "id": "raster/flag",
           "title": "Raster - Flag"
@@ -13683,11 +13688,6 @@
           "description": "Raster rendering using winter colormap",
           "id": "raster/winter",
           "title": "Raster - Winter"
-        },
-        {
-          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "raster/custom",
-          "title": "Raster - Custom"
         }
       ],
       "tileMatrixSetLimits": [
@@ -13865,12 +13865,12 @@
           "boundingBox": {
             "crs": "http://www.opengis.net/def/crs/EPSG/0/3395",
             "lowerLeft": [
-              -20037508.342789244,
-              -242485887.60835055
+              -20037508.342789,
+              -242485887.608351
             ],
             "upperRight": [
-              20037508.342789244,
-              242485887.60835055
+              20037508.342789,
+              242485887.608351
             ]
           },
           "crs": "http://www.opengis.net/def/crs/EPSG/0/3395",
@@ -13925,11 +13925,6 @@
         "image/jpeg"
       ],
       "styles": [
-        {
-          "description": "Default polygons rendering (alias for viridis)",
-          "id": "polygons/default",
-          "title": "Polygons - Default (Viridis)"
-        },
         {
           "description": "Polygons rendering using Accent colormap",
           "id": "polygons/Accent",
@@ -14181,6 +14176,16 @@
           "title": "Polygons - Cubehelix"
         },
         {
+          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "polygons/custom",
+          "title": "Polygons - Custom"
+        },
+        {
+          "description": "Default polygons rendering (alias for viridis)",
+          "id": "polygons/default",
+          "title": "Polygons - Default (Viridis)"
+        },
+        {
           "description": "Polygons rendering using flag colormap",
           "id": "polygons/flag",
           "title": "Polygons - Flag"
@@ -14379,16 +14384,6 @@
           "description": "Polygons rendering using winter colormap",
           "id": "polygons/winter",
           "title": "Polygons - Winter"
-        },
-        {
-          "description": "Polygons rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "polygons/custom",
-          "title": "Polygons - Custom"
-        },
-        {
-          "description": "Default raster rendering (alias for viridis)",
-          "id": "raster/default",
-          "title": "Raster - Default (Viridis)"
         },
         {
           "description": "Raster rendering using Accent colormap",
@@ -14641,6 +14636,16 @@
           "title": "Raster - Cubehelix"
         },
         {
+          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
+          "id": "raster/custom",
+          "title": "Raster - Custom"
+        },
+        {
+          "description": "Default raster rendering (alias for viridis)",
+          "id": "raster/default",
+          "title": "Raster - Default (Viridis)"
+        },
+        {
           "description": "Raster rendering using flag colormap",
           "id": "raster/flag",
           "title": "Raster - Flag"
@@ -14839,11 +14844,6 @@
           "description": "Raster rendering using winter colormap",
           "id": "raster/winter",
           "title": "Raster - Winter"
-        },
-        {
-          "description": "Raster rendering with a custom colormap provided via the 'colormap' parameter",
-          "id": "raster/custom",
-          "title": "Raster - Custom"
         }
       ],
       "tileMatrixSetLimits": [
