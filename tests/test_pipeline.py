@@ -467,6 +467,7 @@ async def test_categorical_out_of_range_values_are_transparent(pytestconfig):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("style", ["raster", "polygons"])
 @pytest.mark.parametrize(
     "abovemaxcolor,belowmincolor",
     [
@@ -476,7 +477,7 @@ async def test_categorical_out_of_range_values_are_transparent(pytestconfig):
     ],
 )
 async def test_continuous_data_with_range_colors(
-    abovemaxcolor, belowmincolor, png_snapshot, pytestconfig
+    abovemaxcolor, belowmincolor, style, png_snapshot, pytestconfig
 ):
     """Test continuous data with abovemaxcolor/belowmincolor parameters.
 
@@ -491,6 +492,7 @@ async def test_continuous_data_with_range_colors(
     query_params = create_query_params(
         tile,
         tms,
+        style=style,
         colorscalerange=(-0.5, 0.5),
         abovemaxcolor=abovemaxcolor,
         belowmincolor=belowmincolor,
