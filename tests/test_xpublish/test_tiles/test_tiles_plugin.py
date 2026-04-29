@@ -759,6 +759,7 @@ def legend_dataset():
                 },
                 attrs={
                     "long_name": "Temperature",
+                    "units": "degC",
                     "valid_min": -3.0,
                     "valid_max": 3.0,
                 },
@@ -801,6 +802,11 @@ def legend_dataset():
             "variables=temperature&style=raster/viridis&colorscalerange=-3,3"
             "&background_color=%23222222&text_color=white",
             id="dark_theme",
+        ),
+        pytest.param(
+            "variables=temperature&style=raster/viridis&colorscalerange=-3,3"
+            "&show_label=false",
+            id="no_label",
         ),
     ],
 )
@@ -882,7 +888,7 @@ def test_legend_endpoint_json_snapshot(legend_dataset, snapshot, params):
     assert r.json() == snapshot.use_extension(JSONSnapshotExtension)
 
 
-def test_legend_endpoint_jpeg_and_flag_colors():
+def test_legend_endpoint_jpeg_and_flag_colors(png_snapshot):
     """JPEG output (with white fallback) + DiscreteData with flag_colors."""
     ds = xr.Dataset(
         {
@@ -904,12 +910,10 @@ def test_legend_endpoint_jpeg_and_flag_colors():
     rest = xpublish.Rest({"d": ds}, plugins={"tiles": TilesPlugin()})
     client = TestClient(rest.app)
 
-    # flag_colors path + JPEG output (no alpha, white background fallback)
     r = client.get("/datasets/d/tiles/legend?variables=land_cover&f=image/jpeg")
     assert r.status_code == 200
     assert r.headers["content-type"] == "image/jpeg"
-    img = Image.open(io.BytesIO(r.content))
-    assert img.mode == "RGB"
+    assert r.content == png_snapshot
 
 
 def test_tilejson_invalid_tile_matrix_set():

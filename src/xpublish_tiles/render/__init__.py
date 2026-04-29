@@ -162,6 +162,7 @@ class Renderer(ABC):
         abovemaxcolor: str | None = None,
         belowmincolor: str | None = None,
         label: str | None = None,
+        units: str | None = None,
         stops: int = 256,
     ) -> dict:
         """Return the legend as a JSON-serializable dict of color stops."""
@@ -461,6 +462,7 @@ class DatashaderRenderer(Renderer):
         abovemaxcolor: str | None = None,
         belowmincolor: str | None = None,
         label: str | None = None,
+        units: str | None = None,
         stops: int = 256,
     ) -> dict:
         if variant == "default":
@@ -491,6 +493,7 @@ class DatashaderRenderer(Renderer):
             return {
                 "type": "continuous",
                 "label": label,
+                "units": units,
                 "variant": variant,
                 "colorscalerange": [float(vmin), float(vmax)],
                 "stops": stops_list,
@@ -517,6 +520,7 @@ class DatashaderRenderer(Renderer):
             return {
                 "type": "discrete",
                 "label": label,
+                "units": units,
                 "items": [
                     {"value": v, "label": m, "color": c}
                     for v, m, c in zip(flag_values, flag_meanings, colors, strict=True)

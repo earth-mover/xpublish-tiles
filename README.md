@@ -111,8 +111,9 @@ Each variable's legend is available at `/tiles/legend`. The endpoint accepts the
 - `width` / `height`: defaults to `100x300` for vertical, `400x100` for horizontal.
 - `background_color`: `transparent` (default), a named color, or hex (`#RRGGBB`/`#RRGGBBAA` plus 3/4-digit shorthand).
 - `text_color`: tick labels, axis label, and outline color. Same accepted formats as `background_color`.
-- `label`: overrides the variable's `long_name` for the axis label.
-- `f` (default `image/png`): set to `application/json` to get a JSON description of the color stops instead of a rendered image, so clients can build their own legends.
+- `label`: overrides the auto-generated label. By default the label is `long_name [units]` (or `name [units]` if no `long_name`), pulled from the variable's CF attributes.
+- `show_label` (default `true`): set to `false` to skip drawing the axis label on the image (useful when the variable's name is too long for the requested size).
+- `f` (default `image/png`): set to `application/json` to get a JSON description of the color stops instead of a rendered image, so clients can build their own legends. The JSON also includes a separate `units` field.
 
 **Examples:**
 ```

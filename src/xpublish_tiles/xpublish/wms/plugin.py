@@ -222,7 +222,7 @@ async def handle_get_legend_graphic(
             colorscalerange=query.colorscalerange,
             colormap=query.colormap,
             vertical=query.vertical,
-            label=label,
+            label=label if query.show_label else None,
             format=query.format,
         )
     except MissingParameterError as e:

@@ -17,5 +17,6 @@
     }
   ],
   "label": "category",
-  "type": "discrete"
+  "type": "discrete",
+  "units": null
 }

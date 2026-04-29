@@ -5,7 +5,7 @@
     -3.0,
     3.0
   ],
-  "label": "Temperature",
+  "label": "Temperature [degC]",
   "stops": [
     {
       "color": "#440154ff",
@@ -1033,5 +1033,6 @@
     }
   ],
   "type": "continuous",
+  "units": "degC",
   "variant": "viridis"
 }

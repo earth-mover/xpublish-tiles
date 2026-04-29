@@ -5,7 +5,7 @@
     0.0,
     1.0
   ],
-  "label": "Temperature",
+  "label": "Temperature [degC]",
   "stops": [
     {
       "color": "#0d0887ff",
@@ -1033,5 +1033,6 @@
     }
   ],
   "type": "continuous",
+  "units": "degC",
   "variant": "plasma"
 }

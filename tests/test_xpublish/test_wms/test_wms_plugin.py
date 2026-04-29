@@ -211,12 +211,32 @@ def test_get_legend_graphic(xpublish_client, png_snapshot):
             "request": "GetLegendGraphic",
             "layer": "air",
             "styles": "raster/viridis",
+            "vertical": "true",
+            "width": 200,
+            "height": 400,
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content == png_snapshot
+
+
+def test_get_legend_graphic_no_label(xpublish_client, png_snapshot):
+    """show_label=false suppresses the axis label."""
+    response = xpublish_client.get(
+        "/datasets/air/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetLegendGraphic",
+            "layer": "air",
+            "styles": "raster/viridis",
+            "show_label": "false",
             "width": 120,
             "height": 300,
         },
     )
     assert response.status_code == 200
-    assert response.headers["content-type"] == "image/png"
     assert response.content == png_snapshot
 
 

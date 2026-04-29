@@ -211,12 +211,12 @@ class TilesPlugin(Plugin):
             from xpublish_tiles.render import RenderRegistry
 
             renderer = RenderRegistry.get(style)()
+            attrs = dataset[var_name].attrs
+            units = attrs.get("units")
             if query.label is not None:
                 label: str | None = query.label
             else:
-                attrs = dataset[var_name].attrs
                 base = attrs.get("long_name") or var_name
-                units = attrs.get("units")
                 label = f"{base} [{units}]" if units else base
 
             if query.f == LegendFormat.JSON:
@@ -229,6 +229,7 @@ class TilesPlugin(Plugin):
                         abovemaxcolor=query.abovemaxcolor,
                         belowmincolor=query.belowmincolor,
                         label=label,
+                        units=units,
                     )
                 except MissingParameterError as e:
                     raise HTTPException(status_code=422, detail=str(e)) from e
@@ -260,7 +261,7 @@ class TilesPlugin(Plugin):
                     abovemaxcolor=query.abovemaxcolor,
                     belowmincolor=query.belowmincolor,
                     vertical=query.vertical,
-                    label=label,
+                    label=label if query.show_label else None,
                     background_color=query.background_color,
                     text_color=query.text_color,
                     format=ImageFormat(query.f.value),

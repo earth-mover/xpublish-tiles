@@ -1653,9 +1653,20 @@ class LegendQuery(BaseModel):
         str | None,
         Field(
             default=None,
-            json_schema_extra={"description": "Optional label for the legend."},
+            json_schema_extra={
+                "description": "Override label for the legend. Defaults to the variable's `long_name` (or its name) plus any `units` attribute, e.g. `Temperature [degK]`.",
+            },
         ),
     ] = None
+    show_label: Annotated[
+        bool,
+        Field(
+            default=True,
+            json_schema_extra={
+                "description": "Whether to draw the axis label on the legend image. Set to `false` to hide it. Has no effect on JSON output (the `label` field is always populated).",
+            },
+        ),
+    ] = True
     background_color: Annotated[
         str | None,
         Field(
@@ -1733,6 +1744,7 @@ LEGEND_FILTERED_QUERY_PARAMS: list[str] = [
     "abovemaxcolor",
     "belowmincolor",
     "label",
+    "show_label",
     "background_color",
     "text_color",
 ]
