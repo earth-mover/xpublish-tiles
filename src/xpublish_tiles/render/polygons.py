@@ -100,3 +100,7 @@ class PolygonsRenderer(DatashaderRenderer):
     @staticmethod
     def style_id() -> str:
         return "polygons"
+
+    @staticmethod
+    def geometry_kind() -> str:
+        return "polygons"

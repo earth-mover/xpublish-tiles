@@ -21,6 +21,13 @@ config = donfig.Config(
             "max_renderable_size": 1024**3,
             "max_pixel_factor": 3,  # coarsen down to this many input grid cells per output pixel
             "max_num_geometries": 1_500_000,  # coarsend down to this many geometries.
+            "mvt_extent": 4096,  # MVT tile-local integer quantization grid (Mapbox/MapLibre default)
+            # Max number of polygon features per axis for vector tiles. The
+            # MVT extent is the *quantization* grid (subpixel precision), not a
+            # feature-count target — emitting one polygon per quantization cell
+            # produces unreadable output at low zoom. 512 ≈ 2× a standard 256px
+            # display tile, which is enough detail without flooding the client.
+            "vector_max_features_per_side": 512,
             "async_load": True,
             "async_load_timeout_per_tile": 20,  # seconds; None to disable
             "num_concurrent_data_loads": 4,  # max concurrent tile data loads; None to disable

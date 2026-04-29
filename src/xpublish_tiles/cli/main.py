@@ -66,7 +66,8 @@ def get_dataset_for_name(
     if name == "global":
         ds = create_global_dataset().assign_attrs(_xpublish_id=name)
     elif name == "air":
-        ds = xr.tutorial.open_dataset("air_temperature").assign_attrs(_xpublish_id=name)
+        # netCDF backend does not support async loading; eagerly load this tiny dataset.
+        ds = xr.tutorial.load_dataset("air_temperature").assign_attrs(_xpublish_id=name)
     elif name in DATASET_LOOKUP:
         ds = DATASET_LOOKUP[name].create().assign_attrs(_xpublish_id=name)
     elif name.startswith("xarray://"):

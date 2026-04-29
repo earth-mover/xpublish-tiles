@@ -111,6 +111,7 @@ wms = "xpublish_tiles.xpublish.wms:WMSPlugin"
 [project.entry-points."xpublish_tiles.renderers"]
 raster = "xpublish_tiles.render.raster:DatashaderRasterRenderer"
 polygons = "xpublish_tiles.render.polygons:PolygonsRenderer"
+vector = "xpublish_tiles.render.vector:VectorTileRenderer"
 
 [project.scripts]
 xpublish-tiles = "xpublish_tiles.cli.main:main"

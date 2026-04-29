@@ -140,6 +140,36 @@ class Renderer(ABC):
         """Return the default variant name."""
         raise NotImplementedError
 
+    @staticmethod
+    def geometry_kind() -> str:
+        """Geometry pipeline kind: 'raster' or 'polygons'.
+
+        Drives branching in ``transform_for_render`` / ``subset_to_bbox``.
+        Vector tiles share the polygon geometry pipeline with the polygons
+        renderer; only the final encoder differs.
+        """
+        return "raster"
+
+    @staticmethod
+    def supported_formats() -> set[ImageFormat]:
+        """Output formats this renderer can encode."""
+        return {ImageFormat.PNG, ImageFormat.JPEG}
+
+    @classmethod
+    def media_type(cls, format: ImageFormat) -> str:
+        """HTTP Content-Type for the given output format."""
+        return {
+            ImageFormat.PNG: "image/png",
+            ImageFormat.JPEG: "image/jpeg",
+            ImageFormat.MVT: "application/vnd.mapbox-vector-tile",
+            ImageFormat.GEOJSON: "application/geo+json",
+        }[format]
+
+    @classmethod
+    def response_headers(cls, format: ImageFormat) -> dict[str, str]:
+        """Extra HTTP headers for the response (e.g. Content-Encoding)."""
+        return {}
+
     @classmethod
     def describe_style(cls, variant: str) -> dict[str, str]:
         """Return metadata for a style/variant combination."""

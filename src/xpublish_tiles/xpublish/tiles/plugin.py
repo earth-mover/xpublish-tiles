@@ -443,12 +443,12 @@ class TilesPlugin(Plugin):
                 bound_logger.error("Exception", exc_info=e)
                 detail = "Internal server error."
 
+            renderer = render_params.get_renderer()
             if status_code != 200:
                 if not query.render_errors:
                     raise HTTPException(status_code=status_code, detail=detail)
                 else:
                     # Use renderer's render_error method for all error types
-                    renderer = render_params.get_renderer()
                     buffer = io.BytesIO()
                     renderer.render_error(
                         buffer=buffer,
@@ -458,6 +458,10 @@ class TilesPlugin(Plugin):
                         format=query.f,
                     )
 
-            return Response(buffer.getbuffer(), media_type="image/png")
+            return Response(
+                buffer.getbuffer(),
+                media_type=renderer.media_type(query.f),
+                headers=renderer.response_headers(query.f),
+            )
 
         return router

@@ -105,14 +105,10 @@ def validate_image_format(v: str | None) -> ImageFormat | None:
     if v is None:
         return None
     try:
-        if "/" in v:
-            _, format_str = v.split("/", 1)
-        else:
-            format_str = v
-        return ImageFormat(format_str.lower())
+        return ImageFormat(v.lower().strip())
     except ValueError as e:
         raise ValueError(
-            f"image format {format_str} is not valid. Options are: {', '.join(ImageFormat.__members__.keys())}",
+            f"format {v!r} is not valid. Options are: {', '.join(ImageFormat.__members__.keys())}",
         ) from e
 
 

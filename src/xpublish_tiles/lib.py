@@ -1009,6 +1009,16 @@ def max_render_shape(
         max_h = int(math.sqrt(max_num / aspect))
         max_w = int(max_h * aspect)
         return (max_w, max_h)
+    if style == "vector":
+        # Vector tiles: width/height are not meaningful. The MVT integer extent
+        # (quantization grid) is unrelated to feature count — we coarsen to a
+        # much smaller per-side budget so each polygon is at least a few display
+        # pixels and the protobuf stays small. Also clamp by the global geometry
+        # budget so a tile can't blow up no matter how dense the source grid.
+        per_side = config.get("vector_max_features_per_side")
+        max_num = config.get("max_num_geometries")
+        side = min(per_side, int(math.sqrt(max_num)))
+        return (side, side)
     pixel_factor = config.get("max_pixel_factor")
     return (pixel_factor * width, pixel_factor * height)
 

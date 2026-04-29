@@ -1,0 +1,294 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>Vector Tiles - xpublish-tiles</title>
+        <meta
+            name="viewport"
+            content="initial-scale=1,maximum-scale=1,user-scalable=no"
+        />
+        <link
+            href="https://unpkg.com/maplibre-gl@5.1/dist/maplibre-gl.css"
+            rel="stylesheet"
+        />
+        <script src="https://unpkg.com/maplibre-gl@5.1/dist/maplibre-gl.js"></script>
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+                font-family: Arial, sans-serif;
+            }
+            #map {
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                width: 100%;
+            }
+            #toggle-container {
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                z-index: 1000;
+            }
+            .toggle-button {
+                padding: 8px 12px;
+                background: white;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12px;
+                margin-bottom: 5px;
+                display: block;
+                width: 200px;
+                text-align: left;
+            }
+            .toggle-button:hover {
+                background: #f0f0f0;
+            }
+            #info {
+                position: absolute;
+                bottom: 10px;
+                left: 10px;
+                z-index: 1000;
+                background: rgba(255, 255, 255, 0.9);
+                padding: 8px 12px;
+                border-radius: 4px;
+                font-size: 12px;
+                max-width: 360px;
+                line-height: 1.4;
+            }
+            #legend {
+                position: absolute;
+                bottom: 10px;
+                right: 10px;
+                z-index: 1000;
+                background: rgba(255, 255, 255, 0.9);
+                padding: 8px 12px;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            #legend .gradient {
+                width: 220px;
+                height: 12px;
+                background: linear-gradient(
+                    to right,
+                    #2c7bb6 0%,
+                    #abd9e9 25%,
+                    #ffffbf 50%,
+                    #fdae61 75%,
+                    #d7191c 100%
+                );
+                border: 1px solid #999;
+            }
+            #legend .units {
+                color: #666;
+                font-size: 11px;
+                margin-bottom: 2px;
+            }
+            #legend .labels {
+                display: flex;
+                justify-content: space-between;
+                margin-top: 2px;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="map"></div>
+        <div id="toggle-container">
+            <button id="fly-to-center" class="toggle-button">Fly to Data</button>
+            <button id="globe-toggle" class="toggle-button">Disable Globe</button>
+            <button id="tile-boundaries-toggle" class="toggle-button">Show Tile Boundaries</button>
+            <button id="outline-toggle" class="toggle-button">Show Cell Outlines</button>
+        </div>
+        <div id="info">
+            Vector tiles served as MVT — each grid cell is a polygon feature
+            with its <code>value</code> as a property. Hover a cell to inspect.<br/>
+            Dataset: synthetic <code>global</code> (variable <code>foo</code>). Run the server with
+            <code>uv run xpublish-tiles --dataset global</code>.
+        </div>
+        <div id="legend">
+            <div id="legend-title">foo</div>
+            <div class="units" id="legend-units">unitless</div>
+            <div class="gradient"></div>
+            <div class="labels">
+                <span id="legend-min">-1</span>
+                <span id="legend-mid">0</span>
+                <span id="legend-max">1</span>
+            </div>
+        </div>
+        <script>
+            // ---- Configuration -------------------------------------------------
+            // Run the server first:
+            //   uv run xpublish-tiles --dataset global
+            //
+            // The "global" synthetic test dataset has a single variable `foo`
+            // on a 1440×720 lat/lon grid in [-1, 1] — same dataset that the
+            // raster + polygons styles are exercised against in the test suite,
+            // so it's the cleanest baseline to verify the vector path against.
+            const SERVER = "http://localhost:8080";
+            const VARIABLE = "foo";
+            const TMS = "WebMercatorQuad";
+            const COLOR_MIN = -1;
+            const COLOR_MAX = 1;
+            // No dimension selectors needed for the synthetic dataset.
+            const TIME = null;
+            const STEP = null;
+
+            // OGC API Tiles URL pattern is {tileMatrix}/{tileRow}/{tileCol} = {z}/{y}/{x}.
+            // MapLibre will substitute these tokens at fetch time.
+            const extraParams = [];
+            if (TIME) extraParams.push(`time=${encodeURIComponent(TIME)}`);
+            if (STEP) extraParams.push(`step=${encodeURIComponent(STEP)}`);
+            const TILE_URL =
+                `${SERVER}/tiles/${TMS}/{z}/{y}/{x}` +
+                `?variables=${VARIABLE}` +
+                `&style=vector/default` +
+                `&f=mvt` +
+                `&colorscalerange=${COLOR_MIN},${COLOR_MAX}` +
+                (extraParams.length ? `&${extraParams.join("&")}` : "");
+
+            document.getElementById("legend-min").textContent = COLOR_MIN;
+            document.getElementById("legend-mid").textContent = Math.round(
+                (COLOR_MIN + COLOR_MAX) / 2,
+            );
+            document.getElementById("legend-max").textContent = COLOR_MAX;
+
+            const map = new maplibregl.Map({
+                container: "map",
+                style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+                // GFS is global; start with the whole disk visible.
+                zoom: 1,
+                center: [0, 20],
+            });
+
+            let globeEnabled = true;
+            map.on("style.load", () => {
+                map.setProjection({ type: globeEnabled ? "globe" : "mercator" });
+            });
+
+            map.on("load", () => {
+                map.addSource("xpublish-vector", {
+                    type: "vector",
+                    tiles: [TILE_URL],
+                    minzoom: 0,
+                    maxzoom: 12,
+                    // OGC API Tiles uses TMS row order (y top-down), which
+                    // matches MapLibre's "xyz" scheme — no flip needed.
+                    scheme: "xyz",
+                });
+
+                // The MVT layer name is the dataset variable name.
+                const sourceLayer = VARIABLE;
+
+                map.addLayer({
+                    id: "xpublish-fill",
+                    type: "fill",
+                    source: "xpublish-vector",
+                    "source-layer": sourceLayer,
+                    paint: {
+                        // Diverging blue→white→red over [COLOR_MIN, COLOR_MAX] —
+                        // works well for temperature-like fields.
+                        "fill-color": [
+                            "interpolate",
+                            ["linear"],
+                            ["to-number", ["get", "value"]],
+                            COLOR_MIN, "#2c7bb6",
+                            COLOR_MIN + (COLOR_MAX - COLOR_MIN) * 0.25, "#abd9e9",
+                            (COLOR_MIN + COLOR_MAX) / 2, "#ffffbf",
+                            COLOR_MIN + (COLOR_MAX - COLOR_MIN) * 0.75, "#fdae61",
+                            COLOR_MAX, "#d7191c",
+                        ],
+                        "fill-opacity": 0.75,
+                        // Adjacent cells share edges; with antialiasing on, both
+                        // edges get drawn and blend darker than the cell interior,
+                        // producing fake "borders." Disable to get a seamless
+                        // raster-like look.
+                        "fill-antialias": false,
+                    },
+                });
+
+                map.addLayer({
+                    id: "xpublish-outline",
+                    type: "line",
+                    source: "xpublish-vector",
+                    "source-layer": sourceLayer,
+                    layout: { visibility: "none" },
+                    paint: {
+                        "line-color": "#222",
+                        "line-width": 0.4,
+                        "line-opacity": 0.4,
+                    },
+                });
+
+                map.showTileBoundaries = false;
+
+                // ---- Hover popup -----------------------------------------------
+                const popup = new maplibregl.Popup({
+                    closeButton: false,
+                    closeOnClick: false,
+                });
+                map.on("mousemove", "xpublish-fill", (e) => {
+                    if (!e.features.length) return;
+                    const f = e.features[0];
+                    const v = f.properties?.value;
+                    map.getCanvas().style.cursor = "pointer";
+                    const text =
+                        typeof v === "number" ? v.toFixed(4) : `${v}`;
+                    popup
+                        .setLngLat(e.lngLat)
+                        .setHTML(
+                            `<strong>${VARIABLE}</strong>: ${text}<br/>` +
+                                `<small>${e.lngLat.lng.toFixed(
+                                    2,
+                                )}, ${e.lngLat.lat.toFixed(2)}</small>`,
+                        )
+                        .addTo(map);
+                });
+                map.on("mouseleave", "xpublish-fill", () => {
+                    map.getCanvas().style.cursor = "";
+                    popup.remove();
+                });
+
+                // ---- UI controls -----------------------------------------------
+                // GFS is global. Recenter the globe view rather than fitBounds,
+                // which on a globe projection would zoom uncomfortably far out.
+                document.getElementById("fly-to-center").addEventListener("click", () => {
+                    map.flyTo({ center: [0, 20], zoom: 1 });
+                });
+
+                const globeToggle = document.getElementById("globe-toggle");
+                globeToggle.addEventListener("click", () => {
+                    globeEnabled = !globeEnabled;
+                    map.setProjection({ type: globeEnabled ? "globe" : "mercator" });
+                    globeToggle.textContent = globeEnabled
+                        ? "Disable Globe"
+                        : "Enable Globe";
+                });
+
+                const tileBoundariesToggle = document.getElementById(
+                    "tile-boundaries-toggle",
+                );
+                tileBoundariesToggle.addEventListener("click", () => {
+                    map.showTileBoundaries = !map.showTileBoundaries;
+                    tileBoundariesToggle.textContent = map.showTileBoundaries
+                        ? "Hide Tile Boundaries"
+                        : "Show Tile Boundaries";
+                });
+
+                const outlineToggle = document.getElementById("outline-toggle");
+                outlineToggle.addEventListener("click", () => {
+                    const visible =
+                        map.getLayoutProperty("xpublish-outline", "visibility") !== "none";
+                    map.setLayoutProperty(
+                        "xpublish-outline",
+                        "visibility",
+                        visible ? "none" : "visible",
+                    );
+                    outlineToggle.textContent = visible
+                        ? "Show Cell Outlines"
+                        : "Hide Cell Outlines";
+                });
+            });
+        </script>
+    </body>
+</html>

@@ -1263,20 +1263,20 @@ class TileQuery(BaseModel):
     width: Annotated[
         int,
         Field(
-            default=...,
+            default=256,
             multiple_of=256,
             json_schema_extra={
-                "description": "Width of the tile in pixels, 256 or 512",
+                "description": "Width of the tile in pixels, 256 or 512. Ignored for vector styles.",
             },
         ),
     ]
     height: Annotated[
         int,
         Field(
-            default=...,
+            default=256,
             multiple_of=256,
             json_schema_extra={
-                "description": "Height of the tile in pixels, 256 or 512",
+                "description": "Height of the tile in pixels, 256 or 512. Ignored for vector styles.",
             },
         ),
     ]

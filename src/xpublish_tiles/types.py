@@ -31,6 +31,27 @@ OutputBBox = NewType("OutputBBox", pyproj.aoi.BBox)
 class ImageFormat(enum.StrEnum):
     PNG = enum.auto()
     JPEG = enum.auto()
+    MVT = enum.auto()
+    GEOJSON = enum.auto()
+
+    @classmethod
+    def _missing_(cls, value: object) -> "ImageFormat | None":
+        if not isinstance(value, str):
+            return None
+        v = value.lower().strip()
+        aliases = {
+            "image/png": cls.PNG,
+            "image/jpeg": cls.JPEG,
+            "image/jpg": cls.JPEG,
+            "jpg": cls.JPEG,
+            "application/vnd.mapbox-vector-tile": cls.MVT,
+            "application/x-protobuf": cls.MVT,
+            "pbf": cls.MVT,
+            "application/geo+json": cls.GEOJSON,
+            "application/json": cls.GEOJSON,
+            "json": cls.GEOJSON,
+        }
+        return aliases.get(v)
 
 
 class SelectionMethod(str, enum.Enum):
@@ -179,6 +200,8 @@ class PopulatedRenderContext(RenderContext):
     # Set by transform_for_render for the renderer:
     da: xr.DataArray | None = None
     cell_rings: np.ndarray | None = None
+    # Output CRS that ``bbox`` and ``cell_rings`` are expressed in.
+    crs: OutputCRS | None = None
 
     @property
     def ugrid_indexer(self) -> UgridIndexer | None:
