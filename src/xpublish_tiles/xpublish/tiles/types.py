@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from xpublish_tiles.types import ImageFormat
 from xpublish_tiles.validators import (
+    validate_color,
     validate_colormap,
     validate_colorscalerange,
     validate_image_format,
@@ -1550,4 +1551,183 @@ TILES_FILTERED_QUERY_PARAMS: list[str] = [
     "abovemaxcolor",
     "belowmincolor",
     "render_errors",
+]
+
+
+class LegendQuery(BaseModel):
+    variables: Annotated[
+        list[str],
+        Field(
+            json_schema_extra={
+                "description": "Variable to render a legend for. Only the first variable is used.",
+            }
+        ),
+    ]
+    colorscalerange: Annotated[
+        tuple[float, float] | None,
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "Range of values to scale colors to, in the format `{min},{max}`. Falls back to the variable's `valid_min`/`valid_max` attributes.",
+            },
+        ),
+    ] = None
+    style: Annotated[
+        tuple[str, str] | None,
+        Field(
+            default="raster/default",
+            json_schema_extra={
+                "description": "Style and variant to use, in the format `{style}/{variant}`.",
+            },
+        ),
+    ]
+    width: Annotated[
+        int,
+        Field(
+            default=100,
+            ge=1,
+            le=2048,
+            json_schema_extra={"description": "Width of the legend image in pixels."},
+        ),
+    ] = 100
+    height: Annotated[
+        int,
+        Field(
+            default=300,
+            ge=1,
+            le=2048,
+            json_schema_extra={"description": "Height of the legend image in pixels."},
+        ),
+    ] = 300
+    vertical: Annotated[
+        bool,
+        Field(
+            default=True,
+            json_schema_extra={
+                "description": "Render the colorbar vertically (true) or horizontally (false).",
+            },
+        ),
+    ] = True
+    f: Annotated[
+        ImageFormat,
+        Field(
+            default="image/png",
+            json_schema_extra={
+                "description": "Output format, `image/png` or `image/jpeg`.",
+            },
+        ),
+    ]
+    colormap: Annotated[
+        dict[str, str] | None,
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "Custom colormap as JSON-encoded dictionary with numeric keys (0-255) and hex color values (#RRGGBB).",
+            },
+        ),
+    ] = None
+    abovemaxcolor: Annotated[
+        str | None,
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "Color for values above the max of colorscalerange.",
+            },
+        ),
+    ] = None
+    belowmincolor: Annotated[
+        str | None,
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "Color for values below the min of colorscalerange.",
+            },
+        ),
+    ] = None
+    label: Annotated[
+        str | None,
+        Field(
+            default=None,
+            json_schema_extra={"description": "Optional label for the legend."},
+        ),
+    ] = None
+    background_color: Annotated[
+        str | None,
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "Background color for the legend image. Accepts 'transparent', a hex color (#RRGGBB or #RRGGBBAA), or a named color. Defaults to transparent.",
+            },
+        ),
+    ] = None
+    text_color: Annotated[
+        str | None,
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "Color for tick labels, axis label, and the colorbar outline. Accepts a hex color (#RRGGBB or #RRGGBBAA) or a named color. Defaults to matplotlib's default (black).",
+            },
+        ),
+    ] = None
+
+    @field_validator("style", mode="before")
+    @classmethod
+    def validate_style(cls, v: str | None) -> tuple[str, str] | None:
+        valid_style = validate_style(v)
+        if valid_style is None:
+            return ("raster", "default")
+        return valid_style
+
+    @field_validator("colorscalerange", mode="before")
+    @classmethod
+    def validate_colorscalerange(cls, v: str | None) -> tuple[float, float] | None:
+        return validate_colorscalerange(v)
+
+    @field_validator("f", mode="before")
+    @classmethod
+    def validate_format(cls, v: str | None) -> ImageFormat:
+        return validate_image_format(v) or ImageFormat.PNG
+
+    @field_validator("variables")
+    @classmethod
+    def validate_variables(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("At least one variable must be specified")
+        return v
+
+    @field_validator("colormap", mode="before")
+    @classmethod
+    def validate_colormap(cls, v: str | dict | None) -> dict[str, str] | None:
+        return validate_colormap(v)
+
+    @field_validator("abovemaxcolor", mode="before")
+    @classmethod
+    def validate_abovemaxcolor(cls, v: str | None) -> str | None:
+        return validate_range_color(v)
+
+    @field_validator("belowmincolor", mode="before")
+    @classmethod
+    def validate_belowmincolor(cls, v: str | None) -> str | None:
+        return validate_range_color(v)
+
+    @field_validator("background_color", "text_color", mode="before")
+    @classmethod
+    def validate_color(cls, v: str | None) -> str | None:
+        return validate_color(v)
+
+
+LEGEND_FILTERED_QUERY_PARAMS: list[str] = [
+    "style",
+    "colorscalerange",
+    "f",
+    "variables",
+    "width",
+    "height",
+    "vertical",
+    "colormap",
+    "abovemaxcolor",
+    "belowmincolor",
+    "label",
+    "background_color",
+    "text_color",
 ]

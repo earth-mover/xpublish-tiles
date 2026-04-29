@@ -28,7 +28,7 @@ from xpublish_tiles.logger import (
     set_context_logger,
     with_accumulated_logs,
 )
-from xpublish_tiles.pipeline import pipeline
+from xpublish_tiles.pipeline import _infer_datatype, pipeline
 from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import QueryParams
 from xpublish_tiles.utils import normalize_tilejson_bounds
@@ -48,6 +48,7 @@ from xpublish_tiles.xpublish.tiles.tile_matrix import (
 from xpublish_tiles.xpublish.tiles.types import (
     TILES_FILTERED_QUERY_PARAMS,
     ConformanceDeclaration,
+    LegendQuery,
     TileJSON,
     TileMatrixSet,
     TileMatrixSets,
@@ -181,6 +182,67 @@ class TilesPlugin(Plugin):
 
             return TilesetsList(tilesets=tilesets)
 
+        @router.get("/legend")
+        @with_accumulated_logs(
+            log_message_fn=lambda query,
+            dataset: f"legend {query.variables} {query.style} {getattr(dataset, '_xpublish_id', 'unknown')}",
+            context_fn=lambda query, dataset: {
+                "endpoint": "legend",
+                "variables": query.variables,
+                "dataset_id": getattr(dataset, "_xpublish_id", "unknown"),
+            },
+        )
+        async def get_dataset_legend(
+            query: Annotated[LegendQuery, Query()],
+            dataset: Dataset = Depends(deps.dataset),
+        ):
+            """Render a legend image for a styled variable."""
+            var_name = query.variables[0]
+            if var_name not in dataset.data_vars:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Variable {var_name!r} not found in dataset.",
+                )
+
+            datatype = _infer_datatype(dataset[var_name])
+            style = query.style[0] if query.style else "raster"
+            variant = query.style[1] if query.style else "default"
+
+            from xpublish_tiles.render import RenderRegistry
+
+            try:
+                renderer = RenderRegistry.get(style)()
+            except ValueError as e:
+                raise HTTPException(status_code=422, detail=str(e)) from e
+
+            buffer = io.BytesIO()
+            try:
+                renderer.render_legend(
+                    buffer=buffer,
+                    width=query.width,
+                    height=query.height,
+                    variant=variant,
+                    datatype=datatype,
+                    colorscalerange=query.colorscalerange,
+                    colormap=query.colormap,
+                    abovemaxcolor=query.abovemaxcolor,
+                    belowmincolor=query.belowmincolor,
+                    vertical=query.vertical,
+                    label=query.label
+                    or dataset[var_name].attrs.get("long_name")
+                    or var_name,
+                    background_color=query.background_color,
+                    text_color=query.text_color,
+                    format=query.f,
+                )
+            except MissingParameterError as e:
+                raise HTTPException(status_code=422, detail=str(e)) from e
+            except NotImplementedError as e:
+                raise HTTPException(status_code=501, detail=str(e)) from e
+
+            media_type = "image/png" if query.f == query.f.PNG else "image/jpeg"
+            return Response(buffer.getvalue(), media_type=media_type)
+
         @router.get(
             "/{tileMatrixSetId}",
             response_model=TileSetMetadata,
@@ -297,6 +359,21 @@ class TilesPlugin(Plugin):
                 selector_qs = "&".join(f"{k}={v}" for k, v in selectors.items())
                 url_template = f"{url_template}&{selector_qs}"
 
+            # Build legend URL (sibling of tilejson.json)
+            dataset_path = tiles_path.rsplit("/", 1)[0]
+            legend_url = (
+                f"{base_url}{dataset_path}/legend?variables={','.join(query.variables)}"
+                f"&style={style}/{variant}"
+            )
+            if query.colorscalerange:
+                legend_url = f"{legend_url}&colorscalerange={query.colorscalerange[0]:g},{query.colorscalerange[1]:g}"
+            if query.colormap:
+                legend_url = f"{legend_url}&colormap={quote(json.dumps(query.colormap))}"
+            if query.belowmincolor:
+                legend_url = f"{legend_url}&belowmincolor={quote(query.belowmincolor)}"
+            if query.abovemaxcolor:
+                legend_url = f"{legend_url}&abovemaxcolor={quote(query.abovemaxcolor)}"
+
             # Compute bounds list if available
             bounds_list = None
             if bounds is not None:
@@ -340,6 +417,7 @@ class TilesPlugin(Plugin):
                 bounds=bounds_list,
                 minzoom=minzoom,
                 maxzoom=maxzoom,
+                legend=legend_url,
             )
 
         @router.get("/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}")

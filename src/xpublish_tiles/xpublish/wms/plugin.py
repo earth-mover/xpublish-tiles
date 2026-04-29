@@ -7,13 +7,13 @@ from typing import Annotated
 import cf_xarray  # noqa: F401
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
-from PIL import Image
 from xpublish import Dependencies, Plugin, hookimpl
 
 import xarray as xr
-from xpublish_tiles.lib import AsyncLoadTimeoutError
-from xpublish_tiles.pipeline import pipeline
-from xpublish_tiles.types import OutputBBox, OutputCRS, QueryParams
+from xpublish_tiles.lib import AsyncLoadTimeoutError, MissingParameterError
+from xpublish_tiles.pipeline import _infer_datatype, pipeline
+from xpublish_tiles.render import RenderRegistry
+from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
 from xpublish_tiles.utils import lower_case_keys
 from xpublish_tiles.xpublish.wms.types import (
     WMS_FILTERED_QUERY_PARAMS,
@@ -64,7 +64,7 @@ class WMSPlugin(Plugin):
                         "GetFeatureInfo is not yet implemented. Coming Soon!"
                     )
                 case WMSGetLegendGraphicQuery():
-                    return await handle_get_legend_graphic(wms_query.root)
+                    return await handle_get_legend_graphic(wms_query.root, dataset)
 
         return router
 
@@ -192,18 +192,42 @@ async def handle_get_map(
     return Response(buffer.getbuffer(), media_type="image/png")
 
 
-async def handle_get_legend_graphic(query: WMSGetLegendGraphicQuery) -> Response:
-    """Handle WMS GetLegendGraphic request with a dummy PNG response."""
+async def handle_get_legend_graphic(
+    query: WMSGetLegendGraphicQuery, dataset: xr.Dataset
+) -> Response:
+    """Handle WMS GetLegendGraphic request."""
 
-    # Create a simple dummy PNG image
-    img = Image.new("RGB", (query.width, query.height), color="white")
+    if query.layer not in dataset.data_vars:
+        raise HTTPException(
+            status_code=422, detail=f"Layer {query.layer!r} not found in dataset."
+        )
 
-    # Save to BytesIO buffer
+    datatype = _infer_datatype(dataset[query.layer])
+    style, variant = query.styles
+
+    try:
+        renderer = RenderRegistry.get(style)()
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
     buffer = BytesIO()
-    img.save(buffer, format="PNG")
-    buffer.seek(0)
+    try:
+        renderer.render_legend(
+            buffer=buffer,
+            width=query.width,
+            height=query.height,
+            variant=variant,
+            datatype=datatype,
+            colorscalerange=query.colorscalerange,
+            colormap=query.colormap,
+            vertical=query.vertical,
+            label=dataset[query.layer].attrs.get("long_name") or query.layer,
+            format=query.format,
+        )
+    except MissingParameterError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except NotImplementedError as e:
+        raise HTTPException(status_code=501, detail=str(e)) from e
 
-    return Response(
-        content=buffer.getvalue(),
-        media_type="image/png",
-    )
+    media_type = "image/png" if query.format == ImageFormat.PNG else "image/jpeg"
+    return Response(content=buffer.getvalue(), media_type=media_type)

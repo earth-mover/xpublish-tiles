@@ -198,3 +198,37 @@ def test_app_router(xpublish_client):
     # Test invalid request (no parameters)
     response = xpublish_client.get("/datasets/air/wms")
     assert response.status_code == 422
+
+
+def test_get_legend_graphic(xpublish_client, png_snapshot):
+    """GetLegendGraphic returns a colorbar PNG matching the snapshot."""
+    response = xpublish_client.get(
+        "/datasets/air/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetLegendGraphic",
+            "layer": "air",
+            "styles": "raster/viridis",
+            "width": 120,
+            "height": 300,
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content == png_snapshot
+
+
+def test_get_legend_graphic_unknown_layer(xpublish_client):
+    response = xpublish_client.get(
+        "/datasets/air/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetLegendGraphic",
+            "layer": "missing",
+            "width": 100,
+            "height": 100,
+        },
+    )
+    assert response.status_code == 422

@@ -396,7 +396,13 @@ async def create_tileset_for_tms(
                     type="image/png",
                     title=f"Tiles for {var_name}",
                     templated=True,
-                )
+                ),
+                Link(
+                    href=f"./legend?variables={var_name}",
+                    rel="ogc-rel:legend",
+                    type="image/png",
+                    title=f"Legend for {var_name}",
+                ),
             ],
             extents=extents,
         )
