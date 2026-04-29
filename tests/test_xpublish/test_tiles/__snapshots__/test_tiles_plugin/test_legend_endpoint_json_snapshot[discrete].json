@@ -1,0 +1,21 @@
+{
+  "items": [
+    {
+      "color": "#440154",
+      "label": "low",
+      "value": 0
+    },
+    {
+      "color": "#21918c",
+      "label": "medium",
+      "value": 1
+    },
+    {
+      "color": "#fde725",
+      "label": "high",
+      "value": 2
+    }
+  ],
+  "label": "category",
+  "type": "discrete"
+}

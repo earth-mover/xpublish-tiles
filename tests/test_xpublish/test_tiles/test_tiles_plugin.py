@@ -851,36 +851,35 @@ def test_legend_endpoint_error_paths(legend_dataset):
     assert "colorscalerange" in r.json()["detail"]
 
 
-def test_legend_endpoint_json(legend_dataset):
-    """Continuous + discrete legends as JSON color stops."""
+@pytest.mark.parametrize(
+    "params",
+    [
+        pytest.param(
+            "variables=temperature&style=raster/viridis&colorscalerange=-3,3"
+            "&f=application/json",
+            id="continuous_viridis",
+        ),
+        pytest.param(
+            "variables=temperature&style=raster/plasma&colorscalerange=0,1"
+            "&belowmincolor=transparent&abovemaxcolor=%23ff0000&f=json",
+            id="continuous_extend_both",
+        ),
+        pytest.param(
+            "variables=category&style=raster/default&f=json",
+            id="discrete",
+        ),
+    ],
+)
+def test_legend_endpoint_json_snapshot(legend_dataset, snapshot, params):
+    """JSON legend snapshots lock in the full color-stop structure."""
+    from syrupy.extensions.json import JSONSnapshotExtension
+
     rest = xpublish.Rest({"d": legend_dataset}, plugins={"tiles": TilesPlugin()})
     client = TestClient(rest.app)
-
-    # Continuous
-    r = client.get(
-        "/datasets/d/tiles/legend?variables=temperature&style=raster/viridis"
-        "&colorscalerange=-3,3&f=application/json"
-    )
+    r = client.get(f"/datasets/d/tiles/legend?{params}")
     assert r.status_code == 200
     assert r.headers["content-type"] == "application/json"
-    data = r.json()
-    assert data["type"] == "continuous"
-    assert data["variant"] == "viridis"
-    assert data["colorscalerange"] == [-3.0, 3.0]
-    assert len(data["stops"]) == 256
-    assert data["stops"][0]["value"] == -3.0
-    assert data["stops"][-1]["value"] == 3.0
-    assert data["stops"][0]["color"].startswith("#")
-
-    # Discrete
-    r = client.get(
-        "/datasets/d/tiles/legend?variables=category&style=raster/default&f=json"
-    )
-    assert r.status_code == 200
-    data = r.json()
-    assert data["type"] == "discrete"
-    assert [item["label"] for item in data["items"]] == ["low", "medium", "high"]
-    assert all(item["color"].startswith("#") for item in data["items"])
+    assert r.json() == snapshot.use_extension(JSONSnapshotExtension)
 
 
 def test_legend_endpoint_jpeg_and_flag_colors():
