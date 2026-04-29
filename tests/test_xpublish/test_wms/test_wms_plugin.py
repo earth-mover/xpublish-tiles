@@ -4,6 +4,7 @@ import pytest
 import xpublish
 from fastapi.testclient import TestClient
 
+import xarray as xr
 from xpublish_tiles.xpublish.wms import WMSPlugin
 
 
@@ -198,3 +199,90 @@ def test_app_router(xpublish_client):
     # Test invalid request (no parameters)
     response = xpublish_client.get("/datasets/air/wms")
     assert response.status_code == 422
+
+
+def test_get_legend_graphic(xpublish_client, png_snapshot):
+    """GetLegendGraphic returns a colorbar PNG matching the snapshot."""
+    response = xpublish_client.get(
+        "/datasets/air/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetLegendGraphic",
+            "layer": "air",
+            "styles": "raster/viridis",
+            "vertical": "true",
+            "width": 200,
+            "height": 400,
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content == png_snapshot
+
+
+def test_get_legend_graphic_no_label(xpublish_client, png_snapshot):
+    """show_label=false suppresses the axis label."""
+    response = xpublish_client.get(
+        "/datasets/air/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetLegendGraphic",
+            "layer": "air",
+            "styles": "raster/viridis",
+            "show_label": "false",
+            "width": 120,
+            "height": 300,
+        },
+    )
+    assert response.status_code == 200
+    assert response.content == png_snapshot
+
+
+def test_get_legend_graphic_unknown_layer(xpublish_client):
+    response = xpublish_client.get(
+        "/datasets/air/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetLegendGraphic",
+            "layer": "missing",
+            "width": 100,
+            "height": 100,
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_get_legend_graphic_missing_colorscalerange():
+    """Continuous data without valid_min/max and no colorscalerange -> 422."""
+    ds = xr.Dataset(
+        {
+            "no_range": xr.DataArray(
+                [[0.0, 1.0], [1.0, 0.0]],
+                dims=["lat", "lon"],
+                coords={
+                    "lat": (["lat"], [0.0, 1.0], {"axis": "Y"}),
+                    "lon": (["lon"], [0.0, 1.0], {"axis": "X"}),
+                },
+            )
+        }
+    )
+    rest = xpublish.Rest({"d": ds}, plugins={"wms": WMSPlugin()})
+    client = TestClient(rest.app)
+
+    r = client.get(
+        "/datasets/d/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetLegendGraphic",
+            "layer": "no_range",
+            "styles": "raster/viridis",
+            "width": 100,
+            "height": 100,
+        },
+    )
+    assert r.status_code == 422
+    assert "colorscalerange" in r.json()["detail"]

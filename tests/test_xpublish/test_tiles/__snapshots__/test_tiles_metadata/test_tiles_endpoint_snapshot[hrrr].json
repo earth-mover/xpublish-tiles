@@ -34,6 +34,12 @@
               "templated": true,
               "title": "Tiles for foo",
               "type": "image/png"
+            },
+            {
+              "href": "./legend?variables=foo",
+              "rel": "ogc-rel:legend",
+              "title": "Legend for foo",
+              "type": "image/png"
             }
           ],
           "title": "foo"
@@ -1235,6 +1241,12 @@
               "templated": true,
               "title": "Tiles for foo",
               "type": "image/png"
+            },
+            {
+              "href": "./legend?variables=foo",
+              "rel": "ogc-rel:legend",
+              "title": "Legend for foo",
+              "type": "image/png"
             }
           ],
           "title": "foo"
@@ -2394,6 +2406,12 @@
               "templated": true,
               "title": "Tiles for foo",
               "type": "image/png"
+            },
+            {
+              "href": "./legend?variables=foo",
+              "rel": "ogc-rel:legend",
+              "title": "Legend for foo",
+              "type": "image/png"
             }
           ],
           "title": "foo"
@@ -3482,6 +3500,12 @@
               "rel": "item",
               "templated": true,
               "title": "Tiles for foo",
+              "type": "image/png"
+            },
+            {
+              "href": "./legend?variables=foo",
+              "rel": "ogc-rel:legend",
+              "title": "Legend for foo",
               "type": "image/png"
             }
           ],
@@ -4663,6 +4687,12 @@
               "templated": true,
               "title": "Tiles for foo",
               "type": "image/png"
+            },
+            {
+              "href": "./legend?variables=foo",
+              "rel": "ogc-rel:legend",
+              "title": "Legend for foo",
+              "type": "image/png"
             }
           ],
           "title": "foo"
@@ -5736,6 +5766,12 @@
               "rel": "item",
               "templated": true,
               "title": "Tiles for foo",
+              "type": "image/png"
+            },
+            {
+              "href": "./legend?variables=foo",
+              "rel": "ogc-rel:legend",
+              "title": "Legend for foo",
               "type": "image/png"
             }
           ],
@@ -6866,6 +6902,12 @@
               "rel": "item",
               "templated": true,
               "title": "Tiles for foo",
+              "type": "image/png"
+            },
+            {
+              "href": "./legend?variables=foo",
+              "rel": "ogc-rel:legend",
+              "title": "Legend for foo",
               "type": "image/png"
             }
           ],
@@ -8019,6 +8061,12 @@
               "templated": true,
               "title": "Tiles for foo",
               "type": "image/png"
+            },
+            {
+              "href": "./legend?variables=foo",
+              "rel": "ogc-rel:legend",
+              "title": "Legend for foo",
+              "type": "image/png"
             }
           ],
           "title": "foo"
@@ -9171,6 +9219,12 @@
               "templated": true,
               "title": "Tiles for foo",
               "type": "image/png"
+            },
+            {
+              "href": "./legend?variables=foo",
+              "rel": "ogc-rel:legend",
+              "title": "Legend for foo",
+              "type": "image/png"
             }
           ],
           "title": "foo"
@@ -10316,6 +10370,12 @@
               "templated": true,
               "title": "Tiles for foo",
               "type": "image/png"
+            },
+            {
+              "href": "./legend?variables=foo",
+              "rel": "ogc-rel:legend",
+              "title": "Legend for foo",
+              "type": "image/png"
             }
           ],
           "title": "foo"
@@ -11460,6 +11520,12 @@
               "rel": "item",
               "templated": true,
               "title": "Tiles for foo",
+              "type": "image/png"
+            },
+            {
+              "href": "./legend?variables=foo",
+              "rel": "ogc-rel:legend",
+              "title": "Legend for foo",
               "type": "image/png"
             }
           ],
@@ -12613,6 +12679,12 @@
               "templated": true,
               "title": "Tiles for foo",
               "type": "image/png"
+            },
+            {
+              "href": "./legend?variables=foo",
+              "rel": "ogc-rel:legend",
+              "title": "Legend for foo",
+              "type": "image/png"
             }
           ],
           "title": "foo"
@@ -13757,6 +13829,12 @@
               "rel": "item",
               "templated": true,
               "title": "Tiles for foo",
+              "type": "image/png"
+            },
+            {
+              "href": "./legend?variables=foo",
+              "rel": "ogc-rel:legend",
+              "title": "Legend for foo",
               "type": "image/png"
             }
           ],

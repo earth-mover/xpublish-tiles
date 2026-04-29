@@ -112,6 +112,24 @@ def validate_image_format(v: str | None) -> ImageFormat | None:
         ) from e
 
 
+def validate_legend_format(v: str | None):
+    """Accept image/png, image/jpeg, application/json, or shorthand."""
+    from xpublish_tiles.types import LegendFormat
+
+    if v is None:
+        return None
+    if "/" in v:
+        _, format_str = v.split("/", 1)
+    else:
+        format_str = v
+    try:
+        return LegendFormat(format_str.lower())
+    except ValueError as e:
+        raise ValueError(
+            f"legend format {format_str} is not valid. Options are: {', '.join(LegendFormat.__members__.keys())}",
+        ) from e
+
+
 def validate_crs(v: str | None) -> CRS | None:
     if v is None:
         return None
@@ -156,6 +174,30 @@ def validate_range_color(v: str | None) -> str | None:
     except ValueError:
         raise ValueError(
             f"Invalid color value '{v}'. Must be 'extend', 'transparent', "
+            "a hex color (#RRGGBB or #RRGGBBAA), or a valid named color."
+        ) from None
+
+
+def validate_color(v: str | None) -> str | None:
+    """Validate a generic color string (hex, named, or 'transparent').
+
+    Unlike ``validate_range_color`` this does not accept the sentinel ``"extend"``.
+    """
+    if v is None:
+        return None
+
+    v_lower = v.lower().strip()
+    if v_lower == "transparent":
+        return v_lower
+
+    from matplotlib.colors import to_rgba
+
+    try:
+        to_rgba(v_lower)
+        return v_lower
+    except ValueError:
+        raise ValueError(
+            f"Invalid color value '{v}'. Must be 'transparent', "
             "a hex color (#RRGGBB or #RRGGBBAA), or a valid named color."
         ) from None
 

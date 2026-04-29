@@ -222,6 +222,10 @@ class WMSGetLegendGraphicQuery(WMSBaseQuery):
     width: int = 100
     height: int = 100
     vertical: bool = False
+    show_label: bool = Field(
+        True,
+        description="Whether to draw the layer's `long_name [units]` as the axis label on the legend image.",
+    )
     colorscalerange: tuple[float, float] | None = Field(
         None,
         description="Color scale range to use for the query in the format 'min,max'. If not provided, the default will be used or autoscaled if no default is available",

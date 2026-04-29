@@ -2,13 +2,16 @@ import io
 from abc import ABC, abstractmethod
 from importlib.metadata import entry_points
 from numbers import Number
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import datashader as dsh
 import datashader.transfer_functions as tf
 import matplotlib as mpl
+import matplotlib.colorbar
 import matplotlib.colors as mcolors
 import numpy as np
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
 from PIL import Image, ImageDraw
 
 import xarray as xr
@@ -21,6 +24,7 @@ from xpublish_tiles.lib import (
 from xpublish_tiles.logger import get_context_logger
 from xpublish_tiles.types import (
     ContinuousData,
+    DataType,
     DiscreteData,
     ImageFormat,
     NullRenderContext,
@@ -28,7 +32,7 @@ from xpublish_tiles.types import (
 )
 
 if TYPE_CHECKING:
-    from xpublish_tiles.types import DataType, RenderContext
+    from xpublish_tiles.types import RenderContext
 
 
 def render_error_image(
@@ -124,6 +128,47 @@ class Renderer(ABC):
     ):
         """Render an error tile with the given message."""
         pass
+
+    def render_legend(
+        self,
+        *,
+        buffer: io.BytesIO,
+        width: int,
+        height: int,
+        variant: str,
+        datatype: DataType,
+        colorscalerange: tuple[float, float] | None = None,
+        colormap: dict[str, str] | None = None,
+        abovemaxcolor: str | None = None,
+        belowmincolor: str | None = None,
+        vertical: bool = True,
+        label: str | None = None,
+        background_color: str | None = None,
+        text_color: str | None = None,
+        format: ImageFormat = ImageFormat.PNG,
+    ):
+        """Render a legend image describing this style/variant + datatype."""
+        raise NotImplementedError(
+            f"Legend rendering not supported for style {self.style_id()!r}"
+        )
+
+    def legend_data(
+        self,
+        *,
+        variant: str,
+        datatype: DataType,
+        colorscalerange: tuple[float, float] | None = None,
+        colormap: dict[str, str] | None = None,
+        abovemaxcolor: str | None = None,
+        belowmincolor: str | None = None,
+        label: str | None = None,
+        units: str | None = None,
+        stops: int = 256,
+    ) -> dict:
+        """Return the legend as a JSON-serializable dict of color stops."""
+        raise NotImplementedError(
+            f"Legend data not supported for style {self.style_id()!r}"
+        )
 
     @staticmethod
     def style_id() -> str:
@@ -224,7 +269,7 @@ class DatashaderRenderer(Renderer):
     @staticmethod
     def shade_mesh(
         mesh: "xr.DataArray",
-        datatype: "DataType",
+        datatype: DataType,
         *,
         variant: str,
         colorscalerange: tuple[Number, Number] | None = None,
@@ -306,6 +351,213 @@ class DatashaderRenderer(Renderer):
         )
         buffer.write(error_buffer.getvalue())
         error_buffer.close()
+
+    def render_legend(
+        self,
+        *,
+        buffer: io.BytesIO,
+        width: int,
+        height: int,
+        variant: str,
+        datatype: DataType,
+        colorscalerange: tuple[float, float] | None = None,
+        colormap: dict[str, str] | None = None,
+        abovemaxcolor: str | None = None,
+        belowmincolor: str | None = None,
+        vertical: bool = True,
+        label: str | None = None,
+        background_color: str | None = None,
+        text_color: str | None = None,
+        format: ImageFormat = ImageFormat.PNG,
+    ):
+        if variant == "default":
+            variant = self.default_variant()
+
+        orientation = "vertical" if vertical else "horizontal"
+        dpi = 100
+        # Default to transparent background; JPEG can't carry alpha so fall back
+        # to white in that case.
+        transparent: tuple[float, float, float, float] = (0, 0, 0, 0)
+        facecolor: tuple[float, float, float, float] | str
+        if background_color is None:
+            facecolor = "white" if format == ImageFormat.JPEG else transparent
+        elif background_color == "transparent":
+            facecolor = transparent
+        else:
+            facecolor = background_color
+        resolved_text_color: tuple[float, float, float, float] | str | None
+        if text_color == "transparent":
+            resolved_text_color = transparent
+        else:
+            resolved_text_color = text_color
+        fig = Figure(
+            figsize=(width / dpi, height / dpi),
+            dpi=dpi,
+            layout="constrained",
+            facecolor=facecolor,
+        )
+        cax = fig.add_subplot()
+
+        if isinstance(datatype, ContinuousData):
+            if colorscalerange is None:
+                if datatype.valid_min is not None and datatype.valid_max is not None:
+                    colorscalerange = (datatype.valid_min, datatype.valid_max)
+                else:
+                    raise MissingParameterError(
+                        "`colorscalerange` must be specified when array does not have valid_min and valid_max attributes specified."
+                    )
+
+            if colormap is not None:
+                cmap = create_colormap_from_dict(colormap)
+            else:
+                cmap = mpl.colormaps.get_cmap(variant)
+            cmap = apply_range_colors(cmap, abovemaxcolor, belowmincolor)
+
+            extend_low = belowmincolor not in (None, "extend")
+            extend_high = abovemaxcolor not in (None, "extend")
+            if extend_low and extend_high:
+                extend: Literal["neither", "min", "max", "both"] = "both"
+            elif extend_low:
+                extend = "min"
+            elif extend_high:
+                extend = "max"
+            else:
+                extend = "neither"
+
+            norm = mcolors.Normalize(vmin=colorscalerange[0], vmax=colorscalerange[1])
+            cb = mpl.colorbar.Colorbar(
+                cax, cmap=cmap, norm=norm, orientation=orientation, extend=extend
+            )
+        elif isinstance(datatype, DiscreteData):
+            flag_values = list(datatype.values)
+            flag_meanings = list(datatype.meanings)
+            if colormap is not None:
+                color_map = create_listed_colormap_from_dict(colormap, flag_values)
+                colors = [color_map[v] for v in flag_values]
+            elif datatype.colors is not None:
+                colors = list(datatype.colors)
+            else:
+                minv = min(flag_values)
+                maxv = max(flag_values)
+                base = mpl.colormaps.get_cmap(variant)
+                colors = [
+                    mcolors.to_hex(base((v - minv) / maxv if maxv else 0.0))
+                    for v in flag_values
+                ]
+
+            cmap = mcolors.ListedColormap(colors)
+            boundaries = list(range(len(flag_values) + 1))
+            norm = mcolors.BoundaryNorm(boundaries, cmap.N)
+            cb = mpl.colorbar.Colorbar(
+                cax,
+                cmap=cmap,
+                norm=norm,
+                orientation=orientation,
+                boundaries=boundaries,
+                ticks=[i + 0.5 for i in range(len(flag_values))],
+            )
+            cb.set_ticklabels(flag_meanings)
+        else:
+            raise NotImplementedError(f"Unsupported datatype: {type(datatype)}")
+
+        if label:
+            cb.set_label(label)
+
+        if resolved_text_color is not None:
+            cb.ax.tick_params(colors=resolved_text_color)
+            for spine in cb.ax.spines.values():
+                spine.set_edgecolor(resolved_text_color)
+            if label:
+                cb.ax.xaxis.label.set_color(resolved_text_color)
+                cb.ax.yaxis.label.set_color(resolved_text_color)
+
+        canvas = FigureCanvasAgg(fig)
+        pil_format = "PNG" if format == ImageFormat.PNG else "JPEG"
+        with io.BytesIO() as raw:
+            canvas.print_png(raw)
+            raw.seek(0)
+            img = Image.open(raw)
+            img.load()
+        if pil_format == "JPEG" and img.mode != "RGB":
+            img = img.convert("RGB")
+        img.save(buffer, format=pil_format)
+
+    def legend_data(
+        self,
+        *,
+        variant: str,
+        datatype: DataType,
+        colorscalerange: tuple[float, float] | None = None,
+        colormap: dict[str, str] | None = None,
+        abovemaxcolor: str | None = None,
+        belowmincolor: str | None = None,
+        label: str | None = None,
+        units: str | None = None,
+        stops: int = 256,
+    ) -> dict:
+        if variant == "default":
+            variant = self.default_variant()
+
+        if isinstance(datatype, ContinuousData):
+            if colorscalerange is None:
+                if datatype.valid_min is not None and datatype.valid_max is not None:
+                    colorscalerange = (datatype.valid_min, datatype.valid_max)
+                else:
+                    raise MissingParameterError(
+                        "`colorscalerange` must be specified when array does not have valid_min and valid_max attributes specified."
+                    )
+
+            if colormap is not None:
+                cmap = create_colormap_from_dict(colormap)
+            else:
+                cmap = mpl.colormaps.get_cmap(variant)
+
+            vmin, vmax = colorscalerange
+            sample_count = max(stops, 2)
+            samples = np.linspace(0.0, 1.0, sample_count)
+            values = vmin + samples * (vmax - vmin)
+            stops_list = [
+                {"value": float(v), "color": mcolors.to_hex(cmap(s), keep_alpha=True)}
+                for v, s in zip(values, samples, strict=True)
+            ]
+            return {
+                "type": "continuous",
+                "label": label,
+                "units": units,
+                "variant": variant,
+                "colorscalerange": [float(vmin), float(vmax)],
+                "stops": stops_list,
+                "abovemaxcolor": abovemaxcolor,
+                "belowmincolor": belowmincolor,
+            }
+
+        if isinstance(datatype, DiscreteData):
+            flag_values = list(datatype.values)
+            flag_meanings = list(datatype.meanings)
+            if colormap is not None:
+                color_map = create_listed_colormap_from_dict(colormap, flag_values)
+                colors = [color_map[v] for v in flag_values]
+            elif datatype.colors is not None:
+                colors = list(datatype.colors)
+            else:
+                minv = min(flag_values)
+                maxv = max(flag_values)
+                base = mpl.colormaps.get_cmap(variant)
+                colors = [
+                    mcolors.to_hex(base((v - minv) / maxv if maxv else 0.0))
+                    for v in flag_values
+                ]
+            return {
+                "type": "discrete",
+                "label": label,
+                "units": units,
+                "items": [
+                    {"value": v, "label": m, "color": c}
+                    for v, m, c in zip(flag_values, flag_meanings, colors, strict=True)
+                ],
+            }
+
+        raise NotImplementedError(f"Unsupported datatype: {type(datatype)}")
 
     @staticmethod
     def supported_variants() -> list[str]:
