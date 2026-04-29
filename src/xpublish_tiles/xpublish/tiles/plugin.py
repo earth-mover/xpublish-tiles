@@ -217,10 +217,20 @@ class TilesPlugin(Plugin):
 
             buffer = io.BytesIO()
             try:
+                width = (
+                    query.width
+                    if query.width is not None
+                    else (100 if query.vertical else 400)
+                )
+                height = (
+                    query.height
+                    if query.height is not None
+                    else (300 if query.vertical else 100)
+                )
                 renderer.render_legend(
                     buffer=buffer,
-                    width=query.width,
-                    height=query.height,
+                    width=width,
+                    height=height,
                     variant=variant,
                     datatype=datatype,
                     colorscalerange=query.colorscalerange,

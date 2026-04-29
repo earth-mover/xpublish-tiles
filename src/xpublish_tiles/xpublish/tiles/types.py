@@ -1582,23 +1582,27 @@ class LegendQuery(BaseModel):
         ),
     ]
     width: Annotated[
-        int,
+        int | None,
         Field(
-            default=100,
+            default=None,
             ge=1,
             le=2048,
-            json_schema_extra={"description": "Width of the legend image in pixels."},
+            json_schema_extra={
+                "description": "Width of the legend image in pixels. Defaults to 100 (vertical) or 400 (horizontal).",
+            },
         ),
-    ] = 100
+    ] = None
     height: Annotated[
-        int,
+        int | None,
         Field(
-            default=300,
+            default=None,
             ge=1,
             le=2048,
-            json_schema_extra={"description": "Height of the legend image in pixels."},
+            json_schema_extra={
+                "description": "Height of the legend image in pixels. Defaults to 300 (vertical) or 100 (horizontal).",
+            },
         ),
-    ] = 300
+    ] = None
     vertical: Annotated[
         bool,
         Field(
