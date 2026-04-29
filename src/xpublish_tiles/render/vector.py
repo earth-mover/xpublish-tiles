@@ -103,9 +103,7 @@ def _write_len_delim(buf: bytearray, field_num: int, body: bytes | bytearray) ->
     buf.extend(body)
 
 
-def _quantize_rings(
-    rings: np.ndarray, *, bbox, extent: int
-) -> np.ndarray:
+def _quantize_rings(rings: np.ndarray, *, bbox, extent: int) -> np.ndarray:
     """Float rings in output CRS → int32 rings in MVT tile-local space.
 
     MVT origin is top-left, Y increases downward.
@@ -302,9 +300,7 @@ def _rings_to_geojson_features(
     return features
 
 
-def _reproject_rings_to_wgs84(
-    rings: np.ndarray, source_crs: pyproj.CRS
-) -> np.ndarray:
+def _reproject_rings_to_wgs84(rings: np.ndarray, source_crs: pyproj.CRS) -> np.ndarray:
     """Reproject (N, M, 2) rings from source_crs to WGS84 (lon, lat)."""
     if source_crs.equals(pyproj.CRS.from_epsg(4326)):
         return rings
@@ -376,9 +372,7 @@ class VectorTileRenderer(Renderer):
                     raise ValueError(
                         "GeoJSON output requires the render context CRS to be set."
                     )
-                with log_duration(
-                    f"vector geojson {rings.shape[0]} polys", "▦", logger
-                ):
+                with log_duration(f"vector geojson {rings.shape[0]} polys", "▦", logger):
                     rings_4326 = _reproject_rings_to_wgs84(rings, context.crs)
                     geojson_features.extend(
                         _rings_to_geojson_features(

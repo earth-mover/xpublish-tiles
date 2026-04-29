@@ -8,7 +8,6 @@ from morecantile import Tile
 from pyproj import CRS
 from pyproj.aoi import BBox
 
-from tests import create_query_params
 from xpublish_tiles import config
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.testing.datasets import create_global_dataset
@@ -19,7 +18,9 @@ from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
 def _vector_query(tile, tms, *, format: ImageFormat) -> QueryParams:
     epsg_code = tms.crs.to_epsg()
     target_crs = (
-        CRS.from_epsg(epsg_code) if epsg_code is not None else CRS.from_user_input(tms.crs)
+        CRS.from_epsg(epsg_code)
+        if epsg_code is not None
+        else CRS.from_user_input(tms.crs)
     )
     native_bounds = tms.xy_bounds(tile)
     bbox = BBox(
@@ -85,6 +86,26 @@ async def test_vector_geojson_smoke():
     for lon, lat in ring:
         assert -180.0 <= lon <= 360.0
         assert -90.0 <= lat <= 90.0
+
+
+@pytest.mark.asyncio
+async def test_vector_max_features_per_side_clamping():
+    """The query param's max_features_per_side is clamped to the server cap."""
+    from xpublish_tiles.lib import max_render_shape
+
+    # Server config sets the absolute hard cap.
+    with config.set(vector_max_features_per_side=512):
+        # Below cap: client value is honored.
+        assert max_render_shape(style="vector", max_features_per_side=128) == (128, 128)
+        # Above cap: clamped down to the server cap.
+        assert max_render_shape(style="vector", max_features_per_side=4096) == (512, 512)
+        # None: defaults to the server cap (max detail).
+        assert max_render_shape(style="vector", max_features_per_side=None) == (
+            512,
+            512,
+        )
+        # Zero / negative is clamped up to 1.
+        assert max_render_shape(style="vector", max_features_per_side=0) == (1, 1)
 
 
 @pytest.mark.asyncio

@@ -777,7 +777,10 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     geometry_kind = renderer.geometry_kind()
 
     max_shape = max_render_shape(
-        style=query.style, width=query.width, height=query.height
+        style=query.style,
+        width=query.width,
+        height=query.height,
+        max_features_per_side=query.max_features_per_side,
     )
 
     # Capture the context logger before entering thread pool

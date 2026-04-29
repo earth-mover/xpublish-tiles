@@ -383,6 +383,11 @@ class TilesPlugin(Plugin):
                     f"{url_template}&abovemaxcolor={quote(query.abovemaxcolor)}"
                 )
 
+            if query.max_features_per_side is not None:
+                url_template = (
+                    f"{url_template}&max_features_per_side={query.max_features_per_side}"
+                )
+
             # Append selectors
             if selectors:
                 selector_qs = "&".join(f"{k}={v}" for k, v in selectors.items())
@@ -513,6 +518,7 @@ class TilesPlugin(Plugin):
                 colormap=query.colormap,
                 abovemaxcolor=query.abovemaxcolor,
                 belowmincolor=query.belowmincolor,
+                max_features_per_side=query.max_features_per_side,
             )
 
             try:

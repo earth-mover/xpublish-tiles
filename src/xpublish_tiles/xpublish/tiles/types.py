@@ -1327,6 +1327,16 @@ class TileQuery(BaseModel):
             },
         ),
     ]
+    max_features_per_side: Annotated[
+        int | None,
+        Field(
+            default=None,
+            ge=1,
+            json_schema_extra={
+                "description": "Vector style only: per-axis polygon-feature budget for this tile. Clamped server-side to [1, vector_max_features_per_side] (the server's hard cap). Lower for faster client rendering / smaller tiles, higher for crisper low-zoom detail. Omit to request the cap.",
+            },
+        ),
+    ]
 
     @field_validator("style", mode="before")
     @classmethod
@@ -1552,6 +1562,7 @@ TILES_FILTERED_QUERY_PARAMS: list[str] = [
     "abovemaxcolor",
     "belowmincolor",
     "render_errors",
+    "max_features_per_side",
 ]
 
 

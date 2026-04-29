@@ -145,6 +145,11 @@ class QueryParams:
     colormap: dict[str, str] | None = None
     abovemaxcolor: str | None = None
     belowmincolor: str | None = None
+    # Vector-style only: per-axis polygon-feature budget the client wants for
+    # this tile. The server's ``vector_max_features_per_side`` config is the
+    # absolute hard cap; this value is clamped into ``[1, cap]``. ``None``
+    # means "use the cap" (max detail the server allows).
+    max_features_per_side: int | None = None
 
     def get_renderer(self):
         from xpublish_tiles.render import RenderRegistry
