@@ -210,23 +210,20 @@ class TilesPlugin(Plugin):
 
             from xpublish_tiles.render import RenderRegistry
 
-            try:
-                renderer = RenderRegistry.get(style)()
-            except ValueError as e:
-                raise HTTPException(status_code=422, detail=str(e)) from e
+            renderer = RenderRegistry.get(style)()
 
+            width = (
+                query.width
+                if query.width is not None
+                else (100 if query.vertical else 400)
+            )
+            height = (
+                query.height
+                if query.height is not None
+                else (300 if query.vertical else 100)
+            )
             buffer = io.BytesIO()
             try:
-                width = (
-                    query.width
-                    if query.width is not None
-                    else (100 if query.vertical else 400)
-                )
-                height = (
-                    query.height
-                    if query.height is not None
-                    else (300 if query.vertical else 100)
-                )
                 renderer.render_legend(
                     buffer=buffer,
                     width=width,
@@ -247,8 +244,6 @@ class TilesPlugin(Plugin):
                 )
             except MissingParameterError as e:
                 raise HTTPException(status_code=422, detail=str(e)) from e
-            except NotImplementedError as e:
-                raise HTTPException(status_code=501, detail=str(e)) from e
 
             media_type = "image/png" if query.f == query.f.PNG else "image/jpeg"
             return Response(buffer.getvalue(), media_type=media_type)

@@ -204,11 +204,7 @@ async def handle_get_legend_graphic(
 
     datatype = _infer_datatype(dataset[query.layer])
     style, variant = query.styles
-
-    try:
-        renderer = RenderRegistry.get(style)()
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
+    renderer = RenderRegistry.get(style)()
 
     buffer = BytesIO()
     try:
@@ -226,8 +222,6 @@ async def handle_get_legend_graphic(
         )
     except MissingParameterError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
-    except NotImplementedError as e:
-        raise HTTPException(status_code=501, detail=str(e)) from e
 
     media_type = "image/png" if query.format == ImageFormat.PNG else "image/jpeg"
     return Response(content=buffer.getvalue(), media_type=media_type)

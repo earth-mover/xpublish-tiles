@@ -815,14 +815,23 @@ def test_legend_endpoint_snapshot(legend_dataset, png_snapshot, params):
 
 
 def test_legend_endpoint_error_paths(legend_dataset):
-    """Missing variable + missing colorscalerange both return 422."""
+    """Cover error branches in the legend endpoint."""
     rest = xpublish.Rest({"d": legend_dataset}, plugins={"tiles": TilesPlugin()})
     client = TestClient(rest.app)
 
+    # Missing variable -> 422
     r = client.get("/datasets/d/tiles/legend?variables=nope")
     assert r.status_code == 422
     assert "not found" in r.json()["detail"]
 
+    # Invalid color value -> 422 from validator
+    r = client.get(
+        "/datasets/d/tiles/legend?variables=temperature&style=raster/viridis"
+        "&colorscalerange=240,300&background_color=notacolor"
+    )
+    assert r.status_code == 422
+
+    # Continuous variable without colorscalerange or valid_min/max -> 422
     no_range = xr.Dataset(
         {
             "x": xr.DataArray(
@@ -840,6 +849,36 @@ def test_legend_endpoint_error_paths(legend_dataset):
     r = client2.get("/datasets/d/tiles/legend?variables=x")
     assert r.status_code == 422
     assert "colorscalerange" in r.json()["detail"]
+
+
+def test_legend_endpoint_jpeg_and_flag_colors():
+    """JPEG output (with white fallback) + DiscreteData with flag_colors."""
+    ds = xr.Dataset(
+        {
+            "land_cover": xr.DataArray(
+                np.zeros((10, 10), dtype=np.int8),
+                dims=["lat", "lon"],
+                coords={
+                    "lat": (["lat"], np.linspace(-90, 90, 10), {"axis": "Y"}),
+                    "lon": (["lon"], np.linspace(-180, 180, 10), {"axis": "X"}),
+                },
+                attrs={
+                    "flag_values": [1, 2, 3],
+                    "flag_meanings": "forest grass urban",
+                    "flag_colors": "#006600 #FAAA00 #888888",
+                },
+            ),
+        }
+    )
+    rest = xpublish.Rest({"d": ds}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    # flag_colors path + JPEG output (no alpha, white background fallback)
+    r = client.get("/datasets/d/tiles/legend?variables=land_cover&f=image/jpeg")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/jpeg"
+    img = Image.open(io.BytesIO(r.content))
+    assert img.mode == "RGB"
 
 
 def test_tilejson_invalid_tile_matrix_set():
