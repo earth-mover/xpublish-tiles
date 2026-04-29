@@ -112,6 +112,7 @@ Each variable's legend is available at `/tiles/legend`. The endpoint accepts the
 - `background_color`: `transparent` (default), a named color, or hex (`#RRGGBB`/`#RRGGBBAA` plus 3/4-digit shorthand).
 - `text_color`: tick labels, axis label, and outline color. Same accepted formats as `background_color`.
 - `label`: overrides the variable's `long_name` for the axis label.
+- `f` (default `image/png`): set to `application/json` to get a JSON description of the color stops instead of a rendered image, so clients can build their own legends.
 
 **Examples:**
 ```
@@ -123,9 +124,12 @@ http://localhost:8080/tiles/legend?variables=temperature&style=raster/viridis&co
 
 # Map overlay: half-opaque dark panel with white text
 http://localhost:8080/tiles/legend?variables=temperature&style=raster/viridis&colorscalerange=280,300&background_color=%2300000080&text_color=white
+
+# JSON color stops (build your own legend client-side)
+http://localhost:8080/tiles/legend?variables=temperature&style=raster/viridis&colorscalerange=280,300&f=application/json
 ```
 
-For categorical data the legend automatically uses the variable's `flag_meanings` as tick labels.
+For categorical data the legend automatically uses the variable's `flag_meanings` as tick labels (or item labels in the JSON response).
 
 ### Dimension selection with methods
 

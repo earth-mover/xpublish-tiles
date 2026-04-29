@@ -6,12 +6,13 @@ from typing import Annotated, Any, Union
 import morecantile.models
 from pydantic import BaseModel, Field, field_validator
 
-from xpublish_tiles.types import ImageFormat
+from xpublish_tiles.types import ImageFormat, LegendFormat
 from xpublish_tiles.validators import (
     validate_color,
     validate_colormap,
     validate_colorscalerange,
     validate_image_format,
+    validate_legend_format,
     validate_range_color,
     validate_style,
 )
@@ -1613,11 +1614,11 @@ class LegendQuery(BaseModel):
         ),
     ] = True
     f: Annotated[
-        ImageFormat,
+        LegendFormat,
         Field(
             default="image/png",
             json_schema_extra={
-                "description": "Output format, `image/png` or `image/jpeg`.",
+                "description": "Output format. `image/png` or `image/jpeg` for a rendered colorbar; `application/json` for a JSON description of the color stops so clients can build their own legend.",
             },
         ),
     ]
@@ -1689,8 +1690,8 @@ class LegendQuery(BaseModel):
 
     @field_validator("f", mode="before")
     @classmethod
-    def validate_format(cls, v: str | None) -> ImageFormat:
-        return validate_image_format(v) or ImageFormat.PNG
+    def validate_format(cls, v: str | None) -> LegendFormat:
+        return validate_legend_format(v) or LegendFormat.PNG
 
     @field_validator("variables")
     @classmethod

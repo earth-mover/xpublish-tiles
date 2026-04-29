@@ -30,7 +30,7 @@ from xpublish_tiles.logger import (
 )
 from xpublish_tiles.pipeline import _infer_datatype, pipeline
 from xpublish_tiles.tiles_lib import get_min_zoom
-from xpublish_tiles.types import QueryParams
+from xpublish_tiles.types import ImageFormat, LegendFormat, QueryParams
 from xpublish_tiles.utils import normalize_tilejson_bounds
 from xpublish_tiles.xpublish.tiles.metadata import (
     create_tileset_for_tms,
@@ -211,6 +211,25 @@ class TilesPlugin(Plugin):
             from xpublish_tiles.render import RenderRegistry
 
             renderer = RenderRegistry.get(style)()
+            label = query.label or dataset[var_name].attrs.get("long_name") or var_name
+
+            if query.f == LegendFormat.JSON:
+                try:
+                    data = renderer.legend_data(
+                        variant=variant,
+                        datatype=datatype,
+                        colorscalerange=query.colorscalerange,
+                        colormap=query.colormap,
+                        abovemaxcolor=query.abovemaxcolor,
+                        belowmincolor=query.belowmincolor,
+                        label=label,
+                    )
+                except MissingParameterError as e:
+                    raise HTTPException(status_code=422, detail=str(e)) from e
+                return Response(
+                    json.dumps(data),
+                    media_type="application/json",
+                )
 
             width = (
                 query.width
@@ -235,17 +254,15 @@ class TilesPlugin(Plugin):
                     abovemaxcolor=query.abovemaxcolor,
                     belowmincolor=query.belowmincolor,
                     vertical=query.vertical,
-                    label=query.label
-                    or dataset[var_name].attrs.get("long_name")
-                    or var_name,
+                    label=label,
                     background_color=query.background_color,
                     text_color=query.text_color,
-                    format=query.f,
+                    format=ImageFormat(query.f.value),
                 )
             except MissingParameterError as e:
                 raise HTTPException(status_code=422, detail=str(e)) from e
 
-            media_type = "image/png" if query.f == query.f.PNG else "image/jpeg"
+            media_type = "image/png" if query.f == LegendFormat.PNG else "image/jpeg"
             return Response(buffer.getvalue(), media_type=media_type)
 
         @router.get(

@@ -116,6 +116,24 @@ def validate_image_format(v: str | None) -> ImageFormat | None:
         ) from e
 
 
+def validate_legend_format(v: str | None):
+    """Accept image/png, image/jpeg, application/json, or shorthand."""
+    from xpublish_tiles.types import LegendFormat
+
+    if v is None:
+        return None
+    if "/" in v:
+        _, format_str = v.split("/", 1)
+    else:
+        format_str = v
+    try:
+        return LegendFormat(format_str.lower())
+    except ValueError as e:
+        raise ValueError(
+            f"legend format {format_str} is not valid. Options are: {', '.join(LegendFormat.__members__.keys())}",
+        ) from e
+
+
 def validate_crs(v: str | None) -> CRS | None:
     if v is None:
         return None

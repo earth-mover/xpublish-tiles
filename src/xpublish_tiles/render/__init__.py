@@ -152,6 +152,23 @@ class Renderer(ABC):
             f"Legend rendering not supported for style {self.style_id()!r}"
         )
 
+    def legend_data(
+        self,
+        *,
+        variant: str,
+        datatype: DataType,
+        colorscalerange: tuple[float, float] | None = None,
+        colormap: dict[str, str] | None = None,
+        abovemaxcolor: str | None = None,
+        belowmincolor: str | None = None,
+        label: str | None = None,
+        stops: int = 256,
+    ) -> dict:
+        """Return the legend as a JSON-serializable dict of color stops."""
+        raise NotImplementedError(
+            f"Legend data not supported for style {self.style_id()!r}"
+        )
+
     @staticmethod
     def style_id() -> str:
         """Return the style identifier for this renderer."""
@@ -433,6 +450,80 @@ class DatashaderRenderer(Renderer):
         if pil_format == "JPEG" and img.mode != "RGB":
             img = img.convert("RGB")
         img.save(buffer, format=pil_format)
+
+    def legend_data(
+        self,
+        *,
+        variant: str,
+        datatype: DataType,
+        colorscalerange: tuple[float, float] | None = None,
+        colormap: dict[str, str] | None = None,
+        abovemaxcolor: str | None = None,
+        belowmincolor: str | None = None,
+        label: str | None = None,
+        stops: int = 256,
+    ) -> dict:
+        if variant == "default":
+            variant = self.default_variant()
+
+        if isinstance(datatype, ContinuousData):
+            if colorscalerange is None:
+                if datatype.valid_min is not None and datatype.valid_max is not None:
+                    colorscalerange = (datatype.valid_min, datatype.valid_max)
+                else:
+                    raise MissingParameterError(
+                        "`colorscalerange` must be specified when array does not have valid_min and valid_max attributes specified."
+                    )
+
+            if colormap is not None:
+                cmap = create_colormap_from_dict(colormap)
+            else:
+                cmap = mpl.colormaps.get_cmap(variant)
+
+            vmin, vmax = colorscalerange
+            sample_count = max(stops, 2)
+            samples = np.linspace(0.0, 1.0, sample_count)
+            values = vmin + samples * (vmax - vmin)
+            stops_list = [
+                {"value": float(v), "color": mcolors.to_hex(cmap(s), keep_alpha=True)}
+                for v, s in zip(values, samples, strict=True)
+            ]
+            return {
+                "type": "continuous",
+                "label": label,
+                "variant": variant,
+                "colorscalerange": [float(vmin), float(vmax)],
+                "stops": stops_list,
+                "abovemaxcolor": abovemaxcolor,
+                "belowmincolor": belowmincolor,
+            }
+
+        if isinstance(datatype, DiscreteData):
+            flag_values = list(datatype.values)
+            flag_meanings = list(datatype.meanings)
+            if colormap is not None:
+                color_map = create_listed_colormap_from_dict(colormap, flag_values)
+                colors = [color_map[v] for v in flag_values]
+            elif datatype.colors is not None:
+                colors = list(datatype.colors)
+            else:
+                minv = min(flag_values)
+                maxv = max(flag_values)
+                base = mpl.colormaps.get_cmap(variant)
+                colors = [
+                    mcolors.to_hex(base((v - minv) / maxv if maxv else 0.0))
+                    for v in flag_values
+                ]
+            return {
+                "type": "discrete",
+                "label": label,
+                "items": [
+                    {"value": v, "label": m, "color": c}
+                    for v, m, c in zip(flag_values, flag_meanings, colors, strict=True)
+                ],
+            }
+
+        raise NotImplementedError(f"Unsupported datatype: {type(datatype)}")
 
     @staticmethod
     def supported_variants() -> list[str]:
