@@ -237,12 +237,12 @@ async def extract_dimension_extents(
     grid = await async_run(guess_grid_system, ds, name)
     data_array = ds[name]
 
-    # Identify spatial and temporal dimensions using CF conventions
-    spatial_dims = {grid.Xdim, grid.Ydim}
+    # Grid-owned dims (X, Y, and faceted ``face_dim``) are skipped for
+    # custom dimension extents — they're an implementation detail of the grid.
+    spatial_dims = grid.dims
     vertical_dims = {grid.Z} if grid.Z else set()
 
     for dim_name in data_array.dims:
-        # Skip spatial dimensions (X, Y axes)
         if dim_name in spatial_dims:
             continue
 
