@@ -10,7 +10,9 @@ from xpublish_tiles.grids import Triangular
 from xpublish_tiles.lib import polygons_from_rings
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import DatashaderRenderer, register_renderer
+from xpublish_tiles.render.raster import _apply_out_of_range_colors
 from xpublish_tiles.types import (
+    ContinuousData,
     ImageFormat,
     RenderContext,
 )
@@ -95,6 +97,10 @@ class PolygonsRenderer(DatashaderRenderer):
             abovemaxcolor=abovemaxcolor,
             belowmincolor=belowmincolor,
         )
+        if isinstance(context.datatype, ContinuousData):
+            im = _apply_out_of_range_colors(
+                im, mesh, colorscalerange, abovemaxcolor, belowmincolor
+            )
         im.save(buffer, format=str(format))
 
     @staticmethod
