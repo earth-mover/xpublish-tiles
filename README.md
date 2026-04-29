@@ -99,6 +99,39 @@ For continuous data, you can control how values outside the `colorscalerange` ar
 http://localhost:8080/tiles/WebMercatorQuad/4/4/14?variables=temperature&colorscalerange=280,300&abovemaxcolor=red&belowmincolor=transparent
 ```
 
+### Legends
+
+Each variable's legend is available at `/tiles/legend`. The endpoint accepts the same styling parameters as a tile request (`style`, `colorscalerange`, `colormap`, `abovemaxcolor`, `belowmincolor`) so the legend matches the tile rendering. The OGC API – Tiles spec doesn't define a legend resource, so it's also discovered via:
+
+- the `legend` field on `TileJSON` responses, populated with an absolute URL carrying the request's styling parameters, and
+- an `ogc-rel:legend` link on each Layer in the tilesets list.
+
+**Optional parameters:**
+- `vertical` (default `true`): orientation of the colorbar.
+- `width` / `height`: defaults to `100x300` for vertical, `400x100` for horizontal.
+- `background_color`: `transparent` (default), a named color, or hex (`#RRGGBB`/`#RRGGBBAA` plus 3/4-digit shorthand).
+- `text_color`: tick labels, axis label, and outline color. Same accepted formats as `background_color`.
+- `label`: overrides the auto-generated label. By default the label is `long_name [units]` (or `name [units]` if no `long_name`), pulled from the variable's CF attributes.
+- `show_label` (default `true`): set to `false` to skip drawing the axis label on the image (useful when the variable's name is too long for the requested size).
+- `f` (default `image/png`): set to `application/json` to get a JSON description of the color stops instead of a rendered image, so clients can build their own legends. The JSON also includes a separate `units` field.
+
+**Examples:**
+```
+# Vertical, transparent background
+http://localhost:8080/tiles/legend?variables=temperature&style=raster/viridis&colorscalerange=280,300
+
+# Horizontal
+http://localhost:8080/tiles/legend?variables=temperature&style=raster/viridis&colorscalerange=280,300&vertical=false
+
+# Map overlay: half-opaque dark panel with white text
+http://localhost:8080/tiles/legend?variables=temperature&style=raster/viridis&colorscalerange=280,300&background_color=%2300000080&text_color=white
+
+# JSON color stops (build your own legend client-side)
+http://localhost:8080/tiles/legend?variables=temperature&style=raster/viridis&colorscalerange=280,300&f=application/json
+```
+
+For categorical data the legend automatically uses the variable's `flag_meanings` as tick labels (or item labels in the JSON response).
+
 ### Dimension selection with methods
 
 `xpublish-tiles` supports flexible dimension selection using a DSL that allows you to specify selection methods. This is particularly useful for temporal and vertical coordinates where you may want to select the nearest value, or use forward/backward fill.
