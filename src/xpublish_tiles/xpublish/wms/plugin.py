@@ -206,6 +206,11 @@ async def handle_get_legend_graphic(
     style, variant = query.styles
     renderer = RenderRegistry.get(style)()
 
+    attrs = dataset[query.layer].attrs
+    base = attrs.get("long_name") or query.layer
+    units = attrs.get("units")
+    label = f"{base} [{units}]" if units else base
+
     buffer = BytesIO()
     try:
         renderer.render_legend(
@@ -217,7 +222,7 @@ async def handle_get_legend_graphic(
             colorscalerange=query.colorscalerange,
             colormap=query.colormap,
             vertical=query.vertical,
-            label=dataset[query.layer].attrs.get("long_name") or query.layer,
+            label=label,
             format=query.format,
         )
     except MissingParameterError as e:

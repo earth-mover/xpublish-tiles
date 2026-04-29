@@ -211,7 +211,13 @@ class TilesPlugin(Plugin):
             from xpublish_tiles.render import RenderRegistry
 
             renderer = RenderRegistry.get(style)()
-            label = query.label or dataset[var_name].attrs.get("long_name") or var_name
+            if query.label is not None:
+                label: str | None = query.label
+            else:
+                attrs = dataset[var_name].attrs
+                base = attrs.get("long_name") or var_name
+                units = attrs.get("units")
+                label = f"{base} [{units}]" if units else base
 
             if query.f == LegendFormat.JSON:
                 try:
