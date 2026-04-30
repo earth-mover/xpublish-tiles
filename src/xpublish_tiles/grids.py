@@ -32,6 +32,7 @@ from xpublish_tiles.lib import (
     fill_rings_from_corners,
     is_degree_geographic,
     round_bbox,
+    sync_load_async,
     unwrap,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
@@ -1580,8 +1581,9 @@ class Rectilinear(RectilinearMixin, GridSystem):
         Yname: str,
     ) -> "Rectilinear":
         """Create a Rectilinear grid from a dataset with cell-center adjusted bbox."""
-        X = ds[Xname].load()
-        Y = ds[Yname].load()
+        sync_load_async(ds[[Xname, Yname]])
+        X = ds[Xname]
+        Y = ds[Yname]
 
         x_data = X.data
         if crs.is_geographic:
@@ -1823,8 +1825,13 @@ class Curvilinear(GridSystem):
         # Note that pyproj requires float64 C-contiguous arrays for in-place transforms.
         # Since Curvilinear grid transforms are quite expensive; we trade the memory cost
         # here to avoid repeated allocations when transforming.
-        X = ds[Xname].load().astype(np.float64, copy=False)
-        Y = ds[Yname].load().astype(np.float64, copy=False)
+        # Materialize X and Y concurrently.
+        # Write the float64 cast back so subsequent lookups skip the conversion.
+        sync_load_async(ds[[Xname, Yname]])
+        ds[Xname] = ds[Xname].astype(np.float64, copy=False)
+        ds[Yname] = ds[Yname].astype(np.float64, copy=False)
+        X = ds[Xname]
+        Y = ds[Yname]
         Xdim, Ydim = Curvilinear._guess_dims(ds, X=X, Y=Y)
         # Normalize Y (and corner-Y) to X's dim order so a single (xaxis, yaxis)
         # pair is valid for both.
