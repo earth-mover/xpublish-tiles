@@ -1580,8 +1580,8 @@ class Rectilinear(RectilinearMixin, GridSystem):
         Yname: str,
     ) -> "Rectilinear":
         """Create a Rectilinear grid from a dataset with cell-center adjusted bbox."""
-        X = ds[Xname]
-        Y = ds[Yname]
+        X = ds[Xname].load()
+        Y = ds[Yname].load()
 
         x_data = X.data
         if crs.is_geographic:
@@ -1823,7 +1823,8 @@ class Curvilinear(GridSystem):
         # Note that pyproj requires float64 C-contiguous arrays for in-place transforms.
         # Since Curvilinear grid transforms are quite expensive; we trade the memory cost
         # here to avoid repeated allocations when transforming.
-        X, Y = ds[Xname].astype(np.float64), ds[Yname].astype(np.float64)
+        X = ds[Xname].load().astype(np.float64, copy=False)
+        Y = ds[Yname].load().astype(np.float64, copy=False)
         Xdim, Ydim = Curvilinear._guess_dims(ds, X=X, Y=Y)
         # Normalize Y (and corner-Y) to X's dim order so a single (xaxis, yaxis)
         # pair is valid for both.
@@ -2464,7 +2465,7 @@ class Healpix(GridSystem):
         if healpix_index is None or cell_ids_name is None or cell_dim is None:
             raise ValueError("No HealpixIndex found in dataset.")
 
-        cell_ids = ds[cell_ids_name].data
+        cell_ids = ds[cell_ids_name].load().to_numpy()
         info = healpix_index.grid_info
         if cell_ids.size == 12 * 4**info.level:
             bbox = BBox(west=-180, south=-90, east=180, north=90)
