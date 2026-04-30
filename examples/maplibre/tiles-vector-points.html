@@ -96,15 +96,23 @@
             </small>
         </div>
         <div id="info">
-            Wind vectors as MVT <code>Point</code> features —
-            <code>wind_u_10m</code> + <code>wind_v_10m</code> attached to each
-            point as typed properties; arrow rotation and color are computed
-            client-side via MapLibre expressions. Hover an arrow to inspect.<br/>
+            Wind vectors as MVT <code>Point</code> features
+            (<code>wind_u_10m</code> + <code>wind_v_10m</code>) layered over a
+            <code>vector/cells</code> backdrop of mean sea-level pressure.
+            Two MVT sources from one server, composited entirely client-side.
+            Hover an arrow to inspect.<br/>
             Dataset: <code>earthmover-public/noaa-gfs-forecast</code>. Run:
             <code>uv run xpublish-tiles --dataset=earthmover-public/noaa-gfs-forecast</code>
         </div>
         <div id="legend">
-            <div id="legend-title">10 m wind speed</div>
+            <div style="font-weight:600;">Mean sea-level pressure</div>
+            <div class="units">hPa</div>
+            <div class="gradient" id="pressure-gradient" style="background: linear-gradient(to right, #4575b4, #abd9e9, #ffffbf, #fdae61, #d73027);"></div>
+            <div class="labels">
+                <span>950</span><span>1000</span><span>1050</span>
+            </div>
+            <div style="height:6px;"></div>
+            <div style="font-weight:600;">10 m wind speed</div>
             <div class="units">m/s</div>
             <div class="gradient" id="legend-gradient"></div>
             <div class="labels">
@@ -118,11 +126,25 @@
             const SERVER = "http://localhost:8080";
             const U_VAR = "wind_u_10m";
             const V_VAR = "wind_v_10m";
+            const PRESSURE_VAR = "pressure_reduced_to_mean_sea_level";
             const TMS = "WebMercatorQuad";
             const TIME = null;
             const STEP = null;
             // The MVT layer name the server emits for vector/points.
-            const SOURCE_LAYER = "points";
+            const POINTS_LAYER = "points";
+            // For vector/cells the server uses the variable name as the layer.
+            const PRESSURE_LAYER = PRESSURE_VAR;
+            // Pressure backdrop is a low-detail smooth field; arrows want
+            // higher density to show direction. Independent of the user's
+            // wind detail slider.
+            const PRESSURE_DETAIL = 192;
+            // Mean sea-level pressure is reported in Pa by the GFS forecast
+            // dataset; typical range is 950–1050 hPa = 95 000 – 105 000 Pa.
+            const PRESSURE_MIN_PA = 95000;
+            const PRESSURE_MAX_PA = 105000;
+            const PRESSURE_PALETTE = [
+                "#4575b4", "#abd9e9", "#ffffbf", "#fdae61", "#d73027",
+            ];
 
             // ---- Palettes ------------------------------------------------------
             const PALETTES = {
@@ -153,6 +175,38 @@
                     `&f=mvt` +
                     (extra.length ? `&${extra.join("&")}` : "")
                 );
+            }
+
+            function buildPressureTileUrl() {
+                const extra = [`max_features_per_side=${PRESSURE_DETAIL}`];
+                if (TIME) extra.push(`time=${encodeURIComponent(TIME)}`);
+                if (STEP) extra.push(`step=${encodeURIComponent(STEP)}`);
+                return (
+                    `${SERVER}/tiles/${TMS}/{z}/{y}/{x}` +
+                    `?variables=${PRESSURE_VAR}` +
+                    `&style=vector/cells` +
+                    `&f=mvt` +
+                    `&${extra.join("&")}`
+                );
+            }
+
+            // Pressure fill-color expression: interpolate over Pa values.
+            // Stops are evenly spaced across the configured Pa range.
+            function buildPressureFillExpression() {
+                const stops = [];
+                PRESSURE_PALETTE.forEach((color, i) => {
+                    const t = i / (PRESSURE_PALETTE.length - 1);
+                    stops.push(
+                        PRESSURE_MIN_PA + (PRESSURE_MAX_PA - PRESSURE_MIN_PA) * t,
+                        color,
+                    );
+                });
+                return [
+                    "interpolate",
+                    ["linear"],
+                    ["to-number", ["get", "value"]],
+                    ...stops,
+                ];
             }
 
             // ---- Expressions (magnitude + rotation) ----------------------------
@@ -282,6 +336,27 @@
             map.on("load", () => {
                 map.addImage("wind-arrow", makeArrowIcon(), { pixelRatio: 2 });
 
+                // Pressure backdrop (vector/cells) — added first so its fill
+                // renders below the wind-arrow symbol layer.
+                map.addSource("xpublish-pressure", {
+                    type: "vector",
+                    tiles: [buildPressureTileUrl()],
+                    minzoom: 0,
+                    maxzoom: 12,
+                    scheme: "xyz",
+                });
+                map.addLayer({
+                    id: "pressure-fill",
+                    type: "fill",
+                    source: "xpublish-pressure",
+                    "source-layer": PRESSURE_LAYER,
+                    paint: {
+                        "fill-color": buildPressureFillExpression(),
+                        "fill-opacity": 0.55,
+                        "fill-antialias": false,
+                    },
+                });
+
                 map.addSource("xpublish-points", {
                     type: "vector",
                     tiles: [buildTileUrl(parseInt(featuresSlider.value, 10))],
@@ -294,7 +369,7 @@
                     id: "wind-arrows",
                     type: "symbol",
                     source: "xpublish-points",
-                    "source-layer": SOURCE_LAYER,
+                    "source-layer": POINTS_LAYER,
                     layout: {
                         "icon-image": "wind-arrow",
                         "icon-rotate": ROTATION_DEG,
@@ -326,6 +401,17 @@
                     // Bearing (deg from N, clockwise) = atan2(u, v).
                     let bearing = Math.atan2(u, v) * 180 / Math.PI;
                     if (bearing < 0) bearing += 360;
+                    // Look up pressure under the cursor from the cells layer.
+                    let pressureLine = "";
+                    const phits = map.queryRenderedFeatures(e.point, {
+                        layers: ["pressure-fill"],
+                    });
+                    if (phits.length) {
+                        const pa = parseFloat(phits[0].properties.value);
+                        if (Number.isFinite(pa)) {
+                            pressureLine = `pressure: ${(pa / 100).toFixed(1)} hPa<br/>`;
+                        }
+                    }
                     map.getCanvas().style.cursor = "pointer";
                     popup
                         .setLngLat(e.lngLat)
@@ -333,6 +419,7 @@
                             `<strong>10 m wind</strong><br/>` +
                             `speed: ${speed.toFixed(2)} m/s<br/>` +
                             `bearing: ${bearing.toFixed(0)}°<br/>` +
+                            pressureLine +
                             `<small>u=${u.toFixed(2)}, v=${v.toFixed(2)}</small><br/>` +
                             `<small>${e.lngLat.lng.toFixed(2)}, ${e.lngLat.lat.toFixed(2)}</small>`,
                         )
@@ -402,7 +489,7 @@
                         id: "wind-arrows",
                         type: "symbol",
                         source: "xpublish-points",
-                        "source-layer": SOURCE_LAYER,
+                        "source-layer": POINTS_LAYER,
                         layout: layout,
                         paint: { "icon-color": iconColor, "icon-opacity": 0.95 },
                     });
