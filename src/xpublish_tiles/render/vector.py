@@ -5,8 +5,8 @@ already in the output CRS), then either:
 
 * MVT: quantize rings to the tile-local integer grid, encode each polygon as
   an MVT command stream, frame as protobuf, gzip.
-* GeoJSON: reproject rings to WGS84 (RFC 7946) and serialize as a
-  FeatureCollection.
+* GeoJSON: serialize the rings as an RFC 7946 FeatureCollection. Requires the
+  request CRS to be geographic (CRS84 / EPSG:4326); rejected otherwise.
 
 Width/height are not meaningful for vector tiles and are ignored; coarsening
 targets ``config["mvt_extent"]`` (default 4096) via the ``vector`` branch in
@@ -23,10 +23,8 @@ from numbers import Number
 
 import numba
 import numpy as np
-import pyproj
 
 from xpublish_tiles.config import config
-from xpublish_tiles.lib import transformer_from_crs
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import Renderer, register_renderer, render_error_image
 from xpublish_tiles.types import (
@@ -266,16 +264,20 @@ def _encode_mvt_tile(layers: list[bytes]) -> bytes:
 
 
 def _rings_to_geojson_features(
-    rings_4326: np.ndarray, values: np.ndarray, *, var_name: str
+    rings: np.ndarray, values: np.ndarray, *, var_name: str
 ) -> list[dict]:
-    """Build GeoJSON Feature dicts from (N, M, 2) WGS84 rings."""
-    n, m, _ = rings_4326.shape
+    """Build GeoJSON Feature dicts from (N, M, 2) lon/lat rings.
+
+    Rings must already be in WGS84 lon/lat — the caller is responsible for
+    validating the output CRS (RFC 7946 GeoJSON requires CRS84).
+    """
+    n, m, _ = rings.shape
     features: list[dict] = []
     for i in range(n):
         v = values[i]
         if not np.isfinite(v):
             continue
-        coords = rings_4326[i].tolist()
+        coords = rings[i].tolist()
         # Drop trailing repeats so the ring closes cleanly. We always keep
         # the first vertex repeated as the last to satisfy GeoJSON's closed-
         # ring requirement.
@@ -298,20 +300,6 @@ def _rings_to_geojson_features(
             }
         )
     return features
-
-
-def _reproject_rings_to_wgs84(rings: np.ndarray, source_crs: pyproj.CRS) -> np.ndarray:
-    """Reproject (N, M, 2) rings from source_crs to WGS84 (lon, lat)."""
-    if source_crs.equals(pyproj.CRS.from_epsg(4326)):
-        return rings
-    transformer = transformer_from_crs(source_crs, pyproj.CRS.from_epsg(4326))
-    flat_x = rings[..., 0].ravel()
-    flat_y = rings[..., 1].ravel()
-    lon, lat = transformer.transform(flat_x, flat_y)
-    out = np.empty_like(rings)
-    out[..., 0] = np.asarray(lon).reshape(rings.shape[:-1])
-    out[..., 1] = np.asarray(lat).reshape(rings.shape[:-1])
-    return out
 
 
 @register_renderer
@@ -368,16 +356,15 @@ class VectorTileRenderer(Renderer):
                     )
                 layers.append(layer_body)
             elif format is ImageFormat.GEOJSON:
-                if context.crs is None:
+                if context.crs is None or not context.crs.is_geographic:
                     raise ValueError(
-                        "GeoJSON output requires the render context CRS to be set."
+                        "GeoJSON output requires a geographic CRS (CRS84 / EPSG:4326). "
+                        "Pick a tile matrix set whose CRS is lon/lat — e.g. "
+                        "WorldCRS84Quad — or request f=mvt instead."
                     )
                 with log_duration(f"vector geojson {rings.shape[0]} polys", "▦", logger):
-                    rings_4326 = _reproject_rings_to_wgs84(rings, context.crs)
                     geojson_features.extend(
-                        _rings_to_geojson_features(
-                            rings_4326, values, var_name=str(var_name)
-                        )
+                        _rings_to_geojson_features(rings, values, var_name=str(var_name))
                     )
 
         if format is ImageFormat.MVT:

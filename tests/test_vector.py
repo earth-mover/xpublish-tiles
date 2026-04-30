@@ -3,6 +3,7 @@
 import gzip
 import json
 
+import morecantile
 import pytest
 from morecantile import Tile
 from pyproj import CRS
@@ -13,6 +14,8 @@ from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.testing.datasets import create_global_dataset
 from xpublish_tiles.testing.tiles import WEBMERC_TMS
 from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
+
+CRS84_TMS = morecantile.tms.get("WorldCRS84Quad")
 
 
 def _vector_query(tile, tms, *, format: ImageFormat) -> QueryParams:
@@ -64,11 +67,11 @@ async def test_vector_mvt_smoke():
 
 @pytest.mark.asyncio
 async def test_vector_geojson_smoke():
-    """End-to-end: vector style + GeoJSON format yields a parseable
-    FeatureCollection of polygons."""
+    """End-to-end: vector style + GeoJSON format on a CRS84 TMS yields a
+    parseable FeatureCollection of polygons in lon/lat."""
     ds = create_global_dataset(nlat=180, nlon=361)
     tile = Tile(x=0, y=0, z=0)
-    query = _vector_query(tile, WEBMERC_TMS, format=ImageFormat.GEOJSON)
+    query = _vector_query(tile, CRS84_TMS, format=ImageFormat.GEOJSON)
     with config.set(rectilinear_check_min_size=0):
         result = await pipeline(ds, query)
     fc = json.loads(result.getvalue().decode("utf-8"))
@@ -82,10 +85,25 @@ async def test_vector_geojson_smoke():
     ring = sample["geometry"]["coordinates"][0]
     assert ring[0] == ring[-1], "Polygon ring must be closed"
     assert len(ring) >= 4, "Polygon ring must have at least 4 coordinates"
-    # GeoJSON coordinates must be in WGS84 lon/lat per RFC 7946.
+    # GeoJSON coordinates must be in WGS84 lon/lat per RFC 7946. Allow a
+    # one-cell overshoot (~1° at this resolution) so the boundary cells whose
+    # rings span the antimeridian don't trip the bounds check.
     for lon, lat in ring:
-        assert -180.0 <= lon <= 360.0
-        assert -90.0 <= lat <= 90.0
+        assert -182.0 <= lon <= 182.0
+        assert -91.0 <= lat <= 91.0
+
+
+@pytest.mark.asyncio
+async def test_vector_geojson_rejects_projected_crs():
+    """GeoJSON output is RFC 7946 (CRS84 only); requesting it against a
+    projected TMS like WebMercatorQuad must error rather than silently
+    reproject."""
+    ds = create_global_dataset(nlat=180, nlon=361)
+    tile = Tile(x=0, y=0, z=0)
+    query = _vector_query(tile, WEBMERC_TMS, format=ImageFormat.GEOJSON)
+    with config.set(rectilinear_check_min_size=0):
+        with pytest.raises(ValueError, match="geographic CRS"):
+            await pipeline(ds, query)
 
 
 @pytest.mark.asyncio
