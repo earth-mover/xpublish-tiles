@@ -418,6 +418,65 @@ def test_polar_grid_assign_index_full_sweep_wraps():
     assert result.sizes["azimuth"] == da.sizes["azimuth"] + 1
 
 
+def test_z_coord_with_mismatched_dim_name():
+    """Detect Z when a 1D vertical coord has a different dim name (NEMO-style).
+
+    NEMO ocean datasets have, e.g., a ``deptht`` coordinate variable along
+    dim ``k``. ``grid.Z`` should pick up the coord name, surface selection
+    should assign a default index and select on it, and the dimension extent
+    metadata should report ``deptht`` (not the bare dim ``k``).
+    """
+    import asyncio
+
+    from xpublish_tiles.pipeline import apply_query
+    from xpublish_tiles.xpublish.tiles.tile_matrix import extract_dimension_extents
+
+    nz, ny, nx = 5, 3, 4
+    ds = xr.Dataset(
+        {
+            "foo": (
+                ("time", "k", "y", "x"),
+                np.zeros((2, nz, ny, nx)),
+                {"coordinates": "deptht lon lat"},
+            )
+        },
+        coords={
+            "deptht": (
+                ("k",),
+                np.arange(nz, dtype="float64") * 10.0,
+                {"standard_name": "depth", "axis": "Z", "positive": "down"},
+            ),
+            "lon": (
+                ("x",),
+                np.linspace(-10, 10, nx),
+                {"standard_name": "longitude", "units": "degrees_east"},
+            ),
+            "lat": (
+                ("y",),
+                np.linspace(-5, 5, ny),
+                {"standard_name": "latitude", "units": "degrees_north"},
+            ),
+            "time": (("time",), pd.date_range("2024-01-01", periods=2)),
+        },
+    )
+
+    grid = guess_grid_system(ds, "foo")
+    assert grid.Z == "deptht"
+    assert grid.X == "lon"
+    assert grid.Y == "lat"
+
+    validated = apply_query(ds, variables=["foo"], selectors={})
+    da = validated["foo"].da
+    assert "k" not in da.dims
+    assert "deptht" in da.coords
+    npt.assert_allclose(da["deptht"].values, 0.0)
+
+    extents = asyncio.run(extract_dimension_extents(ds, "foo"))
+    extent_names = {e.name for e in extents}
+    assert "deptht" in extent_names
+    assert "k" not in extent_names
+
+
 def test_polar_grid_from_dataset_missing_location():
     """from_dataset should raise when radar lat/lon is missing."""
     ds = xr.Dataset(

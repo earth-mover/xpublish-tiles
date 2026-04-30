@@ -224,6 +224,22 @@ async def async_run(func, *args, **kwargs):
         return await loop.run_in_executor(EXECUTOR, func, *args, **kwargs)
 
 
+def sync_load_async(obj: xr.DataArray | xr.Dataset) -> None:
+    """Run ``obj.load_async()`` from sync code, updating ``obj`` in place.
+
+    Lets xarray handle concurrency internally (``Dataset.load_async`` gathers
+    its variables). Safe regardless of whether an event loop is already
+    running on the calling thread: when a loop is detected we delegate to a
+    worker thread that gets a fresh loop via ``asyncio.run``.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(obj.load_async())
+        return
+    EXECUTOR.submit(lambda: asyncio.run(obj.load_async())).result()
+
+
 # 4326 with order of axes reversed.
 OTHER_4326 = pyproj.CRS.from_user_input("WGS 84 (CRS84)")
 

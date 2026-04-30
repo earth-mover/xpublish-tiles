@@ -32,6 +32,7 @@ from xpublish_tiles.lib import (
     fill_rings_from_corners,
     is_degree_geographic,
     round_bbox,
+    sync_load_async,
     unwrap,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
@@ -1580,6 +1581,7 @@ class Rectilinear(RectilinearMixin, GridSystem):
         Yname: str,
     ) -> "Rectilinear":
         """Create a Rectilinear grid from a dataset with cell-center adjusted bbox."""
+        sync_load_async(ds[[Xname, Yname]])
         X = ds[Xname]
         Y = ds[Yname]
 
@@ -1823,7 +1825,13 @@ class Curvilinear(GridSystem):
         # Note that pyproj requires float64 C-contiguous arrays for in-place transforms.
         # Since Curvilinear grid transforms are quite expensive; we trade the memory cost
         # here to avoid repeated allocations when transforming.
-        X, Y = ds[Xname].astype(np.float64), ds[Yname].astype(np.float64)
+        # Materialize X and Y concurrently.
+        # Write the float64 cast back so subsequent lookups skip the conversion.
+        sync_load_async(ds[[Xname, Yname]])
+        ds[Xname] = ds[Xname].astype(np.float64, copy=False)
+        ds[Yname] = ds[Yname].astype(np.float64, copy=False)
+        X = ds[Xname]
+        Y = ds[Yname]
         Xdim, Ydim = Curvilinear._guess_dims(ds, X=X, Y=Y)
         # Normalize Y (and corner-Y) to X's dim order so a single (xaxis, yaxis)
         # pair is valid for both.
@@ -2464,7 +2472,7 @@ class Healpix(GridSystem):
         if healpix_index is None or cell_ids_name is None or cell_dim is None:
             raise ValueError("No HealpixIndex found in dataset.")
 
-        cell_ids = ds[cell_ids_name].data
+        cell_ids = ds[cell_ids_name].load().to_numpy()
         info = healpix_index.grid_info
         if cell_ids.size == 12 * 4**info.level:
             bbox = BBox(west=-180, south=-90, east=180, north=90)
@@ -3060,12 +3068,16 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
 
 
 def _guess_z_dimension(da: xr.DataArray) -> str | None:
-    # make sure Z is a dimension we can select on
-    # We have to do this here to deal with the try-except above.
-    # In the except clause, we might detect multiple Z.
+    # Returns the name of a Z coordinate variable on ``da`` whose underlying
+    # dimension is in ``da.dims``. The coordinate may itself be a dim coord
+    # (e.g. ``depth`` on dim ``depth``) or a 1D non-dim coord (e.g. ``deptht``
+    # on dim ``k``).
     possible = set(da.cf.coordinates.get("vertical", {})) | set(da.cf.axes.get("Z", {}))
     for z in sorted(possible):
-        if z in da.dims:
+        if z not in da.coords:
+            continue
+        zda = da.coords[z]
+        if zda.ndim == 1 and zda.dims[0] in da.dims:
             return z
     return None
 

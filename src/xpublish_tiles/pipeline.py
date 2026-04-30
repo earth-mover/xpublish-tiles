@@ -961,8 +961,10 @@ def apply_query(
 
         grid = guess_grid_system(ds, name)
         array = ds[name]
-        if grid.Z in array.dims:
+        if grid.Z is not None and grid.Z in array.coords:
             # This code assumes all datasets are ocean datasets :/
+            if grid.Z not in array.xindexes:
+                array = array.set_xindex(grid.Z)
             try:
                 array = array.sel({grid.Z: 0}, method="nearest")
             except Exception as e:

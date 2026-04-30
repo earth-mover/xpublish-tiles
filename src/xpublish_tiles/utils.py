@@ -5,6 +5,8 @@ import threading
 import time
 from typing import Any
 
+import cf_xarray  # noqa: F401
+
 import xarray as xr
 from xpublish_tiles.logger import log_duration, logger
 
@@ -14,8 +16,17 @@ NUMBA_THREADING_LOCK = contextlib.nullcontext() if HAS_TBB else threading.Lock()
 
 
 def xarray_object_key(obj: xr.DataArray | xr.Dataset) -> tuple:
-    """Cache key fragment: sorted dims whose size > 1."""
-    return tuple(sorted(dim for dim, size in obj.sizes.items() if size > 1))
+    """Cache key fragment: sorted dims whose size > 1, excluding the time dim
+    when the time coordinate is 1D."""
+    time_dims: set = set()
+    for name in obj.cf.coordinates.get("time", []):
+        if name in obj.coords and obj.coords[name].ndim == 1:
+            time_dims.add(obj.coords[name].dims[0])
+    return tuple(
+        sorted(
+            dim for dim, size in obj.sizes.items() if size > 1 and dim not in time_dims
+        )
+    )
 
 
 def lower_case_keys(d: Any) -> dict[str, Any]:
