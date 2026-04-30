@@ -186,12 +186,16 @@ class Renderer(ABC):
         raise NotImplementedError
 
     @staticmethod
-    def geometry_kind() -> str:
+    def geometry_kind(variant: str) -> str:
         """Geometry pipeline kind: 'raster' or 'polygons'.
 
         Drives branching in ``transform_for_render`` / ``subset_to_bbox``.
-        Vector tiles share the polygon geometry pipeline with the polygons
-        renderer; only the final encoder differs.
+        Takes the resolved variant (never ``"default"``) so a renderer can
+        route different variants through different pipelines — e.g. the
+        vector renderer's ``cells`` and (planned) ``points`` variants share
+        the polygon pipeline (cell-ring centroids = point locations), while
+        a future ``contours`` variant needs ``raster`` to feed marching-
+        squares contour tracing on a regular scalar field.
         """
         return "raster"
 

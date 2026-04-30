@@ -180,16 +180,20 @@ class VectorTileRenderer(Renderer):
         return "vector"
 
     @staticmethod
-    def geometry_kind() -> str:
-        return "polygons"
+    def geometry_kind(variant: str) -> str:
+        # cells: one polygon per grid cell (current behavior).
+        # contours / points (planned) will use the raster geometry pipeline.
+        if variant in ("cells", "default"):
+            return "polygons"
+        raise ValueError(f"Unknown vector variant: {variant!r}")
 
     @staticmethod
     def supported_variants() -> list[str]:
-        return ["default"]
+        return ["cells"]
 
     @staticmethod
     def default_variant() -> str:
-        return "default"
+        return "cells"
 
     @staticmethod
     def supported_formats() -> set[ImageFormat]:
@@ -203,11 +207,17 @@ class VectorTileRenderer(Renderer):
 
     @classmethod
     def describe_style(cls, variant: str) -> dict[str, str]:
-        return {
-            "id": f"{cls.style_id()}/{variant}",
-            "title": "Vector",
-            "description": (
-                "Vector rendering — emits Mapbox Vector Tile (MVT) protobuf "
-                "or GeoJSON feature collections of grid-cell polygons."
+        descriptions = {
+            "cells": (
+                "One MVT/GeoJSON polygon feature per grid cell, with the cell "
+                "value attached as a typed property. Clients style on the value."
             ),
+        }
+        resolved = cls.default_variant() if variant == "default" else variant
+        if resolved not in descriptions:
+            raise ValueError(f"Unknown vector variant: {variant!r}")
+        return {
+            "id": f"{cls.style_id()}/{resolved}",
+            "title": f"Vector — {resolved}",
+            "description": descriptions[resolved],
         }

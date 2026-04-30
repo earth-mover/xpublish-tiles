@@ -108,5 +108,5 @@ class PolygonsRenderer(DatashaderRenderer):
         return "polygons"
 
     @staticmethod
-    def geometry_kind() -> str:
+    def geometry_kind(variant: str) -> str:
         return "polygons"

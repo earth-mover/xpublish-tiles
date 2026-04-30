@@ -18,7 +18,9 @@ from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
 CRS84_TMS = morecantile.tms.get("WorldCRS84Quad")
 
 
-def _vector_query(tile, tms, *, format: ImageFormat) -> QueryParams:
+def _vector_query(
+    tile, tms, *, format: ImageFormat, variant: str = "default"
+) -> QueryParams:
     epsg_code = tms.crs.to_epsg()
     target_crs = (
         CRS.from_epsg(epsg_code)
@@ -40,7 +42,7 @@ def _vector_query(tile, tms, *, format: ImageFormat) -> QueryParams:
         style="vector",
         width=256,
         height=256,
-        variant="default",
+        variant=variant,
         colorscalerange=(-1.0, 1.0),
         format=format,
     )
@@ -138,3 +140,33 @@ async def test_vector_format_aliases():
     assert validate_image_format("application/geo+json") is ImageFormat.GEOJSON
     # Backwards-compat with the legacy `image/<sub>` form
     assert validate_image_format("image/png") is ImageFormat.PNG
+
+
+@pytest.mark.parametrize("variant", ["cells", "default"])
+def test_validate_style_vector_variants(variant):
+    """`vector/cells` is the canonical name; `vector/default` is an alias."""
+    from xpublish_tiles.validators import validate_style
+
+    assert validate_style(f"vector/{variant}") == ("vector", variant)
+
+
+def test_validate_style_vector_rejects_unknown_variant():
+    from xpublish_tiles.validators import validate_style
+
+    with pytest.raises(
+        ValueError,
+        match="variant 'bogus' is not supported for style 'vector'",
+    ):
+        validate_style("vector/bogus")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("variant", ["cells", "default"])
+async def test_vector_cells_variant_renders(variant):
+    """`vector/cells` and `vector/default` both produce identical MVT output."""
+    ds = create_global_dataset(nlat=180, nlon=361)
+    tile = Tile(x=0, y=0, z=0)
+    query = _vector_query(tile, WEBMERC_TMS, format=ImageFormat.MVT, variant=variant)
+    with config.set(rectilinear_check_min_size=0):
+        result = await pipeline(ds, query)
+    assert result.getvalue(), f"vector/{variant} should produce non-empty MVT"

@@ -774,7 +774,8 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
         partial(apply_query, ds, variables=query.variables, selectors=query.selectors)
     )
     renderer = query.get_renderer()
-    geometry_kind = renderer.geometry_kind()
+    variant = renderer.default_variant() if query.variant == "default" else query.variant
+    geometry_kind = renderer.geometry_kind(variant)
 
     max_shape = max_render_shape(
         style=query.style,
