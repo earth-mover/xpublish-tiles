@@ -339,8 +339,8 @@ async def extract_variable_bounding_box(
             upperRight=[transformed_bounds[2], transformed_bounds[3]],
             crs=target_crs,
         )
-    except VariableNotFoundError as e:
-        raise e
+    except VariableNotFoundError:
+        raise
 
     except Exception as e:
         logger.error(f"Failed to transform bounds: {e}")

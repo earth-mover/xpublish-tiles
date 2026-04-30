@@ -2666,6 +2666,8 @@ class CubedSphere(FacetedGridSystem):
         if topology_name is not None:
             keep.append(topology_name)
         coord_ds = ds.reset_coords()[keep]
+        # Materialize centers + corners + topology for all faces
+        sync_load_async(coord_ds)
         faces: list[Curvilinear] = []
         for i in range(face_size):
             face_ds = cast(xr.Dataset, coord_ds.isel({face_dim: i}))
@@ -3125,6 +3127,8 @@ def guess_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
     Uses caching with ds.attrs['_xpublish_id'] as cache key if present.
     If no _xpublish_id, skips caching to avoid cross-contamination.
     """
+    cf_coords = ds.cf.coordinates
+
     xpublish_id = ds.attrs.get("_xpublish_id")
     cache_key = (
         (xpublish_id, xarray_object_key(ds[name])) if xpublish_id is not None else None
@@ -3138,15 +3142,29 @@ def guess_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
         if cache_key is not None and cache_key in _GRID_CACHE:
             return _GRID_CACHE[cache_key]
 
+        # Pre-load coordinates on the parent.
+        # This is an extremely ugly hack :/
+        to_preload = [
+            c
+            for axis in ("latitude", "longitude", "vertical")
+            for c in cf_coords.get(axis, [])
+            if (c in ds.variables and ds.variables[c].ndim <= 2)
+        ]
+        if to_preload:
+            sync_load_async(ds[to_preload])
+
         face_dim = find_cubed_sphere_face_dim(ds, name)
         if face_dim is not None:
-            coords = ds.cf.coordinates
             lon_name = next(
-                (str(c) for c in coords.get("longitude", []) if face_dim in ds[c].dims),
+                (
+                    str(c)
+                    for c in cf_coords.get("longitude", [])
+                    if face_dim in ds[c].dims
+                ),
                 None,
             )
             lat_name = next(
-                (str(c) for c in coords.get("latitude", []) if face_dim in ds[c].dims),
+                (str(c) for c in cf_coords.get("latitude", []) if face_dim in ds[c].dims),
                 None,
             )
             assert lon_name is not None and lat_name is not None, (
