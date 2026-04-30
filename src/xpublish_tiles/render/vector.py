@@ -1,12 +1,19 @@
 """Vector tile renderer (MVT + GeoJSON).
 
 Reuses the polygons-style geometry pipeline (cell rings + per-cell values
-already in the output CRS), then either:
+already in the output CRS) to emit two variants today:
 
-* MVT: delegates to :mod:`xpublish_tiles.render.mvt` for quantization +
-  protobuf encoding, then gzips the result.
-* GeoJSON: serializes the rings as an RFC 7946 FeatureCollection. Requires
-  the request CRS to be geographic (CRS84 / EPSG:4326); rejected otherwise.
+* ``vector/cells`` — one polygon feature per grid cell, value as property.
+* ``vector/points`` — one point feature per grid cell at the ring centroid,
+  with all requested ``variables`` attached as typed properties (intended for
+  vector-field cases like wind ``u``/``v``).
+
+Output goes through:
+
+* MVT — :mod:`xpublish_tiles.render.mvt` for quantization + protobuf
+  encoding, then gzipped.
+* GeoJSON — RFC 7946 ``FeatureCollection``. Requires the request CRS to be
+  geographic (CRS84 / EPSG:4326); rejected otherwise.
 
 Width/height are not meaningful for vector tiles and are ignored; coarsening
 targets ``config["mvt_extent"]`` (default 4096) via the ``vector`` branch in
@@ -25,7 +32,12 @@ import numpy as np
 from xpublish_tiles.config import config
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import Renderer, register_renderer, render_error_image
-from xpublish_tiles.render.mvt import encode_mvt_layer, encode_mvt_tile, quantize_rings
+from xpublish_tiles.render.mvt import (
+    encode_mvt_layer,
+    encode_mvt_point_layer,
+    encode_mvt_tile,
+    quantize_rings,
+)
 from xpublish_tiles.types import (
     ImageFormat,
     NullRenderContext,
@@ -34,10 +46,10 @@ from xpublish_tiles.types import (
 )
 
 
-def _rings_to_geojson_features(
+def _rings_to_geojson_polygon_features(
     rings: np.ndarray, values: np.ndarray, *, var_name: str
 ) -> list[dict]:
-    """Build GeoJSON Feature dicts from (N, M, 2) lon/lat rings.
+    """Build GeoJSON Polygon Feature dicts from (N, M, 2) lon/lat rings.
 
     Rings must already be in WGS84 lon/lat — the caller is responsible for
     validating the output CRS (RFC 7946 GeoJSON requires CRS84).
@@ -71,6 +83,46 @@ def _rings_to_geojson_features(
     return features
 
 
+def _centroids_from_rings(rings: np.ndarray) -> np.ndarray:
+    """Approximate cell centroids from (N, M, 2) cell rings.
+
+    Uses the mean of all-but-the-closing vertex. For non-pole cells padded
+    from M=5 to M=6 (see the polar pole-split in the polygons pipeline) the
+    closing-vertex pad is duplicated, giving a slight bias toward the first
+    corner — visually negligible for points display.
+    """
+    return rings[:, :-1, :].mean(axis=1)
+
+
+def _points_to_geojson_features(
+    centroids: np.ndarray, properties: dict[str, np.ndarray]
+) -> list[dict]:
+    """Build GeoJSON Point Features. Drops a feature if any property value is non-finite."""
+    n = centroids.shape[0]
+    var_names = list(properties.keys())
+
+    finite_mask = np.ones(n, dtype=bool)
+    for vals in properties.values():
+        finite_mask &= np.isfinite(vals)
+
+    features: list[dict] = []
+    for i in range(n):
+        if not finite_mask[i]:
+            continue
+        features.append(
+            {
+                "type": "Feature",
+                "id": i,
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": centroids[i].tolist(),
+                },
+                "properties": {name: float(properties[name][i]) for name in var_names},
+            }
+        )
+    return features
+
+
 @register_renderer
 class VectorTileRenderer(Renderer):
     """Renderer that emits MVT or GeoJSON from the polygons geometry pipeline."""
@@ -98,6 +150,19 @@ class VectorTileRenderer(Renderer):
                 f"{sorted(f.value for f in self.supported_formats())}"
             )
 
+        resolved = self.default_variant() if variant == "default" else variant
+        if resolved == "cells":
+            self._render_cells(
+                contexts=contexts, buffer=buffer, format=format, logger=logger
+            )
+        elif resolved == "points":
+            self._render_points(
+                contexts=contexts, buffer=buffer, format=format, logger=logger
+            )
+        else:
+            raise ValueError(f"Unknown vector variant: {variant!r}")
+
+    def _render_cells(self, *, contexts, buffer, format, logger):
         layers: list[bytes] = []
         geojson_features: list[dict] = []
 
@@ -114,38 +179,85 @@ class VectorTileRenderer(Renderer):
             if format is ImageFormat.MVT:
                 extent = config.get("mvt_extent")
                 with log_duration(
-                    f"vector quantize+encode {rings.shape[0]} polys", "▦", logger
+                    f"vector cells quantize+encode {rings.shape[0]} polys", "▦", logger
                 ):
                     rings_q = quantize_rings(rings, bbox=context.bbox, extent=extent)
-                    layer_body = encode_mvt_layer(
-                        name=str(var_name),
-                        extent=extent,
-                        rings_q=rings_q,
-                        values=values,
+                    layers.append(
+                        encode_mvt_layer(
+                            name=str(var_name),
+                            extent=extent,
+                            rings_q=rings_q,
+                            values=values,
+                        )
                     )
-                layers.append(layer_body)
             elif format is ImageFormat.GEOJSON:
-                if context.crs is None or not context.crs.is_geographic:
-                    raise ValueError(
-                        "GeoJSON output requires a geographic CRS (CRS84 / EPSG:4326). "
-                        "Pick a tile matrix set whose CRS is lon/lat — e.g. "
-                        "WorldCRS84Quad — or request f=mvt instead."
-                    )
-                with log_duration(f"vector geojson {rings.shape[0]} polys", "▦", logger):
+                _require_geographic_crs(context.crs)
+                with log_duration(
+                    f"vector cells geojson {rings.shape[0]} polys", "▦", logger
+                ):
                     geojson_features.extend(
-                        _rings_to_geojson_features(rings, values, var_name=str(var_name))
+                        _rings_to_geojson_polygon_features(
+                            rings, values, var_name=str(var_name)
+                        )
                     )
 
+        _write_output(buffer, format, layers=layers, geojson_features=geojson_features)
+
+    def _render_points(self, *, contexts, buffer, format, logger):
+        # Multi-variable: one MVT layer (or one GeoJSON FeatureCollection)
+        # with every requested variable attached as a property on each point.
+        # All variables must share the same grid (same `cell_rings`); we use
+        # the first populated context as the geometry reference.
+        ref_ctx = next(
+            (
+                c
+                for c in contexts.values()
+                if isinstance(c, PopulatedRenderContext)
+                and c.cell_rings is not None
+                and len(c.cell_rings) > 0
+            ),
+            None,
+        )
+        if ref_ctx is None:
+            _write_output(buffer, format, layers=[], geojson_features=[])
+            return
+        assert ref_ctx.cell_rings is not None  # narrow for the type checker
+
+        rings = np.asarray(ref_ctx.cell_rings)
+        centroids = _centroids_from_rings(rings)
+        properties: dict[str, np.ndarray] = {
+            str(var_name): np.asarray(ctx.da.values).ravel()
+            for var_name, ctx in contexts.items()
+            if isinstance(ctx, PopulatedRenderContext) and ctx.da is not None
+        }
+        if not properties:
+            _write_output(buffer, format, layers=[], geojson_features=[])
+            return
+
         if format is ImageFormat.MVT:
-            tile = encode_mvt_tile(layers)
-            buffer.write(gzip.compress(tile, compresslevel=1))
-        else:
-            payload = json.dumps(
-                {"type": "FeatureCollection", "features": geojson_features},
-                allow_nan=False,
-                separators=(",", ":"),
-            )
-            buffer.write(payload.encode("utf-8"))
+            extent = config.get("mvt_extent")
+            with log_duration(
+                f"vector points encode {centroids.shape[0]} pts × {len(properties)} vars",
+                "▦",
+                logger,
+            ):
+                points_q = quantize_rings(centroids, bbox=ref_ctx.bbox, extent=extent)
+                layer = encode_mvt_point_layer(
+                    name="points",
+                    extent=extent,
+                    points_q=points_q,
+                    properties=properties,
+                )
+            _write_output(buffer, format, layers=[layer], geojson_features=[])
+        elif format is ImageFormat.GEOJSON:
+            _require_geographic_crs(ref_ctx.crs)
+            with log_duration(
+                f"vector points geojson {centroids.shape[0]} pts × {len(properties)} vars",
+                "▦",
+                logger,
+            ):
+                features = _points_to_geojson_features(centroids, properties)
+            _write_output(buffer, format, layers=[], geojson_features=features)
 
     def render_error(
         self,
@@ -181,15 +293,15 @@ class VectorTileRenderer(Renderer):
 
     @staticmethod
     def geometry_kind(variant: str) -> str:
-        # cells: one polygon per grid cell (current behavior).
-        # contours / points (planned) will use the raster geometry pipeline.
-        if variant in ("cells", "default"):
+        # cells + points share the polygon pipeline (point = cell-ring centroid).
+        # A future `contours` variant will return "raster".
+        if variant in ("cells", "points", "default"):
             return "polygons"
         raise ValueError(f"Unknown vector variant: {variant!r}")
 
     @staticmethod
     def supported_variants() -> list[str]:
-        return ["cells"]
+        return ["cells", "points"]
 
     @staticmethod
     def default_variant() -> str:
@@ -212,6 +324,12 @@ class VectorTileRenderer(Renderer):
                 "One MVT/GeoJSON polygon feature per grid cell, with the cell "
                 "value attached as a typed property. Clients style on the value."
             ),
+            "points": (
+                "One MVT/GeoJSON point feature per grid cell at the cell centroid. "
+                "All requested variables are attached as typed properties on each "
+                "point — useful for vector fields (e.g. variables=u,v for wind "
+                "arrows). Features missing any property value are dropped."
+            ),
         }
         resolved = cls.default_variant() if variant == "default" else variant
         if resolved not in descriptions:
@@ -221,3 +339,31 @@ class VectorTileRenderer(Renderer):
             "title": f"Vector — {resolved}",
             "description": descriptions[resolved],
         }
+
+
+def _require_geographic_crs(crs) -> None:
+    if crs is None or not crs.is_geographic:
+        raise ValueError(
+            "GeoJSON output requires a geographic CRS (CRS84 / EPSG:4326). "
+            "Pick a tile matrix set whose CRS is lon/lat — e.g. "
+            "WorldCRS84Quad — or request f=mvt instead."
+        )
+
+
+def _write_output(
+    buffer: io.BytesIO,
+    format: ImageFormat,
+    *,
+    layers: list[bytes],
+    geojson_features: list[dict],
+) -> None:
+    if format is ImageFormat.MVT:
+        tile = encode_mvt_tile(layers)
+        buffer.write(gzip.compress(tile, compresslevel=1))
+    else:
+        payload = json.dumps(
+            {"type": "FeatureCollection", "features": geojson_features},
+            allow_nan=False,
+            separators=(",", ":"),
+        )
+        buffer.write(payload.encode("utf-8"))

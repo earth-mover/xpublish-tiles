@@ -36,6 +36,7 @@ _CMD_LINETO = 2
 _CMD_CLOSEPATH = 7
 
 # MVT geometry types
+_GEOM_POINT = 1
 _GEOM_POLYGON = 3
 
 # Protobuf wire types
@@ -243,3 +244,86 @@ def encode_mvt_tile(layers: list[bytes]) -> bytes:
     for layer_body in layers:
         out.extend(_emit_len_delim(_TILE_LAYERS, layer_body))
     return bytes(out)
+
+
+@numba.njit(cache=True, boundscheck=False)
+def _encode_points_inplace(q: np.ndarray, cmd_buf: np.ndarray):
+    """Encode (N, 2) int32 points as one-vertex MoveTo commands.
+
+    Each row of ``cmd_buf`` becomes ``[moveto_cmd, zigzag_x, zigzag_y]``.
+    """
+    n = q.shape[0]
+    for i in range(n):
+        x = q[i, 0]
+        y = q[i, 1]
+        cmd_buf[i, 0] = (_CMD_MOVETO & 0x7) | (1 << 3)
+        cmd_buf[i, 1] = (x << 1) ^ (x >> 31)
+        cmd_buf[i, 2] = (y << 1) ^ (y >> 31)
+
+
+def encode_mvt_point_layer(
+    *,
+    name: str,
+    extent: int,
+    points_q: np.ndarray,
+    properties: dict[str, np.ndarray],
+) -> bytes:
+    """Build a single MVT Layer of Point features carrying typed properties.
+
+    ``points_q`` is ``(N, 2)`` int32 quantized point coordinates in tile-local
+    space. ``properties`` maps each variable name to an ``(N,)`` float array.
+    A feature is dropped entirely if **any** of its property values is non-
+    finite (NaN/Inf) — useful for vector-field cases like ``u``/``v`` wind
+    components where a partially-missing feature isn't actionable.
+    """
+    n = points_q.shape[0]
+    var_names = list(properties.keys())
+
+    finite_mask = np.ones(n, dtype=bool)
+    for vals in properties.values():
+        finite_mask &= np.isfinite(vals)
+
+    cmd_buf = np.zeros((n, 3), dtype=np.uint32)
+    with NUMBA_THREADING_LOCK:
+        _encode_points_inplace(points_q, cmd_buf)
+
+    # Build values table + per-feature tag-payloads in one pass.
+    value_buf = bytearray()
+    feature_tag_payloads: list[bytes | None] = [None] * n
+    next_value_idx = 0
+    for i in range(n):
+        if not finite_mask[i]:
+            continue
+        tags = bytearray()
+        for k_idx, var_name in enumerate(var_names):
+            value_body = bytearray()
+            _write_double(value_body, _VALUE_DOUBLE, float(properties[var_name][i]))
+            value_buf.extend(_emit_len_delim(_LAYER_VALUES, value_body))
+            _write_varint(tags, k_idx)
+            _write_varint(tags, next_value_idx)
+            next_value_idx += 1
+        feature_tag_payloads[i] = bytes(tags)
+
+    body = bytearray()
+    _write_uint32(body, _LAYER_VERSION, 2)
+    _write_string(body, _LAYER_NAME, name)
+    _write_uint32(body, _LAYER_EXTENT, extent)
+    for var_name in var_names:
+        _write_string(body, _LAYER_KEYS, var_name)
+    body.extend(value_buf)
+
+    for i in range(n):
+        tags_payload = feature_tag_payloads[i]
+        if tags_payload is None:
+            continue
+        feat = bytearray()
+        _write_uint32(feat, _FEATURE_ID, i + 1)
+        _write_len_delim(feat, _FEATURE_TAGS, tags_payload)
+        _write_uint32(feat, _FEATURE_TYPE, _GEOM_POINT)
+        geom_payload = bytearray()
+        for k in range(3):
+            _write_varint(geom_payload, int(cmd_buf[i, k]))
+        _write_len_delim(feat, _FEATURE_GEOMETRY, geom_payload)
+        _write_len_delim(body, _LAYER_FEATURES, feat)
+
+    return bytes(body)
