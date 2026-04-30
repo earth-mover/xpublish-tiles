@@ -3060,12 +3060,16 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
 
 
 def _guess_z_dimension(da: xr.DataArray) -> str | None:
-    # make sure Z is a dimension we can select on
-    # We have to do this here to deal with the try-except above.
-    # In the except clause, we might detect multiple Z.
+    # Returns the name of a Z coordinate variable on ``da`` whose underlying
+    # dimension is in ``da.dims``. The coordinate may itself be a dim coord
+    # (e.g. ``depth`` on dim ``depth``) or a 1D non-dim coord (e.g. ``deptht``
+    # on dim ``k``).
     possible = set(da.cf.coordinates.get("vertical", {})) | set(da.cf.axes.get("Z", {}))
     for z in sorted(possible):
-        if z in da.dims:
+        if z not in da.coords:
+            continue
+        zda = da.coords[z]
+        if zda.ndim == 1 and zda.dims[0] in da.dims:
             return z
     return None
 
