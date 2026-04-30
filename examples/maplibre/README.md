@@ -10,7 +10,8 @@ Then you can try the examples:
 * [MapLibre XYZ Tiles](./tiles.html)
 * [MapLibre TileJSON](./tilejson.html)
 * [MapLibre WMS Tiles](./wms-tiled.html)
-* [MapLibre Vector Tiles (MVT)](./tiles-vector.html) — defaults to the GFS forecast dataset (`uv run xpublish-tiles --dataset=earthmover-public/noaa-gfs-forecast`, requires Arraylake credentials); edit `VARIABLE` / `INITIAL_MIN` / `INITIAL_MAX` / `DOMAIN_*` at the top of the script to point at any other dataset.
+* [MapLibre Vector Tiles (MVT) — cells](./tiles-vector.html) — `vector/cells`: one polygon feature per grid cell, value as a typed property. Defaults to GFS `temperature_2m` (`uv run xpublish-tiles --dataset=earthmover-public/noaa-gfs-forecast`, requires Arraylake credentials).
+* [MapLibre Vector Tiles (MVT) — wind points](./tiles-vector-points.html) — `vector/points` with `wind_u_10m` + `wind_v_10m`: one Point per grid cell, both components attached as typed properties; arrow rotation and color computed client-side via MapLibre expressions. Same dataset / server invocation as above.
 
 ## Categorical Examples
 
