@@ -37,6 +37,7 @@ _CMD_CLOSEPATH = 7
 
 # MVT geometry types
 _GEOM_POINT = 1
+_GEOM_LINESTRING = 2
 _GEOM_POLYGON = 3
 
 # Protobuf wire types
@@ -244,6 +245,384 @@ def encode_mvt_tile(layers: list[bytes]) -> bytes:
     for layer_body in layers:
         out.extend(_emit_len_delim(_TILE_LAYERS, layer_body))
     return bytes(out)
+
+
+@numba.njit(cache=True, boundscheck=False)
+def _encode_multiring_polygons(
+    rings_flat: np.ndarray,
+    ring_starts: np.ndarray,
+    poly_ring_starts: np.ndarray,
+    cmd_buf: np.ndarray,
+    poly_cmd_starts: np.ndarray,
+    cmd_len: np.ndarray,
+    valid: np.ndarray,
+):
+    """Encode multi-ring polygons (outer + holes) as MVT command streams.
+
+    ``rings_flat`` is ``(total_pts, 2)`` int32 quantized vertices with NO
+    closing-vertex duplicates. Ring ``r`` spans ``rings_flat[ring_starts[r]:
+    ring_starts[r+1]]``. Polygon ``p`` owns rings ``[poly_ring_starts[p],
+    poly_ring_starts[p+1])``; the first ring of each polygon is the outer
+    boundary, the rest are holes.
+
+    Per-ring winding is corrected against the MVT spec (outer = positive
+    shoelace area in tile coords; inner = negative): rings are emitted in
+    reverse order if their signed area has the wrong sign. Degenerate rings
+    (<3 distinct vertices after dedup) are dropped; if the outer ring is
+    degenerate the whole polygon is invalidated.
+
+    The MVT cursor persists across rings within a polygon. Per spec,
+    ClosePath returns the cursor to the start of the most recent MoveTo, so
+    each subsequent ring's MoveTo delta is computed against that anchor.
+    """
+    n_polys = poly_ring_starts.shape[0] - 1
+    for p in range(n_polys):
+        ring_lo = poly_ring_starts[p]
+        ring_hi = poly_ring_starts[p + 1]
+        cmd_off = poly_cmd_starts[p]
+        write_idx = 0
+        cursor_x = np.int32(0)
+        cursor_y = np.int32(0)
+        outer_ok = False
+        outer_drop = False
+
+        for r in range(ring_lo, ring_hi):
+            pt_lo = ring_starts[r]
+            pt_hi = ring_starts[r + 1]
+            m = pt_hi - pt_lo
+            outer = r == ring_lo
+            if m < 3:
+                if outer:
+                    outer_drop = True
+                    break
+                continue
+
+            # Shoelace signed area in tile coords (Y flipped).
+            area2 = np.int64(0)
+            for k in range(m):
+                a = pt_lo + k
+                b = pt_lo + ((k + 1) % m)
+                area2 += np.int64(rings_flat[a, 0]) * np.int64(rings_flat[b, 1])
+                area2 -= np.int64(rings_flat[b, 0]) * np.int64(rings_flat[a, 1])
+
+            need_reverse = (outer and area2 < 0) or ((not outer) and area2 > 0)
+            if need_reverse:
+                start_k = m - 1
+                step = -1
+            else:
+                start_k = 0
+                step = 1
+
+            x0 = rings_flat[pt_lo + start_k, 0]
+            y0 = rings_flat[pt_lo + start_k, 1]
+            dx = x0 - cursor_x
+            dy = y0 - cursor_y
+            ring_anchor = write_idx
+            cmd_buf[cmd_off + write_idx] = (_CMD_MOVETO & 0x7) | (1 << 3)
+            write_idx += 1
+            cmd_buf[cmd_off + write_idx] = (dx << 1) ^ (dx >> 31)
+            write_idx += 1
+            cmd_buf[cmd_off + write_idx] = (dy << 1) ^ (dy >> 31)
+            write_idx += 1
+
+            lineto_header = write_idx
+            cmd_buf[cmd_off + write_idx] = 0
+            write_idx += 1
+
+            n_lineto = 0
+            prev_x = x0
+            prev_y = y0
+            for j in range(1, m):
+                k = start_k + j * step
+                cur_x = rings_flat[pt_lo + k, 0]
+                cur_y = rings_flat[pt_lo + k, 1]
+                if cur_x == prev_x and cur_y == prev_y:
+                    continue
+                dx = cur_x - prev_x
+                dy = cur_y - prev_y
+                cmd_buf[cmd_off + write_idx] = (dx << 1) ^ (dx >> 31)
+                write_idx += 1
+                cmd_buf[cmd_off + write_idx] = (dy << 1) ^ (dy >> 31)
+                write_idx += 1
+                n_lineto += 1
+                prev_x = cur_x
+                prev_y = cur_y
+
+            if n_lineto < 2:
+                if outer:
+                    outer_drop = True
+                    break
+                # Drop hole: rewind to before this ring's MoveTo.
+                write_idx = ring_anchor
+                continue
+
+            cmd_buf[cmd_off + lineto_header] = (_CMD_LINETO & 0x7) | (n_lineto << 3)
+            cmd_buf[cmd_off + write_idx] = (_CMD_CLOSEPATH & 0x7) | (1 << 3)
+            write_idx += 1
+            cursor_x = x0
+            cursor_y = y0
+            if outer:
+                outer_ok = True
+
+        if outer_drop or not outer_ok:
+            cmd_len[p] = 0
+            valid[p] = 0
+        else:
+            cmd_len[p] = write_idx
+            valid[p] = 1
+
+
+def encode_mvt_polygon_layer(
+    *,
+    name: str,
+    extent: int,
+    rings_flat_q: np.ndarray,
+    ring_starts: np.ndarray,
+    poly_ring_starts: np.ndarray,
+    properties: dict[str, np.ndarray],
+) -> bytes:
+    """Build an MVT layer of multi-ring Polygon features (outer + holes).
+
+    Inputs are pre-quantized via :func:`quantize_rings`. Each polygon may
+    carry one or more rings — the first is the outer boundary, the rest are
+    holes. Properties is a per-variable ``(n_polys,)`` float array; a
+    polygon is dropped if **any** of its property values is non-finite or
+    if its outer ring degenerates after winding/dedup.
+    """
+    n_polys = poly_ring_starts.shape[0] - 1
+    if n_polys == 0:
+        body = bytearray()
+        _write_uint32(body, _LAYER_VERSION, 2)
+        _write_string(body, _LAYER_NAME, name)
+        _write_uint32(body, _LAYER_EXTENT, extent)
+        return bytes(body)
+
+    poly_n_pts = (
+        ring_starts[poly_ring_starts[1:]] - ring_starts[poly_ring_starts[:-1]]
+    ).astype(np.int64)
+    poly_n_rings = np.diff(poly_ring_starts).astype(np.int64)
+    poly_cmd_upper = 2 * poly_n_pts + 3 * poly_n_rings
+    poly_cmd_starts = np.concatenate(
+        [np.zeros(1, dtype=np.int64), np.cumsum(poly_cmd_upper)]
+    ).astype(np.int32)
+    cmd_buf = np.zeros(int(poly_cmd_starts[-1]), dtype=np.uint32)
+    cmd_len = np.zeros(n_polys, dtype=np.int32)
+    valid = np.zeros(n_polys, dtype=np.uint8)
+
+    with NUMBA_THREADING_LOCK:
+        _encode_multiring_polygons(
+            rings_flat_q,
+            ring_starts.astype(np.int32),
+            poly_ring_starts.astype(np.int32),
+            cmd_buf,
+            poly_cmd_starts,
+            cmd_len,
+            valid,
+        )
+
+    var_names = list(properties.keys())
+    finite_mask = np.ones(n_polys, dtype=bool)
+    for vals in properties.values():
+        finite_mask &= np.isfinite(vals)
+    valid &= finite_mask.view(np.uint8)
+
+    body = bytearray()
+    _write_uint32(body, _LAYER_VERSION, 2)
+    _write_string(body, _LAYER_NAME, name)
+    _write_uint32(body, _LAYER_EXTENT, extent)
+
+    value_buf = bytearray()
+    feature_tag_payloads: list[bytes | None] = [None] * n_polys
+    next_value_idx = 0
+    for i in range(n_polys):
+        if not valid[i]:
+            continue
+        tags = bytearray()
+        for k_idx, var_name in enumerate(var_names):
+            value_body = bytearray()
+            _write_double(value_body, _VALUE_DOUBLE, float(properties[var_name][i]))
+            value_buf.extend(_emit_len_delim(_LAYER_VALUES, value_body))
+            _write_varint(tags, k_idx)
+            _write_varint(tags, next_value_idx)
+            next_value_idx += 1
+        feature_tag_payloads[i] = bytes(tags)
+
+    for var_name in var_names:
+        _write_string(body, _LAYER_KEYS, var_name)
+    body.extend(value_buf)
+
+    for i in range(n_polys):
+        tags_payload = feature_tag_payloads[i]
+        if tags_payload is None:
+            continue
+        feat = bytearray()
+        _write_uint32(feat, _FEATURE_ID, i + 1)
+        _write_len_delim(feat, _FEATURE_TAGS, tags_payload)
+        _write_uint32(feat, _FEATURE_TYPE, _GEOM_POLYGON)
+        geom_payload = bytearray()
+        L = int(cmd_len[i])
+        cmd_off = int(poly_cmd_starts[i])
+        for k in range(L):
+            _write_varint(geom_payload, int(cmd_buf[cmd_off + k]))
+        _write_len_delim(feat, _FEATURE_GEOMETRY, geom_payload)
+        _write_len_delim(body, _LAYER_FEATURES, feat)
+
+    return bytes(body)
+
+
+@numba.njit(cache=True, boundscheck=False)
+def _encode_linestrings(
+    points_flat: np.ndarray,
+    line_starts: np.ndarray,
+    cmd_buf: np.ndarray,
+    line_cmd_starts: np.ndarray,
+    cmd_len: np.ndarray,
+    valid: np.ndarray,
+):
+    """Encode a flat run of LineStrings as MVT command streams.
+
+    Per line: MoveTo(absolute first vertex) + LineTo(remaining deltas), no
+    ClosePath. The cursor resets to (0, 0) per line because each line is
+    its own feature here. Lines with fewer than 2 distinct vertices after
+    dedup are marked invalid.
+    """
+    n_lines = line_starts.shape[0] - 1
+    for i in range(n_lines):
+        lo = line_starts[i]
+        hi = line_starts[i + 1]
+        m = hi - lo
+        cmd_off = line_cmd_starts[i]
+        if m < 2:
+            cmd_len[i] = 0
+            valid[i] = 0
+            continue
+
+        x0 = points_flat[lo, 0]
+        y0 = points_flat[lo, 1]
+        cmd_buf[cmd_off + 0] = (_CMD_MOVETO & 0x7) | (1 << 3)
+        cmd_buf[cmd_off + 1] = (x0 << 1) ^ (x0 >> 31)
+        cmd_buf[cmd_off + 2] = (y0 << 1) ^ (y0 >> 31)
+        write_idx = 4
+        n_lineto = 0
+        prev_x = x0
+        prev_y = y0
+        for k in range(1, m):
+            cur_x = points_flat[lo + k, 0]
+            cur_y = points_flat[lo + k, 1]
+            if cur_x == prev_x and cur_y == prev_y:
+                continue
+            dx = cur_x - prev_x
+            dy = cur_y - prev_y
+            cmd_buf[cmd_off + write_idx] = (dx << 1) ^ (dx >> 31)
+            write_idx += 1
+            cmd_buf[cmd_off + write_idx] = (dy << 1) ^ (dy >> 31)
+            write_idx += 1
+            n_lineto += 1
+            prev_x = cur_x
+            prev_y = cur_y
+
+        if n_lineto < 1:
+            cmd_len[i] = 0
+            valid[i] = 0
+            continue
+        cmd_buf[cmd_off + 3] = (_CMD_LINETO & 0x7) | (n_lineto << 3)
+        cmd_len[i] = write_idx
+        valid[i] = 1
+
+
+def encode_mvt_linestring_layer(
+    *,
+    name: str,
+    extent: int,
+    points_flat_q: np.ndarray,
+    line_starts: np.ndarray,
+    properties: dict[str, np.ndarray],
+) -> bytes:
+    """Build an MVT Layer of LineString features.
+
+    ``points_flat_q`` is ``(total_pts, 2)`` int32 already-quantized
+    coordinates; line ``i`` spans ``points_flat_q[line_starts[i]:line_starts[i+1]]``.
+    Each line carries one entry from each ``properties`` array (typed
+    Value.double_value). Lines with non-finite property values or fewer
+    than 2 distinct vertices after dedup are dropped.
+    """
+    n_lines = line_starts.shape[0] - 1
+    if n_lines == 0:
+        body = bytearray()
+        _write_uint32(body, _LAYER_VERSION, 2)
+        _write_string(body, _LAYER_NAME, name)
+        _write_uint32(body, _LAYER_EXTENT, extent)
+        return bytes(body)
+
+    line_n_pts = np.diff(line_starts).astype(np.int64)
+    # Per line upper bound: MoveTo(3) + LineTo header(1) + LineTo params(2*(M-1))
+    # = 2*M + 2. Safe upper bound, plenty of margin for dedup'd commands.
+    line_cmd_upper = 2 * line_n_pts + 2
+    line_cmd_starts = np.concatenate(
+        [np.zeros(1, dtype=np.int64), np.cumsum(line_cmd_upper)]
+    ).astype(np.int32)
+    cmd_buf = np.zeros(int(line_cmd_starts[-1]), dtype=np.uint32)
+    cmd_len = np.zeros(n_lines, dtype=np.int32)
+    valid = np.zeros(n_lines, dtype=np.uint8)
+
+    with NUMBA_THREADING_LOCK:
+        _encode_linestrings(
+            points_flat_q,
+            line_starts.astype(np.int32),
+            cmd_buf,
+            line_cmd_starts,
+            cmd_len,
+            valid,
+        )
+
+    var_names = list(properties.keys())
+    finite_mask = np.ones(n_lines, dtype=bool)
+    for vals in properties.values():
+        finite_mask &= np.isfinite(vals)
+    valid &= finite_mask.view(np.uint8)
+
+    body = bytearray()
+    _write_uint32(body, _LAYER_VERSION, 2)
+    _write_string(body, _LAYER_NAME, name)
+    _write_uint32(body, _LAYER_EXTENT, extent)
+
+    value_buf = bytearray()
+    feature_tag_payloads: list[bytes | None] = [None] * n_lines
+    next_value_idx = 0
+    for i in range(n_lines):
+        if not valid[i]:
+            continue
+        tags = bytearray()
+        for k_idx, var_name in enumerate(var_names):
+            value_body = bytearray()
+            _write_double(value_body, _VALUE_DOUBLE, float(properties[var_name][i]))
+            value_buf.extend(_emit_len_delim(_LAYER_VALUES, value_body))
+            _write_varint(tags, k_idx)
+            _write_varint(tags, next_value_idx)
+            next_value_idx += 1
+        feature_tag_payloads[i] = bytes(tags)
+
+    for var_name in var_names:
+        _write_string(body, _LAYER_KEYS, var_name)
+    body.extend(value_buf)
+
+    for i in range(n_lines):
+        tags_payload = feature_tag_payloads[i]
+        if tags_payload is None:
+            continue
+        feat = bytearray()
+        _write_uint32(feat, _FEATURE_ID, i + 1)
+        _write_len_delim(feat, _FEATURE_TAGS, tags_payload)
+        _write_uint32(feat, _FEATURE_TYPE, _GEOM_LINESTRING)
+        geom_payload = bytearray()
+        L = int(cmd_len[i])
+        cmd_off = int(line_cmd_starts[i])
+        for k in range(L):
+            _write_varint(geom_payload, int(cmd_buf[cmd_off + k]))
+        _write_len_delim(feat, _FEATURE_GEOMETRY, geom_payload)
+        _write_len_delim(body, _LAYER_FEATURES, feat)
+
+    return bytes(body)
 
 
 @numba.njit(cache=True, boundscheck=False)

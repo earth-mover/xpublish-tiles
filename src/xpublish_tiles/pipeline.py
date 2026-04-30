@@ -828,6 +828,8 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
             colormap=query.colormap,
             abovemaxcolor=query.abovemaxcolor,
             belowmincolor=query.belowmincolor,
+            levels=query.levels,
+            smoothing=query.smoothing,
         ),
     )
     buffer.seek(0)

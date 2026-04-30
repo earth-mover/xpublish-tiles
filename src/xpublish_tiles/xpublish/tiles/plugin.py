@@ -388,6 +388,13 @@ class TilesPlugin(Plugin):
                     f"{url_template}&max_features_per_side={query.max_features_per_side}"
                 )
 
+            if query.levels is not None:
+                levels_str = ",".join(f"{v:g}" for v in query.levels)
+                url_template = f"{url_template}&levels={quote(levels_str)}"
+
+            if query.smoothing is not None:
+                url_template = f"{url_template}&smoothing={query.smoothing:g}"
+
             # Append selectors
             if selectors:
                 selector_qs = "&".join(f"{k}={v}" for k, v in selectors.items())
@@ -519,6 +526,8 @@ class TilesPlugin(Plugin):
                 abovemaxcolor=query.abovemaxcolor,
                 belowmincolor=query.belowmincolor,
                 max_features_per_side=query.max_features_per_side,
+                levels=query.levels,
+                smoothing=query.smoothing,
             )
 
             try:

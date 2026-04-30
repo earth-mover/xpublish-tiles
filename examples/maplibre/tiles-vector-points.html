@@ -98,9 +98,10 @@
         <div id="info">
             Wind vectors as MVT <code>Point</code> features
             (<code>wind_u_10m</code> + <code>wind_v_10m</code>) layered over a
-            <code>vector/cells</code> backdrop of mean sea-level pressure.
-            Two MVT sources from one server, composited entirely client-side.
-            Hover an arrow to inspect.<br/>
+            <code>vector/contours</code> backdrop of mean sea-level pressure
+            — filled bands plus isolines drawn as polygon outlines, both from
+            one MVT source. Two MVT sources from one server, composited
+            entirely client-side. Hover an arrow to inspect.<br/>
             Dataset: <code>earthmover-public/noaa-gfs-forecast</code>. Run:
             <code>uv run xpublish-tiles --dataset=earthmover-public/noaa-gfs-forecast</code>
         </div>
@@ -132,19 +133,56 @@
             const STEP = null;
             // The MVT layer name the server emits for vector/points.
             const POINTS_LAYER = "points";
-            // For vector/cells the server uses the variable name as the layer.
+            // For vector/contours the server emits two layers per variable
+            // in the same MVT response: the variable name (Polygon features
+            // for filled bands) and "<var>_lines" (LineString features at
+            // each level boundary, for isolines + labels).
             const PRESSURE_LAYER = PRESSURE_VAR;
-            // Pressure backdrop is a low-detail smooth field; arrows want
-            // higher density to show direction. Independent of the user's
-            // wind detail slider.
+            const PRESSURE_LINES_LAYER = `${PRESSURE_VAR}_lines`;
+            // Resampling resolution fed into marching squares. The
+            // contour pipeline coarsens the input grid to this many cells
+            // per axis before extracting bands; higher = smoother isolines
+            // but larger MVT payload.
             const PRESSURE_DETAIL = 192;
             // Mean sea-level pressure is reported in Pa by the GFS forecast
-            // dataset; typical range is 950–1050 hPa = 95 000 – 105 000 Pa.
+            // dataset. Two ranges to keep separate:
+            //   * PRESSURE_{MIN,MAX}_PA — visual palette range. Values
+            //     outside it clamp to the first/last palette color via
+            //     MapLibre's interpolate expression.
+            //   * PRESSURE_LEVELS_{MIN,MAX}_PA — wider range that levels
+            //     span. Must bracket all plausible data: a deep low can
+            //     sit below 950 hPa and would otherwise leave a no-fill
+            //     hole in the center of the storm (band [l_i, l_{i+1}]
+            //     polygons cover only values inside the level range).
             const PRESSURE_MIN_PA = 95000;
             const PRESSURE_MAX_PA = 105000;
+            const PRESSURE_LEVELS_MIN_PA = 90000;
+            const PRESSURE_LEVELS_MAX_PA = 110000;
+            // Synoptic charts use 4 hPa cadence; 4 hPa = 400 Pa.
+            const PRESSURE_STEP_PA = 400;
+            // Pre-blur sigma (in resampled grid cells) applied before
+            // marching-squares. Smooths the jagged isolines that come from
+            // a coarse input grid; tune up for smoother contours, down for
+            // tighter feature fidelity.
+            const PRESSURE_SMOOTHING = 1.5;
             const PRESSURE_PALETTE = [
                 "#4575b4", "#abd9e9", "#ffffbf", "#fdae61", "#d73027",
             ];
+
+            // Pressure contour band boundaries in Pa, evenly spaced from
+            // PRESSURE_LEVELS_MIN_PA → PRESSURE_LEVELS_MAX_PA at
+            // PRESSURE_STEP_PA cadence.
+            function buildPressureLevels() {
+                const out = [];
+                for (
+                    let p = PRESSURE_LEVELS_MIN_PA;
+                    p <= PRESSURE_LEVELS_MAX_PA + 1e-6;
+                    p += PRESSURE_STEP_PA
+                ) {
+                    out.push(p);
+                }
+                return out;
+            }
 
             // ---- Palettes ------------------------------------------------------
             const PALETTES = {
@@ -178,20 +216,30 @@
             }
 
             function buildPressureTileUrl() {
-                const extra = [`max_features_per_side=${PRESSURE_DETAIL}`];
+                const levels = buildPressureLevels()
+                    .map((v) => v.toFixed(0))
+                    .join(",");
+                const extra = [
+                    `max_features_per_side=${PRESSURE_DETAIL}`,
+                    `levels=${encodeURIComponent(levels)}`,
+                    `smoothing=${PRESSURE_SMOOTHING}`,
+                ];
                 if (TIME) extra.push(`time=${encodeURIComponent(TIME)}`);
                 if (STEP) extra.push(`step=${encodeURIComponent(STEP)}`);
                 return (
                     `${SERVER}/tiles/${TMS}/{z}/{y}/{x}` +
                     `?variables=${PRESSURE_VAR}` +
-                    `&style=vector/cells` +
+                    `&style=vector/contours` +
                     `&f=mvt` +
                     `&${extra.join("&")}`
                 );
             }
 
-            // Pressure fill-color expression: interpolate over Pa values.
-            // Stops are evenly spaced across the configured Pa range.
+            // Pressure fill-color expression: interpolate the per-band mid
+            // value (Pa) emitted by vector/contours over the configured
+            // palette. Each contour-band polygon carries value_lo/value_hi/
+            // value_mid; we use value_mid so the fill steps cleanly band-
+            // by-band rather than smoothly across cells.
             function buildPressureFillExpression() {
                 const stops = [];
                 PRESSURE_PALETTE.forEach((color, i) => {
@@ -204,7 +252,7 @@
                 return [
                     "interpolate",
                     ["linear"],
-                    ["to-number", ["get", "value"]],
+                    ["to-number", ["get", "value_mid"]],
                     ...stops,
                 ];
             }
@@ -336,8 +384,12 @@
             map.on("load", () => {
                 map.addImage("wind-arrow", makeArrowIcon(), { pixelRatio: 2 });
 
-                // Pressure backdrop (vector/cells) — added first so its fill
-                // renders below the wind-arrow symbol layer.
+                // Pressure backdrop (vector/contours) — added first so its
+                // fill + isolines render below the wind-arrow symbol layer.
+                // The fill and line layers share one MVT source: drawing the
+                // contour polygons' outlines as a `type: line` layer is the
+                // isolines essentially for free (the server does not emit a
+                // separate line geometry).
                 map.addSource("xpublish-pressure", {
                     type: "vector",
                     tiles: [buildPressureTileUrl()],
@@ -354,6 +406,52 @@
                         "fill-color": buildPressureFillExpression(),
                         "fill-opacity": 0.55,
                         "fill-antialias": false,
+                    },
+                });
+                map.addLayer({
+                    id: "pressure-isolines",
+                    type: "line",
+                    source: "xpublish-pressure",
+                    "source-layer": PRESSURE_LINES_LAYER,
+                    paint: {
+                        "line-color": "#333",
+                        "line-width": 0.6,
+                        "line-opacity": 0.8,
+                    },
+                });
+                // Isoline labels: show pressure in hPa along each contour
+                // line, anchored to a labelled point on the line itself.
+                // `symbol-placement: line` walks the linestring; the white
+                // halo keeps text legible on top of variable fills.
+                map.addLayer({
+                    id: "pressure-labels",
+                    type: "symbol",
+                    source: "xpublish-pressure",
+                    "source-layer": PRESSURE_LINES_LAYER,
+                    layout: {
+                        "symbol-placement": "line",
+                        "symbol-spacing": 350,
+                        "text-field": [
+                            "concat",
+                            [
+                                "to-string",
+                                ["round", ["/", ["to-number", ["get", "value"]], 100]],
+                            ],
+                            " hPa",
+                        ],
+                        "text-size": 11,
+                        "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+                        "text-rotation-alignment": "map",
+                        "text-pitch-alignment": "viewport",
+                        "text-keep-upright": true,
+                        "text-allow-overlap": false,
+                        "text-ignore-placement": false,
+                    },
+                    paint: {
+                        "text-color": "#222",
+                        "text-halo-color": "rgba(255,255,255,0.85)",
+                        "text-halo-width": 1.5,
+                        "text-halo-blur": 0.3,
                     },
                 });
 
@@ -401,15 +499,20 @@
                     // Bearing (deg from N, clockwise) = atan2(u, v).
                     let bearing = Math.atan2(u, v) * 180 / Math.PI;
                     if (bearing < 0) bearing += 360;
-                    // Look up pressure under the cursor from the cells layer.
+                    // Look up the contour band under the cursor; report it
+                    // as a [lo, hi] hPa range since contour fills are bands,
+                    // not point samples.
                     let pressureLine = "";
                     const phits = map.queryRenderedFeatures(e.point, {
                         layers: ["pressure-fill"],
                     });
                     if (phits.length) {
-                        const pa = parseFloat(phits[0].properties.value);
-                        if (Number.isFinite(pa)) {
-                            pressureLine = `pressure: ${(pa / 100).toFixed(1)} hPa<br/>`;
+                        const lo = parseFloat(phits[0].properties.value_lo);
+                        const hi = parseFloat(phits[0].properties.value_hi);
+                        if (Number.isFinite(lo) && Number.isFinite(hi)) {
+                            pressureLine =
+                                `pressure: ${(lo / 100).toFixed(0)}–` +
+                                `${(hi / 100).toFixed(0)} hPa<br/>`;
                         }
                     }
                     map.getCanvas().style.cursor = "pointer";

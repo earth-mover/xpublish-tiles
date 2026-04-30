@@ -36,6 +36,54 @@ def validate_colorscalerange(v: str | list[str] | None) -> tuple[float, float] |
     return (min_val, max_val)
 
 
+def validate_levels(v: str | list[str] | None) -> tuple[float, ...] | None:
+    """Parse comma-separated float levels for vector/contours.
+
+    Returns a strictly-increasing tuple, or None if no levels were given.
+    Two or more levels are required (one band needs two boundaries).
+    """
+    if v is None:
+        return None
+    if not isinstance(v, str):
+        if len(v) == 0:
+            return None
+        v = v[0]
+    v = v.strip()
+    if not v:
+        return None
+    try:
+        parsed = tuple(float(x) for x in v.split(","))
+    except ValueError as e:
+        raise ValueError(
+            "levels must be a comma-separated list of floats, e.g. '0,5,10,15'",
+        ) from e
+    if len(parsed) < 2:
+        raise ValueError("levels must contain at least 2 values to define a band")
+    if any(parsed[i + 1] <= parsed[i] for i in range(len(parsed) - 1)):
+        raise ValueError("levels must be strictly increasing")
+    return parsed
+
+
+def validate_smoothing(v: str | list[str] | None) -> float | None:
+    """Parse vector/contours pre-blur sigma (in grid cells)."""
+    if v is None:
+        return None
+    if not isinstance(v, str):
+        if len(v) == 0:
+            return None
+        v = v[0]
+    v = v.strip()
+    if not v:
+        return None
+    try:
+        parsed = float(v)
+    except ValueError as e:
+        raise ValueError("smoothing must be a non-negative float") from e
+    if parsed < 0:
+        raise ValueError("smoothing must be a non-negative float")
+    return parsed
+
+
 def validate_bbox(v: str | None) -> BBox | None:
     if v is None:
         return None

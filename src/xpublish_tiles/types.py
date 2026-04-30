@@ -150,6 +150,14 @@ class QueryParams:
     # absolute hard cap; this value is clamped into ``[1, cap]``. ``None``
     # means "use the cap" (max detail the server allows).
     max_features_per_side: int | None = None
+    # vector/contours only: monotonic value boundaries for filled contour
+    # bands. N levels produce N-1 polygon bands, each carrying value_lo /
+    # value_hi / value_mid as properties.
+    levels: tuple[float, ...] | None = None
+    # vector/contours only: pre-blur sigma in grid cells applied to the
+    # scalar field before marching-squares. Smooths jagged isolines that
+    # come from coarse input grids; 0 / None disables.
+    smoothing: float | None = None
 
     def get_renderer(self):
         from xpublish_tiles.render import RenderRegistry

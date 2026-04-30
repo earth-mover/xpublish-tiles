@@ -110,6 +110,8 @@ class Renderer(ABC):
         colormap: dict[str, str] | None = None,
         abovemaxcolor: str | None = None,
         belowmincolor: str | None = None,
+        levels: tuple[float, ...] | None = None,
+        smoothing: float | None = None,
     ):
         pass
 

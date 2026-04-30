@@ -13,7 +13,9 @@ from xpublish_tiles.validators import (
     validate_colorscalerange,
     validate_image_format,
     validate_legend_format,
+    validate_levels,
     validate_range_color,
+    validate_smoothing,
     validate_style,
 )
 
@@ -1337,6 +1339,25 @@ class TileQuery(BaseModel):
             },
         ),
     ]
+    levels: Annotated[
+        tuple[float, ...] | None,
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "vector/contours only: comma-separated, strictly-increasing list of value boundaries (e.g. '0,5,10,15'). N levels produce N-1 filled polygon bands; each feature carries 'value_lo', 'value_hi', and 'value_mid' as typed properties so clients can color by band. Required for vector/contours.",
+            },
+        ),
+    ]
+    smoothing: Annotated[
+        float | None,
+        Field(
+            default=None,
+            ge=0,
+            json_schema_extra={
+                "description": "vector/contours only: Gaussian pre-blur sigma in grid cells, applied to the scalar field before marching squares. Smooths jagged isolines on coarse input grids. 0 or omitted disables smoothing.",
+            },
+        ),
+    ]
 
     @field_validator("style", mode="before")
     @classmethod
@@ -1350,6 +1371,16 @@ class TileQuery(BaseModel):
     @classmethod
     def validate_colorscalerange(cls, v: str | None) -> tuple[float, float] | None:
         return validate_colorscalerange(v)
+
+    @field_validator("levels", mode="before")
+    @classmethod
+    def validate_levels(cls, v: str | None) -> tuple[float, ...] | None:
+        return validate_levels(v)
+
+    @field_validator("smoothing", mode="before")
+    @classmethod
+    def validate_smoothing(cls, v: str | None) -> float | None:
+        return validate_smoothing(v)
 
     @field_validator("f", mode="before")
     @classmethod
@@ -1563,6 +1594,8 @@ TILES_FILTERED_QUERY_PARAMS: list[str] = [
     "belowmincolor",
     "render_errors",
     "max_features_per_side",
+    "levels",
+    "smoothing",
 ]
 
 

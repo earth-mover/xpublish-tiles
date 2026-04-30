@@ -1,12 +1,18 @@
 """Vector tile renderer (MVT + GeoJSON).
 
 Reuses the polygons-style geometry pipeline (cell rings + per-cell values
-already in the output CRS) to emit two variants today:
+already in the output CRS) for ``cells`` and ``points``, and the raster
+pipeline (regular gridded scalar field) for ``contours``:
 
 * ``vector/cells`` — one polygon feature per grid cell, value as property.
 * ``vector/points`` — one point feature per grid cell at the ring centroid,
   with all requested ``variables`` attached as typed properties (intended for
   vector-field cases like wind ``u``/``v``).
+* ``vector/contours`` — filled contour bands as multi-ring polygons (outer +
+  holes) emitted by :mod:`contourpy`, one feature per band per variable
+  carrying ``value_lo``, ``value_hi``, ``value_mid`` properties. Clients can
+  render as a fill layer, as a line layer (drawing polygon outlines = the
+  isolines), or both on the same source.
 
 Output goes through:
 
@@ -28,13 +34,16 @@ import json
 from numbers import Number
 
 import numpy as np
+from contourpy import FillType, LineType, contour_generator
 
 from xpublish_tiles.config import config
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import Renderer, register_renderer, render_error_image
 from xpublish_tiles.render.mvt import (
     encode_mvt_layer,
+    encode_mvt_linestring_layer,
     encode_mvt_point_layer,
+    encode_mvt_polygon_layer,
     encode_mvt_tile,
     quantize_rings,
 )
@@ -141,6 +150,8 @@ class VectorTileRenderer(Renderer):
         colormap: dict[str, str] | None = None,
         abovemaxcolor: str | None = None,
         belowmincolor: str | None = None,
+        levels: tuple[float, ...] | None = None,
+        smoothing: float | None = None,
     ):
         logger = context_logger if context_logger is not None else get_context_logger()
 
@@ -158,6 +169,22 @@ class VectorTileRenderer(Renderer):
         elif resolved == "points":
             self._render_points(
                 contexts=contexts, buffer=buffer, format=format, logger=logger
+            )
+        elif resolved == "contours":
+            if levels is None or len(levels) < 2:
+                raise ValueError(
+                    "vector/contours requires the `levels` query parameter — "
+                    "a comma-separated, strictly-increasing list of at least "
+                    "two values defining the band boundaries (e.g. "
+                    "'levels=0,5,10,15')."
+                )
+            self._render_contours(
+                contexts=contexts,
+                buffer=buffer,
+                format=format,
+                levels=levels,
+                smoothing=smoothing,
+                logger=logger,
             )
         else:
             raise ValueError(f"Unknown vector variant: {variant!r}")
@@ -259,6 +286,152 @@ class VectorTileRenderer(Renderer):
                 features = _points_to_geojson_features(centroids, properties)
             _write_output(buffer, format, layers=[], geojson_features=features)
 
+    def _render_contours(self, *, contexts, buffer, format, levels, smoothing, logger):
+        # One MVT layer per variable; one combined GeoJSON FeatureCollection
+        # tagged by ``variable`` (lets multi-var requests share a transport).
+        layers: list[bytes] = []
+        geojson_features: list[dict] = []
+
+        for var_name, context in contexts.items():
+            if isinstance(context, NullRenderContext):
+                continue
+            assert isinstance(context, PopulatedRenderContext)
+            if context.da is None:
+                continue
+
+            grid = context.grid
+            try:
+                da = context.da.transpose(grid.Ydim, grid.Xdim)
+            except (AttributeError, ValueError):
+                # Non-2D grids fall through with no contours emitted.
+                continue
+            z = np.asarray(da.values, dtype=np.float64)
+            if z.ndim != 2 or z.shape[0] < 2 or z.shape[1] < 2:
+                continue
+
+            x_arr, y_arr = _coord_arrays_for_contour(da, grid, z.shape)
+            if x_arr is None or y_arr is None:
+                continue
+
+            if smoothing is not None and smoothing > 0:
+                with log_duration(
+                    f"vector contours pre-blur sigma={smoothing} {z.shape}",
+                    "▦",
+                    logger,
+                ):
+                    z = _gaussian_smooth_with_nans(z, sigma=float(smoothing))
+
+            with log_duration(
+                f"vector contours generate {z.shape} {len(levels) - 1} bands",
+                "▦",
+                logger,
+            ):
+                gen = contour_generator(
+                    x=x_arr,
+                    y=y_arr,
+                    z=z,
+                    fill_type=FillType.OuterOffset,
+                    line_type=LineType.ChunkCombinedOffset,
+                )
+                rings_list, ring_lengths, rings_per_poly, props_lists = (
+                    _collect_stacked_contour_polygons(gen, levels)
+                )
+                line_traces = gen.multi_lines(list(levels))
+                line_pts_list, line_lengths, line_values = _collect_contour_lines(
+                    line_traces, levels
+                )
+
+            extent = config.get("mvt_extent")
+
+            if rings_list:
+                rings_flat = np.concatenate(rings_list, axis=0).astype(np.float64)
+                ring_starts = np.concatenate(([0], np.cumsum(ring_lengths))).astype(
+                    np.int32
+                )
+                poly_ring_starts = np.concatenate(
+                    ([0], np.cumsum(rings_per_poly))
+                ).astype(np.int32)
+                properties = {
+                    k: np.asarray(v, dtype=np.float64) for k, v in props_lists.items()
+                }
+                if format is ImageFormat.MVT:
+                    with log_duration(
+                        f"vector contours encode {len(rings_per_poly)} stacks",
+                        "▦",
+                        logger,
+                    ):
+                        rings_q = quantize_rings(
+                            rings_flat, bbox=context.bbox, extent=extent
+                        )
+                        layers.append(
+                            encode_mvt_polygon_layer(
+                                name=str(var_name),
+                                extent=extent,
+                                rings_flat_q=rings_q,
+                                ring_starts=ring_starts,
+                                poly_ring_starts=poly_ring_starts,
+                                properties=properties,
+                            )
+                        )
+                else:  # GEOJSON
+                    _require_geographic_crs(context.crs)
+                    with log_duration(
+                        f"vector contours geojson {len(rings_per_poly)} stacks",
+                        "▦",
+                        logger,
+                    ):
+                        geojson_features.extend(
+                            _contour_polys_to_geojson_features(
+                                rings_flat=rings_flat,
+                                ring_starts=ring_starts,
+                                poly_ring_starts=poly_ring_starts,
+                                properties=properties,
+                                var_name=str(var_name),
+                            )
+                        )
+
+            if line_pts_list:
+                lines_flat = np.concatenate(line_pts_list, axis=0).astype(np.float64)
+                line_starts = np.concatenate(([0], np.cumsum(line_lengths))).astype(
+                    np.int32
+                )
+                line_props = {"value": np.asarray(line_values, dtype=np.float64)}
+                if format is ImageFormat.MVT:
+                    with log_duration(
+                        f"vector contours encode {len(line_lengths)} lines",
+                        "▦",
+                        logger,
+                    ):
+                        lines_q = quantize_rings(
+                            lines_flat, bbox=context.bbox, extent=extent
+                        )
+                        layers.append(
+                            encode_mvt_linestring_layer(
+                                name=f"{var_name}_lines",
+                                extent=extent,
+                                points_flat_q=lines_q,
+                                line_starts=line_starts,
+                                properties=line_props,
+                            )
+                        )
+                else:  # GEOJSON
+                    _require_geographic_crs(context.crs)
+                    with log_duration(
+                        f"vector contours geojson {len(line_lengths)} lines",
+                        "▦",
+                        logger,
+                    ):
+                        geojson_features.extend(
+                            _contour_lines_to_geojson_features(
+                                lines_flat=lines_flat,
+                                line_starts=line_starts,
+                                values=line_props["value"],
+                                var_name=str(var_name),
+                            )
+                        )
+
+        _write_output(buffer, format, layers=layers, geojson_features=geojson_features)
+
     def render_error(
         self,
         *,
@@ -294,14 +467,17 @@ class VectorTileRenderer(Renderer):
     @staticmethod
     def geometry_kind(variant: str) -> str:
         # cells + points share the polygon pipeline (point = cell-ring centroid).
-        # A future `contours` variant will return "raster".
+        # contours runs marching squares on the regular gridded scalar field
+        # produced by the raster pipeline.
         if variant in ("cells", "points", "default"):
             return "polygons"
+        if variant == "contours":
+            return "raster"
         raise ValueError(f"Unknown vector variant: {variant!r}")
 
     @staticmethod
     def supported_variants() -> list[str]:
-        return ["cells", "points"]
+        return ["cells", "points", "contours"]
 
     @staticmethod
     def default_variant() -> str:
@@ -330,6 +506,14 @@ class VectorTileRenderer(Renderer):
                 "point — useful for vector fields (e.g. variables=u,v for wind "
                 "arrows). Features missing any property value are dropped."
             ),
+            "contours": (
+                "Filled contour bands as multi-ring polygons (outer + holes), one "
+                "feature per band per variable. Each carries 'value_lo', "
+                "'value_hi', and 'value_mid' properties; clients render as a "
+                "fill layer (color by band), as a line layer (polygon outlines = "
+                "isolines), or both on the same source. Requires the `levels` "
+                "query parameter."
+            ),
         }
         resolved = cls.default_variant() if variant == "default" else variant
         if resolved not in descriptions:
@@ -339,6 +523,224 @@ class VectorTileRenderer(Renderer):
             "title": f"Vector — {resolved}",
             "description": descriptions[resolved],
         }
+
+
+def _gaussian_smooth_with_nans(z: np.ndarray, *, sigma: float) -> np.ndarray:
+    """Gaussian-blur a 2D scalar field, treating NaNs as missing.
+
+    A naive ``gaussian_filter`` propagates NaNs across the kernel footprint,
+    which would erase valid data near any masked cell. We instead blur the
+    NaN-zeroed field and the validity mask separately, then divide — the
+    standard "normalized convolution" trick. NaN cells stay NaN in the
+    output; valid cells get a re-weighted average of nearby valid cells.
+    """
+    from scipy.ndimage import gaussian_filter
+
+    finite = np.isfinite(z)
+    if finite.all():
+        return gaussian_filter(z, sigma=sigma, mode="nearest")
+    if not finite.any():
+        return z
+    z_filled = np.where(finite, z, 0.0)
+    weight = finite.astype(np.float64)
+    num = gaussian_filter(z_filled, sigma=sigma, mode="nearest")
+    den = gaussian_filter(weight, sigma=sigma, mode="nearest")
+    out = np.where(den > 0, num / np.maximum(den, 1e-12), np.nan)
+    out[~finite] = np.nan
+    return out
+
+
+def _coord_arrays_for_contour(
+    da, grid, z_shape: tuple[int, int]
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Return (x, y) arrays sized to match a (Ydim, Xdim)-transposed z.
+
+    contourpy accepts either both 1D (``x.shape == (nx,), y.shape == (ny,)``)
+    or both 2D (``x.shape == y.shape == z.shape``). Coords already aligned
+    via ``da.transpose(grid.Ydim, grid.Xdim)`` so we just normalize shape.
+    """
+    try:
+        x = np.asarray(da[grid.X].values, dtype=np.float64)
+        y = np.asarray(da[grid.Y].values, dtype=np.float64)
+    except (KeyError, AttributeError):
+        return None, None
+    ny, nx = z_shape
+    if x.ndim == 1 and y.ndim == 1:
+        if x.shape == (nx,) and y.shape == (ny,):
+            return x, y
+        return None, None
+    if x.ndim == 2 and y.ndim == 2:
+        if x.shape == z_shape and y.shape == z_shape:
+            return x, y
+        if x.T.shape == z_shape and y.T.shape == z_shape:
+            return np.ascontiguousarray(x.T), np.ascontiguousarray(y.T)
+    return None, None
+
+
+def _collect_stacked_contour_polygons(
+    gen, levels: tuple[float, ...]
+) -> tuple[list[np.ndarray], list[int], list[int], dict[str, list[float]]]:
+    """Build stacked "z >= L_i" polygons (one per level boundary).
+
+    Why stacked instead of banded: ``multi_filled`` traces each band's
+    outer and hole rings independently, so adjacent bands' shared boundary
+    at level L gets two near-identical-but-not-pixel-identical traces.
+    After MVT quantization those become 1–2 pixel seams between fills.
+    Stacking instead emits one polygon per level (the simply-connected
+    "above L" region, which may have holes for local minima at L). Each
+    polygon's outer boundary at L is **one** trace, full stop. MapLibre
+    renders polygons in source order, so we emit lowest-L first; the
+    visible color in any pixel ends up being the topmost stack's
+    ``[L_i, L_{i+1}]`` band — exactly the band containing z.
+
+    For the topmost level we don't emit a stack: anything above it
+    visually inherits the highest band's color (matches the palette-
+    clamping the client already does for out-of-range values).
+    """
+    rings_list: list[np.ndarray] = []
+    ring_lengths: list[int] = []
+    rings_per_poly: list[int] = []
+    props_lists: dict[str, list[float]] = {
+        "value_lo": [],
+        "value_hi": [],
+        "value_mid": [],
+    }
+
+    for i in range(len(levels) - 1):
+        lo = float(levels[i])
+        hi = float(levels[i + 1])
+        mid = 0.5 * (lo + hi)
+        points_list, offsets_list = gen.filled(lo, np.inf)
+        for pts, offs in zip(points_list, offsets_list, strict=True):
+            pts = np.asarray(pts, dtype=np.float64)
+            offs = np.asarray(offs, dtype=np.int64)
+            n_rings = offs.shape[0] - 1
+            kept_rings: list[np.ndarray] = []
+            for j in range(n_rings):
+                s, e = int(offs[j]), int(offs[j + 1])
+                ring = pts[s:e]
+                if (
+                    ring.shape[0] >= 2
+                    and ring[0, 0] == ring[-1, 0]
+                    and ring[0, 1] == ring[-1, 1]
+                ):
+                    ring = ring[:-1]
+                if ring.shape[0] < 3:
+                    if j == 0:
+                        kept_rings = []
+                        break
+                    continue
+                kept_rings.append(np.ascontiguousarray(ring))
+            if not kept_rings:
+                continue
+            rings_list.extend(kept_rings)
+            ring_lengths.extend(r.shape[0] for r in kept_rings)
+            rings_per_poly.append(len(kept_rings))
+            props_lists["value_lo"].append(lo)
+            props_lists["value_hi"].append(hi)
+            props_lists["value_mid"].append(mid)
+
+    return rings_list, ring_lengths, rings_per_poly, props_lists
+
+
+def _contour_polys_to_geojson_features(
+    *,
+    rings_flat: np.ndarray,
+    ring_starts: np.ndarray,
+    poly_ring_starts: np.ndarray,
+    properties: dict[str, np.ndarray],
+    var_name: str,
+) -> list[dict]:
+    """Build GeoJSON Polygon Features (with holes) from the flat ring arrays."""
+    n_polys = poly_ring_starts.shape[0] - 1
+    features: list[dict] = []
+    for p in range(n_polys):
+        rs, re = int(poly_ring_starts[p]), int(poly_ring_starts[p + 1])
+        rings_for_feat: list[list[list[float]]] = []
+        for r in range(rs, re):
+            ps, pe = int(ring_starts[r]), int(ring_starts[r + 1])
+            ring = rings_flat[ps:pe].tolist()
+            ring.append([ring[0][0], ring[0][1]])
+            rings_for_feat.append(ring)
+        if not rings_for_feat:
+            continue
+        features.append(
+            {
+                "type": "Feature",
+                "id": p,
+                "geometry": {"type": "Polygon", "coordinates": rings_for_feat},
+                "properties": {
+                    "kind": "fill",
+                    "variable": var_name,
+                    "value_lo": float(properties["value_lo"][p]),
+                    "value_hi": float(properties["value_hi"][p]),
+                    "value_mid": float(properties["value_mid"][p]),
+                },
+            }
+        )
+    return features
+
+
+def _collect_contour_lines(
+    line_traces, levels: tuple[float, ...]
+) -> tuple[list[np.ndarray], list[int], list[float]]:
+    """Flatten contourpy ``multi_lines`` output (one entry per level) into
+    flat-array form for the LineString encoder.
+
+    contourpy with ``LineType.ChunkCombinedOffset`` returns, per level, a
+    tuple ``(pts_chunks, offset_chunks)``. Each ``pts_chunks[ci]`` is
+    either ``None`` (empty chunk) or an ``(N_chunk_pts, 2)`` array; the
+    matching ``offset_chunks[ci]`` slices that array into individual line
+    segments. We concat all segments across all levels into one flat list
+    and remember each segment's level value.
+    """
+    pts_list: list[np.ndarray] = []
+    line_lengths: list[int] = []
+    values: list[float] = []
+    for lvl, (pts_chunks, offset_chunks) in zip(levels, line_traces, strict=True):
+        for chunk_pts, chunk_offs in zip(pts_chunks, offset_chunks, strict=True):
+            if chunk_pts is None or chunk_offs is None:
+                continue
+            chunk_pts = np.asarray(chunk_pts, dtype=np.float64)
+            chunk_offs = np.asarray(chunk_offs, dtype=np.int64)
+            for i in range(chunk_offs.shape[0] - 1):
+                s, e = int(chunk_offs[i]), int(chunk_offs[i + 1])
+                if e - s < 2:
+                    continue
+                pts_list.append(np.ascontiguousarray(chunk_pts[s:e]))
+                line_lengths.append(e - s)
+                values.append(float(lvl))
+    return pts_list, line_lengths, values
+
+
+def _contour_lines_to_geojson_features(
+    *,
+    lines_flat: np.ndarray,
+    line_starts: np.ndarray,
+    values: np.ndarray,
+    var_name: str,
+) -> list[dict]:
+    """Build GeoJSON LineString Features for labeled isolines."""
+    n_lines = line_starts.shape[0] - 1
+    features: list[dict] = []
+    for i in range(n_lines):
+        s, e = int(line_starts[i]), int(line_starts[i + 1])
+        coords = lines_flat[s:e].tolist()
+        if len(coords) < 2:
+            continue
+        features.append(
+            {
+                "type": "Feature",
+                "id": i,
+                "geometry": {"type": "LineString", "coordinates": coords},
+                "properties": {
+                    "kind": "line",
+                    "variable": var_name,
+                    "value": float(values[i]),
+                },
+            }
+        )
+    return features
 
 
 def _require_geographic_crs(crs) -> None:
