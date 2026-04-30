@@ -239,20 +239,28 @@ async def extract_dimension_extents(
 
     # Identify spatial and temporal dimensions using CF conventions
     spatial_dims = {grid.Xdim, grid.Ydim}
-    vertical_dims = {grid.Z} if grid.Z else set()
+    # ``grid.Z`` may be a non-dim coord (e.g. ``deptht`` along dim ``k``).
+    # Map the underlying dim to the coord name so the extent reports the
+    # coord variable instead of the bare dim.
+    z_dim_to_coord: dict[Hashable, Hashable] = {}
+    if grid.Z and grid.Z in data_array.coords:
+        z_coord = data_array.coords[grid.Z]
+        if z_coord.ndim == 1:
+            z_dim_to_coord[z_coord.dims[0]] = grid.Z
 
     for dim_name in data_array.dims:
         # Skip spatial dimensions (X, Y axes)
         if dim_name in spatial_dims:
             continue
 
-        coord = data_array.coords.get(dim_name)
+        coord_name = z_dim_to_coord.get(dim_name, dim_name)
+        coord = data_array.coords.get(coord_name)
         if coord is None:
             continue
 
         # Determine dimension type using CF axes
         dim_type = DimensionType.CUSTOM
-        if dim_name in vertical_dims:
+        if coord_name == grid.Z:
             dim_type = DimensionType.VERTICAL
 
         # Extract coordinate values
@@ -303,7 +311,7 @@ async def extract_dimension_extents(
                 default = extent[-1]
 
         dimension = DimensionExtent(
-            name=str(dim_name),
+            name=str(coord_name),
             type=dim_type,
             extent=extent,
             units=units,
