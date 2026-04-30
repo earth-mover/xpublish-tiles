@@ -543,10 +543,14 @@ def has_coordinate_discontinuity(
     if gaps.max() > coordinate_space_width / 2:
         return True
 
-    # For 0→360 geographic data, also check if data spans the antimeridian (180°)
+    # For 0→360 geographic data, also check if data spans the antimeridian (180°).
+    # Symmetric across both equivalent unwrap branches: a face whose lons land in
+    # [170, 190] crosses +180; the same face shifted by −360° lands in [−190, −170]
+    # and crosses −180. Both branches denote the same antimeridian-straddling face
+    # and must trigger the discontinuity fix.
     if check_antimeridian:
         x_min, x_max = coordinates.min(), coordinates.max()
-        if x_min <= 180.0 <= x_max:
+        if x_min <= 180.0 <= x_max or x_min <= -180.0 <= x_max:
             return True
 
     return False

@@ -724,9 +724,196 @@ def test_tilejson_endpoint():
         },
     )
     assert response.status_code == 200
-    tile_url = response.json()["tiles"][0]
+    body = response.json()
+    tile_url = body["tiles"][0]
     assert "belowmincolor=transparent" in tile_url
     assert "abovemaxcolor=%23ff0000" in tile_url
+
+    # Legend URL is populated with the same styling params
+    legend_url = body["legend"]
+    assert "/datasets/temp/tiles/legend" in legend_url
+    assert "variables=temperature" in legend_url
+    assert "style=raster/default" in legend_url
+    assert "belowmincolor=transparent" in legend_url
+    assert "abovemaxcolor=%23ff0000" in legend_url
+
+
+@pytest.fixture(scope="module")
+def legend_dataset():
+    return xr.Dataset(
+        {
+            "temperature": xr.DataArray(
+                np.zeros((10, 10), dtype="float32"),
+                dims=["lat", "lon"],
+                coords={
+                    "lat": (
+                        ["lat"],
+                        np.linspace(-90, 90, 10),
+                        {"axis": "Y", "standard_name": "latitude"},
+                    ),
+                    "lon": (
+                        ["lon"],
+                        np.linspace(-180, 180, 10),
+                        {"axis": "X", "standard_name": "longitude"},
+                    ),
+                },
+                attrs={
+                    "long_name": "Temperature",
+                    "units": "degC",
+                    "valid_min": -3.0,
+                    "valid_max": 3.0,
+                },
+            ),
+            "category": xr.DataArray(
+                np.zeros((10, 10), dtype=np.int8),
+                dims=["lat", "lon"],
+                coords={
+                    "lat": (["lat"], np.linspace(-90, 90, 10), {"axis": "Y"}),
+                    "lon": (["lon"], np.linspace(-180, 180, 10), {"axis": "X"}),
+                },
+                attrs={
+                    "flag_values": [0, 1, 2],
+                    "flag_meanings": "low medium high",
+                },
+            ),
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        pytest.param(
+            "variables=temperature&style=raster/viridis&colorscalerange=-3,3",
+            id="continuous_vertical_viridis",
+        ),
+        pytest.param(
+            "variables=temperature&style=raster/plasma&colorscalerange=-10,10"
+            "&width=400&height=80&vertical=false",
+            id="continuous_horizontal_plasma",
+        ),
+        pytest.param(
+            "variables=temperature&style=raster/viridis&colorscalerange=0,1"
+            "&belowmincolor=transparent&abovemaxcolor=%23ff0000",
+            id="continuous_extend_both",
+        ),
+        pytest.param("variables=category&style=raster/default", id="discrete_default"),
+        pytest.param(
+            "variables=temperature&style=raster/viridis&colorscalerange=-3,3"
+            "&background_color=%23222222&text_color=white",
+            id="dark_theme",
+        ),
+        pytest.param(
+            "variables=temperature&style=raster/viridis&colorscalerange=-3,3"
+            "&show_label=false",
+            id="no_label",
+        ),
+    ],
+)
+def test_legend_endpoint_snapshot(legend_dataset, png_snapshot, params):
+    """Snapshot legend images across continuous/discrete and orientations."""
+    rest = xpublish.Rest({"d": legend_dataset}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+    r = client.get(f"/datasets/d/tiles/legend?{params}")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/png"
+    assert r.content == png_snapshot
+
+
+def test_legend_endpoint_error_paths(legend_dataset):
+    """Cover error branches in the legend endpoint."""
+    rest = xpublish.Rest({"d": legend_dataset}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    # Missing variable -> 422
+    r = client.get("/datasets/d/tiles/legend?variables=nope")
+    assert r.status_code == 422
+    assert "not found" in r.json()["detail"]
+
+    # Invalid color value -> 422 from validator
+    r = client.get(
+        "/datasets/d/tiles/legend?variables=temperature&style=raster/viridis"
+        "&colorscalerange=240,300&background_color=notacolor"
+    )
+    assert r.status_code == 422
+
+    # Continuous variable without colorscalerange or valid_min/max -> 422
+    no_range = xr.Dataset(
+        {
+            "x": xr.DataArray(
+                np.zeros((10, 10), dtype="float32"),
+                dims=["lat", "lon"],
+                coords={
+                    "lat": (["lat"], np.linspace(-90, 90, 10), {"axis": "Y"}),
+                    "lon": (["lon"], np.linspace(-180, 180, 10), {"axis": "X"}),
+                },
+            )
+        }
+    )
+    rest2 = xpublish.Rest({"d": no_range}, plugins={"tiles": TilesPlugin()})
+    client2 = TestClient(rest2.app)
+    r = client2.get("/datasets/d/tiles/legend?variables=x")
+    assert r.status_code == 422
+    assert "colorscalerange" in r.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        pytest.param(
+            "variables=temperature&style=raster/viridis&colorscalerange=-3,3"
+            "&f=application/json",
+            id="continuous_viridis",
+        ),
+        pytest.param(
+            "variables=temperature&style=raster/plasma&colorscalerange=0,1"
+            "&belowmincolor=transparent&abovemaxcolor=%23ff0000&f=json",
+            id="continuous_extend_both",
+        ),
+        pytest.param(
+            "variables=category&style=raster/default&f=json",
+            id="discrete",
+        ),
+    ],
+)
+def test_legend_endpoint_json_snapshot(legend_dataset, snapshot, params):
+    """JSON legend snapshots lock in the full color-stop structure."""
+    from syrupy.extensions.json import JSONSnapshotExtension
+
+    rest = xpublish.Rest({"d": legend_dataset}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+    r = client.get(f"/datasets/d/tiles/legend?{params}")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/json"
+    assert r.json() == snapshot.use_extension(JSONSnapshotExtension)
+
+
+def test_legend_endpoint_jpeg_and_flag_colors(png_snapshot):
+    """JPEG output (with white fallback) + DiscreteData with flag_colors."""
+    ds = xr.Dataset(
+        {
+            "land_cover": xr.DataArray(
+                np.zeros((10, 10), dtype=np.int8),
+                dims=["lat", "lon"],
+                coords={
+                    "lat": (["lat"], np.linspace(-90, 90, 10), {"axis": "Y"}),
+                    "lon": (["lon"], np.linspace(-180, 180, 10), {"axis": "X"}),
+                },
+                attrs={
+                    "flag_values": [1, 2, 3],
+                    "flag_meanings": "forest grass urban",
+                    "flag_colors": "#006600 #FAAA00 #888888",
+                },
+            ),
+        }
+    )
+    rest = xpublish.Rest({"d": ds}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    r = client.get("/datasets/d/tiles/legend?variables=land_cover&f=image/jpeg")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/jpeg"
+    assert r.content == png_snapshot
 
 
 def test_tilejson_invalid_tile_matrix_set():

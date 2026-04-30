@@ -33,6 +33,14 @@ class ImageFormat(enum.StrEnum):
     JPEG = enum.auto()
 
 
+class LegendFormat(enum.StrEnum):
+    """Output format for the legend endpoint."""
+
+    PNG = "png"
+    JPEG = "jpeg"
+    JSON = "json"
+
+
 class SelectionMethod(str, enum.Enum):
     """Selection methods for dimension indexing.
 
