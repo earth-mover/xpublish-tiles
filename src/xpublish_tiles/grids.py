@@ -1670,7 +1670,7 @@ class Rectilinear(RectilinearMixin, GridSystem):
             # Fix longitude discontinuities without centering
             # This ensures datasets with the meridian discontinuitiy in the "middle"
             # of the dataset maintain a continuous coordinate system
-            x_data = unwrap(x_data, width=360)
+            x_data = unwrap(x_data, width=360, axis=-1)
 
         x_bounds = _compute_interval_bounds(x_data)
         x_intervals = pd.IntervalIndex.from_breaks(x_bounds, closed="left")
