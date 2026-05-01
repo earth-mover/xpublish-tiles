@@ -10,7 +10,6 @@ from xarray import Dataset
 from xpublish_tiles.grids import FacetedGridSystem, Healpix, guess_grid_system
 from xpublish_tiles.lib import VariableNotFoundError, async_run
 from xpublish_tiles.logger import logger
-from xpublish_tiles.pipeline import transformer_from_crs
 from xpublish_tiles.render import RenderRegistry
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
@@ -316,14 +315,7 @@ async def extract_variable_bounding_box(
         else:
             target_crs_str = target_crs
 
-        # Transform bounds to target CRS
-        transformer = transformer_from_crs(crs_from=grid.crs, crs_to=target_crs_str)
-        transformed_bounds = transformer.transform_bounds(
-            grid.bbox.west,
-            grid.bbox.south,
-            grid.bbox.east,
-            grid.bbox.north,
-        )
+        transformed_bounds = grid.transform_bbox(target_crs_str)
 
         return BoundingBox(
             lowerLeft=[transformed_bounds[0], transformed_bounds[1]],
