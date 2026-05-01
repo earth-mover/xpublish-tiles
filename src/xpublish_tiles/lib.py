@@ -39,7 +39,17 @@ M_PI = 3.14159265358979323846  # from proj
 M_2_PI = 6.28318530717958647693  # from proj
 
 
-def unwrap(data: np.ndarray, *, width: float) -> np.ndarray:
+def unwrap(data: np.ndarray, *, width: float, axis: int | None = None) -> np.ndarray:
+    """Remove ±width discontinuities from ``data``.
+
+    When ``axis`` is given, uses ``np.unwrap`` along that axis.
+    Use this whenever the discontinuity is per-row/per-column
+
+    When ``axis`` is None, falls back to ``skimage.restoration.unwrap_phase``
+    for cases where the discontinuity has 2D structure (e.g. tripole).
+    """
+    if axis is not None:
+        return np.unwrap(data, period=width, axis=axis)
     factor = 2 * np.pi / width
     un = unwrap_phase(data * factor)
     un /= factor
