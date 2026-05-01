@@ -308,9 +308,11 @@ async def extract_variable_bounding_box(
         # Get the grid system for this variable (run in thread to avoid blocking)
         grid = await async_run(guess_grid_system, dataset, variable_name)
 
-        # Convert target CRS to string format for transformer
+        # ``morecantile.CRS.srs`` returns the cached pyproj ``_srs`` string;
+        # ``to_epsg`` round-trips through the EPSG database and is unexpectedly
+        # expensive when called per variable.
         if isinstance(target_crs, morecantile.models.CRS):
-            target_crs_str = target_crs.to_epsg() or target_crs.to_wkt() or ""
+            target_crs_str = target_crs.srs
         else:
             target_crs_str = target_crs
 
