@@ -36,7 +36,11 @@ from xpublish_tiles.xpublish.tiles.types import (
 _ALLOWED_STYLES_CACHE: dict[str, list[str]] = {}
 
 
-def allowed_styles(dataset: Dataset | None = None) -> list[str]:
+def allowed_styles(
+    dataset: Dataset | None = None,
+    *,
+    cf_coords: dict | None = None,
+) -> list[str]:
     """Return the style IDs supported by ``dataset``'s grid.
 
     Healpix and Faceted grids (e.g. cubed sphere) only support ``polygons``;
@@ -54,7 +58,7 @@ def allowed_styles(dataset: Dataset | None = None) -> list[str]:
         if var_data.ndim == 0:
             continue
         try:
-            grid = guess_grid_system(dataset, str(var_name))
+            grid = guess_grid_system(dataset, str(var_name), cf_coords=cf_coords)
         except Exception:
             continue
         if isinstance(grid, (Healpix, FacetedGridSystem)):
@@ -66,9 +70,13 @@ def allowed_styles(dataset: Dataset | None = None) -> list[str]:
     return result
 
 
-def get_styles(dataset: Dataset | None = None) -> list[Style]:
+def get_styles(
+    dataset: Dataset | None = None,
+    *,
+    cf_coords: dict | None = None,
+) -> list[Style]:
     """Return supported styles for ``dataset``'s grid."""
-    allowed = set(allowed_styles(dataset))
+    allowed = set(allowed_styles(dataset, cf_coords=cf_coords))
     styles: list[Style] = []
     for style_id in RenderRegistry.all():
         if style_id not in allowed:
@@ -171,7 +179,10 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
 
 
 async def extract_dataset_extents(
-    dataset: Dataset, variable_name: str | None
+    dataset: Dataset,
+    variable_name: str | None,
+    *,
+    cf_coords: dict | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Extract dimension extents from dataset and convert to OGC format"""
     extents = {}
@@ -188,7 +199,7 @@ async def extract_dataset_extents(
     for var, array in ds.data_vars.items():
         if array.ndim == 0:
             continue
-        dimensions = await extract_dimension_extents(ds, var)
+        dimensions = await extract_dimension_extents(ds, var, cf_coords=cf_coords)
         for dim in dimensions:
             # Use the first occurrence of each dimension name
             if dim.name not in all_dimensions:
@@ -308,7 +319,11 @@ def _calculate_temporal_resolution(values: xr.DataArray) -> str | None:
 
 
 async def extract_variable_bounding_box(
-    dataset: Dataset, variable_name: str, target_crs: str | morecantile.models.CRS
+    dataset: Dataset,
+    variable_name: str,
+    target_crs: str | morecantile.models.CRS,
+    *,
+    cf_coords: dict | None = None,
 ) -> BoundingBox | None:
     """Extract variable-specific bounding box and transform to target CRS
 
@@ -322,7 +337,9 @@ async def extract_variable_bounding_box(
     """
     try:
         # Get the grid system for this variable (run in thread to avoid blocking)
-        grid = await async_run(guess_grid_system, dataset, variable_name)
+        grid = await async_run(
+            guess_grid_system, dataset, variable_name, cf_coords=cf_coords
+        )
 
         # ``morecantile.CRS.srs`` returns the cached pyproj ``_srs`` string;
         # ``to_epsg`` round-trips through the EPSG database and is unexpectedly
@@ -356,6 +373,8 @@ async def create_tileset_for_tms(
     keywords: list[str],
     dataset_attrs: dict[str, Any],
     styles: list[Style],
+    *,
+    cf_coords: dict | None = None,
 ) -> TilesetSummary | None:
     """Create a tileset summary for a specific tile matrix set
 
@@ -390,7 +409,7 @@ async def create_tileset_for_tms(
 
         # Extract variable-specific bounding box, fallback to dataset bounds
         var_bounding_box = await extract_variable_bounding_box(
-            dataset, var_name, tms_summary.crs
+            dataset, var_name, tms_summary.crs, cf_coords=cf_coords
         )
 
         layer = Layer(
@@ -420,7 +439,9 @@ async def create_tileset_for_tms(
         layers.append(layer)
 
     # Define tile matrix limits
-    tileMatrixSetLimits = await get_tile_matrix_limits(tms_id, dataset)
+    tileMatrixSetLimits = await get_tile_matrix_limits(
+        tms_id, dataset, cf_coords=cf_coords
+    )
 
     tileset = TilesetSummary(
         title=f"{title} - {tms_id}",

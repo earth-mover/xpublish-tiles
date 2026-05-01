@@ -3120,18 +3120,30 @@ def _guess_z_dimension(da: xr.DataArray) -> str | None:
     return None
 
 
-def guess_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
+def guess_grid_system(
+    ds: xr.Dataset,
+    name: Hashable,
+    *,
+    cf_coords: dict | None = None,
+) -> GridSystem:
     """
     Guess the grid system for a dataset.
 
     Uses caching with ds.attrs['_xpublish_id'] as cache key if present.
     If no _xpublish_id, skips caching to avoid cross-contamination.
+
+    ``cf_coords`` may be the precomputed ``ds.cf.coordinates`` mapping;
+    passing it avoids redundant cf-accessor lookups when this function is
+    called repeatedly per variable.
     """
-    cf_coords = ds.cf.coordinates
+    if cf_coords is None:
+        cf_coords = ds.cf.coordinates
 
     xpublish_id = ds.attrs.get("_xpublish_id")
     cache_key = (
-        (xpublish_id, xarray_object_key(ds[name])) if xpublish_id is not None else None
+        (xpublish_id, xarray_object_key(ds[name], cf_coords=cf_coords))
+        if xpublish_id is not None
+        else None
     )
 
     if cache_key is not None and cache_key in _GRID_CACHE:

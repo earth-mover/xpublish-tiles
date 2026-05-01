@@ -15,11 +15,21 @@ HAS_TBB = importlib.util.find_spec("tbb") is not None
 NUMBA_THREADING_LOCK = contextlib.nullcontext() if HAS_TBB else threading.Lock()
 
 
-def xarray_object_key(obj: xr.DataArray | xr.Dataset) -> tuple:
+def xarray_object_key(
+    obj: xr.DataArray | xr.Dataset,
+    *,
+    cf_coords: dict | None = None,
+) -> tuple:
     """Cache key fragment: sorted dims whose size > 1, excluding the time dim
-    when the time coordinate is 1D."""
+    when the time coordinate is 1D.
+
+    ``cf_coords`` may be the parent dataset's ``ds.cf.coordinates`` mapping;
+    passing it avoids an expensive per-call ``obj.cf.coordinates`` lookup on
+    the hot path.
+    """
+    coords = cf_coords if cf_coords is not None else obj.cf.coordinates
     time_dims: set = set()
-    for name in obj.cf.coordinates.get("time", []):
+    for name in coords.get("time", []):
         if name in obj.coords and obj.coords[name].ndim == 1:
             time_dims.add(obj.coords[name].dims[0])
     return tuple(

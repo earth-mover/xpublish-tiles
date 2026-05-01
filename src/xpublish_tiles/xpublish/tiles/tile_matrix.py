@@ -165,7 +165,11 @@ def extract_tile_bbox_and_crs(
 
 
 async def get_tile_matrix_limits(
-    tms_id: str, dataset: xr.Dataset, zoom_levels: range | None = None
+    tms_id: str,
+    dataset: xr.Dataset,
+    zoom_levels: range | None = None,
+    *,
+    cf_coords: dict | None = None,
 ) -> list[TileMatrixSetLimit]:
     """Generate tile matrix limits for the specified zoom levels based on dataset bounds.
 
@@ -185,7 +189,9 @@ async def get_tile_matrix_limits(
     else:
         raise ValueError("Could not find a DataArray with at least one dimension.")
 
-    grid = await async_run(guess_grid_system, dataset, first_data_var)
+    grid = await async_run(
+        guess_grid_system, dataset, first_data_var, cf_coords=cf_coords
+    )
     tms = morecantile.tms.get(tms_id)
 
     if zoom_levels is None:
@@ -217,7 +223,11 @@ def get_all_tile_matrix_set_ids() -> list[str]:
 
 
 async def extract_dimension_extents(
-    ds: xr.Dataset, name: Hashable, max_actual_values: int = 50
+    ds: xr.Dataset,
+    name: Hashable,
+    max_actual_values: int = 50,
+    *,
+    cf_coords: dict | None = None,
 ) -> list[DimensionExtent]:
     """Extract dimension extent information from an xarray DataArray.
 
@@ -234,7 +244,7 @@ async def extract_dimension_extents(
     """
     dimensions = []
 
-    grid = await async_run(guess_grid_system, ds, name)
+    grid = await async_run(guess_grid_system, ds, name, cf_coords=cf_coords)
     data_array = ds[name]
 
     # Grid-owned dims (X, Y, and faceted ``face_dim``) are skipped for

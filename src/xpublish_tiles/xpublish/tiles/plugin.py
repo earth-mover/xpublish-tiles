@@ -133,10 +133,15 @@ class TilesPlugin(Plugin):
             elif not isinstance(keywords, list):
                 keywords = []
 
+            # Compute cf coordinates once for the whole request — this is
+            # an expensive cf_xarray call (regex match across every variable's
+            # attrs) and would otherwise be repeated per variable per TMS.
+            cf_coords = await async_run(lambda d: d.cf.coordinates, dataset)
+
             # Get available styles from registered renderers
             logger.info(f"Getting available styles for dataset '{title}'")
 
-            styles = await async_run(get_styles, dataset)
+            styles = await async_run(get_styles, dataset, cf_coords=cf_coords)
 
             logger.info("loading extents for dataset vars")
 
@@ -147,7 +152,9 @@ class TilesPlugin(Plugin):
                     continue
                 var_name = str(var_name_)
                 try:
-                    extents = await extract_dataset_extents(dataset, var_name)
+                    extents = await extract_dataset_extents(
+                        dataset, var_name, cf_coords=cf_coords
+                    )
                 except Exception as e:
                     logger.info(f"Skipping non-renderable variable {var_name!r}: {e}")
                     continue
@@ -174,6 +181,7 @@ class TilesPlugin(Plugin):
                         keywords,
                         dataset_attrs,
                         styles,
+                        cf_coords=cf_coords,
                     )
                     for tms_id in supported_tms
                 ]
