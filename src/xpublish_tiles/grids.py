@@ -833,6 +833,20 @@ class CurvilinearCellIndex(xr.Index):
         self.left_break = float(np.min(first_col))
         self.right_break = float(np.max(last_col))
 
+        # Sanity check: post-unwrap lon span should not exceed 360° (plus a
+        # small tolerance). When it does, `unwrap` was applied to a grid whose
+        # rows aren't lon-monotonic — typically a polar-cap face whose
+        # is_polar_cap flag was lost. Flag at error level so the regression
+        # surfaces in logs even when downstream rendering "looks fine".
+        if not self.is_polar_cap and (self.right_break - self.left_break) > 360.0 + 1e-3:
+            get_context_logger().error(
+                f"❌ bad lon wraparound detected at index construction: "
+                f"left_break={self.left_break:.4f} right_break={self.right_break:.4f} "
+                f"span={self.right_break - self.left_break:.4f} (>360°). "
+                f"Likely cause: unwrap applied to a polar-cap-shaped grid "
+                f"(is_polar_cap={self.is_polar_cap})."
+            )
+
         # Determine if Y is increasing along the Y axis by checking the first
         # row. Don't use .all() because tripolar grids have dY=0 in the fold
         # region which would cause the swap to trigger incorrectly.
@@ -882,6 +896,7 @@ class CurvilinearCellIndex(xr.Index):
         lat_mask = y_min <= bbox.north
         lat_mask &= y_max >= bbox.south
 
+        logger = get_context_logger()
         all_indexers: list[slice]
         if self.is_polar_cap:
             # Polar-cap faces wind around the pole; neither axis is monotonic
@@ -925,21 +940,72 @@ class CurvilinearCellIndex(xr.Index):
             y_start, y_stop = _bounds_from_mask(mask, axis=xaxis, size=Ylen)
             x_start, x_stop = _bounds_from_mask(mask, axis=yaxis, size=Xlen)
             all_indexers = [slice(x_start, x_stop)]
+            logger.debug(
+                f"🎯 CurvilinearCellIndex.sel POLAR_CAP bbox=W{bbox.west:.4f},S{bbox.south:.4f},"
+                f"E{bbox.east:.4f},N{bbox.north:.4f} "
+                f"tripolar_fold_row={self.tripolar_fold_row} "
+                f"y=[{y_start},{y_stop}) x=[{x_start},{x_stop}) "
+                f"sizes Y={Ylen} X={Xlen}"
+            )
         else:
             y_start, y_stop = _bounds_from_mask(lat_mask, axis=xaxis, size=Ylen)
             all_indexers = []
-            for sl in _convert_longitude_slice(
-                slice(bbox.west, bbox.east),
-                left_break=self.left_break,
-                right_break=self.right_break,
-            ):
+            converted = list(
+                _convert_longitude_slice(
+                    slice(bbox.west, bbox.east),
+                    left_break=self.left_break,
+                    right_break=self.right_break,
+                )
+            )
+            for sl in converted:
                 lon_mask = x_min <= sl.stop
                 lon_mask &= x_max >= sl.start
                 x_start, x_stop = _bounds_from_mask(lon_mask, axis=yaxis, size=Xlen)
                 all_indexers.append(slice(x_start, x_stop))
+            logger.debug(
+                f"🎯 CurvilinearCellIndex.sel STANDARD bbox=W{bbox.west:.4f},S{bbox.south:.4f},"
+                f"E{bbox.east:.4f},N{bbox.north:.4f} "
+                f"tripolar_fold_row={self.tripolar_fold_row} "
+                f"breaks=[{self.left_break:.4f},{self.right_break:.4f}] "
+                f"converted_lon_slices={[(sl.start, sl.stop) for sl in converted]} "
+                f"y=[{y_start},{y_stop}) x_slices={[(s.start, s.stop) for s in all_indexers]} "
+                f"sizes Y={Ylen} X={Xlen}"
+            )
 
         # Prevent overlap between adjacent slices
         all_indexers = _prevent_slice_overlap(all_indexers)
+
+        # Bad-wraparound post-condition: the X corners covered by the resolved
+        # slicers should span at most ~360°. A wider span means `unwrap` was
+        # applied to a grid whose rows aren't lon-monotonic (typically a
+        # polar-cap face where detection failed) and the selection is now
+        # walking across a stretched coordinate.
+        if not self.is_polar_cap and y_stop > y_start and all_indexers:
+            y_sl = [slice(None)] * self.corner_x.ndim
+            y_sl[yaxis] = slice(y_start, y_stop + 1)
+            x_segments: list[float] = []
+            for sl in all_indexers:
+                if sl.stop > sl.start:
+                    x_sl = list(y_sl)
+                    x_sl[xaxis] = slice(sl.start, sl.stop + 1)
+                    seg = self.corner_x[tuple(x_sl)]
+                    if seg.size:
+                        x_segments.append(float(np.nanmin(seg)))
+                        x_segments.append(float(np.nanmax(seg)))
+            if x_segments:
+                sel_span = max(x_segments) - min(x_segments)
+                if sel_span > 360.0 + 1e-3:
+                    logger.error(
+                        f"❌ bad lon wraparound detected after .sel: "
+                        f"selected X span={sel_span:.4f}° (>360°) "
+                        f"bbox=W{bbox.west:.4f},S{bbox.south:.4f},"
+                        f"E{bbox.east:.4f},N{bbox.north:.4f} "
+                        f"breaks=[{self.left_break:.4f},{self.right_break:.4f}] "
+                        f"y=[{y_start},{y_stop}) "
+                        f"x_slices={[(s.start, s.stop) for s in all_indexers]}. "
+                        f"Likely cause: unwrap applied to a polar-cap-shaped "
+                        f"grid (is_polar_cap={self.is_polar_cap})."
+                    )
 
         slicers = {
             self.Xdim: all_indexers,
@@ -1864,6 +1930,9 @@ class Curvilinear(GridSystem):
         corner_x = _corner_mesh(ds, Xname)
         corner_y = _corner_mesh(ds, Yname)
 
+        logger = get_context_logger()
+        x_pre_min = float(np.nanmin(X.data))
+        x_pre_max = float(np.nanmax(X.data))
         if crs.is_geographic and not is_polar_cap:
             # Fix longitude discontinuities without centering. Ensures datasets
             # with the meridian discontinuity in the "middle" of the dataset
@@ -1874,6 +1943,20 @@ class Curvilinear(GridSystem):
             X = X.copy(data=unwrap(X.data, width=360))
             if corner_x is not None:
                 corner_x = unwrap(corner_x, width=360)
+            logger.debug(
+                f"🌀 Curvilinear unwrap APPLIED on {Xname} "
+                f"is_polar_cap={is_polar_cap} tripolar_fold_row={tripolar_fold_row} "
+                f"corners={'yes' if corner_x is not None else 'no'} "
+                f"X range pre=[{x_pre_min:.4f}, {x_pre_max:.4f}] "
+                f"post=[{float(np.nanmin(X.data)):.4f}, {float(np.nanmax(X.data)):.4f}]"
+            )
+        else:
+            logger.debug(
+                f"🌀 Curvilinear unwrap SKIPPED on {Xname} "
+                f"is_polar_cap={is_polar_cap} is_geographic={crs.is_geographic} "
+                f"tripolar_fold_row={tripolar_fold_row} "
+                f"X range=[{x_pre_min:.4f}, {x_pre_max:.4f}]"
+            )
 
         index = CurvilinearCellIndex(
             X=X,
@@ -2656,15 +2739,27 @@ class CubedSphere(FacetedGridSystem):
             # N=32). Checked against raw (pre-unwrap) coords; independent of
             # lon convention.
             if crs.is_geographic:
+                used_corners = (
+                    corner_y_name is not None and corner_y_name in face_ds.variables
+                )
                 lats = (
                     face_ds.variables[corner_y_name]
-                    if corner_y_name is not None and corner_y_name in face_ds.variables
+                    if used_corners
                     else face_ds.variables[Yname]
                 )
                 cap_lat = float(np.nanmax(np.abs(lats.data)))
                 is_polar_cap = cap_lat > 80.0
+                get_context_logger().debug(
+                    f"🧭 cubed-sphere face {i}: cap_lat={cap_lat:.6f} "
+                    f"source={'corners' if used_corners else 'centers'} "
+                    f"({corner_y_name if used_corners else Yname}) "
+                    f"is_polar_cap={is_polar_cap}"
+                )
             else:
                 is_polar_cap = False
+                get_context_logger().debug(
+                    f"🧭 cubed-sphere face {i}: non-geographic crs, is_polar_cap=False"
+                )
             faces.append(
                 Curvilinear.from_dataset(
                     face_ds, crs, Xname, Yname, is_polar_cap=is_polar_cap
