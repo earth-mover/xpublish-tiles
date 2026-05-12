@@ -29,6 +29,12 @@ from xpublish_tiles.xpublish.tiles.types import (
     TilesetSummary,
 )
 
+# Result of ``allowed_styles`` is dataset-wide and stable, but the body
+# loops every data var and pays a ``guess_grid_system`` cache-miss for each
+# unique dim signature. Memoize per dataset so repeat /tiles/ requests skip
+# all of that.
+_ALLOWED_STYLES_CACHE: dict[str, list[str]] = {}
+
 
 def allowed_styles(dataset: Dataset | None = None) -> list[str]:
     """Return the style IDs supported by ``dataset``'s grid.
@@ -36,17 +42,28 @@ def allowed_styles(dataset: Dataset | None = None) -> list[str]:
     Healpix and Faceted grids (e.g. cubed sphere) only support ``polygons``;
     every other grid supports both ``raster`` and ``polygons``.
     """
-    if dataset is not None:
-        for var_name, var_data in dataset.data_vars.items():
-            if var_data.ndim == 0:
-                continue
-            try:
-                grid = guess_grid_system(dataset, str(var_name))
-            except Exception:
-                continue
-            if isinstance(grid, (Healpix, FacetedGridSystem)):
-                return ["polygons"]
-    return ["raster", "polygons"]
+    if dataset is None:
+        return ["raster", "polygons"]
+
+    xpublish_id = dataset.attrs.get("_xpublish_id")
+    if xpublish_id is not None and xpublish_id in _ALLOWED_STYLES_CACHE:
+        return _ALLOWED_STYLES_CACHE[xpublish_id]
+
+    result = ["raster", "polygons"]
+    for var_name, var_data in dataset.data_vars.items():
+        if var_data.ndim == 0:
+            continue
+        try:
+            grid = guess_grid_system(dataset, str(var_name))
+        except Exception:
+            continue
+        if isinstance(grid, (Healpix, FacetedGridSystem)):
+            result = ["polygons"]
+            break
+
+    if xpublish_id is not None:
+        _ALLOWED_STYLES_CACHE[xpublish_id] = result
+    return result
 
 
 def get_styles(dataset: Dataset | None = None) -> list[Style]:
