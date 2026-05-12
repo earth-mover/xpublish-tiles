@@ -25,6 +25,10 @@ repos:
       - id: actionlint
         files: ".github/workflows/"
         args: ["-ignore", "SC1090", "-ignore", "SC2046", "-ignore", "SC2086", "-ignore", "SC2129", "-ignore", "SC2155"]
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: v1.24.1
+    hooks:
+      - id: zizmor
   - repo: https://github.com/codespell-project/codespell
     # Configuration for codespell is in .codespellrc
     rev: v2.4.1

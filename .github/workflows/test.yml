@@ -9,6 +9,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   run-tests:
     name: python (shard ${{ matrix.shard }}/${{ strategy.job-total }})
@@ -19,10 +22,12 @@ jobs:
         shard: [1, 2, 3, 4]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
         with:
           enable-cache: true
 
@@ -35,11 +40,14 @@ jobs:
 
       # To debug snapshot test failures run with --debug-visual-save and download the artifact zip created in the next step.
       - name: Run tests with coverage
-        run: uv run pytest tests --cov=src/xpublish_tiles --cov-report=xml --cov-report=term-missing --durations=10 -nauto --splits=${{ strategy.job-total }} --group=${{ matrix.shard }} --splitting-algorithm=least_duration
+        env:
+          SPLITS: ${{ strategy.job-total }}
+          GROUP: ${{ matrix.shard }}
+        run: uv run pytest tests --cov=src/xpublish_tiles --cov-report=xml --cov-report=term-missing --durations=10 -nauto --splits="$SPLITS" --group="$GROUP" --splitting-algorithm=least_duration
 
       - name: Upload debug visual images on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: debug-visual-images-shard-${{ matrix.shard }}
           path: debug_visual_diff_*.png
@@ -47,7 +55,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
@@ -57,10 +65,12 @@ jobs:
   test-import-with-base-deps:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
         with:
           enable-cache: true
 
