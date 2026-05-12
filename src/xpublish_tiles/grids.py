@@ -2625,14 +2625,13 @@ class CubedSphere(FacetedGridSystem):
         face_dim: str = "nf",
     ) -> Self:
         face_size = ds.sizes[face_dim]
-        # Keep only the 2D lon/lat aux coords; Curvilinear.from_dataset does
-        # a cf-xarray axis scan so trimming down avoids pulling in unrelated
-        # variables and their attrs. Also keep vertex-mesh corner variables
-        # (resolved via SGRID node_coordinates or the GMAO `corner_*`
-        # convention) so Curvilinear can use true shared-vertex corners
-        # instead of per-face extrapolation, plus the SGRID grid_topology
-        # variable (a scalar that survives the per-face isel) so per-face
-        # Curvilinear.from_dataset can re-resolve via SGRID.
+        # Keep only the 2D lon/lat aux coords
+        # - Curvilinear.from_dataset does a cf-xarray axis scan so trimming down avoids pulling in unrelated
+        #   variables and their attrs.
+        # - Use vertex-mesh corner variables (resolved via SGRID node_coordinates or the GMAO `corner_*`
+        #   convention) so Curvilinear can use true shared-vertex corners
+        # - Keep the SGRID grid_topology variable (a scalar that survives the per-face isel) so per-face
+        #   Curvilinear.from_dataset can re-resolve via SGRID.
         corner_x_name = _resolve_corner_name(ds, Xname)
         corner_y_name = _resolve_corner_name(ds, Yname)
         keep = [Xname, Yname]
