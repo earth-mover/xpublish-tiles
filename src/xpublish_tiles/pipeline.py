@@ -1060,7 +1060,11 @@ async def subset_to_bbox(
                 result[var_name] = NullRenderContext()
                 continue
 
-            slicers = grid.sel(bbox=input_bbox)
+            # For most exotic grids this is expensive
+            if isinstance(grid, Rectilinear | RasterAffine):
+                slicers = grid.sel(bbox=input_bbox)
+            else:
+                slicers = await async_run(grid.sel, bbox=input_bbox)
 
             # ugly; figure out how to get rid of this
             if isinstance(grid, Healpix) and all(
@@ -1240,7 +1244,8 @@ async def _transform_one_grid_polygons(
             to_transform, grid.X, grid.Y, input_to_output
         )
 
-    newX, newY, _ = _fix_discontinuity(
+    newX, newY, _ = await async_run(
+        _fix_discontinuity,
         grid,
         newX,
         newY,
@@ -1428,7 +1433,8 @@ async def _transform_raster_patch(
 
     ugrid_indexer = patch.indexer if isinstance(patch.indexer, UgridIndexer) else None
     hp_indexer = patch.indexer if isinstance(patch.indexer, HealpixIndexer) else None
-    newX, newY, _ = _fix_discontinuity(
+    newX, newY, _ = await async_run(
+        _fix_discontinuity,
         grid,
         newX,
         newY,
