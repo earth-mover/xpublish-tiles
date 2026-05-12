@@ -762,6 +762,10 @@ class CurvilinearCellIndex(xr.Index):
     y_is_increasing: bool
     corner_x: np.ndarray
     corner_y: np.ndarray
+    cell_x_min: np.ndarray
+    cell_x_max: np.ndarray
+    cell_y_min: np.ndarray
+    cell_y_max: np.ndarray
     _dXmin: float
     _dYmin: float
     tripolar_fold_row: int | None
@@ -844,6 +848,16 @@ class CurvilinearCellIndex(xr.Index):
         self._dXmin = _min_nonzero_diff(xhi, xlo)
         self._dYmin = _min_nonzero_diff(yhi, ylo)
 
+        # Per-cell (min, max) over the 4 corners. The corner mesh is immutable
+        # on this index, so cache once at construction and reuse on every
+        # `.sel` call.
+        self.cell_y_min, self.cell_y_max = _cell_min_max(
+            self.corner_y, xaxis=xaxis, yaxis=yaxis
+        )
+        self.cell_x_min, self.cell_x_max = _cell_min_max(
+            self.corner_x, xaxis=xaxis, yaxis=yaxis
+        )
+
     def get_min_spacing(self) -> tuple[float, float]:
         """Get minimum spacing in X and Y directions."""
         return self._dXmin, self._dYmin
@@ -859,11 +873,11 @@ class CurvilinearCellIndex(xr.Index):
         bbox = next(iter(labels.values()))
         assert isinstance(bbox, BBox)
 
-        # Per-cell lat/lon bounds from 4 corners. Direction-agnostic (handles
-        # y-decreasing grids) and exact for rotated cells (cubed-sphere,
-        # tripolar fold).
-        y_min, y_max = _cell_min_max(self.corner_y, xaxis=xaxis, yaxis=yaxis)
-        x_min, x_max = _cell_min_max(self.corner_x, xaxis=xaxis, yaxis=yaxis)
+        # Per-cell lat/lon bounds, cached at construction (the corner mesh is
+        # immutable on this index). Direction-agnostic (handles y-decreasing
+        # grids) and exact for rotated cells (cubed-sphere, tripolar fold).
+        y_min, y_max = self.cell_y_min, self.cell_y_max
+        x_min, x_max = self.cell_x_min, self.cell_x_max
 
         lat_mask = y_min <= bbox.north
         lat_mask &= y_max >= bbox.south
@@ -1590,7 +1604,7 @@ class Rectilinear(RectilinearMixin, GridSystem):
             # Fix longitude discontinuities without centering
             # This ensures datasets with the meridian discontinuitiy in the "middle"
             # of the dataset maintain a continuous coordinate system
-            x_data = unwrap(x_data, width=360)
+            x_data = unwrap(x_data, width=360, axis=-1)
 
         x_bounds = _compute_interval_bounds(x_data)
         x_intervals = pd.IntervalIndex.from_breaks(x_bounds, closed="left")

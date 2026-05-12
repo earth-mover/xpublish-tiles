@@ -1,10 +1,12 @@
 """Tile-related utility functions for grids."""
 
 import threading
+import warnings
 
 import cachetools
 import morecantile
 import numpy as np
+from morecantile.errors import PointOutsideTMSBounds
 from pyproj import CRS
 from pyproj.aoi import BBox
 
@@ -125,10 +127,15 @@ def _compute_min_zoom(
     transformer = transformer_from_crs(tms_crs, grid.crs)
 
     def all_renderable(zoom: int) -> bool:
-        unique_tiles = {
-            (tile.x, tile.y)
-            for tile in (tms.tile(lon, lat, zoom) for lon, lat in test_points)
-        }
+        with warnings.catch_warnings():
+            # antimeridian-crossing TMS bounds (left > right) defeat the np.clip
+            # above, so test points may end up just outside the strict W<=lon<=E
+            # check inside morecantile.tile()
+            warnings.simplefilter("ignore", PointOutsideTMSBounds)
+            unique_tiles = {
+                (tile.x, tile.y)
+                for tile in (tms.tile(lon, lat, zoom) for lon, lat in test_points)
+            }
         for x, y in unique_tiles:
             bounds = tms.xy_bounds(morecantile.Tile(x=x, y=y, z=zoom))
             left, bottom, right, top = transformer.transform_bounds(

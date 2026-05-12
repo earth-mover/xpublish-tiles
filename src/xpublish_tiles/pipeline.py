@@ -22,6 +22,8 @@ from xpublish_tiles.grids import (
     Healpix,
     HealpixIndexer,
     Polar,
+    RasterAffine,
+    Rectilinear,
     Slicers,
     Triangular,
     UgridIndexer,
@@ -631,6 +633,7 @@ def fix_coordinate_discontinuities(
     transformer: pyproj.Transformer,
     *,
     bbox: BBox,
+    axis: int | None = None,
 ) -> np.ndarray:
     """
     Fix coordinate discontinuities that occur during coordinate transformation.
@@ -671,7 +674,7 @@ def fix_coordinate_discontinuities(
         return coordinates
 
     # Step 1: Use unwrap to fix discontinuities
-    unwrapped_coords = unwrap(coordinates, width=coordinate_space_width)
+    unwrapped_coords = unwrap(coordinates, width=coordinate_space_width, axis=axis)
 
     # Step 2: Determine optimal shift based on coordinate and bbox bounds
     coord_min, coord_max = unwrapped_coords.min(), unwrapped_coords.max()
@@ -1180,8 +1183,19 @@ def _fix_discontinuity(
             xr.DataArray(y_aug, dims=newY.dims),
             cell_idx,
         )
+    # For rectilinear/raster grids the post-transform discontinuity is per-row
+    # by construction (lon was already 1D-monotonic in the source);
+    # pass the X axis so `unwrap` takes the cheap `np.unwrap` fast path.
+    # Curvilinear falls through to the 2D `skimage.unwrap_phase` branch
+    # because tripole discontinuities are curves, not axis-aligned lines.
+    # Tripole grids need not be the only ones with curves so we always
+    # use the expensive, yet correct, path with Curvilinear.
+    if isinstance(grid, (Rectilinear, RasterAffine)):
+        axis = newX.get_axis_num(grid.Xdim)
+    else:
+        axis = None
     newX = newX.copy(
-        data=fix_coordinate_discontinuities(newX.data, transformer, bbox=bbox)
+        data=fix_coordinate_discontinuities(newX.data, transformer, bbox=bbox, axis=axis)
     )
     return newX, newY, slice(None)
 
