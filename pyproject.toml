@@ -13,7 +13,7 @@ classifiers = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "cf-xarray>=0.10.11",
+    "cf-xarray>=0.11.1",
     "cftime>=1.6.4.post1",
     "datashader>=0.19",
     "donfig>=0.8.0",

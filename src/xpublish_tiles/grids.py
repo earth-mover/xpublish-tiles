@@ -33,6 +33,7 @@ from xpublish_tiles.lib import (
     is_degree_geographic,
     round_bbox,
     sync_load_async,
+    transformer_from_crs,
     unwrap,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
@@ -1168,6 +1169,10 @@ class GridSystem(ABC):
     dXmin: float = 0
     dYmin: float = 0
 
+    _bbox_xform_cache: dict[str, tuple[float, float, float, float]] = field(
+        default_factory=dict, repr=False, compare=False
+    )
+
     @classmethod
     @abstractmethod
     def from_dataset(cls, ds: xr.Dataset, crs: CRS, Xname: str, Yname: str) -> Self:
@@ -1178,6 +1183,22 @@ class GridSystem(ABC):
     def dims(self) -> set[str]:
         """Return the set of dimension names for this grid system."""
         pass
+
+    def transform_bbox(self, target_crs: str) -> tuple[float, float, float, float]:
+        """Return ``self.bbox`` transformed into ``target_crs``.
+
+        Many variables share a grid, so the result is cached per ``target_crs``
+        on the instance to collapse ``transform_bounds`` calls.
+        """
+        cached = self._bbox_xform_cache.get(target_crs)
+        if cached is not None:
+            return cached
+        transformer = transformer_from_crs(crs_from=self.crs, crs_to=target_crs)
+        bounds = transformer.transform_bounds(
+            self.bbox.west, self.bbox.south, self.bbox.east, self.bbox.north
+        )
+        self._bbox_xform_cache[target_crs] = bounds
+        return bounds
 
     def assign_index(self, da: xr.DataArray) -> xr.DataArray:
         return da
@@ -2188,6 +2209,7 @@ class Triangular(GridSystem):
                 lon_spans_globe=self.lon_spans_globe,
             ),
         )
+        self._bbox_xform_cache = {}
 
     @property
     def Xdim(self) -> str:
@@ -2319,6 +2341,7 @@ class Healpix(GridSystem):
         self.bbox = bbox
         self.alternates = ()
         self.cell_ids = cell_ids
+        self._bbox_xform_cache = {}
 
         depth = int(index.grid_info.level)
         # straddle the 180° antimeridian with a hairline zone.
@@ -2625,14 +2648,13 @@ class CubedSphere(FacetedGridSystem):
         face_dim: str = "nf",
     ) -> Self:
         face_size = ds.sizes[face_dim]
-        # Keep only the 2D lon/lat aux coords; Curvilinear.from_dataset does
-        # a cf-xarray axis scan so trimming down avoids pulling in unrelated
-        # variables and their attrs. Also keep vertex-mesh corner variables
-        # (resolved via SGRID node_coordinates or the GMAO `corner_*`
-        # convention) so Curvilinear can use true shared-vertex corners
-        # instead of per-face extrapolation, plus the SGRID grid_topology
-        # variable (a scalar that survives the per-face isel) so per-face
-        # Curvilinear.from_dataset can re-resolve via SGRID.
+        # Keep only the 2D lon/lat aux coords
+        # - Curvilinear.from_dataset does a cf-xarray axis scan so trimming down avoids pulling in unrelated
+        #   variables and their attrs.
+        # - Use vertex-mesh corner variables (resolved via SGRID node_coordinates or the GMAO `corner_*`
+        #   convention) so Curvilinear can use true shared-vertex corners
+        # - Keep the SGRID grid_topology variable (a scalar that survives the per-face isel) so per-face
+        #   Curvilinear.from_dataset can re-resolve via SGRID.
         corner_x_name = _resolve_corner_name(ds, Xname)
         corner_y_name = _resolve_corner_name(ds, Yname)
         keep = [Xname, Yname]
