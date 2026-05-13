@@ -224,6 +224,44 @@ def _bounds_from_mask(mask: np.ndarray, *, axis: int, size: int) -> tuple[int, i
     return int(idx[0]), min(int(idx[-1]) + 1, size)
 
 
+def _bounds_from_combined(
+    *,
+    lat_mask: np.ndarray,
+    x_min: np.ndarray,
+    x_max: np.ndarray,
+    lon_slices: tuple[slice, ...],
+    xaxis: int,
+    yaxis: int,
+    Ylen: int,
+    Xlen: int,
+    combine: np.ufunc = np.logical_and,
+) -> tuple[list[int], list[int], list[slice]]:
+    """Per-slice combine of ``lat_mask`` with the slice's lon_mask, reduced to
+    a per-slice bounding box. Returns ``(y_starts, y_stops, x_indexers)``;
+    callers union the y-range and apply any outer offset.
+
+    Set ``combine`` to ``np.logical_and`` for the normal AABB selection,
+    or ``np.logical_or`` for the polar-cap cube-edge-seam fallback
+    where the intersection is empty but a union AABB over both candidate sets is desired.
+    """
+    y_starts: list[int] = []
+    y_stops: list[int] = []
+    x_indexers: list[slice] = []
+    mask = np.full(x_min.shape, False, dtype=np.bool_)
+    for sl in lon_slices:
+        mask |= x_min <= sl.stop
+        mask &= x_max >= sl.start
+        combine(mask, lat_mask, out=mask)
+        if mask.any():
+            y_s, y_e = _bounds_from_mask(mask, axis=xaxis, size=Ylen)
+            x_s, x_e = _bounds_from_mask(mask, axis=yaxis, size=Xlen)
+            y_starts.append(y_s)
+            y_stops.append(y_e)
+            x_indexers.append(slice(x_s, x_e))
+        mask[:] = False
+    return y_starts, y_stops, x_indexers
+
+
 def _get_xy_pad(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
     x_pad = numbagg.nanmax(np.abs(np.diff(x)))
     y_pad = numbagg.nanmax(np.abs(np.diff(y)))
@@ -865,6 +903,12 @@ class CurvilinearCellIndex(xr.Index):
         self.cell_x_min, self.cell_x_max = _cell_min_max(
             self.corner_x, xaxis=xaxis, yaxis=yaxis
         )
+        # 1D per-row lat aggregates used by `.sel` to find the row-bbox of a
+        # query without materializing the full 2D ``lat_mask``: for a small
+        # bbox this collapses ~15M-element work into a 1D scan of ~Ylen
+        # elements.
+        self.row_y_min = self.cell_y_min.min(axis=xaxis)
+        self.row_y_max = self.cell_y_max.max(axis=xaxis)
 
     def get_min_spacing(self) -> tuple[float, float]:
         """Get minimum spacing in X and Y directions."""
@@ -881,79 +925,125 @@ class CurvilinearCellIndex(xr.Index):
         bbox = next(iter(labels.values()))
         assert isinstance(bbox, BBox)
 
-        # Per-cell lat/lon bounds, cached at construction (the corner mesh is
-        # immutable on this index). Direction-agnostic (handles y-decreasing
-        # grids) and exact for rotated cells (cubed-sphere, tripolar fold).
-        y_min, y_max = self.cell_y_min, self.cell_y_max
-        x_min, x_max = self.cell_x_min, self.cell_x_max
-
-        lat_mask = y_min <= bbox.north
-        lat_mask &= y_max >= bbox.south
-
-        all_indexers: list[slice]
-        if self.is_polar_cap:
-            # Polar-cap faces wind around the pole; neither axis is monotonic
-            # in lon. Per-cell lon bounds can land on either the [-180, 180]
-            # or the [0, 360] branch, so OR both conventions into one 2D
-            # overlap mask and take its (i, j) bounding extent.
-            # We are working with "axis-aligned bounding boxes" (AABB).
-            # This is cheap but wrong near the poles, where the cells are curving.
-            # A ppint in polygon test would be more correct but presumably expensive.
-            #
-            # TODO: A more principled approach is to inverse-project the query bbox into each face's
-            # local gnomonic (x, y). A cubed-sphere face is rectilinear in its native coords,
-            # so selection becomes exact AABB on a regular grid. We would instead introduce a new
-            # CubedSphereFace GridSystem instead of piggybacking on Curvilinear for the polar caps.
-            lon_mask = np.zeros_like(lat_mask)
-            t1 = np.empty_like(lat_mask)
-            t2 = np.empty_like(lat_mask)
-            for left_break, right_break in ((-180.0, 180.0), (0.0, 360.0)):
-                for sl in _convert_longitude_slice(
-                    slice(bbox.west, bbox.east),
-                    left_break=left_break,
-                    right_break=right_break,
-                ):
-                    np.less_equal(x_min, sl.stop, out=t1)
-                    np.greater_equal(x_max, sl.start, out=t2)
-                    t1 &= t2
-                    lon_mask |= t1
-            # When lat_mask and lon_mask are disjoint the bbox sits on a
-            # cube-edge seam: per-cell AABB lon ranges abut the seam but
-            # don't span it, so the true cell lies "between" the two
-            # candidate sets. Union them so `_bounds_from_mask` returns an
-            # i,j box covering both.
-            mask = lat_mask & lon_mask
-            if not mask.any():
-                mask = lat_mask | lon_mask
-            if self.tripolar_fold_row is not None:
-                fold = [slice(None)] * mask.ndim
-                fold[yaxis] = slice(0, Ylen)
-                mask = mask[tuple(fold)]
-
-            y_start, y_stop = _bounds_from_mask(mask, axis=xaxis, size=Ylen)
-            x_start, x_stop = _bounds_from_mask(mask, axis=yaxis, size=Xlen)
-            all_indexers = [slice(x_start, x_stop)]
+        # Find the row-bbox of matching lats via 1D per-row aggregates — a
+        # ~Ylen-element scan rather than a (Ylen × Xlen) ``y_min <= N & y_max
+        # >= S``. The 2D ``lat_mask`` below is built only over those narrow
+        # rows. Tripolar fold rows are excluded by capping at Ylen.
+        row_nonzero = np.flatnonzero(
+            (self.row_y_min[:Ylen] <= bbox.north) & (self.row_y_max[:Ylen] >= bbox.south)
+        )
+        if row_nonzero.size == 0:
+            # No rows overlap the query lat range; nothing to combine. The
+            # polar-cap fallback below handles the cube-edge-seam case where
+            # the intersection is empty but a union AABB is still desired.
+            lat_row_start = lat_row_stop = 0
         else:
-            y_start, y_stop = _bounds_from_mask(lat_mask, axis=xaxis, size=Ylen)
-            all_indexers = []
-            for sl in _convert_longitude_slice(
-                slice(bbox.west, bbox.east),
-                left_break=self.left_break,
-                right_break=self.right_break,
-            ):
-                lon_mask = x_min <= sl.stop
-                lon_mask &= x_max >= sl.start
-                x_start, x_stop = _bounds_from_mask(lon_mask, axis=yaxis, size=Xlen)
-                all_indexers.append(slice(x_start, x_stop))
+            lat_row_start = int(row_nonzero[0])
+            lat_row_stop = int(row_nonzero[-1]) + 1
+        lat_mask, x_min, x_max = self._lat_mask_for_rows(
+            slice(lat_row_start, lat_row_stop), bbox=bbox
+        )
 
-        # Prevent overlap between adjacent slices
-        all_indexers = _prevent_slice_overlap(all_indexers)
+        query = slice(bbox.west, bbox.east)
+        if self.is_polar_cap:
+            # Polar-cap faces wind around the pole; per-cell lon bounds can land on
+            # either the [-180, 180] or the [0, 360] branch, so try both conventions
+            # and union the matches. Non-polar-cap grids use the index's own range.
+            #
+            # TODO: A more principled polar-cap approach is to inverse-project the
+            # query bbox into each face's local gnomonic (x, y). A cubed-sphere face
+            # is rectilinear in its native coords, so selection becomes exact AABB
+            # on a regular grid. We would instead introduce a new CubedSphereFace
+            # GridSystem instead of piggybacking on Curvilinear.
+            lon_slices = tuple(
+                sl
+                for lb, rb in ((-180.0, 180.0), (0.0, 360.0))
+                for sl in _convert_longitude_slice(query, left_break=lb, right_break=rb)
+            )
+        else:
+            lon_slices = _convert_longitude_slice(
+                query, left_break=self.left_break, right_break=self.right_break
+            )
 
-        slicers = {
-            self.Xdim: all_indexers,
-            self.Ydim: slice(y_start, y_stop),
-        }
-        return IndexSelResult(slicers)
+        y_starts, y_stops, x_indexers = _bounds_from_combined(
+            lat_mask=lat_mask,
+            x_min=x_min,
+            x_max=x_max,
+            lon_slices=lon_slices,
+            xaxis=xaxis,
+            yaxis=yaxis,
+            Ylen=lat_row_stop - lat_row_start,
+            Xlen=Xlen,
+        )
+        if x_indexers:
+            y_start = min(y_starts) + lat_row_start
+            y_stop = max(y_stops) + lat_row_start
+        else:
+            y_start = y_stop = 0
+
+        if self.is_polar_cap:
+            if not x_indexers:
+                # Disjoint lat & lon: bbox sits on a cube-edge seam where
+                # per-cell bboxes abut the seam but don't span it. Fall back to
+                # the union of any-lat-or-lon-matching cells over the full
+                # arrays so we cover both candidate sets.
+                # This is a rare case caught by property testing. There is a unit test now for
+                # Tile(x=30948, y=0, z=16). Again a more principled solution would be to transform
+                # to the face-local coordinate system
+                full_lat_mask, full_x_min, full_x_max = self._lat_mask_for_rows(
+                    slice(0, Ylen), bbox=bbox
+                )
+                y_starts, y_stops, x_indexers = _bounds_from_combined(
+                    lat_mask=full_lat_mask,
+                    x_min=full_x_min,
+                    x_max=full_x_max,
+                    lon_slices=lon_slices,
+                    xaxis=xaxis,
+                    yaxis=yaxis,
+                    Ylen=Ylen,
+                    Xlen=Xlen,
+                    combine=np.logical_or,
+                )
+                if x_indexers:
+                    y_start = min(y_starts)
+                    y_stop = max(y_stops)
+                    x_indexers = [
+                        slice(
+                            min(s.start for s in x_indexers),
+                            max(s.stop for s in x_indexers),
+                        )
+                    ]
+                else:
+                    x_indexers = [slice(0, 0)]
+            else:
+                # Polar-cap returns a single bbox regardless of how many lon
+                # conventions/slices matched.
+                x_indexers = [
+                    slice(
+                        min(s.start for s in x_indexers),
+                        max(s.stop for s in x_indexers),
+                    )
+                ]
+        elif not x_indexers:
+            x_indexers = [slice(0, 0)]
+
+        x_indexers = _prevent_slice_overlap(x_indexers)
+        return IndexSelResult({self.Xdim: x_indexers, self.Ydim: slice(y_start, y_stop)})
+
+    def _lat_mask_for_rows(
+        self, y_slice: slice, *, bbox: BBox
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Slice the cached cell bounds to ``y_slice`` rows and build the per-
+        cell lat-overlap mask for ``bbox``. Returns
+        ``(lat_mask, x_min, x_max)`` over those rows for downstream lon-mask
+        combines.
+        """
+        sl: list[slice] = [slice(None), slice(None)]
+        sl[self.yaxis] = y_slice
+        idx = tuple(sl)
+        lat_mask = self.cell_y_min[idx] <= bbox.north
+        lat_mask &= self.cell_y_max[idx] >= bbox.south
+        return lat_mask, self.cell_x_min[idx], self.cell_x_max[idx]
 
     def equals(self, other: xr.Index, **kwargs: Any) -> bool:
         if not isinstance(other, CurvilinearCellIndex):
@@ -1942,9 +2032,6 @@ class Curvilinear(GridSystem):
     def sel(self, *, bbox: BBox) -> Slicers:
         """
         Select a subset of the data array using a bounding box.
-
-        Uses masking to select out the bbox for curvilinear grids where coordinates
-        are 2D arrays. Also normalizes longitude coordinates to -180→180 format.
         """
         # Uses masking to select out the bbox, following the discussion in
         # https://github.com/pydata/xarray/issues/10572
