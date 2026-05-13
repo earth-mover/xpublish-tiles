@@ -3,7 +3,7 @@ import re
 import threading
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Hashable
+from collections.abc import Hashable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self, cast
 
@@ -234,7 +234,7 @@ def _bounds_from_combined(
     yaxis: int,
     Ylen: int,
     Xlen: int,
-    combine: Callable[[np.ndarray, np.ndarray], np.ndarray] = np.logical_and,
+    combine: np.ufunc = np.logical_and,
 ) -> tuple[list[int], list[int], list[slice]]:
     """Per-slice combine of ``lat_mask`` with the slice's lon_mask, reduced to
     a per-slice bounding box. Returns ``(y_starts, y_stops, x_indexers)``;
