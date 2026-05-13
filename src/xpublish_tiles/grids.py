@@ -808,10 +808,8 @@ class CurvilinearCellIndex(xr.Index):
     y_is_increasing: bool
     corner_x: np.ndarray
     corner_y: np.ndarray
-    cell_x_min: np.ndarray
-    cell_x_max: np.ndarray
-    cell_y_min: np.ndarray
-    cell_y_max: np.ndarray
+    row_y_min: np.ndarray
+    row_y_max: np.ndarray
     _dXmin: float
     _dYmin: float
     tripolar_fold_row: int | None
@@ -894,21 +892,15 @@ class CurvilinearCellIndex(xr.Index):
         self._dXmin = _min_nonzero_diff(xhi, xlo)
         self._dYmin = _min_nonzero_diff(yhi, ylo)
 
-        # Per-cell (min, max) over the 4 corners. The corner mesh is immutable
-        # on this index, so cache once at construction and reuse on every
-        # `.sel` call.
-        self.cell_y_min, self.cell_y_max = _cell_min_max(
-            self.corner_y, xaxis=xaxis, yaxis=yaxis
-        )
-        self.cell_x_min, self.cell_x_max = _cell_min_max(
-            self.corner_x, xaxis=xaxis, yaxis=yaxis
-        )
         # 1D per-row lat aggregates used by `.sel` to find the row-bbox of a
         # query without materializing the full 2D ``lat_mask``: for a small
         # bbox this collapses ~15M-element work into a 1D scan of ~Ylen
-        # elements.
-        self.row_y_min = self.cell_y_min.min(axis=xaxis)
-        self.row_y_max = self.cell_y_max.max(axis=xaxis)
+        # elements. Computed directly from corner rows to avoid allocating
+        # the full 2D per-cell bounds.
+        corner_y_row_min = self.corner_y.min(axis=xaxis)
+        corner_y_row_max = self.corner_y.max(axis=xaxis)
+        self.row_y_min = np.minimum(corner_y_row_min[:-1], corner_y_row_min[1:])
+        self.row_y_max = np.maximum(corner_y_row_max[:-1], corner_y_row_max[1:])
 
     def get_min_spacing(self) -> tuple[float, float]:
         """Get minimum spacing in X and Y directions."""
@@ -1033,17 +1025,26 @@ class CurvilinearCellIndex(xr.Index):
     def _lat_mask_for_rows(
         self, y_slice: slice, *, bbox: BBox
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Slice the cached cell bounds to ``y_slice`` rows and build the per-
-        cell lat-overlap mask for ``bbox``. Returns
-        ``(lat_mask, x_min, x_max)`` over those rows for downstream lon-mask
-        combines.
+        """Derive per-cell (min, max) lat/lon bounds for cells in ``y_slice``
+        from the corner mesh, and build the lat-overlap mask for ``bbox``.
+        Returns ``(lat_mask, x_min, x_max)`` over those rows for downstream
+        lon-mask combines.
         """
+        # Cells in ``y_slice`` are bounded by corner rows
+        # ``[y_slice.start : y_slice.stop + 1]``.
+        corner_y_slice = slice(y_slice.start, y_slice.stop + 1)
         sl: list[slice] = [slice(None), slice(None)]
-        sl[self.yaxis] = y_slice
+        sl[self.yaxis] = corner_y_slice
         idx = tuple(sl)
-        lat_mask = self.cell_y_min[idx] <= bbox.north
-        lat_mask &= self.cell_y_max[idx] >= bbox.south
-        return lat_mask, self.cell_x_min[idx], self.cell_x_max[idx]
+        cell_y_min, cell_y_max = _cell_min_max(
+            self.corner_y[idx], xaxis=self.xaxis, yaxis=self.yaxis
+        )
+        cell_x_min, cell_x_max = _cell_min_max(
+            self.corner_x[idx], xaxis=self.xaxis, yaxis=self.yaxis
+        )
+        lat_mask = cell_y_min <= bbox.north
+        lat_mask &= cell_y_max >= bbox.south
+        return lat_mask, cell_x_min, cell_x_max
 
     def equals(self, other: xr.Index, **kwargs: Any) -> bool:
         if not isinstance(other, CurvilinearCellIndex):
