@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from syrupy.extensions.json import JSONSnapshotExtension
 
 import xarray as xr
+from xarray.tests import raise_if_dask_computes
 from xpublish_tiles.lib import VariableNotFoundError
 from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
@@ -16,6 +17,7 @@ from xpublish_tiles.testing.datasets import (
     HRRR,
     IFS,
     REGIONAL_HEALPIX_NA,
+    UTM50S_HIRES,
 )
 from xpublish_tiles.xpublish.tiles import TilesPlugin
 from xpublish_tiles.xpublish.tiles.metadata import (
@@ -911,6 +913,22 @@ def test_tiles_endpoint_snapshot(fixture, snapshot):
     assert _normalize_for_snapshot(response.json()) == snapshot.use_extension(
         JSONSnapshotExtension
     )
+
+
+def test_tiles_metadata_no_dask_compute():
+    """The /tiles/ metadata path must not materialize coordinate arrays.
+
+    UTM50S_HIRES carries 2D alternate-CRS coords sized 64000×20000 (~5 GB
+    each). If anything on the metadata path triggers a dask compute on those
+    (e.g. an over-eager preload), this raises immediately rather than waiting
+    on a multi-minute materialization.
+    """
+    ds = UTM50S_HIRES.create()
+    rest = xpublish.Rest({UTM50S_HIRES.name: ds}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+    with raise_if_dask_computes():
+        response = client.get(f"/datasets/{UTM50S_HIRES.name}/tiles/")
+    assert response.status_code == 200
 
 
 def test_tiles_endpoint_skips_non_spatial_data_vars():

@@ -231,7 +231,9 @@ async def async_run(func, *args, **kwargs):
     loop = asyncio.get_running_loop()
     semaphore = _get_semaphore(loop)
     async with semaphore:
-        return await loop.run_in_executor(EXECUTOR, func, *args, **kwargs)
+        if kwargs:
+            return await loop.run_in_executor(EXECUTOR, partial(func, *args, **kwargs))
+        return await loop.run_in_executor(EXECUTOR, func, *args)
 
 
 def sync_load_async(obj: xr.DataArray | xr.Dataset) -> None:
@@ -241,7 +243,16 @@ def sync_load_async(obj: xr.DataArray | xr.Dataset) -> None:
     its variables). Safe regardless of whether an event loop is already
     running on the calling thread: when a loop is detected we delegate to a
     worker thread that gets a fresh loop via ``asyncio.run``.
+
+    Fast path: if every variable is already in memory, return immediately to
+    avoid an executor round-trip and a fresh-event-loop spin-up.
     """
+    if isinstance(obj, xr.DataArray):
+        if obj.variable._in_memory:
+            return
+    elif all(v._in_memory for v in obj.variables.values()):
+        return
+
     try:
         asyncio.get_running_loop()
     except RuntimeError:
