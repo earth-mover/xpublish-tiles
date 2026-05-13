@@ -130,17 +130,24 @@ def _face_slicers_are_empty(slicers: dict[str, list]) -> bool:
 
 @dataclass
 class GridMetadata:
-    """Grid metadata with coordinate names, CRS, and grid class."""
+    """Grid metadata with coordinate names, CRS, and grid class.
+
+    ``face_dim`` is set only for faceted grids (currently ``CubedSphere``),
+    where it identifies the dimension that enumerates faces (size 6 for GFDL
+    / GMAO mosaic gridspec).
+    """
 
     X: str
     Y: str
     crs: CRS
     grid_cls: type["GridSystem"]
+    face_dim: str | None = None
 
     def __repr__(self) -> str:
+        face = f", face_dim={self.face_dim!r}" if self.face_dim is not None else ""
         return (
             f"GridMetadata(X={self.X!r}, Y={self.Y!r}, "
-            f"crs={crs_repr(self.crs)}, grid_cls={self.grid_cls.__name__})"
+            f"crs={crs_repr(self.crs)}, grid_cls={self.grid_cls.__name__}{face})"
         )
 
 
@@ -3059,6 +3066,26 @@ def guess_grid_metadata(ds: xr.Dataset) -> GridMetadata | None:
     shapes only. Use this when you need the grid class or primary X/Y coordinate names
     without paying to construct the full grid system.
     """
+    face_dim = find_cubed_sphere_face_dim(ds)
+    if face_dim is not None:
+        cf_coords = ds.cf.coordinates
+        lon_name = next(
+            (str(c) for c in cf_coords.get("longitude", []) if face_dim in ds[c].dims),
+            None,
+        )
+        lat_name = next(
+            (str(c) for c in cf_coords.get("latitude", []) if face_dim in ds[c].dims),
+            None,
+        )
+        if lon_name is not None and lat_name is not None:
+            return GridMetadata(
+                X=lon_name,
+                Y=lat_name,
+                crs=DEFAULT_CRS,
+                grid_cls=CubedSphere,
+                face_dim=face_dim,
+            )
+
     all_mappings = _guess_grid_mappings_and_crs(ds)
     if not all_mappings or all_mappings[0].crs is None:
         return None
@@ -3078,8 +3105,17 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
     primary_grid_metadata = guess_grid_metadata(ds)
     if primary_grid_metadata is None:
         raise RuntimeError("CRS/grid system not detected")
+    extra: dict[str, Any] = (
+        {"face_dim": primary_grid_metadata.face_dim}
+        if primary_grid_metadata.face_dim is not None
+        else {}
+    )
     primary_grid = primary_grid_metadata.grid_cls.from_dataset(
-        ds, primary_grid_metadata.crs, primary_grid_metadata.X, primary_grid_metadata.Y
+        ds,
+        primary_grid_metadata.crs,
+        primary_grid_metadata.X,
+        primary_grid_metadata.Y,
+        **extra,
     )
 
     # Create alternate grid systems from remaining mappings
@@ -3162,31 +3198,6 @@ def guess_grid_system(
         if cache_key is not None and cache_key in _GRID_CACHE:
             return _GRID_CACHE[cache_key]
 
-        face_dim = find_cubed_sphere_face_dim(ds, name)
-        if face_dim is not None:
-            lon_name = next(
-                (
-                    str(c)
-                    for c in cf_coords.get("longitude", [])
-                    if face_dim in ds[c].dims
-                ),
-                None,
-            )
-            lat_name = next(
-                (str(c) for c in cf_coords.get("latitude", []) if face_dim in ds[c].dims),
-                None,
-            )
-            assert lon_name is not None and lat_name is not None, (
-                "find_cubed_sphere_face_dim() matched but 2D lon/lat aux coords vanished"
-            )
-            grid = CubedSphere.from_dataset(
-                ds, DEFAULT_CRS, lon_name, lat_name, face_dim=face_dim
-            )
-            grid.Z = _guess_z_dimension(ds[name])
-            if cache_key is not None:
-                _GRID_CACHE[cache_key] = grid
-            return grid
-
         try:
             cf_sub = ds.cf[[name]]
         except KeyError:
@@ -3194,12 +3205,15 @@ def guess_grid_system(
                 f"Variable {name!r} not found in dataset."
             ) from None
 
-        # Preload the primary mapping's X/Y on the *outer* ds.
-        # This helps when we repeatedly hit the same lat/lon variables for different arrays
         try:
             meta = guess_grid_metadata(cf_sub)
         except RuntimeError:
             meta = None
+
+        # Preload the primary mapping's X/Y on the *outer* ds.
+        # This allows reuse of loaded coordinates for datasets where
+        # some arrays have a vertical dimension.
+        # TODO: delete this when we cache the horizontal grid separately
         if (
             meta is not None
             and meta.grid_cls is not RasterAffine
@@ -3207,6 +3221,21 @@ def guess_grid_system(
             and meta.Y in ds.variables
         ):
             sync_load_async(ds[[meta.X, meta.Y]])
+            # Refresh cf_sub so its X/Y Variables point at the loaded data
+            cf_sub = ds.cf[[name]]
+
+        # Cubed sphere has its own construction signature (face_dim) and uses
+        # the outer ds for Z lookup, so dispatch directly instead of going
+        # through ``_guess_grid_for_dataset``.
+        if meta is not None and meta.grid_cls is CubedSphere:
+            assert meta.face_dim is not None
+            grid = CubedSphere.from_dataset(
+                ds, meta.crs, meta.X, meta.Y, face_dim=meta.face_dim
+            )
+            grid.Z = _guess_z_dimension(ds[name])
+            if cache_key is not None:
+                _GRID_CACHE[cache_key] = grid
+            return grid
 
         try:
             grid = _guess_grid_for_dataset(cf_sub)

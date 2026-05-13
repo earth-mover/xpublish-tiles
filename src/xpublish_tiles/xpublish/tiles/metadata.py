@@ -7,7 +7,12 @@ import numpy as np
 
 import xarray as xr
 from xarray import Dataset
-from xpublish_tiles.grids import FacetedGridSystem, Healpix, guess_grid_system
+from xpublish_tiles.grids import (
+    CubedSphere,
+    Healpix,
+    guess_grid_metadata,
+    guess_grid_system,
+)
 from xpublish_tiles.lib import VariableNotFoundError, async_run
 from xpublish_tiles.logger import logger
 from xpublish_tiles.render import RenderRegistry
@@ -58,10 +63,10 @@ def allowed_styles(
         if var_data.ndim == 0:
             continue
         try:
-            grid = guess_grid_system(dataset, str(var_name), cf_coords=cf_coords)
-        except Exception:
+            meta = guess_grid_metadata(dataset.cf[[str(var_name)]])
+        except (KeyError, RuntimeError):
             continue
-        if isinstance(grid, (Healpix, FacetedGridSystem)):
+        if meta is not None and meta.grid_cls in (Healpix, CubedSphere):
             result = ["polygons"]
             break
 
