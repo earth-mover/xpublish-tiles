@@ -3154,17 +3154,6 @@ def guess_grid_system(
         if cache_key is not None and cache_key in _GRID_CACHE:
             return _GRID_CACHE[cache_key]
 
-        # Pre-load coordinates on the parent.
-        # This is an extremely ugly hack :/
-        to_preload = [
-            c
-            for axis in ("latitude", "longitude", "vertical")
-            for c in cf_coords.get(axis, [])
-            if (c in ds.variables and ds.variables[c].ndim <= 2)
-        ]
-        if to_preload:
-            sync_load_async(ds[to_preload])
-
         face_dim = find_cubed_sphere_face_dim(ds, name)
         if face_dim is not None:
             lon_name = next(
