@@ -3,7 +3,7 @@ import re
 import threading
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Hashable
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self, cast
 
@@ -234,7 +234,7 @@ def _bounds_from_combined(
     yaxis: int,
     Ylen: int,
     Xlen: int,
-    combine: np.ufunc = np.logical_and,
+    combine: Callable[[np.ndarray, np.ndarray], np.ndarray] = np.logical_and,
 ) -> tuple[list[int], list[int], list[slice]]:
     """Per-slice combine of ``lat_mask`` with the slice's lon_mask, reduced to
     a per-slice bounding box. Returns ``(y_starts, y_stops, x_indexers)``;
@@ -981,16 +981,50 @@ class CurvilinearCellIndex(xr.Index):
         else:
             y_start = y_stop = 0
 
-        if self.is_polar_cap and x_indexers:
-            # Polar-cap returns a single bbox regardless of how many lon
-            # conventions/slices matched.
-            x_indexers = [
-                slice(
-                    min(s.start for s in x_indexers),
-                    max(s.stop for s in x_indexers),
+        if self.is_polar_cap:
+            if not x_indexers:
+                # Disjoint lat & lon: bbox sits on a cube-edge seam where
+                # per-cell bboxes abut the seam but don't span it. Fall back to
+                # the union of any-lat-or-lon-matching cells over the full
+                # arrays so we cover both candidate sets.
+                # This is a rare case caught by property testing. There is a unit test now for
+                # Tile(x=30948, y=0, z=16). Again a more principled solution would be to transform
+                # to the face-local coordinate system
+                full_lat_mask, full_x_min, full_x_max = self._lat_mask_for_rows(
+                    slice(0, Ylen), bbox=bbox
                 )
-            ]
-        if not x_indexers:
+                y_starts, y_stops, x_indexers = _bounds_from_combined(
+                    lat_mask=full_lat_mask,
+                    x_min=full_x_min,
+                    x_max=full_x_max,
+                    lon_slices=lon_slices,
+                    xaxis=xaxis,
+                    yaxis=yaxis,
+                    Ylen=Ylen,
+                    Xlen=Xlen,
+                    combine=np.logical_or,
+                )
+                if x_indexers:
+                    y_start = min(y_starts)
+                    y_stop = max(y_stops)
+                    x_indexers = [
+                        slice(
+                            min(s.start for s in x_indexers),
+                            max(s.stop for s in x_indexers),
+                        )
+                    ]
+                else:
+                    x_indexers = [slice(0, 0)]
+            else:
+                # Polar-cap returns a single bbox regardless of how many lon
+                # conventions/slices matched.
+                x_indexers = [
+                    slice(
+                        min(s.start for s in x_indexers),
+                        max(s.stop for s in x_indexers),
+                    )
+                ]
+        elif not x_indexers:
             x_indexers = [slice(0, 0)]
 
         x_indexers = _prevent_slice_overlap(x_indexers)

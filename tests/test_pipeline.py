@@ -1025,6 +1025,11 @@ _WORLDCRS84_TMS = morecantile.tms.get("WorldCRS84Quad")
         pytest.param(Tile(x=4, y=4, z=4), WEBMERC_TMS, id="4/4/4"),  # rendering artifact
         pytest.param(Tile(x=1, y=2, z=3), WEBMERC_TMS, id="3/1/2"),  # rendering artifact
         pytest.param(Tile(x=6158, y=25779, z=16), WEBMERC_TMS, id="16/6158/25779"),
+        # High-zoom tile near the north pole that triggers the polar-cap
+        # cube-edge-seam fallback in CurvilinearCellIndex.sel: the AND-combine
+        # of lat & lon masks is empty, so without the OR-union fallback the
+        # tile renders fully transparent. Found by hypothesis (PR #242 CI).
+        pytest.param(Tile(x=30948, y=0, z=16), WEBMERC_TMS, id="16/30948/0"),
         # WorldCRS84Quad reaches lat=±90 so these exercise the polar pole-edge
         # split; the high-zoom WebMercator tile sits on a face-cell edge that
         # was previously dropped by the cell-center-based lon break.
