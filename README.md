@@ -29,7 +29,7 @@ The goal of this project is to transform xarray datasets to raster, vector and o
 | Rectilinear  | `lat[lat], lon[lon]`               | Two 1D orthogonal coordinates.                                                                                        | All              |
 | Curvilinear  | `lat[nlat, nlon], lon[nlat, nlon]` | Two 2D coordinates.                                                                                                   | All              |
 | Unstructured | `lat[point], lon[point]`           | Two 1D coordinates interpreted as vertices, triangulated using `scipy.spatial.Delaunay`.                              | All              |
-| HEALPix      | cell-index coordinate              | Nested indexing scheme, following [CF Conventions PR #605](https://github.com/cf-convention/cf-conventions/pull/605). | `polygons` only  |
+| HEALPix      | cell-index coordinate              | Nested indexing scheme, following [CF Conventions PR #605](https://github.com/cf-convention/cf-conventions/pull/605). | `polygons`, `vector` |
 
 Here `lat[lat]` means a coordinate variable named `lat` with one dimension named `lat`.
 
@@ -41,10 +41,11 @@ for you to annotate your dataset using the CF & ACDD conventions as well as poss
 
 ### Styles
 
-Two rendering styles are supported:
+Three rendering styles are supported:
 
 - `raster` — cells are rasterized onto the output grid using [datashader's mesh rasterizers](https://datashader.org/api.html#datashader.Canvas.quadmesh) (`quadmesh` for rectilinear/curvilinear, `trimesh` for unstructured). Used for raster, rectilinear, curvilinear, and unstructured grids.
 - `polygons` — the mesh is passed to [datashader's polygon rasterizer](https://datashader.org/api.html#datashader.Canvas.polygons) as explicit polygon geometries, which rasterizes them onto the tile. This is the only style supported for HEALPix.
+- `vector` — emits actual vector tiles instead of rasters: each grid cell is shipped to the client as a polygon feature with its data value as a property. The same polygon geometry pipeline as `polygons` is reused (so all the antimeridian / polar-cap / faceted-grid handling carries over), but the renderer encodes [Mapbox Vector Tile (MVT)](https://github.com/mapbox/vector-tile-spec) protobuf (gzipped) or GeoJSON instead of rasterizing. Use `f=mvt` for production tiles and `f=geojson` for debugging — both come from the same renderer. `width`/`height` are not meaningful for vector tiles and are ignored; use `max_features_per_side=N` to control per-tile polygon density (clamped to the server cap, see Configuration). See [`examples/maplibre/tiles-vector.html`](examples/maplibre/tiles-vector.html) for a MapLibre client wired up to this style.
 
 ### Categorical Data support
 
@@ -391,6 +392,8 @@ Settings can be configured via environment variables or config files. The async 
 6. `XPUBLISH_TILES_MAX_RENDERABLE_SIZE: int` - do not attempt to load or render arrays with size greater than this value
 7. `XPUBLISH_TILES_DEFAULT_PAD: int` - how much to pad a selection on either side
 8. `XPUBLISH_TILES_GRID_CACHE_MAX_SIZE: int` - maximum number of grid systems to cache (default: 16). **Note:** This must be set via environment variable before importing the module, as the cache is initialized at import time.
+9. `XPUBLISH_TILES_MVT_EXTENT: int` - MVT tile-local integer quantization grid (default: `4096`, the Mapbox/MapLibre default). Higher values give finer subpixel precision; clients almost universally expect 4096.
+10. `XPUBLISH_TILES_VECTOR_MAX_FEATURES_PER_SIDE: int` - **server-enforced hard cap** on the per-axis number of polygon features emitted per vector tile (default: `512`). Clients can request any value via the `max_features_per_side` query parameter and the server clamps the request into `[1, cap]`. Omitting the query param yields the cap (max detail). Capped further by `XPUBLISH_TILES_MAX_NUM_GEOMETRIES`. Operators tune this knob to bound worst-case tile size and CPU cost; clients tune the per-request value to trade detail for rendering speed.
 
 ## Performance Notes
 

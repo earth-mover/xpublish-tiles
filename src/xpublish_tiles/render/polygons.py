@@ -37,6 +37,8 @@ class PolygonsRenderer(DatashaderRenderer):
         colormap: dict[str, str] | None = None,
         abovemaxcolor: str | None = None,
         belowmincolor: str | None = None,
+        levels: tuple[float, ...] | None = None,
+        smoothing: float | None = None,
     ):
         prepared = self._prepare_render(
             contexts,
@@ -105,4 +107,8 @@ class PolygonsRenderer(DatashaderRenderer):
 
     @staticmethod
     def style_id() -> str:
+        return "polygons"
+
+    @staticmethod
+    def geometry_kind(variant: str) -> str:
         return "polygons"

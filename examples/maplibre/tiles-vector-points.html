@@ -1,0 +1,622 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>Vector Tiles (Points) - xpublish-tiles</title>
+        <meta
+            name="viewport"
+            content="initial-scale=1,maximum-scale=1,user-scalable=no"
+        />
+        <link
+            href="https://unpkg.com/maplibre-gl@5.1/dist/maplibre-gl.css"
+            rel="stylesheet"
+        />
+        <script src="https://unpkg.com/maplibre-gl@5.1/dist/maplibre-gl.js"></script>
+        <style>
+            body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+            #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+            #toggle-container {
+                position: absolute; top: 10px; right: 10px; z-index: 1000;
+                background: rgba(255, 255, 255, 0.95);
+                border: 1px solid #ccc; border-radius: 4px;
+                padding: 8px; width: 220px;
+            }
+            .toggle-button {
+                padding: 6px 10px; background: white; border: 1px solid #ccc;
+                border-radius: 4px; cursor: pointer; font-size: 12px;
+                margin-bottom: 4px; display: block; width: 100%;
+                text-align: left; box-sizing: border-box;
+            }
+            .toggle-button:hover { background: #f0f0f0; }
+            #toggle-container .control-divider {
+                border: none; border-top: 1px solid #eee; margin: 8px 0;
+            }
+            #toggle-container label {
+                display: block; font-size: 11px; color: #555; margin-bottom: 2px;
+            }
+            #toggle-container label .value {
+                color: #111; font-weight: 600; float: right;
+                font-variant-numeric: tabular-nums;
+            }
+            #toggle-container select,
+            #toggle-container input[type="range"] {
+                width: 100%; box-sizing: border-box;
+                font-size: 12px; margin-bottom: 6px;
+            }
+            #toggle-container select {
+                padding: 4px; border: 1px solid #ccc;
+                border-radius: 4px; background: white;
+            }
+            #info {
+                position: absolute; bottom: 10px; left: 10px; z-index: 1000;
+                background: rgba(255, 255, 255, 0.9);
+                padding: 8px 12px; border-radius: 4px; font-size: 12px;
+                max-width: 380px; line-height: 1.4;
+            }
+            #legend {
+                position: absolute; bottom: 10px; right: 10px; z-index: 1000;
+                background: rgba(255, 255, 255, 0.9);
+                padding: 8px 12px; border-radius: 4px; font-size: 12px;
+            }
+            #legend .gradient {
+                width: 220px; height: 12px; border: 1px solid #999;
+                background: linear-gradient(to right, #2c7bb6, #abd9e9, #ffffbf, #fdae61, #d7191c);
+            }
+            #legend .units { color: #666; font-size: 11px; margin-bottom: 2px; }
+            #legend .labels {
+                display: flex; justify-content: space-between;
+                margin-top: 2px; font-variant-numeric: tabular-nums;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="map"></div>
+        <div id="toggle-container">
+            <button id="fly-to-center" class="toggle-button">Fly to Data</button>
+            <button id="globe-toggle" class="toggle-button">Disable Globe</button>
+            <hr class="control-divider" />
+            <label for="palette-select">Colormap (by speed)</label>
+            <select id="palette-select"></select>
+            <label for="max-slider">
+                Speed max <span class="value" id="max-value"></span> m/s
+            </label>
+            <input type="range" id="max-slider" min="5" max="60" step="1" value="25" />
+            <label for="size-slider">
+                Arrow size <span class="value" id="size-value"></span>
+            </label>
+            <input type="range" id="size-slider" min="0.4" max="2.0" step="0.1" value="0.8" />
+            <hr class="control-divider" />
+            <label for="features-slider">
+                Detail (features/side)
+                <span class="value" id="features-value"></span>
+            </label>
+            <input type="range" id="features-slider" min="8" max="512" step="8" value="96" />
+            <small style="color:#777; font-size:10px; line-height:1.3; display:block; margin-top:-2px;">
+                Server-clamped. Changing this refetches tiles.
+            </small>
+        </div>
+        <div id="info">
+            Wind vectors as MVT <code>Point</code> features
+            (<code>wind_u_10m</code> + <code>wind_v_10m</code>) layered over a
+            <code>vector/contours</code> backdrop of mean sea-level pressure
+            — filled bands plus isolines drawn as polygon outlines, both from
+            one MVT source. Two MVT sources from one server, composited
+            entirely client-side. Hover an arrow to inspect.<br/>
+            Dataset: <code>earthmover-public/noaa-gfs-forecast</code>. Run:
+            <code>uv run xpublish-tiles --dataset=earthmover-public/noaa-gfs-forecast</code>
+        </div>
+        <div id="legend">
+            <div style="font-weight:600;">Mean sea-level pressure</div>
+            <div class="units">hPa</div>
+            <div class="gradient" id="pressure-gradient" style="background: linear-gradient(to right, #4575b4, #abd9e9, #ffffbf, #fdae61, #d73027);"></div>
+            <div class="labels">
+                <span>950</span><span>1000</span><span>1050</span>
+            </div>
+            <div style="height:6px;"></div>
+            <div style="font-weight:600;">10 m wind speed</div>
+            <div class="units">m/s</div>
+            <div class="gradient" id="legend-gradient"></div>
+            <div class="labels">
+                <span>0</span>
+                <span id="legend-mid">12.5</span>
+                <span id="legend-max">25</span>
+            </div>
+        </div>
+        <script>
+            // ---- Configuration -------------------------------------------------
+            const SERVER = "http://localhost:8080";
+            const U_VAR = "wind_u_10m";
+            const V_VAR = "wind_v_10m";
+            const PRESSURE_VAR = "pressure_reduced_to_mean_sea_level";
+            const TMS = "WebMercatorQuad";
+            const TIME = null;
+            const STEP = null;
+            // The MVT layer name the server emits for vector/points.
+            const POINTS_LAYER = "points";
+            // For vector/contours the server emits two layers per variable
+            // in the same MVT response: the variable name (Polygon features
+            // for filled bands) and "<var>_lines" (LineString features at
+            // each level boundary, for isolines + labels).
+            const PRESSURE_LAYER = PRESSURE_VAR;
+            const PRESSURE_LINES_LAYER = `${PRESSURE_VAR}_lines`;
+            // Resampling resolution fed into marching squares. The
+            // contour pipeline coarsens the input grid to this many cells
+            // per axis before extracting bands; higher = smoother isolines
+            // but larger MVT payload.
+            const PRESSURE_DETAIL = 192;
+            // Mean sea-level pressure is reported in Pa by the GFS forecast
+            // dataset. Two ranges to keep separate:
+            //   * PRESSURE_{MIN,MAX}_PA — visual palette range. Values
+            //     outside it clamp to the first/last palette color via
+            //     MapLibre's interpolate expression.
+            //   * PRESSURE_LEVELS_{MIN,MAX}_PA — wider range that levels
+            //     span. Must bracket all plausible data: a deep low can
+            //     sit below 950 hPa and would otherwise leave a no-fill
+            //     hole in the center of the storm (band [l_i, l_{i+1}]
+            //     polygons cover only values inside the level range).
+            const PRESSURE_MIN_PA = 95000;
+            const PRESSURE_MAX_PA = 105000;
+            const PRESSURE_LEVELS_MIN_PA = 90000;
+            const PRESSURE_LEVELS_MAX_PA = 110000;
+            // Synoptic charts use 4 hPa cadence; 4 hPa = 400 Pa.
+            const PRESSURE_STEP_PA = 400;
+            // Pre-blur sigma (in resampled grid cells) applied before
+            // marching-squares. Smooths the jagged isolines that come from
+            // a coarse input grid; tune up for smoother contours, down for
+            // tighter feature fidelity.
+            const PRESSURE_SMOOTHING = 1.5;
+            const PRESSURE_PALETTE = [
+                "#4575b4", "#abd9e9", "#ffffbf", "#fdae61", "#d73027",
+            ];
+
+            // Pressure contour band boundaries in Pa, evenly spaced from
+            // PRESSURE_LEVELS_MIN_PA → PRESSURE_LEVELS_MAX_PA at
+            // PRESSURE_STEP_PA cadence.
+            function buildPressureLevels() {
+                const out = [];
+                for (
+                    let p = PRESSURE_LEVELS_MIN_PA;
+                    p <= PRESSURE_LEVELS_MAX_PA + 1e-6;
+                    p += PRESSURE_STEP_PA
+                ) {
+                    out.push(p);
+                }
+                return out;
+            }
+
+            // ---- Palettes ------------------------------------------------------
+            const PALETTES = {
+                "viridis": ["#440154", "#3b528b", "#21918c", "#5ec962", "#fde725"],
+                "RdBu_r (diverging)": ["#2c7bb6", "#abd9e9", "#ffffbf", "#fdae61", "#d7191c"],
+                "magma": ["#000004", "#51127c", "#b73779", "#fc8d59", "#fcfdbf"],
+                "plasma": ["#0d0887", "#6a00a8", "#b12a90", "#e16462", "#fcce25"],
+                "turbo": ["#30123b", "#1ae4b6", "#a4fc3c", "#f9b800", "#b81d22"],
+                "Greys": ["#ffffff", "#cccccc", "#888888", "#444444", "#000000"],
+            };
+            const DEFAULT_PALETTE = "viridis";
+
+            // ---- Tile URL ------------------------------------------------------
+            // Multi-variable: send `variables` once per variable. The points
+            // renderer attaches every requested variable as a typed property
+            // on each Point feature (we then derive magnitude + rotation
+            // client-side via MapLibre expressions).
+            function buildTileUrl(maxFeaturesPerSide) {
+                const extra = [];
+                if (TIME) extra.push(`time=${encodeURIComponent(TIME)}`);
+                if (STEP) extra.push(`step=${encodeURIComponent(STEP)}`);
+                if (maxFeaturesPerSide)
+                    extra.push(`max_features_per_side=${maxFeaturesPerSide}`);
+                return (
+                    `${SERVER}/tiles/${TMS}/{z}/{y}/{x}` +
+                    `?variables=${U_VAR}&variables=${V_VAR}` +
+                    `&style=vector/points` +
+                    `&f=mvt` +
+                    (extra.length ? `&${extra.join("&")}` : "")
+                );
+            }
+
+            function buildPressureTileUrl() {
+                const levels = buildPressureLevels()
+                    .map((v) => v.toFixed(0))
+                    .join(",");
+                const extra = [
+                    `max_features_per_side=${PRESSURE_DETAIL}`,
+                    `levels=${encodeURIComponent(levels)}`,
+                    `smoothing=${PRESSURE_SMOOTHING}`,
+                ];
+                if (TIME) extra.push(`time=${encodeURIComponent(TIME)}`);
+                if (STEP) extra.push(`step=${encodeURIComponent(STEP)}`);
+                return (
+                    `${SERVER}/tiles/${TMS}/{z}/{y}/{x}` +
+                    `?variables=${PRESSURE_VAR}` +
+                    `&style=vector/contours` +
+                    `&f=mvt` +
+                    `&${extra.join("&")}`
+                );
+            }
+
+            // Pressure fill-color expression: interpolate the per-band mid
+            // value (Pa) emitted by vector/contours over the configured
+            // palette. Each contour-band polygon carries value_lo/value_hi/
+            // value_mid; we use value_mid so the fill steps cleanly band-
+            // by-band rather than smoothly across cells.
+            function buildPressureFillExpression() {
+                const stops = [];
+                PRESSURE_PALETTE.forEach((color, i) => {
+                    const t = i / (PRESSURE_PALETTE.length - 1);
+                    stops.push(
+                        PRESSURE_MIN_PA + (PRESSURE_MAX_PA - PRESSURE_MIN_PA) * t,
+                        color,
+                    );
+                });
+                return [
+                    "interpolate",
+                    ["linear"],
+                    ["to-number", ["get", "value_mid"]],
+                    ...stops,
+                ];
+            }
+
+            // ---- Expressions (magnitude + rotation) ----------------------------
+            // Magnitude: sqrt(u² + v²). Available in MapLibre expressions.
+            const MAGNITUDE = [
+                "sqrt",
+                ["+",
+                    ["^", ["to-number", ["get", U_VAR]], 2],
+                    ["^", ["to-number", ["get", V_VAR]], 2],
+                ],
+            ];
+
+            // MapLibre has `atan` but no `atan2`. We need atan2(u, v) — the
+            // bearing measured clockwise from north — to drive `icon-rotate`,
+            // which expects degrees clockwise from north.
+            //
+            // bearing_from_north_cw = atan2(u_east, v_north)
+            //
+            // Quadrant breakdown:
+            //   v >  0          : atan(u/v)
+            //   v <  0, u >= 0  : atan(u/v) + π
+            //   v <  0, u <  0  : atan(u/v) - π
+            //   v == 0, u >  0  :  π/2
+            //   v == 0, u <  0  : -π/2
+            //   v == 0, u == 0  : 0  (degenerate, arrow direction undefined)
+            const U = ["to-number", ["get", U_VAR]];
+            const V = ["to-number", ["get", V_VAR]];
+            const PI = Math.PI;
+            const ATAN_UV = ["atan", ["/", U, V]];
+            const ATAN2_RAD = [
+                "case",
+                [">", V, 0], ATAN_UV,
+                ["<", V, 0], [
+                    "case",
+                    [">=", U, 0], ["+", ATAN_UV, PI],
+                    ["-", ATAN_UV, PI],
+                ],
+                // v == 0
+                [">", U, 0], PI / 2,
+                ["<", U, 0], -PI / 2,
+                0,
+            ];
+            const ROTATION_DEG = ["*", ATAN2_RAD, 180 / Math.PI];
+
+            // ---- Arrow icon (canvas-generated, registered once) ----------------
+            // 32×32 PNG — a slim arrow pointing UP, drawn in white so we can
+            // tint via `icon-color`. Pivot is the center → icon-rotate spins
+            // around the head/tail midpoint, which reads as a wind vector.
+            function makeArrowIcon() {
+                const size = 32;
+                const c = document.createElement("canvas");
+                c.width = c.height = size;
+                const g = c.getContext("2d");
+                g.translate(size / 2, size / 2);
+                g.fillStyle = "#fff";
+                g.strokeStyle = "#fff";
+                g.lineWidth = 2;
+                g.lineCap = "round";
+                g.lineJoin = "round";
+                // Shaft (vertical, tail at +y, head at -y so arrow points up).
+                g.beginPath();
+                g.moveTo(0, size * 0.35);
+                g.lineTo(0, -size * 0.30);
+                g.stroke();
+                // Head (filled triangle).
+                g.beginPath();
+                g.moveTo(0, -size * 0.45);
+                g.lineTo(-size * 0.20, -size * 0.18);
+                g.lineTo(size * 0.20, -size * 0.18);
+                g.closePath();
+                g.fill();
+                return g.getImageData(0, 0, size, size);
+            }
+
+            // ---- Helpers -------------------------------------------------------
+            function buildIconColorExpression(paletteColors, max) {
+                const stops = [];
+                paletteColors.forEach((color, i) => {
+                    const t = i / (paletteColors.length - 1);
+                    stops.push(t * max, color);
+                });
+                return ["interpolate", ["linear"], MAGNITUDE, ...stops];
+            }
+
+            function paletteToCssGradient(paletteColors) {
+                return `linear-gradient(to right, ${paletteColors.join(", ")})`;
+            }
+
+            function updateLegend(paletteColors, max) {
+                document.getElementById("legend-gradient").style.background =
+                    paletteToCssGradient(paletteColors);
+                document.getElementById("legend-mid").textContent = (max / 2).toFixed(1);
+                document.getElementById("legend-max").textContent = max.toFixed(0);
+            }
+
+            // ---- Map setup -----------------------------------------------------
+            const map = new maplibregl.Map({
+                container: "map",
+                style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+                zoom: 1,
+                center: [0, 20],
+            });
+
+            let globeEnabled = true;
+            map.on("style.load", () => {
+                map.setProjection({ type: globeEnabled ? "globe" : "mercator" });
+            });
+
+            // ---- Controls (built before map.on('load') so they exist immediately)
+            const paletteSelect = document.getElementById("palette-select");
+            Object.keys(PALETTES).forEach((name) => {
+                const opt = document.createElement("option");
+                opt.value = name;
+                opt.textContent = name;
+                paletteSelect.appendChild(opt);
+            });
+            paletteSelect.value = DEFAULT_PALETTE;
+
+            const maxSlider = document.getElementById("max-slider");
+            const sizeSlider = document.getElementById("size-slider");
+            const featuresSlider = document.getElementById("features-slider");
+            document.getElementById("max-value").textContent = maxSlider.value;
+            document.getElementById("size-value").textContent = sizeSlider.value;
+            document.getElementById("features-value").textContent = featuresSlider.value;
+            updateLegend(PALETTES[DEFAULT_PALETTE], parseFloat(maxSlider.value));
+
+            map.on("load", () => {
+                map.addImage("wind-arrow", makeArrowIcon(), { pixelRatio: 2 });
+
+                // Pressure backdrop (vector/contours) — added first so its
+                // fill + isolines render below the wind-arrow symbol layer.
+                // The fill and line layers share one MVT source: drawing the
+                // contour polygons' outlines as a `type: line` layer is the
+                // isolines essentially for free (the server does not emit a
+                // separate line geometry).
+                map.addSource("xpublish-pressure", {
+                    type: "vector",
+                    tiles: [buildPressureTileUrl()],
+                    minzoom: 0,
+                    maxzoom: 12,
+                    scheme: "xyz",
+                });
+                map.addLayer({
+                    id: "pressure-fill",
+                    type: "fill",
+                    source: "xpublish-pressure",
+                    "source-layer": PRESSURE_LAYER,
+                    paint: {
+                        "fill-color": buildPressureFillExpression(),
+                        "fill-opacity": 0.55,
+                        "fill-antialias": false,
+                    },
+                });
+                map.addLayer({
+                    id: "pressure-isolines",
+                    type: "line",
+                    source: "xpublish-pressure",
+                    "source-layer": PRESSURE_LINES_LAYER,
+                    paint: {
+                        "line-color": "#333",
+                        "line-width": 0.6,
+                        "line-opacity": 0.8,
+                    },
+                });
+                // Isoline labels: show pressure in hPa along each contour
+                // line, anchored to a labelled point on the line itself.
+                // `symbol-placement: line` walks the linestring; the white
+                // halo keeps text legible on top of variable fills.
+                map.addLayer({
+                    id: "pressure-labels",
+                    type: "symbol",
+                    source: "xpublish-pressure",
+                    "source-layer": PRESSURE_LINES_LAYER,
+                    layout: {
+                        "symbol-placement": "line",
+                        "symbol-spacing": 350,
+                        "text-field": [
+                            "concat",
+                            [
+                                "to-string",
+                                ["round", ["/", ["to-number", ["get", "value"]], 100]],
+                            ],
+                            " hPa",
+                        ],
+                        "text-size": 11,
+                        "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+                        "text-rotation-alignment": "map",
+                        "text-pitch-alignment": "viewport",
+                        "text-keep-upright": true,
+                        "text-allow-overlap": false,
+                        "text-ignore-placement": false,
+                    },
+                    paint: {
+                        "text-color": "#222",
+                        "text-halo-color": "rgba(255,255,255,0.85)",
+                        "text-halo-width": 1.5,
+                        "text-halo-blur": 0.3,
+                    },
+                });
+
+                map.addSource("xpublish-points", {
+                    type: "vector",
+                    tiles: [buildTileUrl(parseInt(featuresSlider.value, 10))],
+                    minzoom: 0,
+                    maxzoom: 12,
+                    scheme: "xyz",
+                });
+
+                map.addLayer({
+                    id: "wind-arrows",
+                    type: "symbol",
+                    source: "xpublish-points",
+                    "source-layer": POINTS_LAYER,
+                    layout: {
+                        "icon-image": "wind-arrow",
+                        "icon-rotate": ROTATION_DEG,
+                        "icon-rotation-alignment": "map",
+                        "icon-size": parseFloat(sizeSlider.value),
+                        "icon-allow-overlap": true,
+                        "icon-ignore-placement": true,
+                    },
+                    paint: {
+                        "icon-color": buildIconColorExpression(
+                            PALETTES[DEFAULT_PALETTE],
+                            parseFloat(maxSlider.value),
+                        ),
+                        "icon-opacity": 0.95,
+                    },
+                });
+
+                // ---- Hover popup -----------------------------------------------
+                const popup = new maplibregl.Popup({
+                    closeButton: false,
+                    closeOnClick: false,
+                });
+                map.on("mousemove", "wind-arrows", (e) => {
+                    if (!e.features.length) return;
+                    const f = e.features[0];
+                    const u = parseFloat(f.properties[U_VAR]);
+                    const v = parseFloat(f.properties[V_VAR]);
+                    const speed = Math.sqrt(u * u + v * v);
+                    // Bearing (deg from N, clockwise) = atan2(u, v).
+                    let bearing = Math.atan2(u, v) * 180 / Math.PI;
+                    if (bearing < 0) bearing += 360;
+                    // Look up the contour band under the cursor; report it
+                    // as a [lo, hi] hPa range since contour fills are bands,
+                    // not point samples.
+                    let pressureLine = "";
+                    const phits = map.queryRenderedFeatures(e.point, {
+                        layers: ["pressure-fill"],
+                    });
+                    if (phits.length) {
+                        const lo = parseFloat(phits[0].properties.value_lo);
+                        const hi = parseFloat(phits[0].properties.value_hi);
+                        if (Number.isFinite(lo) && Number.isFinite(hi)) {
+                            pressureLine =
+                                `pressure: ${(lo / 100).toFixed(0)}–` +
+                                `${(hi / 100).toFixed(0)} hPa<br/>`;
+                        }
+                    }
+                    map.getCanvas().style.cursor = "pointer";
+                    popup
+                        .setLngLat(e.lngLat)
+                        .setHTML(
+                            `<strong>10 m wind</strong><br/>` +
+                            `speed: ${speed.toFixed(2)} m/s<br/>` +
+                            `bearing: ${bearing.toFixed(0)}°<br/>` +
+                            pressureLine +
+                            `<small>u=${u.toFixed(2)}, v=${v.toFixed(2)}</small><br/>` +
+                            `<small>${e.lngLat.lng.toFixed(2)}, ${e.lngLat.lat.toFixed(2)}</small>`,
+                        )
+                        .addTo(map);
+                });
+                map.on("mouseleave", "wind-arrows", () => {
+                    map.getCanvas().style.cursor = "";
+                    popup.remove();
+                });
+
+                // ---- Restyling --------------------------------------------------
+                function applyStyle() {
+                    const palette = PALETTES[paletteSelect.value];
+                    const speedMax = parseFloat(maxSlider.value);
+                    document.getElementById("max-value").textContent = speedMax.toFixed(0);
+                    updateLegend(palette, speedMax);
+                    map.setPaintProperty(
+                        "wind-arrows",
+                        "icon-color",
+                        buildIconColorExpression(palette, speedMax),
+                    );
+                }
+
+                let rafPending = false;
+                function scheduleApply() {
+                    if (rafPending) return;
+                    rafPending = true;
+                    requestAnimationFrame(() => {
+                        rafPending = false;
+                        applyStyle();
+                    });
+                }
+
+                paletteSelect.addEventListener("change", applyStyle);
+                maxSlider.addEventListener("input", scheduleApply);
+
+                sizeSlider.addEventListener("input", () => {
+                    const v = parseFloat(sizeSlider.value);
+                    document.getElementById("size-value").textContent = v.toFixed(1);
+                    map.setLayoutProperty("wind-arrows", "icon-size", v);
+                });
+
+                // ---- Detail (max_features_per_side) slider ---------------------
+                let featuresDebounce;
+                function refetchAtDetail(v) {
+                    const newUrl = buildTileUrl(v);
+                    if (!map.getLayer("wind-arrows")) return;
+                    const layout = {
+                        "icon-image": "wind-arrow",
+                        "icon-rotate": ROTATION_DEG,
+                        "icon-rotation-alignment": "map",
+                        "icon-size": parseFloat(sizeSlider.value),
+                        "icon-allow-overlap": true,
+                        "icon-ignore-placement": true,
+                    };
+                    const iconColor = map.getPaintProperty("wind-arrows", "icon-color");
+                    map.removeLayer("wind-arrows");
+                    map.removeSource("xpublish-points");
+                    map.addSource("xpublish-points", {
+                        type: "vector",
+                        tiles: [newUrl],
+                        minzoom: 0,
+                        maxzoom: 12,
+                        scheme: "xyz",
+                    });
+                    map.addLayer({
+                        id: "wind-arrows",
+                        type: "symbol",
+                        source: "xpublish-points",
+                        "source-layer": POINTS_LAYER,
+                        layout: layout,
+                        paint: { "icon-color": iconColor, "icon-opacity": 0.95 },
+                    });
+                }
+                featuresSlider.addEventListener("input", () => {
+                    const v = parseInt(featuresSlider.value, 10);
+                    document.getElementById("features-value").textContent = v;
+                    clearTimeout(featuresDebounce);
+                    featuresDebounce = setTimeout(() => refetchAtDetail(v), 250);
+                });
+
+                // ---- UI controls -----------------------------------------------
+                document.getElementById("fly-to-center").addEventListener("click", () => {
+                    map.flyTo({ center: [0, 20], zoom: 1 });
+                });
+                const globeToggle = document.getElementById("globe-toggle");
+                globeToggle.addEventListener("click", () => {
+                    globeEnabled = !globeEnabled;
+                    map.setProjection({ type: globeEnabled ? "globe" : "mercator" });
+                    globeToggle.textContent = globeEnabled
+                        ? "Disable Globe"
+                        : "Enable Globe";
+                });
+            });
+        </script>
+    </body>
+</html>

@@ -1032,7 +1032,11 @@ def check_data_is_renderable_size(
 
 
 def max_render_shape(
-    *, style: str, width: int = 256, height: int = 256
+    *,
+    style: str,
+    width: int = 256,
+    height: int = 256,
+    max_features_per_side: int | None = None,
 ) -> tuple[int, int]:
     """Compute the per-axis max data shape for coarsening, given the render style.
 
@@ -1046,6 +1050,26 @@ def max_render_shape(
         max_h = int(math.sqrt(max_num / aspect))
         max_w = int(max_h * aspect)
         return (max_w, max_h)
+    if style == "vector":
+        # Vector tiles: width/height are not meaningful. The MVT integer extent
+        # (quantization grid) is unrelated to feature count — we coarsen to a
+        # much smaller per-side budget so each polygon is at least a few display
+        # pixels and the protobuf stays small.
+        #
+        # The server config ``vector_max_features_per_side`` is the absolute
+        # hard cap; clients can request any value via the ``max_features_per_side``
+        # query param and we clamp it into ``[1, cap]``. ``None`` means "give
+        # me the cap" (most detail the server allows). Also clamp by the global
+        # geometry budget so a tile can't blow up no matter how dense the
+        # source grid.
+        cap = config.get("vector_max_features_per_side")
+        max_num = config.get("max_num_geometries")
+        if max_features_per_side is None:
+            requested = cap
+        else:
+            requested = max(1, min(max_features_per_side, cap))
+        side = min(requested, int(math.sqrt(max_num)))
+        return (side, side)
     pixel_factor = config.get("max_pixel_factor")
     return (pixel_factor * width, pixel_factor * height)
 

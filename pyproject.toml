@@ -34,6 +34,7 @@ dependencies = [
     "aiohttp>=3.12.15",
     "pillow>=11.3.0",
     "matplotlib>=3.10.5",
+    "contourpy>=1.3.0",
     "requests>=2.32.5",
     "numba-celltree>=0.4.1",
     "triangle>=20250106",
@@ -111,6 +112,7 @@ wms = "xpublish_tiles.xpublish.wms:WMSPlugin"
 [project.entry-points."xpublish_tiles.renderers"]
 raster = "xpublish_tiles.render.raster:DatashaderRasterRenderer"
 polygons = "xpublish_tiles.render.polygons:PolygonsRenderer"
+vector = "xpublish_tiles.render.vector:VectorTileRenderer"
 
 [project.scripts]
 xpublish-tiles = "xpublish_tiles.cli.main:main"

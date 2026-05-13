@@ -31,6 +31,27 @@ OutputBBox = NewType("OutputBBox", pyproj.aoi.BBox)
 class ImageFormat(enum.StrEnum):
     PNG = enum.auto()
     JPEG = enum.auto()
+    MVT = enum.auto()
+    GEOJSON = enum.auto()
+
+    @classmethod
+    def _missing_(cls, value: object) -> "ImageFormat | None":
+        if not isinstance(value, str):
+            return None
+        v = value.lower().strip()
+        aliases = {
+            "image/png": cls.PNG,
+            "image/jpeg": cls.JPEG,
+            "image/jpg": cls.JPEG,
+            "jpg": cls.JPEG,
+            "application/vnd.mapbox-vector-tile": cls.MVT,
+            "application/x-protobuf": cls.MVT,
+            "pbf": cls.MVT,
+            "application/geo+json": cls.GEOJSON,
+            "application/json": cls.GEOJSON,
+            "json": cls.GEOJSON,
+        }
+        return aliases.get(v)
 
 
 class LegendFormat(enum.StrEnum):
@@ -124,6 +145,19 @@ class QueryParams:
     colormap: dict[str, str] | None = None
     abovemaxcolor: str | None = None
     belowmincolor: str | None = None
+    # Vector-style only: per-axis polygon-feature budget the client wants for
+    # this tile. The server's ``vector_max_features_per_side`` config is the
+    # absolute hard cap; this value is clamped into ``[1, cap]``. ``None``
+    # means "use the cap" (max detail the server allows).
+    max_features_per_side: int | None = None
+    # vector/contours only: monotonic value boundaries for filled contour
+    # bands. N levels produce N-1 polygon bands, each carrying value_lo /
+    # value_hi / value_mid as properties.
+    levels: tuple[float, ...] | None = None
+    # vector/contours only: pre-blur sigma in grid cells applied to the
+    # scalar field before marching-squares. Smooths jagged isolines that
+    # come from coarse input grids; 0 / None disables.
+    smoothing: float | None = None
 
     def get_renderer(self):
         from xpublish_tiles.render import RenderRegistry
@@ -187,6 +221,8 @@ class PopulatedRenderContext(RenderContext):
     # Set by transform_for_render for the renderer:
     da: xr.DataArray | None = None
     cell_rings: np.ndarray | None = None
+    # Output CRS that ``bbox`` and ``cell_rings`` are expressed in.
+    crs: OutputCRS | None = None
 
     @property
     def ugrid_indexer(self) -> UgridIndexer | None:

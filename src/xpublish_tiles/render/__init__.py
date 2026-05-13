@@ -110,6 +110,8 @@ class Renderer(ABC):
         colormap: dict[str, str] | None = None,
         abovemaxcolor: str | None = None,
         belowmincolor: str | None = None,
+        levels: tuple[float, ...] | None = None,
+        smoothing: float | None = None,
     ):
         pass
 
@@ -184,6 +186,40 @@ class Renderer(ABC):
     def default_variant() -> str:
         """Return the default variant name."""
         raise NotImplementedError
+
+    @staticmethod
+    def geometry_kind(variant: str) -> str:
+        """Geometry pipeline kind: 'raster' or 'polygons'.
+
+        Drives branching in ``transform_for_render`` / ``subset_to_bbox``.
+        Takes the resolved variant (never ``"default"``) so a renderer can
+        route different variants through different pipelines — e.g. the
+        vector renderer's ``cells`` and (planned) ``points`` variants share
+        the polygon pipeline (cell-ring centroids = point locations), while
+        a future ``contours`` variant needs ``raster`` to feed marching-
+        squares contour tracing on a regular scalar field.
+        """
+        return "raster"
+
+    @staticmethod
+    def supported_formats() -> set[ImageFormat]:
+        """Output formats this renderer can encode."""
+        return {ImageFormat.PNG, ImageFormat.JPEG}
+
+    @classmethod
+    def media_type(cls, format: ImageFormat) -> str:
+        """HTTP Content-Type for the given output format."""
+        return {
+            ImageFormat.PNG: "image/png",
+            ImageFormat.JPEG: "image/jpeg",
+            ImageFormat.MVT: "application/vnd.mapbox-vector-tile",
+            ImageFormat.GEOJSON: "application/geo+json",
+        }[format]
+
+    @classmethod
+    def response_headers(cls, format: ImageFormat) -> dict[str, str]:
+        """Extra HTTP headers for the response (e.g. Content-Encoding)."""
+        return {}
 
     @classmethod
     def describe_style(cls, variant: str) -> dict[str, str]:

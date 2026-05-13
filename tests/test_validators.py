@@ -100,13 +100,15 @@ class TestValidateImageFormat:
 
     def test_invalid_format(self):
         with pytest.raises(
-            ValueError, match=r"image format gif is not valid. Options are: PNG, JPEG"
+            ValueError,
+            match=r"format 'gif' is not valid\. Options are: .*PNG.*JPEG",
         ):
             validate_image_format("gif")
 
     def test_invalid_format_with_mime_type(self):
         with pytest.raises(
-            ValueError, match=r"image format gif is not valid. Options are: PNG, JPEG"
+            ValueError,
+            match=r"format 'image/gif' is not valid\. Options are: .*PNG.*JPEG",
         ):
             validate_image_format("image/gif")
 

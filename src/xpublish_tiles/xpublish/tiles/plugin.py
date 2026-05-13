@@ -391,6 +391,18 @@ class TilesPlugin(Plugin):
                     f"{url_template}&abovemaxcolor={quote(query.abovemaxcolor)}"
                 )
 
+            if query.max_features_per_side is not None:
+                url_template = (
+                    f"{url_template}&max_features_per_side={query.max_features_per_side}"
+                )
+
+            if query.levels is not None:
+                levels_str = ",".join(f"{v:g}" for v in query.levels)
+                url_template = f"{url_template}&levels={quote(levels_str)}"
+
+            if query.smoothing is not None:
+                url_template = f"{url_template}&smoothing={query.smoothing:g}"
+
             # Append selectors
             if selectors:
                 selector_qs = "&".join(f"{k}={v}" for k, v in selectors.items())
@@ -521,6 +533,9 @@ class TilesPlugin(Plugin):
                 colormap=query.colormap,
                 abovemaxcolor=query.abovemaxcolor,
                 belowmincolor=query.belowmincolor,
+                max_features_per_side=query.max_features_per_side,
+                levels=query.levels,
+                smoothing=query.smoothing,
             )
 
             try:
@@ -558,12 +573,12 @@ class TilesPlugin(Plugin):
                 bound_logger.error("Exception", exc_info=e)
                 detail = "Internal server error."
 
+            renderer = render_params.get_renderer()
             if status_code != 200:
                 if not query.render_errors:
                     raise HTTPException(status_code=status_code, detail=detail)
                 else:
                     # Use renderer's render_error method for all error types
-                    renderer = render_params.get_renderer()
                     buffer = io.BytesIO()
                     renderer.render_error(
                         buffer=buffer,
@@ -573,6 +588,10 @@ class TilesPlugin(Plugin):
                         format=query.f,
                     )
 
-            return Response(buffer.getbuffer(), media_type="image/png")
+            return Response(
+                buffer.getbuffer(),
+                media_type=renderer.media_type(query.f),
+                headers=renderer.response_headers(query.f),
+            )
 
         return router

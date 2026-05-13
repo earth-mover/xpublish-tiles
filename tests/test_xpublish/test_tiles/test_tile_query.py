@@ -21,6 +21,9 @@ class TestTileQueryColormap:
             render_errors=False,
             abovemaxcolor=None,
             belowmincolor=None,
+            max_features_per_side=None,
+            levels=None,
+            smoothing=None,
         )
         assert query.colormap == colormap
         assert query.style == ("raster", "custom")
@@ -38,6 +41,9 @@ class TestTileQueryColormap:
             render_errors=False,
             abovemaxcolor=None,
             belowmincolor=None,
+            max_features_per_side=None,
+            levels=None,
+            smoothing=None,
         )
         assert query.colormap is None
 
@@ -60,6 +66,9 @@ class TestTileQueryColormap:
             render_errors=False,
             abovemaxcolor=None,
             belowmincolor=None,
+            max_features_per_side=None,
+            levels=None,
+            smoothing=None,
         )
         assert query.colormap == colormap
         assert query.style == ("raster", "custom")
@@ -77,6 +86,9 @@ class TestTileQueryColormap:
                 render_errors=False,
                 abovemaxcolor=None,
                 belowmincolor=None,
+                max_features_per_side=None,
+                levels=None,
+                smoothing=None,
             )
 
         # Test that raster/viridis fails
@@ -92,4 +104,7 @@ class TestTileQueryColormap:
                 render_errors=False,
                 abovemaxcolor=None,
                 belowmincolor=None,
+                max_features_per_side=None,
+                levels=None,
+                smoothing=None,
             )

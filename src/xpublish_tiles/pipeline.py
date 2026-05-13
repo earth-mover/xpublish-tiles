@@ -776,8 +776,15 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = await async_run(
         partial(apply_query, ds, variables=query.variables, selectors=query.selectors)
     )
+    renderer = query.get_renderer()
+    variant = renderer.default_variant() if query.variant == "default" else query.variant
+    geometry_kind = renderer.geometry_kind(variant)
+
     max_shape = max_render_shape(
-        style=query.style, width=query.width, height=query.height
+        style=query.style,
+        width=query.width,
+        height=query.height,
+        max_features_per_side=query.max_features_per_side,
     )
 
     # Capture the context logger before entering thread pool
@@ -788,13 +795,12 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
         bbox=query.bbox,
         crs=query.crs,
         max_shape=max_shape,
-        style=query.style,
+        style=geometry_kind,
     )
 
     # Transform coordinates to output CRS
-    renderer = query.get_renderer()
     subsets = await transform_for_render(
-        subsets, bbox=query.bbox, crs=query.crs, style=renderer.style_id()
+        subsets, bbox=query.bbox, crs=query.crs, style=geometry_kind
     )
 
     tasks = [
@@ -825,6 +831,8 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
             colormap=query.colormap,
             abovemaxcolor=query.abovemaxcolor,
             belowmincolor=query.belowmincolor,
+            levels=query.levels,
+            smoothing=query.smoothing,
         ),
     )
     buffer.seek(0)
@@ -1141,6 +1149,7 @@ async def subset_to_bbox(
             datatype=datatype,
             bbox=bbox,
             patches=patches,
+            crs=crs,
         )
     return result
 
@@ -1532,6 +1541,7 @@ async def transform_for_render(
                 patches=context.patches,
                 da=da_out,
                 cell_rings=cell_rings,
+                crs=crs,
             )
             continue
 
@@ -1547,5 +1557,6 @@ async def transform_for_render(
             bbox=bbox,
             patches=context.patches,
             da=da,
+            crs=crs,
         )
     return result
