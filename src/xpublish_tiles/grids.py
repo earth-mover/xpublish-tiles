@@ -3051,6 +3051,23 @@ def _detect_grid_metadata(
     return GridMetadata(X=Xname, Y=Yname, crs=mapping.crs, grid_cls=grid_cls)
 
 
+def guess_grid_metadata(ds: xr.Dataset) -> GridMetadata | None:
+    """Return ``GridMetadata`` for ``ds``'s primary grid mapping, or ``None``
+    if no CRS can be detected from attributes alone.
+
+    Inspects grid_mapping variables, CF coordinate attributes, and coordinate
+    shapes only. Use this when you need the grid class or primary X/Y coordinate names
+    without paying to construct the full grid system.
+    """
+    all_mappings = _guess_grid_mappings_and_crs(ds)
+    if not all_mappings or all_mappings[0].crs is None:
+        return None
+    skip_coordinates = set(
+        itertools.chain(*(mapping.coordinates or [] for mapping in all_mappings[1:]))
+    )
+    return _detect_grid_metadata(ds, all_mappings[0], skip_coordinates)
+
+
 @time_debug
 def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
     """
@@ -3058,17 +3075,7 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
 
     Raises RuntimeError to indicate that we might try again.
     """
-    all_mappings = _guess_grid_mappings_and_crs(ds)
-    if not all_mappings or all_mappings[0].crs is None:
-        raise RuntimeError("CRS/grid system not detected")
-
-    # Create primary grid system from first mapping
-    primary_mapping = all_mappings[0]
-    # make sure we don't detect coordinates referred to by OTHER grid_mapping variables
-    skip_coordinates = set(
-        itertools.chain(*(mapping.coordinates or [] for mapping in all_mappings[1:]))
-    )
-    primary_grid_metadata = _detect_grid_metadata(ds, primary_mapping, skip_coordinates)
+    primary_grid_metadata = guess_grid_metadata(ds)
     if primary_grid_metadata is None:
         raise RuntimeError("CRS/grid system not detected")
     primary_grid = primary_grid_metadata.grid_cls.from_dataset(
@@ -3076,6 +3083,7 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
     )
 
     # Create alternate grid systems from remaining mappings
+    all_mappings = _guess_grid_mappings_and_crs(ds)
     alternates = []
     for mapping in all_mappings[1:]:
         try:
@@ -3180,7 +3188,28 @@ def guess_grid_system(
             return grid
 
         try:
-            grid = _guess_grid_for_dataset(ds.cf[[name]])
+            cf_sub = ds.cf[[name]]
+        except KeyError:
+            raise VariableNotFoundError(
+                f"Variable {name!r} not found in dataset."
+            ) from None
+
+        # Preload the primary mapping's X/Y on the *outer* ds.
+        # This helps when we repeatedly hit the same lat/lon variables for different arrays
+        try:
+            meta = guess_grid_metadata(cf_sub)
+        except RuntimeError:
+            meta = None
+        if (
+            meta is not None
+            and meta.grid_cls is not RasterAffine
+            and meta.X in ds.variables
+            and meta.Y in ds.variables
+        ):
+            sync_load_async(ds[[meta.X, meta.Y]])
+
+        try:
+            grid = _guess_grid_for_dataset(cf_sub)
         except RuntimeError:
             # Check for polar radar grid (needs full ds for scalar lat/lon)
             az_coord, rng_coord = _find_polar_coords(ds)

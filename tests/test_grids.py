@@ -556,6 +556,34 @@ def test_unit_minmax_zoom_level(dataset: Dataset, minzoom, maxzoom):
     assert get_max_zoom(grid, tms) == maxzoom
 
 
+def test_guess_grid_system_curvilinear_loads_coords_in_place(tmp_path) -> None:
+    """guess_grid_system on a Curvilinear dataset must materialize lat/lon on
+    the caller's dataset.
+
+    The metadata path calls guess_grid_system once per variable. If the load
+    triggered by Curvilinear.from_dataset stays on the cf-subset Variable
+    instead of propagating back to the outer ds, every subsequent reader pays
+    the lazy-read cost again. Pin the contract: after guess_grid_system, the
+    caller's ds.lat / ds.lon are in memory.
+
+    Backed by zarr + chunks=None so the lat/lon arrive as xarray-lazy
+    (MemoryCachedArray) — the realistic production state. A cheap 20×20
+    subset of CURVILINEAR keeps the round-trip fast.
+    """
+    src = CURVILINEAR.create().isel(xi_rho=slice(0, 20), eta_rho=slice(0, 20))
+    path = tmp_path / "curvi.zarr"
+    src.to_zarr(path, zarr_format=3)
+    ds = xr.open_zarr(path, chunks=None)
+    # Drop _xpublish_id so the per-dataset grid cache doesn't short-circuit the
+    # preload on cache hits from prior tests using the same fixture.
+    ds.attrs.pop("_xpublish_id", None)
+    assert not ds.lat.variable._in_memory
+    assert not ds.lon.variable._in_memory
+    guess_grid_system(ds, "foo")
+    assert ds.lat.variable._in_memory
+    assert ds.lon.variable._in_memory
+
+
 def test_multiple_grid_mappings_detection() -> None:
     """Test detection of datasets with multiple grid mappings that create alternates."""
     ds = HRRR_MULTIPLE.create()
