@@ -3248,20 +3248,11 @@ def _guess_z_dimension(da: xr.DataArray) -> str | None:
     return None
 
 
-def _validate_grid_dims(grid: GridSystem, ds: xr.Dataset, name: Hashable) -> None:
-    # ``grid.dims`` may report coord names rather than dim names (e.g.
-    # ``Rectilinear`` sets ``Xdim = X`` in ``__post_init__``). Resolve each
-    # entry to the underlying dim(s) of the coord var if present.
-    required: set[str] = set()
-    for n in grid.dims:
-        if n in ds.variables:
-            required.update(map(str, ds[n].dims))
-        else:
-            required.add(str(n))
-    missing = required - set(map(str, ds[name].dims))
+def _validate_grid_dims(grid: GridSystem, var: xr.DataArray) -> None:
+    missing = grid.dims - set(map(str, var.dims))
     if missing:
         raise GridDetectionError(
-            f"Variable {name!r} is missing spatial dim(s) {sorted(missing)} "
+            f"Variable {var.name!r} is missing spatial dim(s) {sorted(missing)} "
             f"required by detected grid {type(grid).__name__}"
         )
 
@@ -3335,7 +3326,7 @@ def guess_grid_system(
                 ds, meta.crs, meta.X, meta.Y, face_dim=meta.face_dim
             )
             grid.Z = _guess_z_dimension(ds[name])
-            _validate_grid_dims(grid, ds, name)
+            _validate_grid_dims(grid, ds[name])
             if cache_key is not None:
                 _GRID_CACHE[cache_key] = grid
             return grid
@@ -3363,7 +3354,7 @@ def guess_grid_system(
         # on a cubed-sphere dataset shares the ``face_dim`` but lacks the
         # 2D lat/lon dims). Reject these so per-variable callers can skip them.
         grid.Z = _guess_z_dimension(ds.cf[name])
-        _validate_grid_dims(grid, ds, name)
+        _validate_grid_dims(grid, ds[name])
 
         if cache_key is not None:
             _GRID_CACHE[cache_key] = grid
