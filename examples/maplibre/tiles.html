@@ -53,7 +53,19 @@
             <button id="tile-boundaries-toggle" class="toggle-button">Show Tile Boundaries</button>
         </div>
         <script>
-            const TILEJSON_URL = "http://localhost:8080/tiles/WebMercatorQuad/tilejson.json?variables=foo&width=512&height=512&style=polygons/viridis";
+          const SERVER_URL = "http://localhost:8080";
+          const TILEJSON_URL = `${SERVER_URL}/tiles/WebMercatorQuad/tilejson.json?variables=RH&lev=45&colorscalerange=0%2C1&style=polygons%2Fdefault&width=512&height=512&f=png&render_errors=false`;
+
+          (async () => {
+            try {
+              const resp = await fetch(`${SERVER_URL}/tiles/`);
+              if (!resp.ok) {
+                throw new Error(`HTTP ${resp.status}`);
+              }
+            } catch (err) {
+              document.body.innerHTML = `<pre style="padding:1em;color:#b00">Tile server not reachable at ${SERVER_URL}/tiles/ (${err.message})</pre>`;
+              return;
+            }
 
             const map = new maplibregl.Map({
                 container: "map",
@@ -132,6 +144,7 @@
                         .addTo(map);
                 });
             });
+          })();
         </script>
     </body>
 </html>

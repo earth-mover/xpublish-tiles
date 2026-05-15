@@ -146,7 +146,7 @@ class TilesPlugin(Plugin):
             logger.info("loading extents for dataset vars")
 
             layer_extents: dict[str, dict[str, Any]] = {}
-            for var_name_ in dataset.data_vars.keys():
+            for var_name_ in sorted(dataset.data_vars.keys()):
                 # Skip scalar variables
                 if dataset[var_name_].ndim == 0:
                     continue

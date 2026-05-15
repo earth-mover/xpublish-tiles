@@ -29,6 +29,7 @@ The goal of this project is to transform xarray datasets to raster, vector and o
 | Rectilinear  | `lat[lat], lon[lon]`               | Two 1D orthogonal coordinates.                                                                                        | All              |
 | Curvilinear  | `lat[nlat, nlon], lon[nlat, nlon]` | Two 2D coordinates.                                                                                                   | All              |
 | Unstructured | `lat[point], lon[point]`           | Two 1D coordinates interpreted as vertices, triangulated using `scipy.spatial.Delaunay`.                              | All              |
+| Cubed sphere | `lat[face, y, x], lon[face, y, x]` | Faceted curvilinear grid, GMAO/MAPL `corner_lons`/`corner_lats` convention.                                           | All              |
 | HEALPix      | cell-index coordinate              | Nested indexing scheme, following [CF Conventions PR #605](https://github.com/cf-convention/cf-conventions/pull/605). | `polygons` only  |
 
 Here `lat[lat]` means a coordinate variable named `lat` with one dimension named `lat`.
