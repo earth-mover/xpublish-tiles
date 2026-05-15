@@ -422,10 +422,6 @@ def _corner_mesh(ds: xr.Dataset, name: str) -> np.ndarray | None:
     """Return a ``(ny+1, nx+1)`` vertex-mesh corner array for ``ds[name]``
     if the dataset provides one via either SGRID ``node_coordinates`` or the
     GMAO ``corner_*`` naming convention. Returns ``None`` otherwise.
-
-    This is distinct from CF ``bounds``, which uses a ``(n, 2)`` (1D) or
-    ``(ny, nx, 4)`` (2D) cell-bounds layout — a different convention we
-    don't consume here.
     """
     corner_name = _resolve_corner_name(ds, name)
     if corner_name is None:
