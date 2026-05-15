@@ -13,7 +13,7 @@ from xpublish_tiles.grids import (
     guess_grid_metadata,
     guess_grid_system,
 )
-from xpublish_tiles.lib import async_run
+from xpublish_tiles.lib import GridDetectionError, async_run
 from xpublish_tiles.logger import logger
 from xpublish_tiles.render import RenderRegistry
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
@@ -58,7 +58,7 @@ def allowed_styles(dataset: Dataset | None = None) -> list[str]:
             continue
         try:
             meta = guess_grid_metadata(dataset.cf[[str(var_name)]])
-        except (KeyError, RuntimeError):
+        except (KeyError, GridDetectionError):
             continue
         if meta is not None and meta.grid_cls in (Healpix, CubedSphere):
             result = ["polygons"]

@@ -40,6 +40,7 @@ from xpublish_tiles.grids import (
     guess_grid_system,
 )
 from xpublish_tiles.lib import (
+    GridDetectionError,
     TileTooBigError,
     _iter_subset_shapes,
     _prevent_slice_overlap,
@@ -494,7 +495,7 @@ def test_polar_grid_from_dataset_missing_location():
             ),
         },
     )
-    with pytest.raises(RuntimeError, match="Center location not found"):
+    with pytest.raises(GridDetectionError, match="Center location not found"):
         Polar.from_dataset(ds, CRS.from_epsg(4326), "azimuth", "range")
 
 
@@ -518,7 +519,7 @@ def test_guess_coordinate_vars_filters_scalars():
 
 
 def test_detect_grid_metadata_unsupported_ndim():
-    """Coordinates with unsupported dimensionality should raise RuntimeError."""
+    """Coordinates with unsupported dimensionality should raise GridDetectionError."""
     ds = xr.Dataset(
         {"temp": (("a", "b", "c"), np.ones((2, 3, 4)))},
         coords={
@@ -526,7 +527,7 @@ def test_detect_grid_metadata_unsupported_ndim():
             "lon": (("a", "b", "c"), np.ones((2, 3, 4)), {"standard_name": "longitude"}),
         },
     )
-    with pytest.raises(RuntimeError, match="Unsupported coordinate dimensionality"):
+    with pytest.raises(GridDetectionError, match="Unsupported coordinate dimensionality"):
         guess_grid_system(ds, "temp")
 
 

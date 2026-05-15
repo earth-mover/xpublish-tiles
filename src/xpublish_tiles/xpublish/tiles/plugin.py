@@ -16,6 +16,7 @@ from xarray import Dataset
 from xpublish_tiles.grids import guess_grid_system
 from xpublish_tiles.lib import (
     AsyncLoadTimeoutError,
+    GridDetectionError,
     IndexingError,
     MissingParameterError,
     TileTooBigError,
@@ -351,6 +352,12 @@ class TilesPlugin(Plugin):
                 raise HTTPException(
                     status_code=422,
                     detail=f"Invalid variable name(s): {query.variables!r}.",
+                ) from None
+            except GridDetectionError as e:
+                logger.error("GridDetectionError", str(e))
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Variable {query.variables[0]!r} cannot be tiled: {e}",
                 ) from None
 
             logger.info(f"base_url: {request.base_url}")
