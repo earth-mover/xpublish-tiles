@@ -24,6 +24,7 @@ from xarray.core.indexing import IndexSelResult
 from xpublish_tiles.config import config
 from xpublish_tiles.lib import (
     Fill,
+    GridDetectionError,
     VariableNotFoundError,
     _coarsen_indices_impl,
     _prevent_slice_overlap,
@@ -1931,7 +1932,7 @@ class Curvilinear(GridSystem):
 
             # If we still can't identify, raise an error
             if not Xdim or not Ydim:
-                raise RuntimeError(
+                raise GridDetectionError(
                     f"Could not identify X and Y dimensions for curvilinear grid. "
                     f"Coordinate dimensions are {list(X.dims)}, but could not determine "
                     f"which corresponds to X and which to Y axes. "
@@ -2139,7 +2140,7 @@ class Polar(GridSystem):
         center_lat = _find_scalar_coord(ds, "latitude")
         center_lon = _find_scalar_coord(ds, "longitude")
         if center_lat is None or center_lon is None:
-            raise RuntimeError(
+            raise GridDetectionError(
                 "Center location not found. Expected scalar 'latitude'/'longitude' "
                 "coordinates (WMO FM-301) or dataset attributes."
             )
@@ -3020,7 +3021,7 @@ def _guess_coordinates_for_mapping(
         Yname = [y for y in Yname if y in first.attrs.get("coordinates", [])]
 
     if len(Xname) > 1 or len(Yname) > 1:
-        raise RuntimeError(
+        raise GridDetectionError(
             f"Multiple coordinate options found for grid mapping: {Xname=!r}, {Yname=!r}."
         )
 
@@ -3088,7 +3089,7 @@ def _detect_grid_metadata(
     if Xname is None or Yname is None:
         # Handle the fallback case where coordinates can't be determined normally
         if mapping.grid_mapping is None:
-            raise RuntimeError(
+            raise GridDetectionError(
                 "Creating raster affine grid system failed. "
                 "No explicit coordinate variables were detected and "
                 "no grid_mapping variable was detected."
@@ -3096,7 +3097,7 @@ def _detect_grid_metadata(
 
         if "GeoTransform" not in mapping.grid_mapping.attrs:
             # Return None to indicate no GeoTransform available
-            raise RuntimeError(
+            raise GridDetectionError(
                 "Creating raster affine grid system failed. "
                 "No explicit coordinate variables were detected and "
                 "no GeoTransform attribute is present on "
@@ -3112,7 +3113,7 @@ def _detect_grid_metadata(
             if y_dim is None and Y_COORD_PATTERN.match(dim):
                 y_dim = dim
         if not (x_dim and y_dim):
-            raise RuntimeError(
+            raise GridDetectionError(
                 "Creating raster affine grid system failed. "
                 "No explicit coordinate variables were detected and "
                 "no x or y dimensions could be inferred. "
@@ -3133,7 +3134,7 @@ def _detect_grid_metadata(
         elif X.ndim == 2 and Y.ndim == 2:
             grid_cls = Curvilinear
         else:
-            raise RuntimeError(
+            raise GridDetectionError(
                 f"Unsupported coordinate dimensionality: {Xname} has ndim={X.ndim}, "
                 f"{Yname} has ndim={Y.ndim}. Expected 1D or 2D coordinate arrays."
             )
@@ -3187,7 +3188,7 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
     """
     primary_grid_metadata = guess_grid_metadata(ds)
     if primary_grid_metadata is None:
-        raise RuntimeError("CRS/grid system not detected")
+        raise GridDetectionError("CRS/grid system not detected")
     extra: dict[str, Any] = (
         {"face_dim": primary_grid_metadata.face_dim}
         if primary_grid_metadata.face_dim is not None
@@ -3210,8 +3211,8 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
             if alternate_grid is not None:
                 alternates.append(alternate_grid)
             else:
-                raise RuntimeError("Could not detect grid metadata")
-        except RuntimeError as e:
+                raise GridDetectionError("Could not detect grid metadata")
+        except GridDetectionError as e:
             # Skip grid systems that can't be created but warn about it
             grid_mapping_name = (
                 mapping.grid_mapping.name
@@ -3247,11 +3248,11 @@ def _guess_z_dimension(da: xr.DataArray) -> str | None:
     return None
 
 
-def _validate_grid_dims(grid: GridSystem, var: xr.DataArray, name: Hashable) -> None:
+def _validate_grid_dims(grid: GridSystem, var: xr.DataArray) -> None:
     missing = grid.dims - set(map(str, var.dims))
     if missing:
-        raise RuntimeError(
-            f"Variable {name!r} is missing spatial dim(s) {sorted(missing)} "
+        raise GridDetectionError(
+            f"Variable {var.name!r} is missing spatial dim(s) {sorted(missing)} "
             f"required by detected grid {type(grid).__name__}"
         )
 
@@ -3299,7 +3300,7 @@ def guess_grid_system(
 
         try:
             meta = guess_grid_metadata(cf_sub)
-        except RuntimeError:
+        except GridDetectionError:
             meta = None
 
         # Preload the primary mapping's X/Y on the *outer* ds.
@@ -3325,14 +3326,14 @@ def guess_grid_system(
                 ds, meta.crs, meta.X, meta.Y, face_dim=meta.face_dim
             )
             grid.Z = _guess_z_dimension(ds[name])
-            _validate_grid_dims(grid, ds[name], name)
+            _validate_grid_dims(grid, ds[name])
             if cache_key is not None:
                 _GRID_CACHE[cache_key] = grid
             return grid
 
         try:
             grid = _guess_grid_for_dataset(cf_sub)
-        except RuntimeError:
+        except GridDetectionError:
             # Check for polar radar grid (needs full ds for scalar lat/lon)
             az_coord, rng_coord = _find_polar_coords(ds)
             if az_coord is not None and rng_coord is not None:
@@ -3340,7 +3341,7 @@ def guess_grid_system(
             else:
                 try:
                     grid = _guess_grid_for_dataset(ds)
-                except RuntimeError:
+                except GridDetectionError:
                     ds = ds.cf.guess_coord_axis()
                     grid = _guess_grid_for_dataset(ds)
         except KeyError:
@@ -3348,8 +3349,12 @@ def guess_grid_system(
                 f"Variable {name!r} not found in dataset."
             ) from None
 
+        # The full-dataset fallback above can return a grid that doesn't
+        # actually apply to ``name`` (e.g. an auxiliary var like ``contacts``
+        # on a cubed-sphere dataset shares the ``face_dim`` but lacks the
+        # 2D lat/lon dims). Reject these so per-variable callers can skip them.
         grid.Z = _guess_z_dimension(ds.cf[name])
-        _validate_grid_dims(grid, ds[name], name)
+        _validate_grid_dims(grid, ds[name])
 
         if cache_key is not None:
             _GRID_CACHE[cache_key] = grid

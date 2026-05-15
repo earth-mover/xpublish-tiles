@@ -177,6 +177,12 @@ class VariableNotFoundError(Exception):
     pass
 
 
+class GridDetectionError(Exception):
+    """Raised when no tileable grid system can be detected for a variable."""
+
+    pass
+
+
 class IndexingError(Exception):
     """Raised when an invalid coordinate is passed for selection."""
 

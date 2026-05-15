@@ -234,14 +234,18 @@ async def extract_dimension_extents(
     Uses cf_xarray to detect CF-compliant axes for robust dimension classification.
 
     Args:
-        data_array: xarray DataArray to extract dimensions from
-        name: Name of the data array
+        ds: xarray Dataset
+        name: Name of the data variable in ``ds``
         max_actual_values: Maximum number of actual values to extract,
             otherwise only extents and resolution will be extracted.
 
     Returns:
         List of DimensionExtent objects for non-spatial dimensions
     """
+    # Deferred import: metadata.py imports from this module, so the temporal
+    # resolution helper can only be imported lazily to avoid a cycle.
+    from xpublish_tiles.xpublish.tiles.metadata import _calculate_temporal_resolution
+
     dimensions = []
 
     grid = await async_run(guess_grid_system, ds, name, cf_coords=cf_coords)
@@ -279,6 +283,7 @@ async def extract_dimension_extents(
         # Handle different coordinate types
         extent: list[str | float | int] = []
         actual_values: list[str | float | int] | None = None
+        resolution: str | float | int | None = None
 
         if len(values) == 0:
             extent = []
@@ -287,6 +292,8 @@ async def extract_dimension_extents(
             extent = [str(values[0]), str(values[-1])]
             if len(values) <= max_actual_values:
                 actual_values = [str(value) for value in values]
+            if len(values) > 1:
+                resolution = _calculate_temporal_resolution(coord)
         elif np.issubdtype(values.dtype, np.datetime64):
             dim_type = DimensionType.TEMPORAL
             # Convert datetime to ISO strings - only get first and last values for extent
@@ -298,11 +305,18 @@ async def extract_dimension_extents(
                     value.isoformat()
                     for value in cast(list[pd.Timestamp], pd.to_datetime(values))
                 ]
+            if len(values) > 1:
+                resolution = _calculate_temporal_resolution(coord)
         elif np.issubdtype(values.dtype, np.number):
             # Numeric coordinates
             extent = [float(values.min()), float(values.max())]
             if len(values) <= max_actual_values:
                 actual_values = values
+            if len(values) > 1:
+                numeric = values
+                if np.issubdtype(values.dtype, np.unsignedinteger):
+                    numeric = values.astype(np.int64)
+                resolution = float(np.abs(np.diff(numeric)).min())
         else:
             extent = [str(values[0]), str(values[-1])]
             if len(values) <= max_actual_values:
@@ -328,6 +342,7 @@ async def extract_dimension_extents(
             description=description,
             default=default,
             values=actual_values,
+            resolution=resolution,
         )
         dimensions.append(dimension)
 

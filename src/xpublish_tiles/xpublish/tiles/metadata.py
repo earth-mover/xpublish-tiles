@@ -3,7 +3,7 @@ import re
 from typing import Any
 
 import morecantile.models
-import numpy as np
+import pyproj.exceptions
 
 import xarray as xr
 from xarray import Dataset
@@ -13,7 +13,7 @@ from xpublish_tiles.grids import (
     guess_grid_metadata,
     guess_grid_system,
 )
-from xpublish_tiles.lib import VariableNotFoundError, async_run
+from xpublish_tiles.lib import GridDetectionError, async_run
 from xpublish_tiles.logger import logger
 from xpublish_tiles.render import RenderRegistry
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
@@ -23,10 +23,8 @@ from xpublish_tiles.xpublish.tiles.tile_matrix import (
     get_tile_matrix_limits,
 )
 from xpublish_tiles.xpublish.tiles.types import (
-    AttributesMetadata,
     BoundingBox,
     DataType,
-    DimensionType,
     Layer,
     Link,
     Style,
@@ -41,11 +39,7 @@ from xpublish_tiles.xpublish.tiles.types import (
 _ALLOWED_STYLES_CACHE: dict[str, list[str]] = {}
 
 
-def allowed_styles(
-    dataset: Dataset | None = None,
-    *,
-    cf_coords: dict | None = None,
-) -> list[str]:
+def allowed_styles(dataset: Dataset | None = None) -> list[str]:
     """Return the style IDs supported by ``dataset``'s grid.
 
     Healpix and Faceted grids (e.g. cubed sphere) only support ``polygons``;
@@ -64,7 +58,7 @@ def allowed_styles(
             continue
         try:
             meta = guess_grid_metadata(dataset.cf[[str(var_name)]])
-        except (KeyError, RuntimeError):
+        except (KeyError, GridDetectionError):
             continue
         if meta is not None and meta.grid_cls in (Healpix, CubedSphere):
             result = ["polygons"]
@@ -75,13 +69,9 @@ def allowed_styles(
     return result
 
 
-def get_styles(
-    dataset: Dataset | None = None,
-    *,
-    cf_coords: dict | None = None,
-) -> list[Style]:
+def get_styles(dataset: Dataset | None = None) -> list[Style]:
     """Return supported styles for ``dataset``'s grid."""
-    allowed = set(allowed_styles(dataset, cf_coords=cf_coords))
+    allowed = set(allowed_styles(dataset))
     styles: list[Style] = []
     for style_id in RenderRegistry.all():
         if style_id not in allowed:
@@ -118,32 +108,6 @@ def _styles_for_renderer(style_id: str) -> tuple[Style, ...]:
             )
         )
     return tuple(styles)
-
-
-def extract_attributes_metadata(
-    dataset: Dataset, variable_name: str | None = None
-) -> AttributesMetadata:
-    """Extract and filter attributes from dataset and variables
-
-    Args:
-        dataset: xarray Dataset
-        variable_name: Optional variable name to extract attributes for specific variable only
-
-    Returns:
-        AttributesMetadata object with filtered dataset and variable attributes
-    """
-    # Extract variable attributes
-    variable_attrs = {}
-    if variable_name:
-        # Extract attributes for specific variable only
-        if variable_name in dataset.data_vars:
-            variable_attrs[variable_name] = dataset[variable_name].attrs
-    else:
-        # Extract attributes for all data variables
-        for var_name, var_data in dataset.data_vars.items():
-            variable_attrs[var_name] = var_data.attrs
-
-    return AttributesMetadata(dataset_attrs=dataset.attrs, variable_attrs=variable_attrs)
 
 
 def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSetMetadata:
@@ -185,65 +149,27 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
 
 async def extract_dataset_extents(
     dataset: Dataset,
-    variable_name: str | None,
+    variable_name: str,
     *,
     cf_coords: dict | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Extract dimension extents from dataset and convert to OGC format"""
-    extents = {}
+    """Format ``variable_name``'s non-spatial dimension extents as OGC extents."""
+    dimensions = await extract_dimension_extents(
+        dataset, variable_name, cf_coords=cf_coords
+    )
 
-    # Collect all dimensions from all data variables
-    all_dimensions = {}
-
-    variables = [variable_name] if variable_name else sorted(dataset.data_vars.keys())
-
-    for var in variables:
-        if dataset[var].ndim == 0:
-            continue
-        dimensions = await extract_dimension_extents(dataset, var, cf_coords=cf_coords)
-        for dim in dimensions:
-            # Use the first occurrence of each dimension name
-            if dim.name not in all_dimensions:
-                all_dimensions[dim.name] = dim
-
-    # Convert DimensionExtent objects to OGC extents format
-    for dim_name, dim_extent in all_dimensions.items():
-        extent_dict = {"interval": dim_extent.extent}
-        values = dataset[dim_name]
-
-        # Calculate resolution if possible
-        if len(values) > 1:
-            if dim_extent.type == DimensionType.TEMPORAL:
-                # For temporal dimensions, try to calculate time resolution
-                temporal_resolution = _calculate_temporal_resolution(values)
-                if temporal_resolution is not None:
-                    extent_dict["resolution"] = temporal_resolution
-            elif np.issubdtype(values.data.dtype, np.integer) or np.issubdtype(
-                values.data.dtype, np.floating
-            ):
-                # If the type is an unsigned integer, we need to cast to an int to avoid overflow
-                if np.issubdtype(values.data.dtype, np.unsignedinteger):
-                    values = values.astype(np.int64)
-
-                # For numeric dimensions, calculate step size
-                data = values.data
-                diffs = [abs(data[i + 1] - data[i]).item() for i in range(len(data) - 1)]
-                if diffs:
-                    extent_dict["resolution"] = min(diffs)
-
-        # Add units if available
-        if dim_extent.units:
-            extent_dict["units"] = dim_extent.units
-
-        # Add description if available
-        if dim_extent.description:
-            extent_dict["description"] = dim_extent.description
-
-        # Add default value if available
-        if dim_extent.default is not None:
-            extent_dict["default"] = dim_extent.default
-
-        extents[dim_name] = extent_dict
+    extents: dict[str, dict[str, Any]] = {}
+    for dim in dimensions:
+        extent_dict: dict[str, Any] = {"interval": dim.extent}
+        if dim.resolution is not None:
+            extent_dict["resolution"] = dim.resolution
+        if dim.units:
+            extent_dict["units"] = dim.units
+        if dim.description:
+            extent_dict["description"] = dim.description
+        if dim.default is not None:
+            extent_dict["default"] = dim.default
+        extents[dim.name] = extent_dict
 
     return extents
 
@@ -336,33 +262,26 @@ async def extract_variable_bounding_box(
     Returns:
         BoundingBox object if bounds can be extracted, None otherwise
     """
+    # ``morecantile.CRS.srs`` returns the cached pyproj ``_srs`` string;
+    # ``to_epsg`` round-trips through the EPSG database and is unexpectedly
+    # expensive when called per variable.
+    if isinstance(target_crs, morecantile.models.CRS):
+        target_crs_str = target_crs.srs
+    else:
+        target_crs_str = target_crs
+
+    grid = await async_run(guess_grid_system, dataset, variable_name, cf_coords=cf_coords)
     try:
-        # Get the grid system for this variable (run in thread to avoid blocking)
-        grid = await async_run(
-            guess_grid_system, dataset, variable_name, cf_coords=cf_coords
-        )
-
-        # ``morecantile.CRS.srs`` returns the cached pyproj ``_srs`` string;
-        # ``to_epsg`` round-trips through the EPSG database and is unexpectedly
-        # expensive when called per variable.
-        if isinstance(target_crs, morecantile.models.CRS):
-            target_crs_str = target_crs.srs
-        else:
-            target_crs_str = target_crs
-
         transformed_bounds = grid.transform_bbox(target_crs_str)
-
-        return BoundingBox(
-            lowerLeft=[transformed_bounds[0], transformed_bounds[1]],
-            upperRight=[transformed_bounds[2], transformed_bounds[3]],
-            crs=target_crs,
-        )
-    except VariableNotFoundError:
-        raise
-
-    except Exception as e:
-        logger.error(f"Failed to transform bounds: {e}")
+    except pyproj.exceptions.ProjError as e:
+        logger.error("Failed to transform bounds", exc_info=e)
         return None
+
+    return BoundingBox(
+        lowerLeft=[transformed_bounds[0], transformed_bounds[1]],
+        upperRight=[transformed_bounds[2], transformed_bounds[3]],
+        crs=target_crs,
+    )
 
 
 async def create_tileset_for_tms(
