@@ -3348,6 +3348,23 @@ def guess_grid_system(
                 f"Variable {name!r} not found in dataset."
             ) from None
 
+        # The full-dataset fallback above can return a grid that doesn't
+        # actually apply to ``name`` (e.g. an auxiliary var like ``contacts``
+        # on a cubed-sphere dataset shares the ``face_dim`` but lacks the
+        # 2D lat/lon dims). Reject these so per-variable callers can skip them.
+        # ``grid.dims`` uses coord names for some grid types (Rectilinear with
+        # non-dim coords), so look up the X/Y coord vars' actual dims instead.
+        var_dims = set(ds[name].dims)
+        spatial_dims: set[Hashable] = set()
+        for coord_name in (grid.X, grid.Y):
+            if coord_name in ds.variables:
+                spatial_dims.update(ds[coord_name].dims)
+        if spatial_dims and not spatial_dims.issubset(var_dims):
+            raise RuntimeError(
+                f"Variable {name!r} does not have grid spatial dims "
+                f"{spatial_dims - var_dims!r}; cannot tile."
+            )
+
         grid.Z = _guess_z_dimension(ds.cf[name])
         _validate_grid_dims(grid, ds[name], name)
 
