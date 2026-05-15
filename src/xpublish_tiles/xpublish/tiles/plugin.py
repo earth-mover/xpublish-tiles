@@ -141,7 +141,7 @@ class TilesPlugin(Plugin):
             # Get available styles from registered renderers
             logger.info(f"Getting available styles for dataset '{title}'")
 
-            styles = await async_run(get_styles, dataset, cf_coords=cf_coords)
+            styles = await async_run(get_styles, dataset)
 
             logger.info("loading extents for dataset vars")
 

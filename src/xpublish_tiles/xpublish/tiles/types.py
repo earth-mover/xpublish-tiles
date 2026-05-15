@@ -338,29 +338,6 @@ class DataType(str, Enum):
     COVERAGE = "coverage"
 
 
-class AttributesMetadata(BaseModel):
-    """Metadata extracted from xarray attributes"""
-
-    dataset_attrs: Annotated[
-        dict[str, Any],
-        Field(
-            default_factory=dict,
-            json_schema_extra={
-                "description": "Dataset-level attributes from xarray.Dataset.attrs"
-            },
-        ),
-    ]
-    variable_attrs: Annotated[
-        dict[str, dict[str, Any]],
-        Field(
-            default_factory=dict,
-            json_schema_extra={
-                "description": "Variable-level attributes from xarray.DataArray.attrs, keyed by variable name"
-            },
-        ),
-    ]
-
-
 class TileSetMetadata(BaseModel):
     """Metadata for a tileset applied to a specific dataset"""
 
@@ -717,6 +694,14 @@ class DimensionExtent(BaseModel):
         Field(
             json_schema_extra={
                 "description": "Default value for this dimension",
+            }
+        ),
+    ] = None
+    resolution: Annotated[
+        Union[str, float, int] | None,
+        Field(
+            json_schema_extra={
+                "description": "Step size between consecutive values (ISO 8601 duration for temporal dims, numeric for others)",
             }
         ),
     ] = None
