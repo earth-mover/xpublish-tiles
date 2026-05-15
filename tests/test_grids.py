@@ -435,7 +435,7 @@ def test_z_coord_with_mismatched_dim_name():
     ds = xr.Dataset(
         {
             "foo": (
-                ("time", "k", "y", "x"),
+                ("time", "k", "lat", "lon"),
                 np.zeros((2, nz, ny, nx)),
                 {"coordinates": "deptht lon lat"},
             )
@@ -447,12 +447,12 @@ def test_z_coord_with_mismatched_dim_name():
                 {"standard_name": "depth", "axis": "Z", "positive": "down"},
             ),
             "lon": (
-                ("x",),
+                ("lon",),
                 np.linspace(-10, 10, nx),
                 {"standard_name": "longitude", "units": "degrees_east"},
             ),
             "lat": (
-                ("y",),
+                ("lat",),
                 np.linspace(-5, 5, ny),
                 {"standard_name": "latitude", "units": "degrees_north"},
             ),

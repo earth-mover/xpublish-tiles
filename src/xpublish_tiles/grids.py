@@ -3247,6 +3247,15 @@ def _guess_z_dimension(da: xr.DataArray) -> str | None:
     return None
 
 
+def _validate_grid_dims(grid: GridSystem, var: xr.DataArray, name: Hashable) -> None:
+    missing = grid.dims - set(map(str, var.dims))
+    if missing:
+        raise RuntimeError(
+            f"Variable {name!r} is missing spatial dim(s) {sorted(missing)} "
+            f"required by detected grid {type(grid).__name__}"
+        )
+
+
 def guess_grid_system(
     ds: xr.Dataset,
     name: Hashable,
@@ -3316,6 +3325,7 @@ def guess_grid_system(
                 ds, meta.crs, meta.X, meta.Y, face_dim=meta.face_dim
             )
             grid.Z = _guess_z_dimension(ds[name])
+            _validate_grid_dims(grid, ds[name], name)
             if cache_key is not None:
                 _GRID_CACHE[cache_key] = grid
             return grid
@@ -3339,6 +3349,7 @@ def guess_grid_system(
             ) from None
 
         grid.Z = _guess_z_dimension(ds.cf[name])
+        _validate_grid_dims(grid, ds[name], name)
 
         if cache_key is not None:
             _GRID_CACHE[cache_key] = grid
