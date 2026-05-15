@@ -1377,3 +1377,35 @@ def test_cubed_sphere_grid(use_sgrid):
     indexer = slicers[grid.face_dim][0]
     assert isinstance(indexer, FacetedIndexer)
     assert len(indexer.selections) == 6
+
+
+def test_detect_orca_tripole_fold_row() -> None:
+    """A minimal 10x10 ORCA-style bipolar halo (last row collapses to two
+    antipodal pole longitudes) must produce an index with
+    ``tripolar_fold_row`` set.
+    """
+    ny, nx = 10, 10
+    half = nx // 2
+    cell_lon = ((73.0 + np.arange(nx) * (360.0 / nx) + 180.0) % 360.0) - 180.0
+    lons2d = np.broadcast_to(cell_lon[None, :], (ny, nx)).astype(np.float32).copy()
+    # ORCA bipolar halo: top row collapses to {73°, -107°} — antipodal pole lons.
+    lons2d[-1, :half] = 73.0
+    lons2d[-1, half:] = -107.0
+
+    base_lat = np.append(
+        np.linspace(-85.0, 80.0, ny - 1, dtype=np.float32), np.float32(89.98)
+    )
+    lats2d = np.broadcast_to(base_lat[:, None], (ny, nx)).astype(np.float32).copy()
+
+    ds = xr.Dataset(
+        {"foo": (("j", "i"), np.zeros((ny, nx), dtype=np.float32))},
+        coords={
+            "lon": (("j", "i"), lons2d, {"standard_name": "longitude"}),
+            "lat": (("j", "i"), lats2d, {"standard_name": "latitude"}),
+        },
+    )
+
+    grid = Curvilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
+    (index,) = grid.indexes
+    assert isinstance(index, CurvilinearCellIndex)
+    assert index.tripolar_fold_row == ny - 1
