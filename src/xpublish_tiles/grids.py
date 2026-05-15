@@ -758,35 +758,38 @@ class PolarIndex(xr.Index):
 
 
 def _detect_tripolar_fold_row(X: np.ndarray, *, yaxis: int) -> int | None:
-    """Detect tripolar grid fold row by checking if the last row is a flipped version of the second-to-last.
+    """Detect tripolar grid fold row.
 
-    In a tripolar grid, the northernmost row of data is a flipped version of the row below it.
-    This creates a "seam" at the North Pole where the grid folds back on itself.
+    Two patterns are handled, both signatures of the topmost row being a
+    pole-collapsed seam:
 
-    Parameters
-    ----------
-    X : np.ndarray
-        2D longitude coordinate array
-    yaxis : int
-        Axis index for Y dimension
+    1. NEMO ORCA-style (e.g. ORCA12, eORCA12): the last row collapses to
+       exactly two unique lon values 180° apart — the two bipolar poles
+       (ORCA12: 73°E and -107°W). Antipodality is the definitional
+       signature, so the check is unconditional.
+    2. HYCOM-style: the last row is a flipped copy of the second-to-last
+       — the fold seam itself.
 
-    Returns
-    -------
-    int | None
-        Index of the fold row (the row that is flipped), or None if not a tripolar grid
+    Must be called BEFORE ``unwrap`` is run on ``X``: the ORCA branch
+    relies on the row having only its two raw pole lons (after
+    ``unwrap_phase`` they fan into 2–3 continuous values), and the HYCOM
+    flip-equality only holds pre-unwrap.
     """
     n_rows = X.shape[yaxis]
     if n_rows < 2:
         return None
 
     last_row = np.take(X, -1, axis=yaxis)
-    second_last_row = np.take(X, -2, axis=yaxis)
-    second_last_flipped = np.flip(second_last_row)
+    finite = last_row[~np.isnan(last_row)] if last_row.dtype.kind == "f" else last_row
+    # ORCA bipolar halo: 2 unique pole lons, antipodal (180° apart mod 360°).
+    # Round to absorb float32 jitter (real eORCA12 has -107.000015 etc.).
+    uniq = np.unique(np.round(finite, 1))
+    if uniq.size == 2 and abs(((uniq[1] - uniq[0]) % 360.0) - 180.0) < 1.0:
+        return n_rows - 1
 
-    # Check if last row matches flipped second-to-last row.
-    # Use a tolerance that accounts for floating-point precision in grid coordinates.
-    # For float32 coordinates (common in HYCOM), precision errors can reach ~0.0001,
-    # so use a slightly larger tolerance of 0.001 (~1 km at equator).
+    # HYCOM-style seam: last row equals flipped second-to-last.
+    # 0.001 tolerance ≈ 1 km at the equator, comfortably above float32 noise.
+    second_last_flipped = np.flip(np.take(X, -2, axis=yaxis))
     if np.allclose(last_row, second_last_flipped, atol=0.001, rtol=0):
         return n_rows - 1
 
@@ -870,6 +873,9 @@ class CurvilinearCellIndex(xr.Index):
         # Use first/last columns along x-axis for the breaks.
         first_col = np.take(self.corner_x, 0, axis=xaxis)
         last_col = np.take(self.corner_x, -1, axis=xaxis)
+        # fixing discontuities when the tripolar fold row is included is extremely hard.
+        # So we just skip it instead; these rows are either redundant or north of the 85°N cutoff for WebMercator
+        # TODO: see how well this works for Polar Stereographic projections.
         if tripolar_fold_row is not None:
             first_col = first_col[:tripolar_fold_row]
             last_col = last_col[:tripolar_fold_row]
@@ -961,7 +967,6 @@ class CurvilinearCellIndex(xr.Index):
             lon_slices = _convert_longitude_slice(
                 query, left_break=self.left_break, right_break=self.right_break
             )
-
         y_starts, y_stops, x_indexers = _bounds_from_combined(
             lat_mask=lat_mask,
             x_min=x_min,
