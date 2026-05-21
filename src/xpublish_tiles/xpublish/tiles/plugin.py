@@ -12,8 +12,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from xpublish import Dependencies, Plugin, hookimpl
 
-from xarray import Dataset
+import xarray as xr
+from xarray import DataTree
 from xpublish_tiles.grids import guess_grid_system
+from xpublish_tiles.multiscale import get_dataset
 from xpublish_tiles.lib import (
     AsyncLoadTimeoutError,
     GridDetectionError,
@@ -114,15 +116,16 @@ class TilesPlugin(Plugin):
 
         @router.get("/", response_model=TilesetsList, response_model_exclude_none=True)
         @with_accumulated_logs(
-            log_message_fn=lambda dataset: f"tiles_list {getattr(dataset, '_xpublish_id', 'unknown')}",
-            context_fn=lambda dataset: {
+            log_message_fn=lambda datatree: f"tiles_list {getattr(datatree, '_xpublish_id', 'unknown')}",
+            context_fn=lambda datatree: {
                 "endpoint": "tiles_list",
-                "dataset_id": getattr(dataset, "_xpublish_id", "unknown"),
+                "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
             },
         )
         async def get_dataset_tiles_list(
-            dataset: Dataset = Depends(deps.dataset),
+            datatree: DataTree = Depends(deps.datatree),
         ):
+            dataset = get_dataset(datatree)
             """List of available tilesets for this dataset"""
             # Get dataset metadata
             dataset_attrs = dataset.attrs
@@ -194,17 +197,18 @@ class TilesPlugin(Plugin):
         @router.get("/legend")
         @with_accumulated_logs(
             log_message_fn=lambda query,
-            dataset: f"legend {query.variables} {query.style} {getattr(dataset, '_xpublish_id', 'unknown')}",
-            context_fn=lambda query, dataset: {
+            datatree: f"legend {query.variables} {query.style} {getattr(datatree, '_xpublish_id', 'unknown')}",
+            context_fn=lambda query, datatree: {
                 "endpoint": "legend",
                 "variables": query.variables,
-                "dataset_id": getattr(dataset, "_xpublish_id", "unknown"),
+                "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
             },
         )
         async def get_dataset_legend(
             query: Annotated[LegendQuery, Query()],
-            dataset: Dataset = Depends(deps.dataset),
+            datatree: DataTree = Depends(deps.datatree),
         ):
+            dataset = get_dataset(datatree)
             """Render a legend image for a styled variable."""
             var_name = query.variables[0]
             if var_name not in dataset.data_vars:
@@ -288,16 +292,17 @@ class TilesPlugin(Plugin):
         )
         @with_accumulated_logs(
             log_message_fn=lambda tileMatrixSetId,
-            dataset: f"tileset_metadata {tileMatrixSetId} {getattr(dataset, '_xpublish_id', 'unknown')}",
-            context_fn=lambda tileMatrixSetId, dataset: {
+            datatree: f"tileset_metadata {tileMatrixSetId} {getattr(datatree, '_xpublish_id', 'unknown')}",
+            context_fn=lambda tileMatrixSetId, datatree: {
                 "tileMatrixSetId": tileMatrixSetId,
-                "dataset_id": getattr(dataset, "_xpublish_id", "unknown"),
+                "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
             },
         )
         async def get_dataset_tileset_metadata(
             tileMatrixSetId: str,
-            dataset: Dataset = Depends(deps.dataset),
+            datatree: DataTree = Depends(deps.datatree),
         ):
+            dataset = get_dataset(datatree)
             """Get tileset metadata for this dataset"""
             try:
                 return await async_run(create_tileset_metadata, dataset, tileMatrixSetId)
@@ -313,19 +318,20 @@ class TilesPlugin(Plugin):
             log_message_fn=lambda request,
             tileMatrixSetId,
             query,
-            dataset: f"tilejson {tileMatrixSetId} {query.variables} {getattr(dataset, '_xpublish_id', 'unknown')}",
-            context_fn=lambda request, tileMatrixSetId, query, dataset: {
+            datatree: f"tilejson {tileMatrixSetId} {query.variables} {getattr(datatree, '_xpublish_id', 'unknown')}",
+            context_fn=lambda request, tileMatrixSetId, query, datatree: {
                 "tileMatrixSetId": tileMatrixSetId,
                 "variables": query.variables,
-                "dataset_id": getattr(dataset, "_xpublish_id", "unknown"),
+                "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
             },
         )
         async def get_dataset_tilejson(
             request: Request,
             tileMatrixSetId: str,
             query: Annotated[TileQuery, Query()],
-            dataset: Dataset = Depends(deps.dataset),
+            datatree: DataTree = Depends(deps.datatree),
         ):
+            dataset = get_dataset(datatree)
             """Get TileJSON specification for this dataset and tile matrix set"""
             # Validate that the tile matrix set exists
             if tileMatrixSetId not in TILE_MATRIX_SET_SUMMARIES:
@@ -472,17 +478,17 @@ class TilesPlugin(Plugin):
             tileRow,
             tileCol,
             query,
-            dataset: f"{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} {query.variables} {getattr(dataset, '_xpublish_id', 'unknown')}",
+            datatree: f"{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} {query.variables} {getattr(datatree, '_xpublish_id', 'unknown')}",
             context_fn=lambda request,
             tileMatrixSetId,
             tileMatrix,
             tileRow,
             tileCol,
             query,
-            dataset: {
+            datatree: {
                 "tile": f"{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}",
                 "variables": query.variables,
-                "dataset_id": getattr(dataset, "_xpublish_id", "unknown"),
+                "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
             },
         )
         async def get_dataset_tile(
@@ -492,7 +498,7 @@ class TilesPlugin(Plugin):
             tileRow: int,
             tileCol: int,
             query: Annotated[TileQuery, Query()],
-            dataset: Dataset = Depends(deps.dataset),
+            datatree: DataTree = Depends(deps.datatree),
         ):
             """Get individual tile from this dataset"""
             try:
@@ -501,6 +507,11 @@ class TilesPlugin(Plugin):
                 )
             except ValueError as e:
                 raise HTTPException(status_code=404, detail=str(e)) from e
+
+            # Get the TMS for level selection
+            tms = morecantile.tms.get(tileMatrixSetId)
+            # Extract dataset at appropriate resolution level for this zoom
+            dataset = get_dataset(datatree, zoom=tileMatrix, tms=tms)
 
             # Extract dimension selectors from query parameters
             selectors = {}
