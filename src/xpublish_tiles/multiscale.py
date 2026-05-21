@@ -10,6 +10,7 @@ DataTrees, including:
 from __future__ import annotations
 
 import morecantile
+
 import xarray as xr
 from xarray import DataTree
 
@@ -199,5 +200,3 @@ def get_dataset(
         "Cannot extract dataset."
     )
     raise ValueError(msg)
-
-

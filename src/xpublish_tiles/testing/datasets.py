@@ -14,7 +14,6 @@ from pyproj.aoi import BBox
 import dask.array
 import xarray as xr
 from xarray import DataTree
-
 from xpublish_tiles.lib import transformer_from_crs
 from xpublish_tiles.testing.tiles import (
     ETRS89_TILES,
@@ -1810,7 +1809,7 @@ def geozarr_multiscale_grid(
             "description": "Spatial coordinate information",
         },
     ]
-    
+
     root_attrs = {
         "zarr_conventions": zarr_conventions,
         "proj:code": "EPSG:4326",

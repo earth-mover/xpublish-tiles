@@ -12,10 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from xpublish import Dependencies, Plugin, hookimpl
 
-import xarray as xr
 from xarray import DataTree
 from xpublish_tiles.grids import guess_grid_system
-from xpublish_tiles.multiscale import get_dataset
 from xpublish_tiles.lib import (
     AsyncLoadTimeoutError,
     GridDetectionError,
@@ -31,6 +29,7 @@ from xpublish_tiles.logger import (
     set_context_logger,
     with_accumulated_logs,
 )
+from xpublish_tiles.multiscale import get_dataset
 from xpublish_tiles.pipeline import _infer_datatype, pipeline
 from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import ImageFormat, LegendFormat, QueryParams
