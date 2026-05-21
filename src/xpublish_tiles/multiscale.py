@@ -1,90 +1,111 @@
+from dataclasses import dataclass
+
 import morecantile
 
 import xarray as xr
 from xarray import DataTree
 
 
-def is_multiscale(tree: DataTree) -> bool:
-    """Check if DataTree is a multiscale pyramid.
+@dataclass
+class ResolutionLevel:
+    """A dataset at a specific resolution level."""
 
-    A DataTree is considered a [GeoZarr] multiscale if:
-    - Root has a `multiscales` attribute with a `layout` list
-    - Layout entries have `asset` keys pointing to existing children
-    - Each layout entry has `spatial:transform` (resolution info)
-    """
-    multiscales = tree.attrs.get("multiscales")
-    if not multiscales:
-        return False
-
-    layout = multiscales.get("layout")
-    if not isinstance(layout, list) or len(layout) == 0:
-        return False
-
-    # Verify at least one asset exists as a child and has spatial:transform attr
-    for entry in layout:
-        asset = entry.get("asset")
-        if asset is not None and asset in tree.children:
-            if "spatial:transform" in entry:
-                return True
-
-    return False
+    path: str | None  # None for root, child name for children
+    pixel_size: float
+    dataset: xr.Dataset
 
 
-def get_layout_levels(tree: DataTree) -> list[dict]:
-    """Get the layout levels from a multiscale DataTree, sorted by resolution.
+def get_spatial_transform(ds: xr.Dataset) -> list[float] | None:
+    """Extract spatial:transform from dataset attributes."""
+    return ds.attrs.get("spatial:transform")
 
-    Levels are sorted from finest (highest resolution, smallest pixel size)
-    to coarsest (lowest resolution, largest pixel size) per Zarr multiscale spec.
-    """
-    if not is_multiscale(tree):
-        raise ValueError("DataTree is not a valid GeoZarr multiscale pyramid")
 
-    layout = tree.attrs["multiscales"]["layout"]
-
-    # Filter to only valid entries with spatial:transform
-    valid_entries = [
-        entry
-        for entry in layout
-        if entry.get("asset") in tree.children and "spatial:transform" in entry
-    ]
-
-    # Sort by resolution - smallest pixel size (finest) first
-    def get_pixel_size(entry: dict) -> float:
-        transform = entry["spatial:transform"]
+def get_pixel_size(ds: xr.Dataset) -> float | None:
+    """Get pixel size from dataset's spatial:transform attribute."""
+    transform = get_spatial_transform(ds)
+    if transform and len(transform) >= 1:
         return abs(transform[0])  # X resolution
+    return None
 
-    return sorted(valid_entries, key=get_pixel_size)
+
+def scan_resolution_levels(tree: DataTree) -> list[ResolutionLevel]:
+    """Scan all datasets in tree and return sorted resolution levels.
+
+    Iterates over all nodes in the tree (root and all descendants at any depth)
+    and collects those with data variables and spatial:transform attributes.
+
+    Returns levels sorted from finest (smallest pixel size) to coarsest.
+    """
+    levels: list[ResolutionLevel] = []
+
+    for path, node in tree.subtree_with_keys:
+        ds = node.to_dataset()
+        if not ds.data_vars:
+            continue
+
+        pixel_size = get_pixel_size(ds)
+        if pixel_size is None:
+            continue
+
+        # path is "." for root, otherwise the relative path
+        level_path = None if path == "." else path
+        levels.append(ResolutionLevel(path=level_path, pixel_size=pixel_size, dataset=ds))
+
+    # Sort by pixel size (finest/smallest first)
+    levels.sort(key=lambda x: x.pixel_size)
+
+    return levels
+
+
+def is_multiscale(tree: DataTree) -> bool:
+    """Check if DataTree has multiple resolution levels.
+
+    Returns True if there are 2+ datasets with spatial:transform attributes.
+    This handles both:
+    - GeoZarr convention (all levels in children)
+    - Native-at-root (root has data, children have overviews)
+    """
+    levels = scan_resolution_levels(tree)
+    return len(levels) >= 2
+
+
+def _pixel_size_in_meters(pixel_size_degrees: float) -> float:
+    """Convert pixel size from degrees to approximate meters at equator."""
+    return pixel_size_degrees * 111_000
 
 
 def select_level_for_zoom(
     tree: DataTree,
     tms: morecantile.TileMatrixSet,
     zoom: int,
-) -> str:
+) -> ResolutionLevel:
     """Select the best resolution level for a given tile zoom.
 
-    Choose the finest level whose resolution is >= the tile pixel size.
-    Avoids upscaling data while minimizing oversampling.
-    """
-    levels = get_layout_levels(tree)
-    if not levels:
-        raise ValueError("No valid resolution levels found in multiscale pyramid")
+    Strategy: Choose the coarsest level whose pixel size is still finer than
+    or equal to the tile pixel size.
 
-    # Get tile pixel size at this zoom level
+    Falls back to finest level if all levels are coarser than tile pixels.
+    """
+    levels = scan_resolution_levels(tree)
+    if not levels:
+        msg = "No valid resolution levels found in tree"
+        raise ValueError(msg)
+
     tile_matrix = tms.matrix(zoom)
     tile_pixel_size = tile_matrix.cellSize
 
-    # Find the finest level whose pixel size is >= tile pixel size
     # Levels are sorted finest (smallest pixel) to coarsest (largest pixel)
-    selected = levels[0]  # Default to finest level
+    # Default to finest level (for when all are coarser than tile - need upscaling)
+    selected = levels[0]
 
-    for entry in levels:
-        level_pixel_size = abs(entry["spatial:transform"][0])
-        if level_pixel_size <= tile_pixel_size:
-            selected = entry
+    # Iterate from coarsest to finest, find coarsest level still finer than tile
+    for level in reversed(levels):
+        level_meters = _pixel_size_in_meters(level.pixel_size)
+        if level_meters <= tile_pixel_size:
+            selected = level
             break
 
-    return selected["asset"]
+    return selected
 
 
 def get_dataset(
@@ -95,29 +116,26 @@ def get_dataset(
 ) -> xr.Dataset:
     """Extract the appropriate Dataset from a DataTree.
 
-    Behavior depends on the tree structure and parameters:
-    - Multiscale + zoom + tms: Select level based on zoom, return that dataset
-    - Multiscale + no zoom: Return the finest (highest resolution) level
-    - Not multiscale: Return root dataset if present
-    - No root dataset and not multiscale: Raise ValueError
+    Behavior:
+    - If zoom + tms provided: Select best resolution level for that zoom
+    - If no zoom: Return finest (highest resolution) level available
+    - If no valid levels found: Try root dataset, else raise ValueError
     """
-    if is_multiscale(tree):
+    levels = scan_resolution_levels(tree)
+
+    if levels:
         if zoom is not None and tms is not None:
-            level_name = select_level_for_zoom(tree, tms, zoom)
+            selected = select_level_for_zoom(tree, tms, zoom)
         else:
             # Return finest level (first in sorted list)
-            levels = get_layout_levels(tree)
-            level_name = levels[0]["asset"]
+            selected = levels[0]
+        return selected.dataset
 
-        return tree[level_name].to_dataset()
-
-    # Not multiscale - try to return root dataset
+    # No levels with spatial:transform - fall back to root dataset
     root_ds = tree.to_dataset()
     if root_ds.data_vars:
         return root_ds
 
-    # Empty root and not multiscale
-    raise ValueError(
-        "DataTree has no data at root and is not a valid GeoZarr multiscale pyramid. "
-        "Cannot extract dataset."
-    )
+    # Empty root and no valid levels
+    msg = "DataTree has no extractable dataset (no data at root or children with spatial:transform)"
+    raise ValueError(msg)

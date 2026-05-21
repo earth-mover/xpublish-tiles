@@ -1882,6 +1882,148 @@ GEOZARR_MULTISCALE = Dataset(
 )
 
 
+def native_at_root_multiscale_grid(
+    *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
+) -> DataTree:
+    """Create a multiscale dataset with native data at root and overviews in children.
+
+    This follows the pattern where:
+    - Root group: native (highest resolution) data + multiscales metadata
+    - Child groups 0/, 1/: 2x and 4x downsampled overviews
+
+    The multiscales.layout only references the overview children, not the root.
+    """
+    crs = pyproj.CRS.from_epsg(4326)
+    crs_wkt = crs.to_wkt()
+
+    native_size = dims[0].size
+    origin_x = attrs.get("origin_x", -10.0)
+    origin_y = attrs.get("origin_y", 50.0)
+    native_res = attrs.get("native_res", 0.01)
+
+    xmax = origin_x + native_size * native_res
+    ymin = origin_y - native_size * native_res
+
+    # Overview levels only (native is at root)
+    overview_levels = [
+        (2, native_size // 2, native_res * 2),  # Overview 0: 2x downsampled
+        (4, native_size // 4, native_res * 4),  # Overview 1: 4x downsampled
+    ]
+
+    # Layout only references overviews, not root
+    multiscales_layout = []
+    for i, (_, size, res) in enumerate(overview_levels):
+        spatial_transform = [res, 0.0, origin_x, 0.0, -res, origin_y]
+        entry = {
+            "asset": str(i),
+            "spatial:shape": [size, size],
+            "spatial:transform": spatial_transform,
+            "derived_from": "root" if i == 0 else str(i - 1),
+            "transform": {"scale": [2.0, 2.0], "translation": [0.0, 0.0]},
+            "resampling_method": "average",
+        }
+        multiscales_layout.append(entry)
+
+    native_x_coords = origin_x + (np.arange(native_size) + 0.5) * native_res
+    native_y_coords = origin_y - (np.arange(native_size) + 0.5) * native_res
+
+    native_data = generate_tanh_wave_data(
+        coords=(native_y_coords, native_x_coords),
+        sizes=(native_size, native_size),
+        chunks=(native_size, native_size),
+        dtype=dtype,
+    )
+
+    root_ds = xr.Dataset(
+        {
+            "data": (
+                ("Y", "X"),
+                native_data,
+                {"valid_min": -1, "valid_max": 1, "spatial:dimensions": ["Y", "X"]},
+            ),
+        },
+        coords={
+            "Y": ("Y", native_y_coords, {"standard_name": "latitude"}),
+            "X": ("X", native_x_coords, {"standard_name": "longitude"}),
+        },
+        attrs={
+            "spatial:dimensions": ["Y", "X"],
+            "spatial:transform": [native_res, 0.0, origin_x, 0.0, -native_res, origin_y],
+            "spatial:shape": [native_size, native_size],
+            "proj:code": "EPSG:4326",
+            "proj:wkt2": crs_wkt,
+            "spatial:bbox": [origin_x, ymin, xmax, origin_y],
+            "multiscales": {
+                "layout": multiscales_layout,
+                "resampling_method": "average",
+            },
+        },
+    )
+    root_ds["data"].encoding["chunks"] = (native_size, native_size)
+
+    # Create overview datasets for children - use different dimension names
+    # to avoid coordinate alignment issues with the root
+    children = {}
+    for i, (_, size, res) in enumerate(overview_levels):
+        x_coords = origin_x + (np.arange(size) + 0.5) * res
+        y_coords = origin_y - (np.arange(size) + 0.5) * res
+
+        data_array = generate_tanh_wave_data(
+            coords=(y_coords, x_coords),
+            sizes=(size, size),
+            chunks=(size, size),
+            dtype=dtype,
+        )
+
+        # Use unique dimension names for each level to avoid alignment issues
+        y_dim = f"Y_{i}"
+        x_dim = f"X_{i}"
+
+        ds = xr.Dataset(
+            {
+                "data": (
+                    (y_dim, x_dim),
+                    data_array,
+                    {
+                        "valid_min": -1,
+                        "valid_max": 1,
+                        "spatial:dimensions": [y_dim, x_dim],
+                    },
+                ),
+            },
+            coords={
+                y_dim: (y_dim, y_coords, {"standard_name": "latitude"}),
+                x_dim: (x_dim, x_coords, {"standard_name": "longitude"}),
+            },
+            attrs={
+                "spatial:dimensions": [y_dim, x_dim],
+                "spatial:transform": [res, 0.0, origin_x, 0.0, -res, origin_y],
+                "spatial:shape": [size, size],
+            },
+        )
+        ds["data"].encoding["chunks"] = (size, size)
+        children[str(i)] = ds
+
+    # Build tree: use from_dict with "/" key for root data
+    tree_dict = {"/": root_ds}
+    tree_dict.update(children)
+
+    tree = DataTree.from_dict(tree_dict)
+
+    return tree
+
+
+NATIVE_AT_ROOT_MULTISCALE = Dataset(
+    name="native_at_root_multiscale",
+    dims=(
+        Dim(name="Y", size=64, chunk_size=64, data=None),
+        Dim(name="X", size=64, chunk_size=64, data=None),
+    ),
+    dtype=np.float32,
+    setup=native_at_root_multiscale_grid,
+)
+
+
 # Lookup dictionary for all available datasets
 DATASET_LOOKUP = {
     "hrrr": HRRR,
@@ -1906,4 +2048,5 @@ DATASET_LOOKUP = {
     "global_healpix_l5": GLOBAL_HEALPIX_L5,
     "regional_healpix_na": REGIONAL_HEALPIX_NA,
     "geozarr_multiscale": GEOZARR_MULTISCALE,
+    "native_at_root_multiscale": NATIVE_AT_ROOT_MULTISCALE,
 }
