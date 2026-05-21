@@ -5068,8 +5068,8 @@ wheels = [
 
 [[package]]
 name = "xpublish"
-version = "0.4.2"
-source = { registry = "https://pypi.org/simple" }
+version = "0.4.2.post11"
+source = { git = "https://github.com/xpublish-community/xpublish.git?branch=datatree-api#240a68ce031b5b2573aa31bb4d7bdb981efd46a5" }
 dependencies = [
     { name = "cachey" },
     { name = "dask" },
@@ -5082,10 +5082,6 @@ dependencies = [
     { name = "uvicorn" },
     { name = "xarray" },
     { name = "zarr" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/55/f2/a5bd36cc0e39dccdfe9df85a71f9a4f43de105131a3ae47f81d986b728a9/xpublish-0.4.2.tar.gz", hash = "sha256:3d091edf9b86cf2f5e0090701ea58d2aebe056e7772d78cca107d91a5627da77", size = 25280, upload-time = "2026-01-12T02:43:26.227Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8a/2a/db61f609c850b519b263de9a543802c547d56dc81044c040ea1abd598bad/xpublish-0.4.2-py3-none-any.whl", hash = "sha256:66ebd3f5068e746db04b07c606f3146e2b51b8a8f936ddf3f5bd877511086ade", size = 31792, upload-time = "2026-01-12T02:43:24.749Z" },
 ]
 
 [[package]]
@@ -5204,7 +5200,7 @@ requires-dist = [
     { name = "xarray", specifier = ">=2025.12.0" },
     { name = "xdggs", marker = "extra == 'complete'", specifier = ">=0.5.0" },
     { name = "xdggs", marker = "extra == 'healpix'", specifier = ">=0.5.0" },
-    { name = "xpublish", specifier = ">=0.3.0" },
+    { name = "xpublish", git = "https://github.com/xpublish-community/xpublish.git?branch=datatree-api" },
     { name = "zarr", specifier = ">=3.1.2" },
 ]
 provides-extras = ["complete", "healpix", "testing"]
