@@ -13,6 +13,8 @@ from pyproj.aoi import BBox
 
 import dask.array
 import xarray as xr
+from xarray import DataTree
+
 from xpublish_tiles.lib import transformer_from_crs
 from xpublish_tiles.testing.tiles import (
     ETRS89_TILES,
@@ -1738,6 +1740,149 @@ REGIONAL_HEALPIX_NA = Dataset(
 )
 
 
+def geozarr_multiscale_grid(
+    *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
+) -> DataTree:
+    """Create a GeoZarr-conformant multiscale dataset with pyramid structure.
+
+    Creates a DataTree with:
+    - Root group: multiscales metadata, proj:, and spatial: conventions
+    - Child groups 0/, 1/, 2/: data at native, 2x, and 4x downsampled resolutions
+
+    The dataset uses EPSG:4326. Native size comes from dims[0].size.
+    """
+    crs = pyproj.CRS.from_epsg(4326)
+    crs_wkt = crs.to_wkt()
+
+    # Get parameters from dims and attrs
+    native_size = dims[0].size
+    origin_x = attrs.get("origin_x", -10.0)  # Longitude (west edge)
+    origin_y = attrs.get("origin_y", 50.0)  # Latitude (north edge)
+    native_res = attrs.get("native_res", 0.01)  # ~1km
+
+    xmax = origin_x + native_size * native_res
+    ymin = origin_y - native_size * native_res
+
+    # (scale_factor, size, resolution)
+    levels = [
+        (1, native_size, native_res),  # Level 0: native
+        (2, native_size // 2, native_res * 2),  # Level 1: 2x downsampled
+        (4, native_size // 4, native_res * 4),  # Level 2: 4x downsampled
+    ]
+
+    multiscales_layout = []
+    for i, (_, size, res) in enumerate(levels):
+        spatial_transform = [res, 0.0, origin_x, 0.0, -res, origin_y]
+        entry = {
+            "asset": str(i),
+            "spatial:shape": [size, size],
+            "spatial:transform": spatial_transform,
+        }
+        if i == 0:
+            entry["transform"] = {"scale": [1.0, 1.0], "translation": [0.0, 0.0]}
+        else:
+            entry["derived_from"] = str(i - 1)
+            entry["transform"] = {"scale": [2.0, 2.0], "translation": [0.0, 0.0]}
+            entry["resampling_method"] = "average"
+
+        multiscales_layout.append(entry)
+
+    zarr_conventions = [
+        {
+            "schema_url": "https://raw.githubusercontent.com/zarr-conventions/multiscales/refs/tags/v1/schema.json",
+            "spec_url": "https://github.com/zarr-conventions/multiscales/blob/v1/README.md",
+            "uuid": "d35379db-88df-4056-af3a-620245f8e347",
+            "name": "multiscales",
+            "description": "Multiscale layout of zarr datasets",
+        },
+        {
+            "schema_url": "https://raw.githubusercontent.com/zarr-conventions/geo-proj/refs/tags/v1/schema.json",
+            "spec_url": "https://github.com/zarr-conventions/geo-proj/blob/v1/README.md",
+            "uuid": "f17cb550-5864-4468-aeb7-f3180cfb622f",
+            "name": "proj:",
+            "description": "Coordinate reference system information for geospatial data",
+        },
+        {
+            "schema_url": "https://raw.githubusercontent.com/zarr-conventions/spatial/refs/tags/v1/schema.json",
+            "spec_url": "https://github.com/zarr-conventions/spatial/blob/v1/README.md",
+            "uuid": "689b58e2-cf7b-45e0-9fff-9cfc0883d6b4",
+            "name": "spatial",
+            "description": "Spatial coordinate information",
+        },
+    ]
+    
+    root_attrs = {
+        "zarr_conventions": zarr_conventions,
+        "proj:code": "EPSG:4326",
+        "proj:wkt2": crs_wkt,
+        "spatial:dimensions": ["Y", "X"],
+        "spatial:bbox": [origin_x, ymin, xmax, origin_y],
+        "multiscales": {
+            "layout": multiscales_layout,
+            "resampling_method": "average",
+        },
+    }
+
+    # Create datasets for each resolution level
+    children = {}
+    for i, (_, size, res) in enumerate(levels):
+        # Generate coordinate arrays for this level
+        x_coords = origin_x + (np.arange(size) + 0.5) * res
+        y_coords = origin_y - (np.arange(size) + 0.5) * res
+
+        data_array = generate_tanh_wave_data(
+            coords=(y_coords, x_coords),
+            sizes=(size, size),
+            chunks=(size, size),
+            dtype=dtype,
+        )
+
+        # Create dataset for this level
+        ds = xr.Dataset(
+            {
+                "data": (
+                    ("Y", "X"),
+                    data_array,
+                    {
+                        "valid_min": -1,
+                        "valid_max": 1,
+                        "spatial:dimensions": ["Y", "X"],
+                    },
+                ),
+            },
+            coords={
+                "Y": ("Y", y_coords, {"standard_name": "latitude"}),
+                "X": ("X", x_coords, {"standard_name": "longitude"}),
+            },
+        )
+
+        # Array-level spatial attributes
+        spatial_transform = [res, 0.0, origin_x, 0.0, -res, origin_y]
+        ds.attrs["spatial:dimensions"] = ["Y", "X"]
+        ds.attrs["spatial:transform"] = spatial_transform
+        ds.attrs["spatial:shape"] = [size, size]
+
+        ds["data"].encoding["chunks"] = (size, size)
+
+        children[str(i)] = ds
+
+    tree = DataTree.from_dict(children)
+    tree.attrs.update(root_attrs)
+
+    return tree
+
+
+GEOZARR_MULTISCALE = Dataset(
+    name="geozarr_multiscale",
+    dims=(
+        Dim(name="Y", size=64, chunk_size=64, data=None),
+        Dim(name="X", size=64, chunk_size=64, data=None),
+    ),
+    dtype=np.float32,
+    setup=geozarr_multiscale_grid,
+)
+
+
 # Lookup dictionary for all available datasets
 DATASET_LOOKUP = {
     "hrrr": HRRR,
@@ -1761,4 +1906,5 @@ DATASET_LOOKUP = {
     "global_healpix_l3": GLOBAL_HEALPIX_L3,
     "global_healpix_l5": GLOBAL_HEALPIX_L5,
     "regional_healpix_na": REGIONAL_HEALPIX_NA,
+    "geozarr_multiscale": GEOZARR_MULTISCALE,
 }
