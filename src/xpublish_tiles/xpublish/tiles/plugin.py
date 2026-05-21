@@ -29,7 +29,7 @@ from xpublish_tiles.logger import (
     set_context_logger,
     with_accumulated_logs,
 )
-from xpublish_tiles.multiscale import get_dataset
+from xpublish_tiles.multiscale import get_dataset, is_multiscale, select_level_for_zoom
 from xpublish_tiles.pipeline import _infer_datatype, pipeline
 from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import ImageFormat, LegendFormat, QueryParams
@@ -513,6 +513,12 @@ class TilesPlugin(Plugin):
             # Extract dataset at appropriate resolution level for this zoom
             dataset = get_dataset(datatree, zoom=tileMatrix, tms=tms)
 
+            # Track which resolution level was selected (for response header)
+            resolution_level = None
+            if is_multiscale(datatree):
+                level = select_level_for_zoom(datatree, tms, tileMatrix)
+                resolution_level = level.path if level.path is not None else "root"
+
             # Extract dimension selectors from query parameters
             selectors = {}
             for param_name, param_value in request.query_params.items():
@@ -591,6 +597,10 @@ class TilesPlugin(Plugin):
                         format=query.f,
                     )
 
-            return Response(buffer.getbuffer(), media_type="image/png")
+            headers = {}
+            if resolution_level is not None:
+                headers["X-Multiscale-Level"] = resolution_level
+
+            return Response(buffer.getbuffer(), media_type="image/png", headers=headers)
 
         return router

@@ -1769,10 +1769,10 @@ def geozarr_multiscale_grid(
         (4, native_size // 4, native_res * 4),  # Level 2: 4x downsampled
     ]
 
-    multiscales_layout = []
+    multiscales_layout: list[dict[str, Any]] = []
     for i, (_, size, res) in enumerate(levels):
         spatial_transform = [res, 0.0, origin_x, 0.0, -res, origin_y]
-        entry = {
+        entry: dict[str, Any] = {
             "asset": str(i),
             "spatial:shape": [size, size],
             "spatial:transform": spatial_transform,
