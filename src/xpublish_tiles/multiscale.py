@@ -1,14 +1,3 @@
-"""GeoZarr multiscale detection and level selection utilities.
-
-This module provides functions for working with GeoZarr-conformant multiscale
-DataTrees, including:
-- Detection of multiscale pyramids
-- Automatic level selection based on tile zoom
-- Dataset extraction from DataTrees
-"""
-
-from __future__ import annotations
-
 import morecantile
 
 import xarray as xr
@@ -16,22 +5,12 @@ from xarray import DataTree
 
 
 def is_multiscale(tree: DataTree) -> bool:
-    """Check if DataTree is a GeoZarr multiscale pyramid.
+    """Check if DataTree is a multiscale pyramid.
 
-    A DataTree is considered a GeoZarr multiscale if:
+    A DataTree is considered a [GeoZarr] multiscale if:
     - Root has a `multiscales` attribute with a `layout` list
     - Layout entries have `asset` keys pointing to existing children
     - Each layout entry has `spatial:transform` (resolution info)
-
-    Parameters
-    ----------
-    tree : DataTree
-        The DataTree to check.
-
-    Returns
-    -------
-    bool
-        True if the tree is a valid GeoZarr multiscale pyramid.
     """
     multiscales = tree.attrs.get("multiscales")
     if not multiscales:
@@ -41,7 +20,7 @@ def is_multiscale(tree: DataTree) -> bool:
     if not isinstance(layout, list) or len(layout) == 0:
         return False
 
-    # Verify at least one asset exists as a child and has spatial:transform
+    # Verify at least one asset exists as a child and has spatial:transform attr
     for entry in layout:
         asset = entry.get("asset")
         if asset is not None and asset in tree.children:
@@ -55,26 +34,10 @@ def get_layout_levels(tree: DataTree) -> list[dict]:
     """Get the layout levels from a multiscale DataTree, sorted by resolution.
 
     Levels are sorted from finest (highest resolution, smallest pixel size)
-    to coarsest (lowest resolution, largest pixel size).
-
-    Parameters
-    ----------
-    tree : DataTree
-        A multiscale DataTree.
-
-    Returns
-    -------
-    list[dict]
-        Layout entries sorted by resolution (finest first).
-
-    Raises
-    ------
-    ValueError
-        If the tree is not a valid multiscale pyramid.
+    to coarsest (lowest resolution, largest pixel size) per Zarr multiscale spec.
     """
     if not is_multiscale(tree):
-        msg = "DataTree is not a valid GeoZarr multiscale pyramid"
-        raise ValueError(msg)
+        raise ValueError("DataTree is not a valid GeoZarr multiscale pyramid")
 
     layout = tree.attrs["multiscales"]["layout"]
 
@@ -85,9 +48,7 @@ def get_layout_levels(tree: DataTree) -> list[dict]:
         if entry.get("asset") in tree.children and "spatial:transform" in entry
     ]
 
-    # Sort by resolution (pixel size). The affine transform is [a, b, c, d, e, f]
-    # where a is X resolution and e is Y resolution (usually negative for north-up).
-    # We use abs(a) as the pixel size for sorting.
+    # Sort by resolution - smallest pixel size (finest) first
     def get_pixel_size(entry: dict) -> float:
         transform = entry["spatial:transform"]
         return abs(transform[0])  # X resolution
@@ -102,32 +63,12 @@ def select_level_for_zoom(
 ) -> str:
     """Select the best resolution level for a given tile zoom.
 
-    Strategy: Choose the finest level whose resolution is >= the tile pixel size.
-    This avoids upscaling data while minimizing oversampling.
-
-    Parameters
-    ----------
-    tree : DataTree
-        A multiscale DataTree.
-    tms : morecantile.TileMatrixSet
-        The tile matrix set being used.
-    zoom : int
-        The requested zoom level.
-
-    Returns
-    -------
-    str
-        The asset path (child name) for the selected level.
-
-    Raises
-    ------
-    ValueError
-        If the tree is not a valid multiscale pyramid or has no valid levels.
+    Choose the finest level whose resolution is >= the tile pixel size.
+    Avoids upscaling data while minimizing oversampling.
     """
     levels = get_layout_levels(tree)
     if not levels:
-        msg = "No valid resolution levels found in multiscale pyramid"
-        raise ValueError(msg)
+        raise ValueError("No valid resolution levels found in multiscale pyramid")
 
     # Get tile pixel size at this zoom level
     tile_matrix = tms.matrix(zoom)
@@ -159,25 +100,6 @@ def get_dataset(
     - Multiscale + no zoom: Return the finest (highest resolution) level
     - Not multiscale: Return root dataset if present
     - No root dataset and not multiscale: Raise ValueError
-
-    Parameters
-    ----------
-    tree : DataTree
-        The DataTree to extract from.
-    zoom : int, optional
-        The tile zoom level for level selection.
-    tms : morecantile.TileMatrixSet, optional
-        The tile matrix set for resolution calculation.
-
-    Returns
-    -------
-    xr.Dataset
-        The extracted dataset.
-
-    Raises
-    ------
-    ValueError
-        If the tree has no root dataset and is not a valid multiscale pyramid.
     """
     if is_multiscale(tree):
         if zoom is not None and tms is not None:
@@ -195,8 +117,7 @@ def get_dataset(
         return root_ds
 
     # Empty root and not multiscale
-    msg = (
+    raise ValueError(
         "DataTree has no data at root and is not a valid GeoZarr multiscale pyramid. "
         "Cannot extract dataset."
     )
-    raise ValueError(msg)

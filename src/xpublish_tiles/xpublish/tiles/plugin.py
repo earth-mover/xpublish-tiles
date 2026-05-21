@@ -330,11 +330,12 @@ class TilesPlugin(Plugin):
             query: Annotated[TileQuery, Query()],
             datatree: DataTree = Depends(deps.datatree),
         ):
-            dataset = get_dataset(datatree)
             """Get TileJSON specification for this dataset and tile matrix set"""
             # Validate that the tile matrix set exists
             if tileMatrixSetId not in TILE_MATRIX_SET_SUMMARIES:
                 raise HTTPException(status_code=404, detail="Tile matrix set not found")
+
+            dataset = get_dataset(datatree)
 
             # Extract dimension selectors from query parameters
             selectors = {}
