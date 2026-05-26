@@ -22,7 +22,7 @@ dependencies = [
     "numba>=0.60.0",
     "pydantic-xml>=2.17.3",
     "pyproj>=3.7.1",
-    "xpublish>=0.3.0",
+    "xpublish>=0.5.0",
     "fastapi",
     "xarray>=2025.12.0",
     "zarr>=3.1.2",
@@ -64,7 +64,6 @@ packages = ["src/xpublish_tiles"]
 
 [tool.uv.sources]
 datashader = { git = "https://github.com/holoviz/datashader.git", rev = "2ff83af86022f667015488d2b2d602409b931cf4" }
-xpublish = { git = "https://github.com/xpublish-community/xpublish.git", branch = "datatree-api" }
 
 [project.optional-dependencies]
 healpix = [
