@@ -419,6 +419,51 @@ def _resolve_corner_name(ds: xr.Dataset, name: str) -> str | None:
     return None
 
 
+def _ugrid_topology_var(ds: xr.Dataset) -> str | None:
+    """Return the name of the UGRID mesh topology variable in ``ds``, or
+    ``None`` if there isn't one. Mirrors ``_sgrid_topology_var``."""
+    topology_vars = ds.cf.cf_roles.get("mesh_topology", [])
+    if not topology_vars:
+        return None
+    assert len(topology_vars) == 1, (
+        f"expected at most one cf_role=mesh_topology variable, found {topology_vars}"
+    )
+    return str(topology_vars[0])
+
+
+def _ugrid_face_node_connectivity(ds: xr.Dataset) -> np.ndarray | None:
+    """Read face_node_connectivity from a UGRID topology variable.
+
+    Returns a zero-indexed ``(n_faces, 3)`` int64 array, or ``None`` if the
+    dataset has no UGRID mesh topology or is not triangular.
+    """
+    topology_name = _ugrid_topology_var(ds)
+    if topology_name is None:
+        return None
+    var = ds[topology_name]
+    conn_name = var.attrs.get("face_node_connectivity")
+    if conn_name is None or conn_name not in ds:
+        return None
+    conn = ds[conn_name]
+
+    face_dim_name = var.attrs.get("face_dimension")
+    if face_dim_name is not None:
+        face_axis = conn.dims.index(face_dim_name)
+    else:
+        face_axis = 0  # UGRID convention: first dim is face dim
+
+    if conn.shape[1 - face_axis] != 3:
+        return None  # not triangular
+
+    faces = conn.values.astype(np.int64)
+    if face_axis == 1:
+        faces = faces.T  # normalize to (n_faces, 3)
+
+    start_index = int(conn.attrs.get("start_index", 0))
+    faces -= start_index
+    return faces
+
+
 def _corner_mesh(ds: xr.Dataset, name: str) -> np.ndarray | None:
     """Return a ``(ny+1, nx+1)`` vertex-mesh corner array for ``ds[name]``
     if the dataset provides one via either SGRID ``node_coordinates`` or the

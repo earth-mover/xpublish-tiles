@@ -1594,6 +1594,32 @@ REDGAUSS_N320 = Dataset(
 )
 
 
+def create_fvcom_ugrid(
+    *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
+) -> xr.Dataset:
+    """Load the Machias Bay FVCOM UGRID fixture and expose ``h`` as ``foo``."""
+    nc = Path(__file__).parent / "grids" / "machias_bay_fvcom.nc"
+    ds = xr.open_dataset(nc, chunks={})
+    ds = ds[["h", "mesh_topology", "nv"]].rename({"h": "foo"})
+    # CF disambiguation: two longitude coords (lon, lonc) exist; declare which
+    # belongs to foo so _guess_coordinates_for_mapping picks lon/lat over lonc/latc.
+    ds["foo"].attrs["coordinates"] = "lon lat"
+    return ds.assign_attrs(attrs)
+
+
+FVCOM_MACHIAS_BAY = Dataset(
+    name="fvcom_machias_bay",
+    dims=(Dim(name="node", size=184, chunk_size=184),),
+    setup=create_fvcom_ugrid,
+    dtype=np.float32,
+    benchmark_tiles=[
+        "9/160/184",
+        "10/320/369",
+        "11/641/739",
+    ],
+)
+
+
 def _create_global_healpix(*, level: int, dtype: npt.DTypeLike) -> xr.Dataset:
     """Build a global HEALPix grid at the given nested refinement level.
 
@@ -1756,6 +1782,7 @@ DATASET_LOOKUP = {
     "hrrr_multiple": HRRR_MULTIPLE,
     "global_nans": GLOBAL_NANS,
     "redgauss_n320": REDGAUSS_N320,
+    "fvcom_machias_bay": FVCOM_MACHIAS_BAY,
     "tripole_antimeridian": TRIPOLE_ANTIMERIDIAN,
     "cubed_sphere": CUBED_SPHERE,
     "global_healpix_l3": GLOBAL_HEALPIX_L3,

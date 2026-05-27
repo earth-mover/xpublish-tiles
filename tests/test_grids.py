@@ -35,6 +35,8 @@ from xpublish_tiles.grids import (
     Rectilinear,
     Triangular,
     UgridIndexer,
+    _ugrid_face_node_connectivity,
+    _ugrid_topology_var,
     find_cubed_sphere_face_dim,
     guess_coordinate_vars,
     guess_grid_system,
@@ -62,6 +64,7 @@ from xpublish_tiles.testing.datasets import (
     EU3035,
     EU3035_HIRES,
     FORECAST,
+    FVCOM_MACHIAS_BAY,
     GLOBAL_HEALPIX_L3,
     HRRR,
     HRRR_CRS_WKT,
@@ -1409,3 +1412,28 @@ def test_detect_orca_tripole_fold_row() -> None:
     (index,) = grid.indexes
     assert isinstance(index, CurvilinearCellIndex)
     assert index.tripolar_fold_row == ny - 1
+
+
+def test_ugrid_topology_var_found():
+    ds = FVCOM_MACHIAS_BAY.create()
+    assert _ugrid_topology_var(ds) == "mesh_topology"
+
+
+def test_ugrid_topology_var_none_for_non_ugrid():
+    ds = REDGAUSS_N320.create()
+    assert _ugrid_topology_var(ds) is None
+
+
+def test_ugrid_face_node_connectivity():
+    ds = FVCOM_MACHIAS_BAY.create()
+    faces = _ugrid_face_node_connectivity(ds)
+    assert faces is not None
+    assert faces.shape == (266, 3)
+    assert faces.dtype == np.int64
+    assert faces.min() == 0
+    assert faces.max() == 183  # 184 nodes, zero-indexed
+
+
+def test_ugrid_face_node_connectivity_none_for_non_ugrid():
+    ds = REDGAUSS_N320.create()
+    assert _ugrid_face_node_connectivity(ds) is None
