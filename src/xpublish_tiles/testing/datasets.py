@@ -1836,7 +1836,7 @@ def geozarr_multiscale_grid(
             dtype=dtype,
         )
 
-        # Create dataset for this level (no explicit coords - use spatial:transform on array)
+        # Create dataset for this level
         # Per GeoZarr spec: spatial:transform goes on the array, proj: goes on the group
         spatial_transform = [res, 0.0, origin_x, 0.0, -res, origin_y]
         ds = xr.Dataset(
@@ -1854,8 +1854,6 @@ def geozarr_multiscale_grid(
                 ),
             },
         )
-
-        # Group-level attributes (proj: convention)
         ds.attrs["proj:code"] = "EPSG:4326"
         ds.attrs["proj:wkt2"] = crs_wkt
 
@@ -1908,7 +1906,6 @@ def native_at_root_multiscale_grid(
         (4, native_size // 4, native_res * 4),  # Overview 1: 4x downsampled
     ]
 
-    # Layout only references overviews, not root
     multiscales_layout = []
     for i, (_, size, res) in enumerate(overview_levels):
         spatial_transform = [res, 0.0, origin_x, 0.0, -res, origin_y]
@@ -1974,7 +1971,9 @@ def native_at_root_multiscale_grid(
             dtype=dtype,
         )
 
-        # Use unique dimension names for each level to avoid alignment issues
+        # Use unique dimension names for each overview level (Y_0, X_0, Y_1, X_1, etc.)
+        # When datasets in a DataTree share the same dimension names but have different sizes,
+        # xarray tries to align them, which can cause errors or unexpected broadcasting behavior
         y_dim = f"Y_{i}"
         x_dim = f"X_{i}"
         spatial_transform = [res, 0.0, origin_x, 0.0, -res, origin_y]

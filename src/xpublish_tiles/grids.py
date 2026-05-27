@@ -1587,10 +1587,8 @@ class RasterAffine(RectilinearMixin, GridSystem):
             If provided, used to create the affine transform directly.
             Otherwise falls back to rasterix auto-detection.
         """
-
         if spatial_transform is not None:
             # Create RasterIndex from spatial:transform
-            # Format: [a, b, c, d, e, f] -> Affine(a, b, c, d, e, f)
             affine = Affine(*spatial_transform[:6])
             width = ds.sizes[Xname]
             height = ds.sizes[Yname]

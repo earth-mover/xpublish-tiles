@@ -1,6 +1,7 @@
 import io
 import json
 import urllib.parse
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -10,6 +11,8 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import xarray as xr
+from xpublish_tiles.config import config
+from xpublish_tiles.lib import TileTooBigError
 from xpublish_tiles.testing.datasets import (
     EU3035,
     GEOZARR_MULTISCALE,
@@ -17,6 +20,7 @@ from xpublish_tiles.testing.datasets import (
     NATIVE_AT_ROOT_MULTISCALE,
     REDGAUSS_N320,
 )
+from xpublish_tiles.tiles_lib import _MIN_ZOOM_CACHE
 from xpublish_tiles.xpublish.tiles import TilesPlugin
 from xpublish_tiles.xpublish.tiles.tile_matrix import extract_dimension_extents
 
@@ -594,9 +598,6 @@ def test_no_bbox_overlap_transparent_png():
 
 def test_zoom_level_below_minimum():
     """Test that requesting a zoom level below the minimum returns 400 error"""
-    from xpublish_tiles.config import config
-    from xpublish_tiles.tiles_lib import _MIN_ZOOM_CACHE
-
     # Clear the minzoom cache to ensure fresh computation with our config
     _MIN_ZOOM_CACHE.clear()
 
@@ -617,12 +618,7 @@ def test_zoom_level_below_minimum():
 
 
 def test_tile_too_big_error():
-    """Test that TileTooBigError (413) is still triggered when rendering exceeds memory limits"""
-    from unittest.mock import patch
-
-    from xpublish_tiles.lib import TileTooBigError
-    from xpublish_tiles.tiles_lib import _MIN_ZOOM_CACHE
-
+    """Test that TileTooBigError (413) is triggered when rendering exceeds memory limits"""
     # Clear the minzoom cache to ensure clean state
     _MIN_ZOOM_CACHE.clear()
 
@@ -630,6 +626,7 @@ def test_tile_too_big_error():
     client = TestClient(rest.app)
 
     # Mock the pipeline to raise TileTooBigError to test the error handling path
+    # Minimum zoom error will be triggered before we get to TileTooBigError, so we mock
     with patch(
         "xpublish_tiles.xpublish.tiles.plugin.pipeline",
         side_effect=TileTooBigError("test error"),
@@ -1287,7 +1284,7 @@ def test_native_at_root_multiscale_tiles():
 @pytest.mark.parametrize(
     "zoom,tile_row,tile_col,expected_level",
     [
-        pytest.param(15, 10893, 15659, "0", id="zoom15_finest"),
+        pytest.param(15, 11113, 15473, "0", id="zoom15_finest"),
         pytest.param(0, 0, 0, "2", id="zoom0_coarsest"),
     ],
 )
@@ -1311,7 +1308,7 @@ def test_geozarr_multiscale_snapshot(
 @pytest.mark.parametrize(
     "zoom,tile_row,tile_col,expected_level",
     [
-        pytest.param(15, 10893, 15659, "root", id="zoom15_root"),
+        pytest.param(15, 11113, 15473, "root", id="zoom15_root"),
         pytest.param(0, 0, 0, "1", id="zoom0_overview1"),
     ],
 )

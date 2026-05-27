@@ -124,8 +124,8 @@ class TilesPlugin(Plugin):
         async def get_dataset_tiles_list(
             datatree: DataTree = Depends(deps.datatree),
         ):
-            dataset = get_dataset(datatree)
             """List of available tilesets for this dataset"""
+            dataset = get_dataset(datatree)
             # Get dataset metadata
             dataset_attrs = dataset.attrs
             title = dataset_attrs.get("title", "Dataset")
@@ -207,8 +207,8 @@ class TilesPlugin(Plugin):
             query: Annotated[LegendQuery, Query()],
             datatree: DataTree = Depends(deps.datatree),
         ):
-            dataset = get_dataset(datatree)
             """Render a legend image for a styled variable."""
+            dataset = get_dataset(datatree)
             var_name = query.variables[0]
             if var_name not in dataset.data_vars:
                 raise HTTPException(
@@ -301,8 +301,8 @@ class TilesPlugin(Plugin):
             tileMatrixSetId: str,
             datatree: DataTree = Depends(deps.datatree),
         ):
-            dataset = get_dataset(datatree)
             """Get tileset metadata for this dataset"""
+            dataset = get_dataset(datatree)
             try:
                 return await async_run(create_tileset_metadata, dataset, tileMatrixSetId)
             except ValueError as e:
