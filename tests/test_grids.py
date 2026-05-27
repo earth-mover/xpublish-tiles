@@ -1432,7 +1432,7 @@ def test_ugrid_face_node_connectivity():
     assert faces.shape == (266, 3)
     assert faces.dtype == np.int64
     assert faces.min() == 0
-    assert faces.max() == 183  # 184 nodes, zero-indexed
+    assert faces.max() == 183
 
 
 def test_ugrid_face_node_connectivity_none_for_non_ugrid():

@@ -448,16 +448,18 @@ def _ugrid_face_node_connectivity(ds: xr.Dataset) -> np.ndarray | None:
 
     face_dim_name = var.attrs.get("face_dimension")
     if face_dim_name is not None:
+        if face_dim_name not in conn.dims:
+            return None
         face_axis = conn.dims.index(face_dim_name)
     else:
-        face_axis = 0  # UGRID convention: first dim is face dim
+        face_axis = 0
 
     if conn.shape[1 - face_axis] != 3:
-        return None  # not triangular
+        return None
 
     faces = conn.values.astype(np.int64)
     if face_axis == 1:
-        faces = faces.T  # normalize to (n_faces, 3)
+        faces = faces.T
 
     start_index = int(conn.attrs.get("start_index", 0))
     faces -= start_index
