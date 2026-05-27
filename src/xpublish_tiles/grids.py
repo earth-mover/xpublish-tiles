@@ -2399,7 +2399,8 @@ class Triangular(GridSystem):
         Xname: str,
         Yname: str,
     ) -> Self:
-        # FIXME: detect UGRID here
+        faces = _ugrid_face_node_connectivity(ds)
+
         vertices = (
             ds.reset_coords()[[Xname, Yname]]
             .to_dataarray("variable")
@@ -2410,25 +2411,25 @@ class Triangular(GridSystem):
             f"Attempting to triangulate vertices with shape={vertices.shape}. Expected (n_points, 2)"
         )
         if crs.is_geographic:
-            # TODO: consider normalizing these to the unit sphere like UXarray
-            # normalize to -180<=grid.X<180
             vertices[:, 0] = ((vertices[:, 0] + 180) % 360) - 180
 
         (dim_,) = ds[Xname].dims
         dim = str(dim_)
-        with log_duration("Triangulating", "🔺"):
-            if numbagg.anynan(vertices):
-                raise ValueError(
-                    f"Triangulation failed. Variables {Xname!r} or {Yname!r} contain NaNs."
-                )
-            try:
-                faces = triangle.delaunay(vertices)
-            except Exception as e:
-                raise ValueError(
-                    f"Triangulation failed. This may indicate bad data in variables {Xname!r}, {Yname!r}."
-                    f"Please check whether all values are the same. "
-                    f"Original exception: {e!r}"
-                ) from None
+
+        if faces is None:
+            with log_duration("Triangulating", "🔺"):
+                if numbagg.anynan(vertices):
+                    raise ValueError(
+                        f"Triangulation failed. Variables {Xname!r} or {Yname!r} contain NaNs."
+                    )
+                try:
+                    faces = triangle.delaunay(vertices)
+                except Exception as e:
+                    raise ValueError(
+                        f"Triangulation failed. This may indicate bad data in variables {Xname!r}, {Yname!r}."
+                        f"Please check whether all values are the same. "
+                        f"Original exception: {e!r}"
+                    ) from None
 
         return cls(
             vertices=vertices,

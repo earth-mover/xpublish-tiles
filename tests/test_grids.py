@@ -1437,3 +1437,14 @@ def test_ugrid_face_node_connectivity():
 def test_ugrid_face_node_connectivity_none_for_non_ugrid():
     ds = REDGAUSS_N320.create()
     assert _ugrid_face_node_connectivity(ds) is None
+
+
+def test_triangular_from_dataset_uses_ugrid_connectivity():
+    """from_dataset on a UGRID dataset skips Delaunay and uses provided faces."""
+    ds = FVCOM_MACHIAS_BAY.create()
+    with patch("xpublish_tiles.grids.triangle.delaunay") as mock_delaunay:
+        grid = Triangular.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
+
+    mock_delaunay.assert_not_called()
+    assert isinstance(grid, Triangular)
+    assert grid.indexes[0].tree.faces.shape == (266, 3)
