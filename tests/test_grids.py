@@ -9,6 +9,7 @@ import numpy.testing as npt
 import pandas as pd
 import pytest
 import rasterix
+import triangle
 from affine import Affine
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
@@ -1448,6 +1449,19 @@ def test_triangular_from_dataset_uses_ugrid_connectivity():
     mock_delaunay.assert_not_called()
     assert isinstance(grid, Triangular)
     assert grid.indexes[0].tree.faces.shape == (266, 3)
+
+
+def test_triangular_from_dataset_fallback():
+    """Non-UGRID dataset still runs Delaunay triangulation as before."""
+    ds = REDGAUSS_N320.create()
+    # Add a unique ID to avoid cache hits
+    ds.attrs["_xpublish_id"] = "triangular_fallback_test"
+    with patch(
+        "xpublish_tiles.grids.triangle.delaunay", wraps=triangle.delaunay
+    ) as mock_delaunay:
+        grid = guess_grid_system(ds, "foo")
+    assert mock_delaunay.call_count > 0
+    assert isinstance(grid, Triangular)
 
 
 @pytest.mark.asyncio
