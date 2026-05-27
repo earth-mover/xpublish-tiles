@@ -15,6 +15,7 @@ import pandas as pd
 import pyproj
 import rasterix
 import triangle
+from affine import Affine
 from numba_celltree import CellTree2d
 from pyproj import CRS
 from pyproj.aoi import BBox
@@ -136,6 +137,9 @@ class GridMetadata:
     ``face_dim`` is set only for faceted grids (currently ``CubedSphere``),
     where it identifies the dimension that enumerates faces (size 6 for GFDL
     / GMAO mosaic gridspec).
+
+    ``spatial_transform`` is set for GeoZarr datasets using the spatial: convention,
+    containing the 6-element affine transform coefficients [a, b, c, d, e, f].
     """
 
     X: str
@@ -143,6 +147,7 @@ class GridMetadata:
     crs: CRS
     grid_cls: type["GridSystem"]
     face_dim: str | None = None
+    spatial_transform: list[float] | None = None
 
     def __repr__(self) -> str:
         face = f", face_dim={self.face_dim!r}" if self.face_dim is not None else ""
@@ -1570,12 +1575,33 @@ class RasterAffine(RectilinearMixin, GridSystem):
         crs: CRS,
         Xname: str,
         Yname: str,
+        *,
+        spatial_transform: list[float] | None = None,
     ) -> "RasterAffine":
-        """Create a RasterAffine grid from a dataset using rasterix."""
-        ds = rasterix.assign_index(ds, x_dim=Xname, y_dim=Yname)
-        index = ds.xindexes[Xname]
-        # After assign_index, the index should be a RasterIndex
-        raster_index = cast(rasterix.RasterIndex, index)
+        """Create a RasterAffine grid from a dataset using rasterix.
+
+        Parameters
+        ----------
+        spatial_transform
+            Optional GeoZarr spatial:transform coefficients [a, b, c, d, e, f].
+            If provided, used to create the affine transform directly.
+            Otherwise falls back to rasterix auto-detection.
+        """
+
+        if spatial_transform is not None:
+            # Create RasterIndex from spatial:transform
+            # Format: [a, b, c, d, e, f] -> Affine(a, b, c, d, e, f)
+            affine = Affine(*spatial_transform[:6])
+            width = ds.sizes[Xname]
+            height = ds.sizes[Yname]
+            raster_index = rasterix.RasterIndex.from_transform(
+                affine, width=width, height=height, x_dim=Xname, y_dim=Yname
+            )
+        else:
+            # Fallback: let rasterix auto-detect (works with coords or GeoTransform)
+            ds = rasterix.assign_index(ds, x_dim=Xname, y_dim=Yname)
+            raster_index = cast(rasterix.RasterIndex, ds.xindexes[Xname])
+
         return cls(
             crs=crs,
             X=Xname,
@@ -2861,6 +2887,24 @@ GridSystem1D = Triangular
 GridSystem2D = RasterAffine | Rectilinear | Curvilinear | Polar
 
 
+def _parse_proj_convention_crs(attrs: dict) -> CRS | None:
+    """Parse CRS from proj: convention attributes.
+
+    The proj: convention uses proj:code (e.g. "EPSG:4326") or proj:wkt2.
+    """
+    if "proj:code" in attrs:
+        try:
+            return CRS.from_user_input(attrs["proj:code"])
+        except Exception:
+            pass
+    if "proj:wkt2" in attrs:
+        try:
+            return CRS.from_wkt(attrs["proj:wkt2"])
+        except Exception:
+            pass
+    return None
+
+
 def _guess_grid_mappings_and_crs(
     ds: xr.Dataset,
 ) -> list[GridMappingInfo]:
@@ -2902,9 +2946,18 @@ def _guess_grid_mappings_and_crs(
                 tuple(itertools.chain(Xname, Yname)) if Xname and Yname else None
             )
             return [GridMappingInfo(None, DEFAULT_CRS, coordinates)]
-        else:
-            warnings.warn("No CRS detected", UserWarning, stacklevel=2)
-            return [GridMappingInfo(None, None, None)]
+
+        # Check for GeoZarr conventions (spatial: on arrays, proj: on group)
+        has_spatial_transform = "spatial:transform" in ds.attrs or any(
+            "spatial:transform" in ds[var].attrs for var in ds.data_vars
+        )
+        if has_spatial_transform:
+            crs = _parse_proj_convention_crs(ds.attrs)
+            if crs is not None:
+                return [GridMappingInfo(None, crs, None)]
+
+        warnings.warn("No CRS detected", UserWarning, stacklevel=2)
+        return [GridMappingInfo(None, None, None)]
 
     # Handle case where spatial_ref is present but not linked to by a grid_mapping attribute
     result = []
@@ -3093,6 +3146,31 @@ def _detect_grid_metadata(
 
     if Xname is None or Yname is None:
         # Handle the fallback case where coordinates can't be determined normally
+        # Check for GeoZarr spatial: convention (array attrs override group attrs)
+        spatial_dims = None
+        spatial_transform = None
+        for var in ds.data_vars:
+            var_attrs = ds[var].attrs
+            if "spatial:dimensions" in var_attrs:
+                spatial_dims = var_attrs["spatial:dimensions"]
+                spatial_transform = var_attrs.get("spatial:transform")
+                break
+        if spatial_dims is None:
+            spatial_dims = ds.attrs.get("spatial:dimensions")
+            spatial_transform = ds.attrs.get("spatial:transform")
+        if spatial_dims is not None and len(spatial_dims) == 2:
+            # spatial:dimensions is [Y, X] order
+            y_dim, x_dim = spatial_dims[0], spatial_dims[1]
+            Xname, Yname = x_dim, y_dim
+            grid_cls = RasterAffine
+            return GridMetadata(
+                X=Xname,
+                Y=Yname,
+                crs=mapping.crs,
+                grid_cls=grid_cls,
+                spatial_transform=spatial_transform,
+            )
+
         if mapping.grid_mapping is None:
             raise GridDetectionError(
                 "Creating raster affine grid system failed. "
@@ -3101,7 +3179,6 @@ def _detect_grid_metadata(
             )
 
         if "GeoTransform" not in mapping.grid_mapping.attrs:
-            # Return None to indicate no GeoTransform available
             raise GridDetectionError(
                 "Creating raster affine grid system failed. "
                 "No explicit coordinate variables were detected and "
@@ -3194,11 +3271,11 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
     primary_grid_metadata = guess_grid_metadata(ds)
     if primary_grid_metadata is None:
         raise GridDetectionError("CRS/grid system not detected")
-    extra: dict[str, Any] = (
-        {"face_dim": primary_grid_metadata.face_dim}
-        if primary_grid_metadata.face_dim is not None
-        else {}
-    )
+    extra: dict[str, Any] = {}
+    if primary_grid_metadata.face_dim is not None:
+        extra["face_dim"] = primary_grid_metadata.face_dim
+    if primary_grid_metadata.spatial_transform is not None:
+        extra["spatial_transform"] = primary_grid_metadata.spatial_transform
     primary_grid = primary_grid_metadata.grid_cls.from_dataset(
         ds,
         primary_grid_metadata.crs,

@@ -1,9 +1,14 @@
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import morecantile
 
 import xarray as xr
 from xarray import DataTree
+
+if TYPE_CHECKING:
+    from xpublish_tiles.grids import GridSystem
+    from xpublish_tiles.tiles_lib import get_min_zoom as _get_min_zoom
 
 
 @dataclass
@@ -11,18 +16,47 @@ class ResolutionLevel:
     """A dataset at a specific resolution level."""
 
     path: str | None  # None for root, child name for children
-    pixel_size: float
     dataset: xr.Dataset
+    pixel_size: float
+    min_zoom: int | None = None
 
+    def get_min_zoom(
+        self,
+        *,
+        grid: "GridSystem",
+        tms: morecantile.TileMatrixSet,
+        variable: str,
+        style: str,
+        xpublish_id: str | None = None,
+    ) -> int:
+        """Get or compute the minimum renderable zoom for this level.
 
-def get_spatial_transform(ds: xr.Dataset) -> list[float] | None:
-    """Extract spatial:transform from dataset attributes."""
-    return ds.attrs.get("spatial:transform")
+        Uses the cached min_zoom if available, otherwise computes it using
+        tiles_lib.get_min_zoom and caches the result.
+        """
+        if self.min_zoom is not None:
+            return self.min_zoom
+
+        da = self.dataset[variable]
+        self.min_zoom = _get_min_zoom(grid, tms, da, style, xpublish_id)
+        return self.min_zoom
 
 
 def get_pixel_size(ds: xr.Dataset) -> float | None:
-    """Get pixel size from dataset's spatial:transform attribute."""
-    transform = get_spatial_transform(ds)
+    """Get pixel size from spatial:transform attribute.
+
+    Per GeoZarr spec, array-level attrs override group-level attrs.
+    Checks data variable attrs first, then falls back to dataset attrs.
+    """
+    transform = None
+    # Check array-level attrs first (GeoZarr: arrays override group)
+    for var in ds.data_vars:
+        transform = ds[var].attrs.get("spatial:transform")
+        if transform is not None:
+            break
+    # Fall back to dataset/group-level attrs
+    if transform is None:
+        transform = ds.attrs.get("spatial:transform")
     if transform and len(transform) >= 1:
         return abs(transform[0])  # X resolution
     return None

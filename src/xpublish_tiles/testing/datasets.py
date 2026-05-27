@@ -1836,7 +1836,9 @@ def geozarr_multiscale_grid(
             dtype=dtype,
         )
 
-        # Create dataset for this level
+        # Create dataset for this level (no explicit coords - use spatial:transform on array)
+        # Per GeoZarr spec: spatial:transform goes on the array, proj: goes on the group
+        spatial_transform = [res, 0.0, origin_x, 0.0, -res, origin_y]
         ds = xr.Dataset(
             {
                 "data": (
@@ -1846,20 +1848,16 @@ def geozarr_multiscale_grid(
                         "valid_min": -1,
                         "valid_max": 1,
                         "spatial:dimensions": ["Y", "X"],
+                        "spatial:transform": spatial_transform,
+                        "spatial:shape": [size, size],
                     },
                 ),
             },
-            coords={
-                "Y": ("Y", y_coords, {"standard_name": "latitude"}),
-                "X": ("X", x_coords, {"standard_name": "longitude"}),
-            },
         )
 
-        # Array-level spatial attributes
-        spatial_transform = [res, 0.0, origin_x, 0.0, -res, origin_y]
-        ds.attrs["spatial:dimensions"] = ["Y", "X"]
-        ds.attrs["spatial:transform"] = spatial_transform
-        ds.attrs["spatial:shape"] = [size, size]
+        # Group-level attributes (proj: convention)
+        ds.attrs["proj:code"] = "EPSG:4326"
+        ds.attrs["proj:wkt2"] = crs_wkt
 
         ds["data"].encoding["chunks"] = (size, size)
 
@@ -1934,22 +1932,23 @@ def native_at_root_multiscale_grid(
         dtype=dtype,
     )
 
+    # Root dataset: spatial:transform on array, proj: on group
+    native_transform = [native_res, 0.0, origin_x, 0.0, -native_res, origin_y]
     root_ds = xr.Dataset(
         {
             "data": (
                 ("Y", "X"),
                 native_data,
-                {"valid_min": -1, "valid_max": 1, "spatial:dimensions": ["Y", "X"]},
+                {
+                    "valid_min": -1,
+                    "valid_max": 1,
+                    "spatial:dimensions": ["Y", "X"],
+                    "spatial:transform": native_transform,
+                    "spatial:shape": [native_size, native_size],
+                },
             ),
         },
-        coords={
-            "Y": ("Y", native_y_coords, {"standard_name": "latitude"}),
-            "X": ("X", native_x_coords, {"standard_name": "longitude"}),
-        },
         attrs={
-            "spatial:dimensions": ["Y", "X"],
-            "spatial:transform": [native_res, 0.0, origin_x, 0.0, -native_res, origin_y],
-            "spatial:shape": [native_size, native_size],
             "proj:code": "EPSG:4326",
             "proj:wkt2": crs_wkt,
             "spatial:bbox": [origin_x, ymin, xmax, origin_y],
@@ -1978,6 +1977,7 @@ def native_at_root_multiscale_grid(
         # Use unique dimension names for each level to avoid alignment issues
         y_dim = f"Y_{i}"
         x_dim = f"X_{i}"
+        spatial_transform = [res, 0.0, origin_x, 0.0, -res, origin_y]
 
         ds = xr.Dataset(
             {
@@ -1988,17 +1988,14 @@ def native_at_root_multiscale_grid(
                         "valid_min": -1,
                         "valid_max": 1,
                         "spatial:dimensions": [y_dim, x_dim],
+                        "spatial:transform": spatial_transform,
+                        "spatial:shape": [size, size],
                     },
                 ),
             },
-            coords={
-                y_dim: (y_dim, y_coords, {"standard_name": "latitude"}),
-                x_dim: (x_dim, x_coords, {"standard_name": "longitude"}),
-            },
             attrs={
-                "spatial:dimensions": [y_dim, x_dim],
-                "spatial:transform": [res, 0.0, origin_x, 0.0, -res, origin_y],
-                "spatial:shape": [size, size],
+                "proj:code": "EPSG:4326",
+                "proj:wkt2": crs_wkt,
             },
         )
         ds["data"].encoding["chunks"] = (size, size)

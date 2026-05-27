@@ -513,6 +513,27 @@ class TilesPlugin(Plugin):
             # Extract dataset at appropriate resolution level for this zoom
             dataset = get_dataset(datatree, zoom=tileMatrix, tms=tms)
 
+            style = query.style[0] if query.style else "raster"
+            variant = query.style[1] if query.style else "default"
+
+            # Validate zoom level against minimum renderable zoom
+            var_name = query.variables[0]
+            try:
+                grid = await async_run(guess_grid_system, dataset, var_name)
+                da = dataset.cf[var_name]
+                xpublish_id = dataset.attrs.get("_xpublish_id")
+                minzoom = await async_run(get_min_zoom, grid, tms, da, style, xpublish_id)
+                if tileMatrix < minzoom:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Zoom level {tileMatrix} is below minimum zoom {minzoom} for this dataset. Use zoom >= {minzoom}.",
+                    )
+            except GridDetectionError as e:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Variable {var_name!r} cannot be tiled: {e}",
+                ) from None
+
             # Track which resolution level was selected (for response header)
             resolution_level = None
             if is_multiscale(datatree):
@@ -527,9 +548,6 @@ class TilesPlugin(Plugin):
                     # Check if this parameter corresponds to a dataset dimension
                     if param_name in dataset.dims:
                         selectors[param_name] = param_value
-
-            style = query.style[0] if query.style else "raster"
-            variant = query.style[1] if query.style else "default"
 
             render_params = QueryParams(
                 variables=query.variables,
