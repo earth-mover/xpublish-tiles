@@ -1604,6 +1604,8 @@ def create_fvcom_ugrid(
     # CF disambiguation: two longitude coords (lon, lonc) exist; declare which
     # belongs to foo so _guess_coordinates_for_mapping picks lon/lat over lonc/latc.
     ds["foo"].attrs["coordinates"] = "lon lat"
+    ds["foo"].attrs["valid_min"] = 0.0
+    ds["foo"].attrs["valid_max"] = 100.0
     return ds.assign_attrs(attrs)
 
 

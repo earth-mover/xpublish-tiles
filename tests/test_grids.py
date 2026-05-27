@@ -1448,3 +1448,23 @@ def test_triangular_from_dataset_uses_ugrid_connectivity():
     mock_delaunay.assert_not_called()
     assert isinstance(grid, Triangular)
     assert grid.indexes[0].tree.faces.shape == (266, 3)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tile,tms_id",
+    [
+        ("9/160/184", "WebMercatorQuad"),
+        ("10/320/369", "WebMercatorQuad"),
+        ("11/641/739", "WebMercatorQuad"),
+    ],
+)
+async def test_pipeline_fvcom_ugrid(tile, tms_id):
+    """Full pipeline render for the FVCOM UGRID dataset at multiple zoom levels."""
+    ds = FVCOM_MACHIAS_BAY.create()
+    tms = morecantile.tms.get(tms_id)
+    z, x, y = (int(v) for v in tile.split("/"))
+    tile_obj = morecantile.Tile(x=x, y=y, z=z)
+    query_params = create_query_params(tile_obj, tms)
+    result = await pipeline(ds, query_params)
+    assert result is not None
