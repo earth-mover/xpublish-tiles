@@ -225,12 +225,68 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                     # Only drop the dimension coordinate if it exists as a variable
                     data = data.drop_vars(context.grid.dim)
                 df = data.to_dataframe()
-                mesh = cvs.trimesh(
-                    df[[context.grid.X, context.grid.Y, data.name]],
-                    pd.DataFrame(
-                        context.ugrid_indexer.connectivity, columns=["v0", "v1", "v2"]
-                    ),
+                verts_df = df[[context.grid.X, context.grid.Y, data.name]]
+                simps_df = pd.DataFrame(
+                    context.ugrid_indexer.connectivity, columns=["v0", "v1", "v2"]
                 )
+                idx = context.grid.indexes[0]
+                if idx.preserve_holes:
+                    # Render at the full mesh extent so datashader never clips
+                    # triangles at the canvas boundary.  Clipping creates artifacts
+                    # that fill coastal inlets.  hvplot uses the same approach.
+                    vx = verts_df.iloc[:, 0]
+                    vy = verts_df.iloc[:, 1]
+                    mesh_x = (float(vx.min()), float(vx.max()))
+                    mesh_y = (float(vy.min()), float(vy.max()))
+                    x_scale = (mesh_x[1] - mesh_x[0]) / (cvs.x_range[1] - cvs.x_range[0])
+                    y_scale = (mesh_y[1] - mesh_y[0]) / (cvs.y_range[1] - cvs.y_range[0])
+                    mesh_cvs = dsh.Canvas(
+                        plot_width=max(width, int(np.ceil(width * x_scale))),
+                        plot_height=max(height, int(np.ceil(height * y_scale))),
+                        x_range=mesh_x,
+                        y_range=mesh_y,
+                    )
+                    full_mesh = mesh_cvs.trimesh(verts_df, simps_df)
+                    # Crop the rendered mesh to the tile bounds
+                    tile_x = cvs.x_range
+                    tile_y = cvs.y_range
+                    x0 = int(
+                        np.floor(
+                            (tile_x[0] - mesh_x[0])
+                            / (mesh_x[1] - mesh_x[0])
+                            * mesh_cvs.plot_width
+                        )
+                    )
+                    x1 = int(
+                        np.ceil(
+                            (tile_x[1] - mesh_x[0])
+                            / (mesh_x[1] - mesh_x[0])
+                            * mesh_cvs.plot_width
+                        )
+                    )
+                    # y-axis is inverted in image coordinates
+                    y0 = int(
+                        np.floor(
+                            (mesh_y[1] - tile_y[1])
+                            / (mesh_y[1] - mesh_y[0])
+                            * mesh_cvs.plot_height
+                        )
+                    )
+                    y1 = int(
+                        np.ceil(
+                            (mesh_y[1] - tile_y[0])
+                            / (mesh_y[1] - mesh_y[0])
+                            * mesh_cvs.plot_height
+                        )
+                    )
+                    x0, x1 = max(0, x0), min(mesh_cvs.plot_width, x1)
+                    y0, y1 = max(0, y0), min(mesh_cvs.plot_height, y1)
+                    mesh = full_mesh.isel(
+                        x=slice(x0, x1),
+                        y=slice(y0, y1),
+                    )
+                else:
+                    mesh = cvs.trimesh(verts_df, simps_df)
         else:
             raise NotImplementedError(
                 f"Grid type {type(context.grid)} not supported by DatashaderRasterRenderer"
