@@ -542,9 +542,11 @@ class CellTreeIndex(xr.Index):
         X: str,
         Y: str,
         lon_spans_globe: bool,
+        preserve_holes: bool = False,
     ):
         self.X = X
         self.Y = Y
+        self.preserve_holes = preserve_holes
         if lon_spans_globe:
             # We want to reflect the vertices across the anti-meridian, and then run the triangulation.
             # For simplicity, we just append two copies of the convex hull the longitudes modified differently.
@@ -601,11 +603,17 @@ class CellTreeIndex(xr.Index):
         assert isinstance(xidxr, slice)
         assert isinstance(yidxr, slice)
 
-        with NUMBA_THREADING_LOCK:
-            _, face_indices = self.tree.locate_boxes(
-                np.array([[xidxr.start, xidxr.stop, yidxr.start, yidxr.stop]])
-            )
-        face_indices = np.unique(face_indices)
+        if self.preserve_holes:
+            # Use all faces: bounding-box subsetting drops faces that form the
+            # walls of mesh holes (coastal inlets, islands), causing them to
+            # fill in during trimesh rasterization.
+            face_indices = np.arange(self.tree.faces.shape[0])
+        else:
+            with NUMBA_THREADING_LOCK:
+                _, face_indices = self.tree.locate_boxes(
+                    np.array([[xidxr.start, xidxr.stop, yidxr.start, yidxr.stop]])
+                )
+            face_indices = np.unique(face_indices)
 
         inverse, vertex_indices = pd.factorize(
             self.tree.faces[face_indices].ravel(), sort=True
@@ -2331,6 +2339,7 @@ class Triangular(GridSystem):
         Xname: str,
         Yname: str,
         fill_value: Any,
+        preserve_holes: bool = False,
     ):
         self.crs = crs
         self.X, self.Y = Xname, Yname
@@ -2352,6 +2361,7 @@ class Triangular(GridSystem):
                 X=Xname,
                 Y=Yname,
                 lon_spans_globe=self.lon_spans_globe,
+                preserve_holes=preserve_holes,
             ),
         )
         self._bbox_xform_cache = {}
@@ -2404,6 +2414,7 @@ class Triangular(GridSystem):
         Yname: str,
     ) -> Self:
         faces = _ugrid_face_node_connectivity(ds)
+        ugrid_connectivity = faces is not None
 
         vertices = (
             ds.reset_coords()[[Xname, Yname]]
@@ -2443,6 +2454,7 @@ class Triangular(GridSystem):
             Yname=Yname,
             dim=dim,
             fill_value=-1,
+            preserve_holes=ugrid_connectivity,
         )
 
 
