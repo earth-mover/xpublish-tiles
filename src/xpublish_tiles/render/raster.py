@@ -281,9 +281,10 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                     )
                     x0, x1 = max(0, x0), min(mesh_cvs.plot_width, x1)
                     y0, y1 = max(0, y0), min(mesh_cvs.plot_height, y1)
+                    # Datashader names output dims after the vertex column names
+                    xdim, ydim = full_mesh.dims[1], full_mesh.dims[0]
                     mesh = full_mesh.isel(
-                        x=slice(x0, x1),
-                        y=slice(y0, y1),
+                        {xdim: slice(x0, x1), ydim: slice(y0, y1)},
                     )
                 else:
                     mesh = cvs.trimesh(verts_df, simps_df)

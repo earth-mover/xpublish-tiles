@@ -2364,6 +2364,8 @@ class Triangular(GridSystem):
                 preserve_holes=preserve_holes,
             ),
         )
+        self.alternates = ()
+        self.Z = None
         self._bbox_xform_cache = {}
 
     @property
@@ -3397,6 +3399,22 @@ def guess_grid_system(
             if cache_key is not None:
                 _GRID_CACHE[cache_key] = grid
             return grid
+
+        # UGRID topology variables (mesh_topology, face_node_connectivity) are
+        # not followed by ds.cf[[name]], so cf_sub silently drops them and
+        # Triangular.from_dataset falls back to Delaunay triangulation, which
+        # fills coastal holes with extra triangles.  Dispatch directly on the
+        # outer ds when UGRID topology is present, same pattern as CubedSphere.
+        if _ugrid_topology_var(ds) is not None:
+            if meta is None:
+                meta = guess_grid_metadata(ds)
+            if meta is not None and meta.grid_cls is Triangular:
+                grid = Triangular.from_dataset(ds, meta.crs, meta.X, meta.Y)
+                grid.Z = _guess_z_dimension(ds[name])
+                _validate_grid_dims(grid, ds[name])
+                if cache_key is not None:
+                    _GRID_CACHE[cache_key] = grid
+                return grid
 
         try:
             grid = _guess_grid_for_dataset(cf_sub)
