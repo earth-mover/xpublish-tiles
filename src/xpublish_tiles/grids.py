@@ -605,6 +605,8 @@ class CellTreeIndex(xr.Index):
             _, face_indices = self.tree.locate_boxes(
                 np.array([[xidxr.start, xidxr.stop, yidxr.start, yidxr.stop]])
             )
+        face_indices = np.unique(face_indices)
+
         inverse, vertex_indices = pd.factorize(
             self.tree.faces[face_indices].ravel(), sort=True
         )
