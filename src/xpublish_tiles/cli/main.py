@@ -206,12 +206,13 @@ def get_dataset_for_name(
             client = Client()
             repo = client.get_repo(name, config=config)
             session = repo.readonly_session(branch=branch)
-            ds = xr.open_zarr(
+            ds = xr.open_datatree(
                 session.store,
                 group=group or None,
                 zarr_format=3,
                 consolidated=False,
                 chunks=None,
+                engine="zarr",
             )
             # Add _xpublish_id for caching - use name, branch, and group for arraylake
             xpublish_id = f"{name}:{branch}"

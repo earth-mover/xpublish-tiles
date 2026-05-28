@@ -1,0 +1,150 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>XYZ - xpublish-tiles</title>
+        <meta
+            name="viewport"
+            content="initial-scale=1,maximum-scale=1,user-scalable=no"
+        />
+        <link
+            href="https://unpkg.com/maplibre-gl@5.1/dist/maplibre-gl.css"
+            rel="stylesheet"
+        />
+        <script src="https://unpkg.com/maplibre-gl@5.1/dist/maplibre-gl.js"></script>
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+            }
+            #map {
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                width: 100%;
+            }
+            #toggle-container {
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                z-index: 1000;
+            }
+            .toggle-button {
+                padding: 8px 12px;
+                background: white;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                cursor: pointer;
+                font-family: Arial, sans-serif;
+                font-size: 12px;
+                margin-bottom: 5px;
+                display: block;
+            }
+            .toggle-button:hover {
+                background: #f0f0f0;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="map"></div>
+        <div id="toggle-container">
+            <button id="fly-to-center" class="toggle-button">Fly to Data</button>
+            <button id="globe-toggle" class="toggle-button">Disable Globe</button>
+            <button id="tile-boundaries-toggle" class="toggle-button">Show Tile Boundaries</button>
+        </div>
+        <script>
+          const SERVER_URL = "http://localhost:8080";
+          const TILEJSON_URL = `${SERVER_URL}/tiles/WebMercatorQuad/tilejson.json?variables=NDVI&colorscalerange=0%2C1&style=raster%2Fdefault&width=512&height=512&f=png&render_errors=false`;
+
+          (async () => {
+            try {
+              const resp = await fetch(`${SERVER_URL}/tiles/`);
+              if (!resp.ok) {
+                throw new Error(`HTTP ${resp.status}`);
+              }
+            } catch (err) {
+              document.body.innerHTML = `<pre style="padding:1em;color:#b00">Tile server not reachable at ${SERVER_URL}/tiles/ (${err.message})</pre>`;
+              return;
+            }
+
+            const map = new maplibregl.Map({
+                container: "map",
+                style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+                zoom: 2,
+                center: [-71.0367, 42.3739],
+            });
+
+            let globeEnabled = true;
+
+            map.on("style.load", () => {
+                map.setProjection({ type: globeEnabled ? "globe" : "mercator" });
+            });
+
+            map.on("load", () => {
+                map.addSource("tiles-test-source", {
+                    type: "raster",
+                    // use the tiles option to specify a raster tile source URL
+                    // https://docs.mapbox.com/style-spec/reference/sources/
+                    url: TILEJSON_URL,
+                    tileSize: 512,
+                });
+                map.addLayer(
+                    {
+                        id: "tiles-test-layer",
+                        type: "raster",
+                        source: "tiles-test-source",
+                        paint: {
+                            "raster-opacity": 0.75,
+                        },
+                    },
+                    // 'building' // Place layer under labels, roads and buildings.
+                );
+                map.showTileBoundaries = false;
+
+                // Fly to data center using tilejson bbox & minzoom
+                document.getElementById("fly-to-center").addEventListener("click", async () => {
+                    const resp = await fetch(TILEJSON_URL);
+                    const tj = await resp.json();
+                    if (tj.bounds) {
+                        const [west, south, east, north] = tj.bounds;
+                        map.fitBounds([[west, south], [east, north]], {
+                            padding: 40,
+                        });
+                    }
+                });
+
+                // Toggle globe projection
+                const globeToggle = document.getElementById("globe-toggle");
+                globeToggle.addEventListener("click", () => {
+                    globeEnabled = !globeEnabled;
+                    map.setProjection({ type: globeEnabled ? "globe" : "mercator" });
+                    globeToggle.textContent = globeEnabled
+                        ? "Disable Globe"
+                        : "Enable Globe";
+                });
+
+                // Toggle tile boundaries functionality
+                const tileBoundariesToggle = document.getElementById(
+                    "tile-boundaries-toggle",
+                );
+                tileBoundariesToggle.addEventListener("click", () => {
+                    map.showTileBoundaries = !map.showTileBoundaries;
+                    tileBoundariesToggle.textContent = map.showTileBoundaries
+                        ? "Hide Tile Boundaries"
+                        : "Show Tile Boundaries";
+                });
+            });
+
+            map.on("style.load", function () {
+                map.on("click", function (e) {
+                    var coordinates = e.lngLat;
+                    new maplibregl.Popup()
+                        .setLngLat(coordinates)
+                        .setHTML("you clicked here: <br/>" + coordinates)
+                        .addTo(map);
+                });
+            });
+          })();
+        </script>
+    </body>
+</html>
