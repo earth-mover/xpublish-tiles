@@ -1594,6 +1594,225 @@ REDGAUSS_N320 = Dataset(
 )
 
 
+def _ugrid_triangle_geometry(
+    side: int = 3,
+    bbox: tuple[float, float, float, float] = (-75.0, 40.0, -73.0, 42.0),
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return (lon_node, lat_node, lon_face, lat_face, connectivity_0based).
+
+    Builds an ``side x side`` regular grid of nodes covering ``bbox`` split into
+    ``2*(side-1)**2`` triangles. Face centroids are the mean of the three node
+    coordinates.
+    """
+    west, south, east, north = bbox
+    lats, lons = np.meshgrid(
+        np.linspace(south, north, side), np.linspace(west, east, side), indexing="xy"
+    )
+    lon_node = lons.ravel()
+    lat_node = lats.ravel()
+    rows, cols = side, side
+    conn_list = []
+    for j in range(rows - 1):
+        for i in range(cols - 1):
+            n00 = j * cols + i
+            n10 = j * cols + (i + 1)
+            n01 = (j + 1) * cols + i
+            n11 = (j + 1) * cols + (i + 1)
+            conn_list.append([n00, n10, n11])
+            conn_list.append([n00, n11, n01])
+    conn = np.array(conn_list, dtype=np.int32)
+    lon_face = lon_node[conn].mean(axis=1)
+    lat_face = lat_node[conn].mean(axis=1)
+    return lon_node, lat_node, lon_face, lat_face, conn
+
+
+def _ugrid_dim_side(dims: tuple[Dim, ...]) -> int:
+    """Derive node-grid side length from a ``node`` Dim of perfect-square size."""
+    by_name = {d.name: d for d in dims}
+    node_dim = by_name.get("node")
+    if node_dim is None:
+        return 3
+    side = round(np.sqrt(node_dim.size))
+    if side * side != node_dim.size:
+        raise ValueError(f"UGRID node dim size {node_dim.size} is not a perfect square")
+    return side
+
+
+def ugrid_triangles_grid(
+    *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
+) -> xr.Dataset:
+    """Strict CF-UGRID 1.0 dataset: explicit mesh_topology variable, 0-based
+    connectivity, one node-located and one face-located data variable.
+
+    Geometry is a regular ``side x side`` node grid (derived from the ``node``
+    Dim size) over a small region. ``attrs`` are applied to both data
+    variables; ``dtype`` controls the data array dtype.
+    """
+    side = _ugrid_dim_side(dims)
+    lon_node, lat_node, lon_face, lat_face, conn = _ugrid_triangle_geometry(side)
+    return xr.Dataset(
+        data_vars={
+            "mesh": xr.DataArray(
+                np.int32(0),
+                attrs={
+                    "cf_role": "mesh_topology",
+                    "topology_dimension": 2,
+                    "node_coordinates": "lon lat",
+                    "face_node_connectivity": "nv",
+                    "face_coordinates": "lonc latc",
+                },
+            ),
+            "nv": xr.DataArray(
+                conn,
+                dims=("face", "three"),
+                attrs={"cf_role": "face_node_connectivity", "start_index": 0},
+            ),
+            "zeta": xr.DataArray(
+                lat_node.astype(dtype),
+                dims=("node",),
+                attrs={
+                    **attrs,
+                    "mesh": "mesh",
+                    "location": "node",
+                    "long_name": "node-located",
+                },
+            ),
+            "u": xr.DataArray(
+                lat_face.astype(dtype),
+                dims=("face",),
+                attrs={
+                    **attrs,
+                    "mesh": "mesh",
+                    "location": "face",
+                    "long_name": "face-located",
+                },
+            ),
+        },
+        coords={
+            "lon": xr.DataArray(
+                lon_node,
+                dims=("node",),
+                attrs={"standard_name": "longitude", "units": "degrees_east"},
+            ),
+            "lat": xr.DataArray(
+                lat_node,
+                dims=("node",),
+                attrs={"standard_name": "latitude", "units": "degrees_north"},
+            ),
+            "lonc": xr.DataArray(
+                lon_face,
+                dims=("face",),
+                attrs={"standard_name": "longitude", "units": "degrees_east"},
+            ),
+            "latc": xr.DataArray(
+                lat_face,
+                dims=("face",),
+                attrs={"standard_name": "latitude", "units": "degrees_north"},
+            ),
+        },
+    )
+
+
+def fvcom_grid(
+    *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
+) -> xr.Dataset:
+    """FVCOM-shape dataset: no formal mesh_topology variable. Connectivity is
+    1-based with shape ``(three, nele)``, dim names are FVCOM's ``node`` /
+    ``nele`` / ``three``. One node-located variable (``zeta``-like) and one
+    face-located variable (``u``-like).
+    """
+    side = _ugrid_dim_side(dims)
+    lon_node, lat_node, lon_face, lat_face, conn = _ugrid_triangle_geometry(side)
+    nv_1based = (conn + 1).T.astype(np.int32)
+    return xr.Dataset(
+        data_vars={
+            "mesh": xr.DataArray(
+                np.int32(0),
+                attrs={
+                    "cf_role": "mesh_topology",
+                    "topology_dimension": 2,
+                    "node_coordinates": "lon lat",
+                    "face_node_connectivity": "nv",
+                    "face_coordinates": "lonc latc",
+                },
+            ),
+            "nv": xr.DataArray(
+                nv_1based,
+                dims=("three", "nele"),
+                attrs={"cf_role": "face_node_connectivity", "start_index": 1},
+            ),
+            "zeta": xr.DataArray(
+                lat_node.astype(dtype),
+                dims=("node",),
+                attrs={
+                    **attrs,
+                    "mesh": "mesh",
+                    "location": "node",
+                    "long_name": "free surface",
+                    "units": "m",
+                },
+            ),
+            "u": xr.DataArray(
+                lat_face.astype(dtype),
+                dims=("nele",),
+                attrs={
+                    **attrs,
+                    "mesh": "mesh",
+                    "location": "face",
+                    "long_name": "eastward velocity",
+                    "units": "m s-1",
+                },
+            ),
+        },
+        coords={
+            "lon": xr.DataArray(
+                lon_node,
+                dims=("node",),
+                attrs={"standard_name": "longitude", "units": "degrees_east"},
+            ),
+            "lat": xr.DataArray(
+                lat_node,
+                dims=("node",),
+                attrs={"standard_name": "latitude", "units": "degrees_north"},
+            ),
+            "lonc": xr.DataArray(
+                lon_face,
+                dims=("nele",),
+                attrs={"standard_name": "longitude", "units": "degrees_east"},
+            ),
+            "latc": xr.DataArray(
+                lat_face,
+                dims=("nele",),
+                attrs={"standard_name": "latitude", "units": "degrees_north"},
+            ),
+        },
+    )
+
+
+UGRID_TRIANGLES = Dataset(
+    name="ugrid_triangles",
+    dims=(
+        Dim(name="node", size=9, chunk_size=9),
+        Dim(name="face", size=8, chunk_size=8),
+        Dim(name="three", size=3, chunk_size=3),
+    ),
+    setup=ugrid_triangles_grid,
+    dtype=np.float32,
+)
+
+
+FVCOM = Dataset(
+    name="fvcom",
+    dims=(
+        Dim(name="node", size=9, chunk_size=9),
+        Dim(name="nele", size=8, chunk_size=8),
+        Dim(name="three", size=3, chunk_size=3),
+    ),
+    setup=fvcom_grid,
+    dtype=np.float32,
+)
+
+
 def _create_global_healpix(*, level: int, dtype: npt.DTypeLike) -> xr.Dataset:
     """Build a global HEALPix grid at the given nested refinement level.
 

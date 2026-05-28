@@ -310,12 +310,17 @@ def apply_slicers(
     # For Healpix, also keep the cell_ids coordinate
     if isinstance(grid, Healpix):
         pick.append(grid.cell_ids_name)
-    ds = cast(
-        xr.Dataset,
-        da.to_dataset()
-        # drop any coordinate vars we don't need
-        .reset_coords()[[da.name, *pick]],
-    )
+    if isinstance(grid, Triangular):
+        # Face-located vars don't inherit node X/Y as coords (different dim);
+        # let Triangular synthesize them from its stored vertex array.
+        ds = grid.build_subset_dataset(da)
+    else:
+        ds = cast(
+            xr.Dataset,
+            da.to_dataset()
+            # drop any coordinate vars we don't need
+            .reset_coords()[[da.name, *pick]],
+        )
 
     subsets: list[xr.Dataset]
     if isinstance(grid, GridSystem2D):
@@ -336,7 +341,7 @@ def apply_slicers(
         concat_dim = grid.Xdim
     elif isinstance(grid, Triangular):
         subsets = [
-            ds.isel({grid.Xdim: sl.vertices})
+            grid.isel_indexer(ds, sl)
             for sl in slicers[grid.Xdim]
             if isinstance(sl, UgridIndexer)
         ]
@@ -976,7 +981,7 @@ def apply_query(
                     f"Automatic selection failed with error: {str(e)!r}."
                 ) from None
 
-        if extra_dims := (set(array.dims) - grid.dims):
+        if extra_dims := (set(array.dims) - grid.dims_for(array)):
             # Note: this will handle squeezing of label-based selection
             # along datetime coordinates
             array = array.isel(dict.fromkeys(extra_dims, -1))

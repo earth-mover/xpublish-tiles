@@ -38,6 +38,7 @@ from xpublish_tiles.lib import (
     unwrap,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
+from xpublish_tiles.ugrid import MeshTopology, detect_mesh, load_connectivity
 from xpublish_tiles.utils import NUMBA_THREADING_LOCK, time_debug, xarray_object_key
 
 if TYPE_CHECKING:
@@ -57,6 +58,9 @@ class UgridIndexer:
     connectivity: np.ndarray
     # face indices that intersect the anti-meridian
     antimeridian_vertices: dict[str, np.ndarray]
+    # original face indices in the source mesh corresponding to `connectivity` rows.
+    # Used to slice face-located data variables (e.g. FVCOM cell-centred values).
+    face_indices: np.ndarray | None = None
 
     @property
     def size(self) -> int:
@@ -136,6 +140,9 @@ class GridMetadata:
     ``face_dim`` is set only for faceted grids (currently ``CubedSphere``),
     where it identifies the dimension that enumerates faces (size 6 for GFDL
     / GMAO mosaic gridspec).
+
+    ``mesh`` is set when an explicit UGRID mesh topology was detected; it
+    routes through to ``Triangular.from_dataset`` to skip Delaunay.
     """
 
     X: str
@@ -143,12 +150,14 @@ class GridMetadata:
     crs: CRS
     grid_cls: type["GridSystem"]
     face_dim: str | None = None
+    mesh: MeshTopology | None = None
 
     def __repr__(self) -> str:
         face = f", face_dim={self.face_dim!r}" if self.face_dim is not None else ""
+        mesh = f", mesh={self.mesh.name!r}" if self.mesh is not None else ""
         return (
             f"GridMetadata(X={self.X!r}, Y={self.Y!r}, "
-            f"crs={crs_repr(self.crs)}, grid_cls={self.grid_cls.__name__}{face})"
+            f"crs={crs_repr(self.crs)}, grid_cls={self.grid_cls.__name__}{face}{mesh})"
         )
 
 
@@ -598,6 +607,7 @@ class CellTreeIndex(xr.Index):
                     vertices=vertex_indices,
                     connectivity=inverse,
                     antimeridian_vertices=antimeridian_vertices,
+                    face_indices=np.asarray(face_indices),
                 )
             }
         )
@@ -1282,6 +1292,15 @@ class GridSystem(ABC):
     def dims(self) -> set[str]:
         """Return the set of dimension names for this grid system."""
         pass
+
+    def dims_for(self, var: xr.DataArray) -> set[str]:
+        """Return the spatial dims that ``var`` carries on this grid.
+
+        Default: intersect ``self.dims`` with the variable's dims. Grid systems
+        that expose multiple alternative spatial dims for a single variable
+        (e.g. UGRID, where data lives on either nodes or faces) override this.
+        """
+        return self.dims & set(map(str, var.dims))
 
     def transform_bbox(self, target_crs: str) -> tuple[float, float, float, float]:
         """Return ``self.bbox`` transformed into ``target_crs``.
@@ -2264,6 +2283,7 @@ class Triangular(GridSystem):
     Y: str
     Z: str | None = None
     dim: str
+    mesh: MeshTopology | None
     lon_spans_globe: bool
     indexes: tuple[xr.Index]
     npoints_per_geometry: int = field(init=False, default=4)
@@ -2282,15 +2302,25 @@ class Triangular(GridSystem):
         Xname: str,
         Yname: str,
         fill_value: Any,
+        mesh: MeshTopology | None = None,
     ):
         self.crs = crs
         self.X, self.Y = Xname, Yname
         self.dim = dim
+        self.mesh = mesh
         xmin, xmax = vertices[:, 0].min(), vertices[:, 0].max()
         ymin, ymax = vertices[:, 1].min(), vertices[:, 1].max()
         # This "350" business is nonsense; we need a way to figure out if a grid has global coverage
         # but that's basically impossible if all you have are vertices.
         self.lon_spans_globe = crs.is_geographic and ((xmax - xmin) > 350)
+        if self.lon_spans_globe and mesh is not None:
+            # The lon_spans_globe path in CellTreeIndex pads the convex hull and
+            # re-runs Delaunay, which would silently discard explicit UGRID
+            # connectivity. Refuse instead; revisit when global UGRID is needed.
+            raise NotImplementedError(
+                "Global UGRID meshes with explicit connectivity are not yet "
+                "supported (would discard provided face_node_connectivity)."
+            )
         if self.lon_spans_globe:
             self.bbox = BBox(west=-180, east=180, south=ymin, north=ymax)
         else:
@@ -2308,6 +2338,10 @@ class Triangular(GridSystem):
         self._bbox_xform_cache = {}
 
     @property
+    def face_dim(self) -> str | None:
+        return self.mesh.face_dim if self.mesh is not None else None
+
+    @property
     def Xdim(self) -> str:
         return self.dim
 
@@ -2319,6 +2353,21 @@ class Triangular(GridSystem):
     def dims(self) -> set[str]:
         return {self.dim}
 
+    def dims_for(self, var: xr.DataArray) -> set[str]:
+        """For UGRID, dispatch on ``var.attrs['location']`` if present,
+        otherwise fall back to which mesh dim the variable actually carries.
+        Non-mesh (Delaunay) Triangulars only ever live on ``self.dim``.
+        """
+        if self.mesh is None:
+            return super().dims_for(var)
+        location = var.attrs.get("location")
+        if location == "node":
+            return {self.mesh.node_dim}
+        if location == "face":
+            return {self.mesh.face_dim}
+        var_dims = set(map(str, var.dims))
+        return {self.mesh.node_dim, self.mesh.face_dim} & var_dims
+
     def sel(self, *, bbox: BBox) -> Slicers:
         index = next(iter(self.indexes))
         result = index.sel(
@@ -2328,6 +2377,41 @@ class Triangular(GridSystem):
         ugrid_indexer = result.dim_indexers["ugrid"]
         assert isinstance(ugrid_indexer, UgridIndexer)
         return {self.dim: [ugrid_indexer]}
+
+    def build_subset_dataset(self, da: xr.DataArray) -> xr.Dataset:
+        """Build a flat ``Dataset`` carrying ``da`` plus node-located X/Y
+        coordinates, ready for ``isel_indexer``.
+
+        For a face-located variable (e.g. FVCOM ``u``) the DataArray's coords
+        don't include node X/Y because xarray only inherits coords sharing a
+        dim with the variable. We synthesize them here from the grid's stored
+        vertex array so triangle rendering downstream has lon/lat per node.
+        """
+        if self.mesh is not None and self.X not in da.coords:
+            index = self.indexes[0]
+            assert isinstance(index, CellTreeIndex)
+            verts = index.tree.vertices
+            return xr.Dataset(
+                {
+                    da.name: da,
+                    self.X: ((self.dim,), verts[:, 0]),
+                    self.Y: ((self.dim,), verts[:, 1]),
+                }
+            )
+        return cast(xr.Dataset, da.to_dataset().reset_coords()[[da.name, self.X, self.Y]])
+
+    def isel_indexer(self, ds: xr.Dataset, indexer: "UgridIndexer") -> xr.Dataset:
+        """Apply a ``UgridIndexer`` to ``ds``, slicing node-located coords by
+        ``vertices`` and (if present) face-located vars by ``face_indices``.
+        """
+        kwargs: dict[str, Any] = {self.dim: indexer.vertices}
+        if (
+            self.face_dim is not None
+            and self.face_dim in ds.dims
+            and indexer.face_indices is not None
+        ):
+            kwargs[self.face_dim] = indexer.face_indices
+        return ds.isel(kwargs)
 
     def corners_to_rings(
         self,
@@ -2353,8 +2437,8 @@ class Triangular(GridSystem):
         crs: CRS,
         Xname: str,
         Yname: str,
+        mesh: MeshTopology | None = None,
     ) -> Self:
-        # FIXME: detect UGRID here
         vertices = (
             ds.reset_coords()[[Xname, Yname]]
             .to_dataarray("variable")
@@ -2371,6 +2455,20 @@ class Triangular(GridSystem):
 
         (dim_,) = ds[Xname].dims
         dim = str(dim_)
+
+        if mesh is not None:
+            faces = load_connectivity(ds, mesh)
+            return cls(
+                vertices=vertices,
+                faces=faces,
+                crs=crs,
+                Xname=Xname,
+                Yname=Yname,
+                dim=dim,
+                mesh=mesh,
+                fill_value=-1,
+            )
+
         with log_duration("Triangulating", "🔺"):
             if numbagg.anynan(vertices):
                 raise ValueError(
@@ -3082,6 +3180,16 @@ def _detect_grid_metadata(
     """
     assert mapping.crs is not None, "CRS must not be None"
 
+    if (mesh := detect_mesh(ds)) is not None:
+        node_X, node_Y = mesh.node_coordinates
+        return GridMetadata(
+            X=node_X,
+            Y=node_Y,
+            crs=mapping.crs,
+            grid_cls=Triangular,
+            mesh=mesh,
+        )
+
     Xname, Yname = _guess_coordinates_for_mapping(ds, mapping, skip_coordinates)
 
     if (
@@ -3194,11 +3302,11 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
     primary_grid_metadata = guess_grid_metadata(ds)
     if primary_grid_metadata is None:
         raise GridDetectionError("CRS/grid system not detected")
-    extra: dict[str, Any] = (
-        {"face_dim": primary_grid_metadata.face_dim}
-        if primary_grid_metadata.face_dim is not None
-        else {}
-    )
+    extra: dict[str, Any] = {}
+    if primary_grid_metadata.face_dim is not None:
+        extra["face_dim"] = primary_grid_metadata.face_dim
+    if primary_grid_metadata.mesh is not None:
+        extra["mesh"] = primary_grid_metadata.mesh
     primary_grid = primary_grid_metadata.grid_cls.from_dataset(
         ds,
         primary_grid_metadata.crs,
@@ -3254,12 +3362,30 @@ def _guess_z_dimension(da: xr.DataArray) -> str | None:
 
 
 def _validate_grid_dims(grid: GridSystem, var: xr.DataArray) -> None:
-    missing = grid.dims - set(map(str, var.dims))
-    if missing:
-        raise GridDetectionError(
-            f"Variable {var.name!r} is missing spatial dim(s) {sorted(missing)} "
-            f"required by detected grid {type(grid).__name__}"
+    if (
+        isinstance(grid, Triangular)
+        and grid.mesh is not None
+        and var.attrs.get("location") == "edge"
+    ):
+        raise NotImplementedError(
+            f"Variable {var.name!r} is edge-located on a UGRID mesh; "
+            "edge-located rendering is not yet supported."
         )
+    spatial = grid.dims_for(var)
+    if not spatial:
+        raise GridDetectionError(
+            f"Variable {var.name!r} has no dim matching detected grid "
+            f"{type(grid).__name__} (grid dims: {sorted(grid.dims)}, "
+            f"var dims: {var.dims!r})"
+        )
+    if not isinstance(grid, Triangular):
+        missing = grid.dims - spatial
+        if missing:
+            raise GridDetectionError(
+                f"Variable {var.name!r} is missing spatial dim(s) "
+                f"{sorted(missing)} required by detected grid "
+                f"{type(grid).__name__}"
+            )
 
 
 def guess_grid_system(
@@ -3289,12 +3415,16 @@ def guess_grid_system(
     )
 
     if cache_key is not None and cache_key in _GRID_CACHE:
-        return _GRID_CACHE[cache_key]
+        cached = _GRID_CACHE[cache_key]
+        _validate_grid_dims(cached, ds[name])
+        return cached
 
     with GRID_DETECTION_LOCK:
         # Double-check in case another thread populated cache while we waited
         if cache_key is not None and cache_key in _GRID_CACHE:
-            return _GRID_CACHE[cache_key]
+            cached = _GRID_CACHE[cache_key]
+            _validate_grid_dims(cached, ds[name])
+            return cached
 
         try:
             cf_sub = ds.cf[[name]]
@@ -3302,6 +3432,20 @@ def guess_grid_system(
             raise VariableNotFoundError(
                 f"Variable {name!r} not found in dataset."
             ) from None
+
+        # cf-xarray doesn't follow the UGRID ``mesh`` attribute, so the cf
+        # subset is missing the mesh_topology variable, the connectivity, and
+        # the node coordinates. Without those, detect_mesh returns None and
+        # detection silently falls back to Delaunay on face centroids. Work
+        # from the full ds whenever the variable points at a UGRID mesh.
+        mesh_attr = ds[name].attrs.get("mesh")
+        is_ugrid_var = bool(
+            mesh_attr
+            and mesh_attr in ds.variables
+            and ds[mesh_attr].attrs.get("cf_role") == "mesh_topology"
+        )
+        if is_ugrid_var:
+            cf_sub = ds
 
         try:
             meta = guess_grid_metadata(cf_sub)
@@ -3319,8 +3463,10 @@ def guess_grid_system(
             and meta.Y in ds.variables
         ):
             sync_load_async(ds[[meta.X, meta.Y]])
-            # Refresh cf_sub so its X/Y Variables point at the loaded data
-            cf_sub = ds.cf[[name]]
+            # Refresh cf_sub so its X/Y Variables point at the loaded data.
+            # For UGRID stay on the full ds — the cf-subset path drops the
+            # mesh+connectivity.
+            cf_sub = ds if is_ugrid_var else ds.cf[[name]]
 
         # Cubed sphere has its own construction signature (face_dim) and uses
         # the outer ds for Z lookup, so dispatch directly instead of going
