@@ -40,6 +40,7 @@ from xpublish_tiles.grids import (
     _ugrid_topology_var,
     find_cubed_sphere_face_dim,
     guess_coordinate_vars,
+    guess_grid_metadata,
     guess_grid_system,
 )
 from xpublish_tiles.lib import (
@@ -1438,6 +1439,83 @@ def test_ugrid_face_node_connectivity():
 def test_ugrid_face_node_connectivity_none_for_non_ugrid():
     ds = REDGAUSS_N320.create()
     assert _ugrid_face_node_connectivity(ds) is None
+
+
+def test_ugrid_face_node_connectivity_missing_conn_var():
+    """Returns None when face_node_connectivity attr names a variable not in ds."""
+    ds = FVCOM_MACHIAS_BAY.create()
+    ds["mesh_topology"].attrs["face_node_connectivity"] = "nonexistent_var"
+    assert _ugrid_face_node_connectivity(ds) is None
+
+
+def test_ugrid_face_node_connectivity_wrong_face_dimension():
+    """Returns None when face_dimension attr doesn't match any dim of the conn var."""
+    ds = FVCOM_MACHIAS_BAY.create()
+    ds["mesh_topology"].attrs["face_dimension"] = "bad_dim"
+    assert _ugrid_face_node_connectivity(ds) is None
+
+
+def test_ugrid_face_node_connectivity_no_face_dimension_attr():
+    """face_axis defaults to 0 when face_dimension attr is absent."""
+    ds = FVCOM_MACHIAS_BAY.create()
+    ds["mesh_topology"].attrs.pop("face_dimension")
+    faces = _ugrid_face_node_connectivity(ds)
+    assert faces is not None
+    assert faces.shape == (266, 3)
+
+
+def test_ugrid_face_node_connectivity_non_triangular():
+    """Returns None for quad or mixed meshes (n_nodes_per_face != 3)."""
+    ds = FVCOM_MACHIAS_BAY.create()
+    # Replace nv with a (n_faces, 4) array to simulate a quad mesh
+    nv = ds["nv"]
+    quad_nv = xr.DataArray(
+        np.zeros((nv.shape[0], 4), dtype=nv.dtype),
+        dims=(nv.dims[0], "nMax_face_nodes_quad"),
+        attrs=nv.attrs,
+    )
+    ds = ds.drop_vars("nv").assign(nv=quad_nv)
+    assert _ugrid_face_node_connectivity(ds) is None
+
+
+def test_ugrid_face_node_connectivity_transposed():
+    """Handles (3, n_faces) connectivity where face_dimension is the second dim."""
+    ds = FVCOM_MACHIAS_BAY.create()
+    nv = ds["nv"]
+    # Transpose: shape (3, n_faces), face_dimension on axis 1
+    transposed = xr.DataArray(
+        nv.values.T,
+        dims=("nMax_face_nodes", "nele"),
+        attrs={**nv.attrs, "start_index": 1},
+    )
+    ds = ds.drop_vars("nv").assign(nv=transposed)
+    ds["mesh_topology"].attrs["face_dimension"] = "nele"
+    faces = _ugrid_face_node_connectivity(ds)
+    assert faces is not None
+    assert faces.shape == (266, 3)
+
+
+def test_ugrid_dispatch_when_meta_none_from_cf_sub():
+    """guess_grid_system re-runs guess_grid_metadata on full ds when cf_sub gives no grid."""
+    ds = FVCOM_MACHIAS_BAY.create()
+    ds.attrs["_xpublish_id"] = "ugrid_meta_none_test"
+    # Force meta=None from cf_sub by raising GridDetectionError on the first call,
+    # letting the second call (on full ds) succeed normally.
+    original = guess_grid_metadata
+
+    call_count = {"n": 0}
+
+    def patched(d, **kw):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise GridDetectionError("forced miss")
+        return original(d, **kw)
+
+    with patch("xpublish_tiles.grids.guess_grid_metadata", side_effect=patched):
+        grid = guess_grid_system(ds, "foo")
+
+    assert isinstance(grid, Triangular)
+    assert grid.indexes[0].preserve_holes is True
 
 
 def test_triangular_from_dataset_uses_ugrid_connectivity():
