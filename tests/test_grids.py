@@ -1515,7 +1515,7 @@ def test_ugrid_dispatch_when_meta_none_from_cf_sub():
         grid = guess_grid_system(ds, "foo")
 
     assert isinstance(grid, Triangular)
-    assert grid.indexes[0].preserve_holes is True
+    assert grid.indexes[0].tree.faces.shape == (266, 3)
 
 
 def test_triangular_from_dataset_uses_ugrid_connectivity():
