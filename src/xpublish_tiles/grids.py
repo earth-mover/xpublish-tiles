@@ -161,14 +161,14 @@ class GridMetadata:
 class GridMappingInfo:
     """Information about a grid mapping and its coordinates."""
 
-    grid_mapping: xr.DataArray | None
+    grid_mapping: dict[str, Any]
     crs: CRS | None
     coordinates: tuple[str, ...] | None
     geozarr_attrs: dict | None = None
 
     def __repr__(self) -> str:
         gm_repr = (
-            f"<DataArray: {self.grid_mapping.name}>"
+            f"<DataArray: {self.grid_mapping.get('name', 'unknown')}>"
             if self.grid_mapping is not None
             else "None"
         )
@@ -3064,28 +3064,26 @@ def _guess_coordinates_for_mapping(
     """
     assert mapping.crs is not None, "CRS must not be None at this point"
 
-    Xname: tuple[str, ...] | None = None
-    Yname: tuple[str, ...] | None = None
-
-    # Try GeoZarr spatial:dimensions first
-    if mapping.geozarr_attrs is not None:
-        spatial_dims = mapping.geozarr_attrs.get("spatial:dimensions")
-        if spatial_dims and len(spatial_dims) == 2:
-            # spatial:dimensions is [Y, X] order
-            Xname = (spatial_dims[1],)
-            Yname = (spatial_dims[0],)
-
-    # Check explicit coordinates from CF conventions
-    if Xname is None and mapping.coordinates:
+    # Check for GeoZarr spatial:dimensions first
+    spatial_dims = (
+        mapping.geozarr_attrs.get("spatial:dimensions")
+        if mapping.geozarr_attrs is not None
+        else None
+    )
+    if spatial_dims and len(spatial_dims) == 2:
+        # spatial:dimensions is [Y, X] order
+        Xname: tuple[str, ...] | None = (spatial_dims[1],)
+        Yname: tuple[str, ...] | None = (spatial_dims[0],)
+    elif mapping.coordinates:
+        # Use explicit coordinates from CF conventions
         Xname, Yname = guess_coordinate_vars(
             ds.reset_coords()[list(mapping.coordinates)].set_coords(
                 list(mapping.coordinates)
             ),
             mapping.crs,
         )
-
-    # Fall back to guessing from full dataset
-    if Xname is None:
+    else:
+        # Fall back to guessing from full dataset
         Xname, Yname = guess_coordinate_vars(ds, mapping.crs)
         if Xname is None or Yname is None:
             # FIXME: Can we be a little more targeted in what we are guessing?
@@ -3102,8 +3100,11 @@ def _guess_coordinates_for_mapping(
 
     if len(Xname) > 1 or (len(Yname) > 1 and len(ds.data_vars) == 1):
         first = next(iter(ds.data_vars.values()))
-        Xname = [x for x in Xname if x in first.attrs.get("coordinates", [])]
-        Yname = [y for y in Yname if y in first.attrs.get("coordinates", [])]
+        Xname = tuple(x for x in Xname if x in first.attrs.get("coordinates", []))
+        Yname = tuple(y for y in Yname if y in first.attrs.get("coordinates", []))
+
+    if not Xname or not Yname:
+        return None, None
 
     if len(Xname) > 1 or len(Yname) > 1:
         raise GridDetectionError(
@@ -3171,6 +3172,17 @@ def _detect_grid_metadata(
         assert Xname is not None and Yname is not None
         return GridMetadata(X=Xname, Y=Yname, grid_cls=Healpix, crs=mapping.crs)
 
+    # GeoZarr with geozarr_attrs uses RasterAffine with spatial:transform
+    if mapping.geozarr_attrs is not None and Xname is not None and Yname is not None:
+        spatial_transform = mapping.geozarr_attrs.get("spatial:transform")
+        return GridMetadata(
+            X=Xname,
+            Y=Yname,
+            crs=mapping.crs,
+            grid_cls=RasterAffine,
+            spatial_transform=spatial_transform,
+        )
+
     if Xname is None or Yname is None:
         # Handle the fallback case where coordinates can't be determined normally
         # Check for GeoZarr spatial: convention (array attrs override group attrs)
@@ -3189,12 +3201,11 @@ def _detect_grid_metadata(
             # spatial:dimensions is [Y, X] order
             y_dim, x_dim = spatial_dims[0], spatial_dims[1]
             Xname, Yname = x_dim, y_dim
-            grid_cls = RasterAffine
             return GridMetadata(
                 X=Xname,
                 Y=Yname,
                 crs=mapping.crs,
-                grid_cls=grid_cls,
+                grid_cls=RasterAffine,
                 spatial_transform=spatial_transform,
             )
 

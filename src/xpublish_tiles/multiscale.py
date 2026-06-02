@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import morecantile
+from pyproj import CRS
 
 import xarray as xr
 from xarray import DataTree
@@ -62,6 +63,53 @@ def get_pixel_size(ds: xr.Dataset) -> float | None:
     return None
 
 
+def get_crs(ds: xr.Dataset) -> CRS | None:
+    """Get CRS from proj: attributes.
+
+    Per GeoZarr spec, proj: attributes are on the group level.
+    """
+    if "proj:code" in ds.attrs:
+        try:
+            return CRS.from_user_input(ds.attrs["proj:code"])
+        except Exception:
+            pass
+    if "proj:wkt2" in ds.attrs:
+        try:
+            return CRS.from_wkt(ds.attrs["proj:wkt2"])
+        except Exception:
+            pass
+    return None
+
+
+def _pixel_size_in_tms_units(
+    pixel_size: float, data_crs: CRS | None, tms: morecantile.TileMatrixSet
+) -> float:
+    """Convert pixel size to TMS units for comparison.
+
+    If data CRS is geographic (degrees) and TMS is projected (meters),
+    convert using approximate meters per degree at the equator.
+    """
+    if data_crs is None:
+        return pixel_size
+
+    tms_crs = CRS.from_user_input(tms.crs)
+
+    # If both are in same units, no conversion needed
+    if data_crs.is_geographic == tms_crs.is_geographic:
+        return pixel_size
+
+    # Data is geographic (degrees), TMS is projected (meters)
+    if data_crs.is_geographic and not tms_crs.is_geographic:
+        # Approximate conversion: 1 degree ≈ 111,000 meters at equator
+        return pixel_size * 111_000
+
+    # Data is projected (meters), TMS is geographic (degrees)
+    if not data_crs.is_geographic and tms_crs.is_geographic:
+        return pixel_size / 111_000
+
+    return pixel_size
+
+
 def scan_resolution_levels(tree: DataTree) -> list[ResolutionLevel]:
     """Scan all datasets in tree and return sorted resolution levels.
 
@@ -103,11 +151,6 @@ def is_multiscale(tree: DataTree) -> bool:
     return len(levels) >= 2
 
 
-def _pixel_size_in_meters(pixel_size_degrees: float) -> float:
-    """Convert pixel size from degrees to approximate meters at equator."""
-    return pixel_size_degrees * 111_000
-
-
 def select_level_for_zoom(
     tree: DataTree,
     tms: morecantile.TileMatrixSet,
@@ -119,11 +162,17 @@ def select_level_for_zoom(
     or equal to the tile pixel size.
 
     Falls back to finest level if all levels are coarser than tile pixels.
+
+    Handles CRS unit conversion when data CRS differs from TMS CRS
+    (e.g., data in degrees, TMS in meters).
     """
     levels = scan_resolution_levels(tree)
     if not levels:
         msg = "No valid resolution levels found in tree"
         raise ValueError(msg)
+
+    # Get CRS from the first level's dataset for unit conversion
+    data_crs = get_crs(levels[0].dataset)
 
     tile_matrix = tms.matrix(zoom)
     tile_pixel_size = tile_matrix.cellSize
@@ -134,8 +183,9 @@ def select_level_for_zoom(
 
     # Iterate from coarsest to finest, find coarsest level still finer than tile
     for level in reversed(levels):
-        level_meters = _pixel_size_in_meters(level.pixel_size)
-        if level_meters <= tile_pixel_size:
+        # Convert pixel size to TMS units for proper comparison
+        pixel_size_tms = _pixel_size_in_tms_units(level.pixel_size, data_crs, tms)
+        if pixel_size_tms <= tile_pixel_size:
             selected = level
             break
 
