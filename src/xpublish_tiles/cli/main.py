@@ -8,6 +8,7 @@ import subprocess
 import threading
 import time
 import warnings
+from typing import Any
 
 import cf_xarray  # noqa: F401
 import uvicorn
@@ -15,6 +16,7 @@ import xpublish
 from fastapi.middleware.cors import CORSMiddleware
 
 import xarray as xr
+from xarray import DataTree
 from xpublish_tiles.cli.bench import run_benchmark
 from xpublish_tiles.logger import setup_logging
 from xpublish_tiles.testing.datasets import (
@@ -62,7 +64,7 @@ def create_onecrs_dataset(ds: xr.Dataset) -> xr.Dataset:
 
 def get_dataset_for_name(
     name: str, branch: str = "main", group: str = "", icechunk_cache: bool = False
-) -> xr.Dataset:
+) -> xr.Dataset | DataTree:
     if name == "global":
         ds = create_global_dataset().assign_attrs(_xpublish_id=name)
     elif name == "air":
@@ -206,8 +208,9 @@ def get_dataset_for_name(
             client = Client()
             repo = client.get_repo(name, config=config)
             session = repo.readonly_session(branch=branch)
+            store: Any = session.store  # IcechunkStore is a valid zarr store
             ds = xr.open_datatree(
-                session.store,
+                store,
                 group=group or None,
                 zarr_format=3,
                 consolidated=False,

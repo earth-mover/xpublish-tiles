@@ -164,6 +164,7 @@ class GridMappingInfo:
     grid_mapping: xr.DataArray | None
     crs: CRS | None
     coordinates: tuple[str, ...] | None
+    geozarr_attrs: dict | None = None
 
     def __repr__(self) -> str:
         gm_repr = (
@@ -173,7 +174,8 @@ class GridMappingInfo:
         )
         return (
             f"GridMappingInfo(grid_mapping={gm_repr}, "
-            f"crs={crs_repr(self.crs)}, coordinates={self.coordinates!r})"
+            f"crs={crs_repr(self.crs)}, coordinates={self.coordinates!r}, "
+            f"geozarr_attrs={self.geozarr_attrs!r})"
         )
 
 
@@ -2946,13 +2948,28 @@ def _guess_grid_mappings_and_crs(
             return [GridMappingInfo(None, DEFAULT_CRS, coordinates)]
 
         # Check for GeoZarr conventions (spatial: on arrays, proj: on group)
-        has_spatial_transform = "spatial:transform" in ds.attrs or any(
-            "spatial:transform" in ds[var].attrs for var in ds.data_vars
-        )
-        if has_spatial_transform:
+        # Per GeoZarr spec: array-level attrs override group-level attrs
+        geozarr_attrs: dict | None = None
+        for var in ds.data_vars:
+            var_attrs = ds[var].attrs
+            if "spatial:transform" in var_attrs:
+                geozarr_attrs = {
+                    k: v for k, v in var_attrs.items() if k.startswith("spatial:")
+                }
+                break
+        if geozarr_attrs is None and "spatial:transform" in ds.attrs:
+            geozarr_attrs = {
+                k: v for k, v in ds.attrs.items() if k.startswith("spatial:")
+            }
+
+        if geozarr_attrs is not None:
+            # Add proj: attrs from group level
+            proj_attrs = {k: v for k, v in ds.attrs.items() if k.startswith("proj:")}
+            geozarr_attrs.update(proj_attrs)
+
             crs = _parse_proj_convention_crs(ds.attrs)
             if crs is not None:
-                return [GridMappingInfo(None, crs, None)]
+                return [GridMappingInfo(None, crs, None, geozarr_attrs)]
 
         warnings.warn("No CRS detected", UserWarning, stacklevel=2)
         return [GridMappingInfo(None, None, None)]
@@ -3047,16 +3064,28 @@ def _guess_coordinates_for_mapping(
     """
     assert mapping.crs is not None, "CRS must not be None at this point"
 
-    if mapping.coordinates:
-        # Use explicit coordinate pair if provided
+    Xname: tuple[str, ...] | None = None
+    Yname: tuple[str, ...] | None = None
+
+    # Try GeoZarr spatial:dimensions first
+    if mapping.geozarr_attrs is not None:
+        spatial_dims = mapping.geozarr_attrs.get("spatial:dimensions")
+        if spatial_dims and len(spatial_dims) == 2:
+            # spatial:dimensions is [Y, X] order
+            Xname = (spatial_dims[1],)
+            Yname = (spatial_dims[0],)
+
+    # Check explicit coordinates from CF conventions
+    if Xname is None and mapping.coordinates:
         Xname, Yname = guess_coordinate_vars(
             ds.reset_coords()[list(mapping.coordinates)].set_coords(
                 list(mapping.coordinates)
             ),
             mapping.crs,
         )
-    else:
-        # No explicit coordinates, guess from full dataset
+
+    # Fall back to guessing from full dataset
+    if Xname is None:
         Xname, Yname = guess_coordinate_vars(ds, mapping.crs)
         if Xname is None or Yname is None:
             # FIXME: Can we be a little more targeted in what we are guessing?
