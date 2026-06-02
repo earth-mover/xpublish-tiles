@@ -38,7 +38,7 @@ from xpublish_tiles.lib import (
     transformer_from_crs,
     unwrap,
 )
-from xpublish_tiles.logger import get_context_logger, log_duration
+from xpublish_tiles.logger import get_context_logger, log_duration, logger
 from xpublish_tiles.utils import NUMBA_THREADING_LOCK, time_debug, xarray_object_key
 
 if TYPE_CHECKING:
@@ -2895,13 +2895,13 @@ def _parse_proj_convention_crs(attrs: dict) -> CRS | None:
     if "proj:code" in attrs:
         try:
             return CRS.from_user_input(attrs["proj:code"])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to parse proj:code {attrs['proj:code']!r}: {e}")
     if "proj:wkt2" in attrs:
         try:
             return CRS.from_wkt(attrs["proj:wkt2"])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to parse proj:wkt2: {e}")
     return None
 
 

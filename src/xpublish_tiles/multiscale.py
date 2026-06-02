@@ -6,6 +6,7 @@ from pyproj import CRS
 
 import xarray as xr
 from xarray import DataTree
+from xpublish_tiles.logger import logger
 
 if TYPE_CHECKING:
     from xpublish_tiles.grids import GridSystem
@@ -71,13 +72,13 @@ def get_crs(ds: xr.Dataset) -> CRS | None:
     if "proj:code" in ds.attrs:
         try:
             return CRS.from_user_input(ds.attrs["proj:code"])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to parse proj:code {ds.attrs['proj:code']!r}: {e}")
     if "proj:wkt2" in ds.attrs:
         try:
             return CRS.from_wkt(ds.attrs["proj:wkt2"])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to parse proj:wkt2: {e}")
     return None
 
 
@@ -139,38 +140,42 @@ def scan_resolution_levels(tree: DataTree) -> list[ResolutionLevel]:
     return levels
 
 
-def is_multiscale(tree: DataTree) -> bool:
-    """Check if DataTree has multiple resolution levels.
+def get_resolution_level(
+    tree: DataTree,
+    *,
+    zoom: int | None = None,
+    tms: morecantile.TileMatrixSet | None = None,
+) -> ResolutionLevel | None:
+    """Get the appropriate resolution level from a DataTree.
 
-    Returns True if there are 2+ datasets with spatial:transform attributes.
-    This handles both:
-    - GeoZarr convention (all levels in children)
-    - Native-at-root (root has data, children have overviews)
+    Behavior:
+    - If zoom + tms provided: Select best resolution level for that zoom
+    - If no zoom: Return finest (highest resolution) level available
+    - If no valid levels found: Return None
+
+    Returns ResolutionLevel with dataset and path info, or None if no levels found.
     """
     levels = scan_resolution_levels(tree)
-    return len(levels) >= 2
+
+    if not levels:
+        return None
+
+    if zoom is not None and tms is not None:
+        return _select_level_for_zoom_from_levels(levels, tms, zoom)
+
+    # Return finest level (first in sorted list)
+    return levels[0]
 
 
-def select_level_for_zoom(
-    tree: DataTree,
+def _select_level_for_zoom_from_levels(
+    levels: list[ResolutionLevel],
     tms: morecantile.TileMatrixSet,
     zoom: int,
 ) -> ResolutionLevel:
-    """Select the best resolution level for a given tile zoom.
+    """Select the best resolution level from pre-scanned levels.
 
-    Strategy: Choose the coarsest level whose pixel size is still finer than
-    or equal to the tile pixel size.
-
-    Falls back to finest level if all levels are coarser than tile pixels.
-
-    Handles CRS unit conversion when data CRS differs from TMS CRS
-    (e.g., data in degrees, TMS in meters).
+    Internal helper that operates on already-scanned levels to avoid rescanning.
     """
-    levels = scan_resolution_levels(tree)
-    if not levels:
-        msg = "No valid resolution levels found in tree"
-        raise ValueError(msg)
-
     # Get CRS from the first level's dataset for unit conversion
     data_crs = get_crs(levels[0].dataset)
 
@@ -205,15 +210,10 @@ def get_dataset(
     - If no zoom: Return finest (highest resolution) level available
     - If no valid levels found: Try root dataset, else raise ValueError
     """
-    levels = scan_resolution_levels(tree)
+    level = get_resolution_level(tree, zoom=zoom, tms=tms)
 
-    if levels:
-        if zoom is not None and tms is not None:
-            selected = select_level_for_zoom(tree, tms, zoom)
-        else:
-            # Return finest level (first in sorted list)
-            selected = levels[0]
-        return selected.dataset
+    if level is not None:
+        return level.dataset
 
     # No levels with spatial:transform - fall back to root dataset
     root_ds = tree.to_dataset()

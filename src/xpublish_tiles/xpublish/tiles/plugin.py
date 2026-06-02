@@ -31,9 +31,8 @@ from xpublish_tiles.logger import (
 )
 from xpublish_tiles.multiscale import (
     get_dataset,
-    is_multiscale,
+    get_resolution_level,
     scan_resolution_levels,
-    select_level_for_zoom,
 )
 from xpublish_tiles.pipeline import _infer_datatype, pipeline
 from xpublish_tiles.tiles_lib import get_min_zoom
@@ -130,6 +129,8 @@ class TilesPlugin(Plugin):
             datatree: DataTree = Depends(deps.datatree),
         ):
             """List of available tilesets for this dataset"""
+            # Extract dataset from datatree
+            # If multiscale, returns finest (highest resolution) level available
             dataset = get_dataset(datatree)
             # Get dataset metadata
             dataset_attrs = dataset.attrs
@@ -213,6 +214,8 @@ class TilesPlugin(Plugin):
             datatree: DataTree = Depends(deps.datatree),
         ):
             """Render a legend image for a styled variable."""
+            # Extract dataset from datatree
+            # If multiscale, returns finest (highest resolution) level available
             dataset = get_dataset(datatree)
             var_name = query.variables[0]
             if var_name not in dataset.data_vars:
@@ -307,6 +310,8 @@ class TilesPlugin(Plugin):
             datatree: DataTree = Depends(deps.datatree),
         ):
             """Get tileset metadata for this dataset"""
+            # Extract dataset from datatree
+            # If multiscale, returns finest (highest resolution) level available
             dataset = get_dataset(datatree)
             try:
                 return await async_run(create_tileset_metadata, dataset, tileMatrixSetId)
@@ -343,7 +348,7 @@ class TilesPlugin(Plugin):
             # Scan resolution levels once - use coarsest for metadata (any level works)
             levels = scan_resolution_levels(datatree)
             if levels:
-                dataset = levels[-1].dataset  # coarsest level
+                dataset = levels[-1].dataset  # coarsest level is last in sorted list
             else:
                 dataset = datatree.to_dataset()
 
@@ -451,7 +456,7 @@ class TilesPlugin(Plugin):
             tms = morecantile.tms.get(tileMatrixSetId)
 
             # Calculate optimal zoom levels based on grid and data characteristics
-            # dataset is already the coarsest level (or root if no levels)
+            # Get the first variable's grid system
             var_name = query.variables[0]
             grid = await async_run(guess_grid_system, dataset, var_name)
             da = dataset.cf[var_name]
@@ -460,7 +465,7 @@ class TilesPlugin(Plugin):
             bound_logger = bound_logger.bind(tms=tms.id)
             set_context_logger(bound_logger)
 
-            # Calculate min/max zoom based on coarsest level characteristics
+            # Calculate min/max zoom based on data characteristics
             xpublish_id = dataset.attrs.get("_xpublish_id")
             minzoom = await async_run(get_min_zoom, grid, tms, da, style, xpublish_id)
             maxzoom = tms.maxzoom
@@ -520,8 +525,15 @@ class TilesPlugin(Plugin):
 
             # Get the TMS for level selection
             tms = morecantile.tms.get(tileMatrixSetId)
+
             # Extract dataset at appropriate resolution level for this zoom
-            dataset = get_dataset(datatree, zoom=tileMatrix, tms=tms)
+            level = get_resolution_level(datatree, zoom=tileMatrix, tms=tms)
+            if level is not None:
+                dataset = level.dataset
+                resolution_level = level.path if level.path is not None else "root"
+            else:
+                dataset = datatree.to_dataset()
+                resolution_level = None
 
             style = query.style[0] if query.style else "raster"
             variant = query.style[1] if query.style else "default"
@@ -543,12 +555,6 @@ class TilesPlugin(Plugin):
                     status_code=422,
                     detail=f"Variable {var_name!r} cannot be tiled: {e}",
                 ) from None
-
-            # Track which resolution level was selected (for response header)
-            resolution_level = None
-            if is_multiscale(datatree):
-                level = select_level_for_zoom(datatree, tms, tileMatrix)
-                resolution_level = level.path if level.path is not None else "root"
 
             # Extract dimension selectors from query parameters
             selectors = {}

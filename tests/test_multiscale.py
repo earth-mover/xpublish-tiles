@@ -5,35 +5,34 @@ import xarray as xr
 from xarray import DataTree
 from xpublish_tiles.multiscale import (
     get_dataset,
-    is_multiscale,
+    get_resolution_level,
     scan_resolution_levels,
-    select_level_for_zoom,
 )
 from xpublish_tiles.testing.datasets import GEOZARR_MULTISCALE, NATIVE_AT_ROOT_MULTISCALE
 
 
-def test_is_multiscale_true():
+def test_multiscale_has_multiple_levels():
     geozarr_tree = GEOZARR_MULTISCALE.create()
-    assert is_multiscale(geozarr_tree) is True
+    assert len(scan_resolution_levels(geozarr_tree)) >= 2
 
     native_root_tree = NATIVE_AT_ROOT_MULTISCALE.create()
-    assert is_multiscale(native_root_tree) is True
+    assert len(scan_resolution_levels(native_root_tree)) >= 2
 
 
-def test_is_multiscale_false():
+def test_non_multiscale_has_fewer_than_two_levels():
     air_temp_ds = xr.tutorial.load_dataset("air_temperature")
     air_temp_tree = DataTree(dataset=air_temp_ds)
-    assert is_multiscale(air_temp_tree) is False
+    assert len(scan_resolution_levels(air_temp_tree)) < 2
 
     empty_tree = DataTree()
-    assert is_multiscale(empty_tree) is False
+    assert len(scan_resolution_levels(empty_tree)) < 2
 
     simple_ds = xr.Dataset(
         {"data": (("y", "x"), [[1, 2], [3, 4]])},
         attrs={"spatial:transform": [1.0, 0, 0, 0, -1.0, 0]},
     )
     simple_tree = DataTree(dataset=simple_ds)
-    assert is_multiscale(simple_tree) is False
+    assert len(scan_resolution_levels(simple_tree)) < 2
 
 
 def test_scan_geozarr_finds_all_levels():
@@ -83,38 +82,42 @@ def tms():
     return morecantile.tms.get("WebMercatorQuad")
 
 
-def test_select_level_high_zoom_returns_finest_geozarr(tms):
+def test_get_resolution_level_high_zoom_returns_finest_geozarr(tms):
     tree = GEOZARR_MULTISCALE.create()
-    level = select_level_for_zoom(tree, tms, zoom=15)
+    level = get_resolution_level(tree, zoom=15, tms=tms)
+    assert level is not None
     assert level.path == "0"
     assert level.pixel_size == 0.01
 
 
-def test_select_level_low_zoom_returns_coarsest_geozarr(tms):
+def test_get_resolution_level_low_zoom_returns_coarsest_geozarr(tms):
     tree = GEOZARR_MULTISCALE.create()
-    level = select_level_for_zoom(tree, tms, zoom=0)
+    level = get_resolution_level(tree, zoom=0, tms=tms)
+    assert level is not None
     assert level.path == "2"
     assert level.pixel_size == 0.04
 
 
-def test_select_level_high_zoom_returns_root_native_at_root(tms):
+def test_get_resolution_level_high_zoom_returns_root_native_at_root(tms):
     tree = NATIVE_AT_ROOT_MULTISCALE.create()
-    level = select_level_for_zoom(tree, tms, zoom=15)
+    level = get_resolution_level(tree, zoom=15, tms=tms)
+    assert level is not None
     assert level.path is None
     assert level.pixel_size == 0.01
 
 
-def test_select_level_low_zoom_returns_coarsest_native_at_root(tms):
+def test_get_resolution_level_low_zoom_returns_coarsest_native_at_root(tms):
     tree = NATIVE_AT_ROOT_MULTISCALE.create()
-    level = select_level_for_zoom(tree, tms, zoom=0)
+    level = get_resolution_level(tree, zoom=0, tms=tms)
+    assert level is not None
     assert level.path == "1"
     assert level.pixel_size == 0.04
 
 
-def test_select_level_raises_on_empty_tree(tms):
+def test_get_resolution_level_returns_none_on_empty_tree(tms):
     tree = DataTree()
-    with pytest.raises(ValueError, match="No valid resolution levels"):
-        select_level_for_zoom(tree, tms, zoom=10)
+    level = get_resolution_level(tree, zoom=10, tms=tms)
+    assert level is None
 
 
 def test_get_dataset_geozarr_high_zoom_returns_finest():

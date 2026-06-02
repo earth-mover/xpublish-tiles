@@ -64,6 +64,7 @@ def create_onecrs_dataset(ds: xr.Dataset) -> xr.Dataset:
 def get_dataset_for_name(
     name: str, branch: str = "main", group: str = "", icechunk_cache: bool = False
 ) -> xr.Dataset | DataTree:
+    """Returns a datatree for multiscale datasets, or a dataset for single-scale datasets."""
     if name == "global":
         ds = create_global_dataset().assign_attrs(_xpublish_id=name)
     elif name == "air":
@@ -207,9 +208,8 @@ def get_dataset_for_name(
             client = Client()
             repo = client.get_repo(name, config=config)
             session = repo.readonly_session(branch=branch)
-            store = session.store
-            ds = xr.open_datatree(
-                store,  # ty: ignore[invalid-argument-type]
+            ds: xr.DataTree = xr.open_datatree(
+                session.store,  # ty: ignore[invalid-argument-type]
                 group=group or None,
                 zarr_format=3,
                 consolidated=False,
