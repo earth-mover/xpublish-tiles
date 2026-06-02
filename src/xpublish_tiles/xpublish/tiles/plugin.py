@@ -29,11 +29,7 @@ from xpublish_tiles.logger import (
     set_context_logger,
     with_accumulated_logs,
 )
-from xpublish_tiles.multiscale import (
-    get_dataset,
-    get_resolution_level,
-    scan_resolution_levels,
-)
+from xpublish_tiles.multiscale import get_dataset, get_resolution_level
 from xpublish_tiles.pipeline import _infer_datatype, pipeline
 from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import ImageFormat, LegendFormat, QueryParams
@@ -345,12 +341,9 @@ class TilesPlugin(Plugin):
             if tileMatrixSetId not in TILE_MATRIX_SET_SUMMARIES:
                 raise HTTPException(status_code=404, detail="Tile matrix set not found")
 
-            # Scan resolution levels once - use coarsest for metadata (any level works)
-            levels = scan_resolution_levels(datatree)
-            if levels:
-                dataset = levels[-1].dataset  # coarsest level is last in sorted list
-            else:
-                dataset = datatree.to_dataset()
+            # Extract dataset from datatree
+            # If multiscale, returns finest (highest resolution) level available
+            dataset = get_dataset(datatree)
 
             # Extract dimension selectors from query parameters
             selectors = {}
