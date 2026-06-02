@@ -8,7 +8,6 @@ import subprocess
 import threading
 import time
 import warnings
-from typing import Any
 
 import cf_xarray  # noqa: F401
 import uvicorn
@@ -208,9 +207,9 @@ def get_dataset_for_name(
             client = Client()
             repo = client.get_repo(name, config=config)
             session = repo.readonly_session(branch=branch)
-            store: Any = session.store  # IcechunkStore is a valid zarr store
+            store = session.store
             ds = xr.open_datatree(
-                store,
+                store,  # ty: ignore[invalid-argument-type]
                 group=group or None,
                 zarr_format=3,
                 consolidated=False,
@@ -360,6 +359,9 @@ def _run_single_dataset_benchmark(dataset_name, args, ds=None):
 
         # Use titiler.xarray if requested
         if hasattr(args, "titiler") and args.titiler:
+            if not isinstance(ds, xr.Dataset):
+                print("  WARNING: titiler benchmark only supports Dataset, not DataTree")
+                return None
             from xpublish_tiles.cli.titiler_bench import run_titiler_benchmark
 
             return run_titiler_benchmark(
@@ -656,7 +658,7 @@ def main():
 
             if not ds.data_vars:
                 raise ValueError(f"No data variables found in dataset '{dataset_name}'")
-            first_var = next(iter(ds.data_vars))
+            first_var = str(next(iter(ds.data_vars)))
 
             needs_colorscale = (
                 "valid_min" not in ds[first_var].attrs
