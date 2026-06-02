@@ -1995,6 +1995,7 @@ DATASET_LOOKUP = {
     "global_nans": GLOBAL_NANS,
     "redgauss_n320": REDGAUSS_N320,
     "fvcom_machias_bay": FVCOM_MACHIAS_BAY,
+    "ugrid_triangles": UGRID_TRIANGLES,
     "tripole_antimeridian": TRIPOLE_ANTIMERIDIAN,
     "cubed_sphere": CUBED_SPHERE,
     "global_healpix_l3": GLOBAL_HEALPIX_L3,

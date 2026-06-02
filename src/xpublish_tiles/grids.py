@@ -58,8 +58,6 @@ class UgridIndexer:
     connectivity: np.ndarray
     # face indices that intersect the anti-meridian
     antimeridian_vertices: dict[str, np.ndarray]
-    # original face indices in the source mesh corresponding to connectivity rows;
-    # used to slice face-located variables (e.g. FVCOM cell-centred values)
     face_indices: np.ndarray | None = None
 
     @property
@@ -2386,18 +2384,54 @@ class Triangular(GridSystem):
             )
         return cast(xr.Dataset, da.to_dataset().reset_coords()[[da.name, self.X, self.Y]])
 
-    def isel_indexer(self, ds: xr.Dataset, indexer: "UgridIndexer") -> xr.Dataset:
-        """Apply a UgridIndexer to ``ds``, slicing node coords by ``vertices``
-        and face-located vars by ``face_indices`` when available.
+    def average_faces_to_nodes(
+        self,
+        subset: xr.DataArray,
+        indexer: "UgridIndexer",
+        Xname: str,
+        Yname: str,
+    ) -> xr.DataArray:
+        """Convert a face-located DataArray to node-located by averaging adjacent faces.
+
+        Returns a node DataArray with source-CRS X/Y coords taken from the
+        stored CellTreeIndex vertices, ready for coordinate transformation.
         """
-        kwargs: dict[str, Any] = {self.dim: indexer.vertices}
+        cell_index = self.indexes[0]
+        assert isinstance(cell_index, CellTreeIndex)
+        selected = indexer.vertices
+        node_coords = cell_index.tree.vertices[selected]
+        conn = indexer.connectivity
+        face_vals = np.asarray(subset.values, dtype=np.float64)
+        node_vals = numbagg.group_nanmean(
+            np.repeat(face_vals, 3),
+            conn.ravel(),
+            num_labels=len(selected),
+        )
+        return xr.DataArray(
+            node_vals,
+            dims=[self.dim],
+            coords={
+                Xname: (self.dim, node_coords[:, 0]),
+                Yname: (self.dim, node_coords[:, 1]),
+            },
+            name=subset.name,
+            attrs=subset.attrs,
+        )
+
+    def isel_indexer(self, ds: xr.Dataset, indexer: "UgridIndexer") -> xr.Dataset:
+        """Apply a UgridIndexer to ``ds``.
+
+        Face-located datasets are sliced by face_indices only; node-located
+        datasets are sliced by vertices.
+        """
         if (
             self.face_dim is not None
             and self.face_dim in ds.dims
             and indexer.face_indices is not None
         ):
-            kwargs[self.face_dim] = indexer.face_indices
-        return ds.isel(kwargs)
+            return ds.isel({self.face_dim: indexer.face_indices})
+        else:
+            return ds.isel({self.dim: indexer.vertices})
 
     def sel(self, *, bbox: BBox) -> Slicers:
         index = next(iter(self.indexes))
@@ -3300,7 +3334,9 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
     if primary_grid_metadata.face_dim is not None:
         extra["face_dim"] = primary_grid_metadata.face_dim
     if primary_grid_metadata.mesh is not None:
-        extra["mesh"] = primary_grid_metadata.mesh
+        extra["mesh"] = (
+            primary_grid_metadata.mesh
+        )  # TODO: review interaction with alternates
     primary_grid = primary_grid_metadata.grid_cls.from_dataset(
         ds,
         primary_grid_metadata.crs,
