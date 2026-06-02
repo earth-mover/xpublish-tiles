@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any, cast
 
+import numbagg
 import numpy as np
 import pandas as pd
 import pyproj
@@ -13,6 +14,7 @@ from pyproj.aoi import BBox
 import xarray as xr
 from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
+    CellTreeIndex,
     Curvilinear,
     FacetedGridSystem,
     FacetedIndexer,
@@ -310,12 +312,17 @@ def apply_slicers(
     # For Healpix, also keep the cell_ids coordinate
     if isinstance(grid, Healpix):
         pick.append(grid.cell_ids_name)
-    ds = cast(
-        xr.Dataset,
-        da.to_dataset()
-        # drop any coordinate vars we don't need
-        .reset_coords()[[da.name, *pick]],
-    )
+    if isinstance(grid, Triangular):
+        # Face-located vars don't inherit node X/Y as coords (different dim);
+        # let Triangular synthesize them from its stored vertex array.
+        ds = grid.build_subset_dataset(da)
+    else:
+        ds = cast(
+            xr.Dataset,
+            da.to_dataset()
+            # drop any coordinate vars we don't need
+            .reset_coords()[[da.name, *pick]],
+        )
 
     subsets: list[xr.Dataset]
     if isinstance(grid, GridSystem2D):
@@ -336,7 +343,7 @@ def apply_slicers(
         concat_dim = grid.Xdim
     elif isinstance(grid, Triangular):
         subsets = [
-            ds.isel({grid.Xdim: sl.vertices})
+            grid.isel_indexer(ds, sl)
             for sl in slicers[grid.Xdim]
             if isinstance(sl, UgridIndexer)
         ]
@@ -976,7 +983,7 @@ def apply_query(
                     f"Automatic selection failed with error: {str(e)!r}."
                 ) from None
 
-        if extra_dims := (set(array.dims) - grid.dims):
+        if extra_dims := (set(array.dims) - grid.dims_for(array)):
             # Note: this will handle squeezing of label-based selection
             # along datetime coordinates
             array = array.isel(dict.fromkeys(extra_dims, -1))
@@ -1426,6 +1433,62 @@ async def _transform_raster_patch(
             raise NotImplementedError
 
     input_to_output = transformer_from_crs(source_crs, output_crs)
+
+    # For face-located Triangular data: synthesize node coords from the
+    # CellTreeIndex, transform them, average face values to nodes, then
+    # return a node DataArray so the existing trimesh renderer works unchanged.
+    if isinstance(grid, Triangular) and isinstance(patch.indexer, UgridIndexer):
+        face_dim = grid.face_dim
+        if face_dim is not None and face_dim in subset.dims:
+            cell_index = grid.indexes[0]
+            assert isinstance(cell_index, CellTreeIndex)
+            selected = patch.indexer.vertices
+            node_src_coords = cell_index.tree.vertices[
+                selected
+            ]  # (n_nodes, 2) in source CRS
+            coord_da = xr.DataArray(
+                np.zeros(len(selected), dtype=np.float32),
+                dims=[grid.dim],
+                coords={
+                    alternate.X: (grid.dim, node_src_coords[:, 0]),
+                    alternate.Y: (grid.dim, node_src_coords[:, 1]),
+                },
+            )
+            with log_duration("transform_coordinates", "🔄"):
+                newX, newY = await transform_coordinates(
+                    coord_da, alternate.X, alternate.Y, input_to_output
+                )
+            newX, newY, _ = await async_run(
+                _fix_discontinuity,
+                grid,
+                newX,
+                newY,
+                has_discontinuity=has_discontinuity,
+                transformer=input_to_output,
+                bbox=bbox,
+                ugrid_indexer=patch.indexer,
+                hp_indexer=None,
+                style="raster",
+            )
+            conn = patch.indexer.connectivity  # (n_faces, 3) 0-based into selected nodes
+            face_vals = np.asarray(subset.values, dtype=np.float64)
+            n_nodes = len(selected)
+            node_vals = numbagg.group_nanmean(
+                np.repeat(face_vals, 3),
+                conn.ravel(),
+                num_labels=n_nodes,
+            )
+            return xr.DataArray(
+                node_vals,
+                dims=[grid.dim],
+                coords={
+                    grid.X: (grid.dim, np.asarray(newX)),
+                    grid.Y: (grid.dim, np.asarray(newY)),
+                },
+                name=subset.name,
+                attrs=subset.attrs,
+            )
+
     with log_duration("transform_coordinates", "🔄"):
         newX, newY = await transform_coordinates(
             subset, alternate.X, alternate.Y, input_to_output

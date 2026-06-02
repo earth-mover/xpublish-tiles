@@ -253,7 +253,7 @@ async def extract_dimension_extents(
 
     # Grid-owned dims (X, Y, and faceted ``face_dim``) are skipped for
     # custom dimension extents — they're an implementation detail of the grid.
-    spatial_dims = grid.dims
+    spatial_dims = grid.dims_for(data_array)
     # ``grid.Z`` may be a non-dim coord (e.g. ``deptht`` along dim ``k``).
     # Map the underlying dim to the coord name so the extent reports the
     # coord variable instead of the bare dim.
