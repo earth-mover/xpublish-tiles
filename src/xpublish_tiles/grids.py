@@ -161,14 +161,14 @@ class GridMetadata:
 class GridMappingInfo:
     """Information about a grid mapping and its coordinates."""
 
-    grid_mapping: dict[str, Any]
+    grid_mapping: xr.DataArray | None
     crs: CRS | None
     coordinates: tuple[str, ...] | None
     geozarr_attrs: dict | None = None
 
     def __repr__(self) -> str:
         gm_repr = (
-            f"<DataArray: {self.grid_mapping.get('name', 'unknown')}>"
+            f"<DataArray: {self.grid_mapping.name}>"
             if self.grid_mapping is not None
             else "None"
         )

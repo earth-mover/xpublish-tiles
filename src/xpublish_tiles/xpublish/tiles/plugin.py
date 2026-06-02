@@ -340,7 +340,12 @@ class TilesPlugin(Plugin):
             if tileMatrixSetId not in TILE_MATRIX_SET_SUMMARIES:
                 raise HTTPException(status_code=404, detail="Tile matrix set not found")
 
-            dataset = get_dataset(datatree)
+            # Scan resolution levels once - use coarsest for metadata (any level works)
+            levels = scan_resolution_levels(datatree)
+            if levels:
+                dataset = levels[-1].dataset  # coarsest level
+            else:
+                dataset = datatree.to_dataset()
 
             # Extract dimension selectors from query parameters
             selectors = {}
@@ -446,24 +451,17 @@ class TilesPlugin(Plugin):
             tms = morecantile.tms.get(tileMatrixSetId)
 
             # Calculate optimal zoom levels based on grid and data characteristics
-            # For multiscale datasets, use the coarsest level to determine minzoom
-            # since that level can render at the lowest zoom levels
+            # dataset is already the coarsest level (or root if no levels)
             var_name = query.variables[0]
-            levels = scan_resolution_levels(datatree)
-            if levels:
-                # Use coarsest level (last in list, sorted by pixel size ascending)
-                coarsest_ds = levels[-1].dataset
-            else:
-                coarsest_ds = dataset
-            grid = await async_run(guess_grid_system, coarsest_ds, var_name)
-            da = coarsest_ds.cf[var_name]
+            grid = await async_run(guess_grid_system, dataset, var_name)
+            da = dataset.cf[var_name]
 
             bound_logger = get_context_logger()
             bound_logger = bound_logger.bind(tms=tms.id)
             set_context_logger(bound_logger)
 
             # Calculate min/max zoom based on coarsest level characteristics
-            xpublish_id = coarsest_ds.attrs.get("_xpublish_id")
+            xpublish_id = dataset.attrs.get("_xpublish_id")
             minzoom = await async_run(get_min_zoom, grid, tms, da, style, xpublish_id)
             maxzoom = tms.maxzoom
 

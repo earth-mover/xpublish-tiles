@@ -1972,8 +1972,8 @@ def native_at_root_multiscale_grid(
         )
 
         # Use unique dimension names for each overview level (Y_0, X_0, Y_1, X_1, etc.)
-        # When datasets in a DataTree share the same dimension names but have different sizes,
-        # xarray tries to align them, which can cause errors or unexpected broadcasting behavior
+        # When datasets in a DataTree share the same dimension names
+        # but have different sizes, xarray tries to align them
         y_dim = f"Y_{i}"
         x_dim = f"X_{i}"
         spatial_transform = [res, 0.0, origin_x, 0.0, -res, origin_y]
