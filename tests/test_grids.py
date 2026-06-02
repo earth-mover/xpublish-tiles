@@ -24,6 +24,7 @@ from xpublish_tiles.grids import (
     _GRID_CACHE,
     X_COORD_PATTERN,
     Y_COORD_PATTERN,
+    CellTreeIndex,
     CubedSphere,
     Curvilinear,
     CurvilinearCellIndex,
@@ -1521,6 +1522,7 @@ def test_ugrid_dispatch_when_meta_none_from_cf_sub():
         grid = guess_grid_system(ds, "foo")
 
     assert isinstance(grid, Triangular)
+    assert isinstance(grid.indexes[0], CellTreeIndex)
     assert grid.indexes[0].tree.faces.shape == (266, 3)
 
 
@@ -1534,6 +1536,7 @@ def test_triangular_from_dataset_uses_ugrid_connectivity():
 
     mock_delaunay.assert_not_called()
     assert isinstance(grid, Triangular)
+    assert isinstance(grid.indexes[0], CellTreeIndex)
     assert grid.indexes[0].tree.faces.shape == (266, 3)
     assert grid.face_dim == "nele"
 

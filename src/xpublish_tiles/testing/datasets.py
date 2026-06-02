@@ -1606,7 +1606,8 @@ def create_fvcom_ugrid(
     ds["foo"].attrs["coordinates"] = "lon lat"
     ds["foo"].attrs["valid_min"] = 0.0
     ds["foo"].attrs["valid_max"] = 100.0
-    return ds.assign_attrs(attrs)
+    ds.attrs.update(attrs)
+    return ds
 
 
 FVCOM_MACHIAS_BAY = Dataset(
