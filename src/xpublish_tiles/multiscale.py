@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import morecantile
 from pyproj import CRS
@@ -7,10 +6,6 @@ from pyproj import CRS
 import xarray as xr
 from xarray import DataTree
 from xpublish_tiles.logger import logger
-
-if TYPE_CHECKING:
-    from xpublish_tiles.grids import GridSystem
-    from xpublish_tiles.tiles_lib import get_min_zoom as _get_min_zoom
 
 
 @dataclass
@@ -20,28 +15,6 @@ class ResolutionLevel:
     path: str | None  # None for root, child name for children
     dataset: xr.Dataset
     pixel_size: float
-    min_zoom: int | None = None
-
-    def get_min_zoom(
-        self,
-        *,
-        grid: "GridSystem",
-        tms: morecantile.TileMatrixSet,
-        variable: str,
-        style: str,
-        xpublish_id: str | None = None,
-    ) -> int:
-        """Get or compute the minimum renderable zoom for this level.
-
-        Uses the cached min_zoom if available, otherwise computes it using
-        tiles_lib.get_min_zoom and caches the result.
-        """
-        if self.min_zoom is not None:
-            return self.min_zoom
-
-        da = self.dataset[variable]
-        self.min_zoom = _get_min_zoom(grid, tms, da, style, xpublish_id)
-        return self.min_zoom
 
 
 def get_pixel_size(ds: xr.Dataset) -> float | None:

@@ -1,9 +1,11 @@
 import morecantile
 import pytest
+from pyproj import CRS
 
 import xarray as xr
 from xarray import DataTree
 from xpublish_tiles.multiscale import (
+    get_crs,
     get_dataset,
     get_resolution_level,
     scan_resolution_levels,
@@ -183,3 +185,28 @@ def test_get_dataset_empty_raises():
 
     with pytest.raises(ValueError, match="no extractable dataset"):
         get_dataset(tree)
+
+
+def test_get_crs_invalid_proj_code_logs_error(caplog):
+    """Test that invalid proj:code logs error and falls through."""
+    ds = xr.Dataset(attrs={"proj:code": "INVALID_CRS_CODE"})
+    result = get_crs(ds)
+    assert result is None
+    assert "Failed to parse proj:code" in caplog.text
+
+
+def test_get_crs_invalid_proj_wkt2_logs_error(caplog):
+    """Test that invalid proj:wkt2 logs error and returns None."""
+    ds = xr.Dataset(attrs={"proj:wkt2": "NOT_VALID_WKT"})
+    result = get_crs(ds)
+    assert result is None
+    assert "Failed to parse proj:wkt2" in caplog.text
+
+
+def test_get_crs_falls_back_to_wkt2():
+    """Test that get_crs falls back to proj:wkt2 when proj:code not present."""
+    wkt = CRS.from_epsg(4326).to_wkt()
+    ds = xr.Dataset(attrs={"proj:wkt2": wkt})
+    result = get_crs(ds)
+    assert result is not None
+    assert result.to_epsg() == 4326
