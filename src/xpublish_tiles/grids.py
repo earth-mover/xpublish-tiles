@@ -3458,6 +3458,9 @@ def guess_grid_system(
     passing it avoids redundant cf-accessor lookups when this function is
     called repeatedly per variable.
     """
+    if name not in ds:
+        raise VariableNotFoundError(f"Variable {name!r} not found in dataset.")
+
     if cf_coords is None:
         cf_coords = ds.cf.coordinates
 
