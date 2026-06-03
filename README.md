@@ -40,7 +40,7 @@ Here `lat[lat]` means a coordinate variable named `lat` with one dimension named
 We attempt to require as little metadata as possible, and attempts to infer as much as possible. However, it is *always* better
 for you to annotate your dataset using the CF & ACDD conventions as well as possible.
 
-### GeoZarr & Multiscale Support
+### GeoZarr & Multiscale Overviews Support
 
 `xpublish-tiles` supports [GeoZarr](https://geozarr.org)-conformant datasets and automatically handles multiscale pyramids (overviews). Multiscale support requires datasets to follow the GeoZarr conventions: [`proj:`](https://github.com/zarr-conventions/geo-proj), [`spatial:`](https://github.com/zarr-conventions/spatial), and [`multiscales`](https://github.com/zarr-conventions/multiscales).
 
