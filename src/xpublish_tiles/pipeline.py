@@ -310,12 +310,18 @@ def apply_slicers(
     # For Healpix, also keep the cell_ids coordinate
     if isinstance(grid, Healpix):
         pick.append(grid.cell_ids_name)
-    ds = cast(
-        xr.Dataset,
-        da.to_dataset()
-        # drop any coordinate vars we don't need
-        .reset_coords()[[da.name, *pick]],
-    )
+    if isinstance(grid, Triangular):
+        # Face-located vars don't inherit node X/Y as coords (different dim);
+        # let Triangular synthesize them from its stored vertex array.
+        ds = grid.build_subset_dataset(da)
+    else:
+        # TODO: generalise build_subset_dataset to all grid systems (issue #154)
+        ds = cast(
+            xr.Dataset,
+            da.to_dataset()
+            # drop any coordinate vars we don't need
+            .reset_coords()[[da.name, *pick]],
+        )
 
     subsets: list[xr.Dataset]
     if isinstance(grid, GridSystem2D):
@@ -336,7 +342,7 @@ def apply_slicers(
         concat_dim = grid.Xdim
     elif isinstance(grid, Triangular):
         subsets = [
-            ds.isel({grid.Xdim: sl.vertices})
+            grid.isel_indexer(ds, sl)
             for sl in slicers[grid.Xdim]
             if isinstance(sl, UgridIndexer)
         ]
@@ -976,7 +982,7 @@ def apply_query(
                     f"Automatic selection failed with error: {str(e)!r}."
                 ) from None
 
-        if extra_dims := (set(array.dims) - grid.dims):
+        if extra_dims := (set(array.dims) - grid.dims_for(array)):
             # Note: this will handle squeezing of label-based selection
             # along datetime coordinates
             array = array.isel(dict.fromkeys(extra_dims, -1))
@@ -1426,6 +1432,16 @@ async def _transform_raster_patch(
             raise NotImplementedError
 
     input_to_output = transformer_from_crs(source_crs, output_crs)
+
+    # For face-located Triangular data: convert to node-located via averaging,
+    # then fall through to the shared coordinate-transform path below.
+    if isinstance(grid, Triangular) and isinstance(patch.indexer, UgridIndexer):
+        face_dim = grid.face_dim
+        if face_dim is not None and face_dim in subset.dims:
+            subset = grid.average_faces_to_nodes(
+                subset, patch.indexer, alternate.X, alternate.Y
+            )
+
     with log_duration("transform_coordinates", "🔄"):
         newX, newY = await transform_coordinates(
             subset, alternate.X, alternate.Y, input_to_output

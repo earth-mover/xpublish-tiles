@@ -9,6 +9,7 @@ import numpy.testing as npt
 import pandas as pd
 import pytest
 import rasterix
+import triangle
 from affine import Affine
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
@@ -22,6 +23,7 @@ from xpublish_tiles.grids import (
     _GRID_CACHE,
     X_COORD_PATTERN,
     Y_COORD_PATTERN,
+    CellTreeIndex,
     CubedSphere,
     Curvilinear,
     CurvilinearCellIndex,
@@ -35,8 +37,10 @@ from xpublish_tiles.grids import (
     Rectilinear,
     Triangular,
     UgridIndexer,
+    _guess_grid_for_dataset,
     find_cubed_sphere_face_dim,
     guess_coordinate_vars,
+    guess_grid_metadata,
     guess_grid_system,
 )
 from xpublish_tiles.lib import (
@@ -63,6 +67,8 @@ from xpublish_tiles.testing.datasets import (
     EU3035,
     EU3035_HIRES,
     FORECAST,
+    FVCOM,
+    FVCOM_MACHIAS_BAY,
     GLOBAL_HEALPIX_L3,
     HRRR,
     HRRR_CRS_WKT,
@@ -73,6 +79,7 @@ from xpublish_tiles.testing.datasets import (
     RADAR,
     REDGAUSS_N320,
     REGIONAL_HEALPIX_NA,
+    UGRID_TRIANGLES,
     UTM33S_HIRES,
     UTM50S_HIRES,
     Dataset,
@@ -81,6 +88,7 @@ from xpublish_tiles.testing.lib import as_pytestparams
 from xpublish_tiles.testing.tiles import TILES
 from xpublish_tiles.tiles_lib import get_max_zoom, get_min_zoom
 from xpublish_tiles.types import ContinuousData
+from xpublish_tiles.ugrid import detect_mesh, load_connectivity
 
 TRIANGULAR_SENTINEL = 1
 HEALPIX_SENTINEL = 2
@@ -1429,3 +1437,306 @@ def test_detect_orca_tripole_fold_row() -> None:
     (index,) = grid.indexes
     assert isinstance(index, CurvilinearCellIndex)
     assert index.tripolar_fold_row == ny - 1
+
+
+def test_detect_mesh_ugrid():
+    ds = FVCOM_MACHIAS_BAY.create()
+    mesh = detect_mesh(ds)
+    assert mesh is not None
+    assert mesh.name == "mesh_topology"
+
+    ds = REDGAUSS_N320.create()
+    assert detect_mesh(ds) is None
+
+
+def test_load_connectivity():
+    ds = FVCOM_MACHIAS_BAY.create()
+    mesh = detect_mesh(ds)
+    assert mesh is not None
+    faces = load_connectivity(ds, mesh)
+    assert faces.shape == (266, 3)
+    assert faces.dtype == np.int64
+    assert faces.min() == 0
+    assert faces.max() == 183
+
+    ds = REDGAUSS_N320.create()
+    assert detect_mesh(ds) is None
+
+
+def test_detect_mesh_missing_conn_var():
+    """Returns None when face_node_connectivity attr names a variable not in ds."""
+    ds = FVCOM_MACHIAS_BAY.create()
+    ds["mesh_topology"].attrs["face_node_connectivity"] = "nonexistent_var"
+    assert detect_mesh(ds) is None
+
+
+def test_detect_mesh_wrong_face_dimension():
+    """Returns None when face_dimension attr doesn't match any dim of the conn var."""
+    ds = FVCOM_MACHIAS_BAY.create()
+    ds["mesh_topology"].attrs["face_dimension"] = "bad_dim"
+    assert detect_mesh(ds) is None
+
+
+def test_detect_mesh_no_face_dimension_attr():
+    """Infers face axis when face_dimension attr is absent."""
+    ds = FVCOM_MACHIAS_BAY.create()
+    ds["mesh_topology"].attrs.pop("face_dimension")
+    mesh = detect_mesh(ds)
+    assert mesh is not None
+    faces = load_connectivity(ds, mesh)
+    assert faces.shape == (266, 3)
+
+
+def test_detect_mesh_non_triangular():
+    """Returns None for quad or mixed meshes (n_nodes_per_face != 3)."""
+    ds = FVCOM_MACHIAS_BAY.create()
+    nv = ds["nv"]
+    quad_nv = xr.DataArray(
+        np.zeros((nv.shape[0], 4), dtype=nv.dtype),
+        dims=(nv.dims[0], "nMax_face_nodes_quad"),
+        attrs=nv.attrs,
+    )
+    ds = ds.drop_vars("nv").assign(nv=quad_nv)
+    assert detect_mesh(ds) is None
+
+
+def test_detect_mesh_transposed_connectivity():
+    """Handles (3, n_faces) connectivity where face_dimension is the second dim."""
+    ds = FVCOM_MACHIAS_BAY.create()
+    nv = ds["nv"]
+    transposed = xr.DataArray(
+        nv.values.T,
+        dims=("nMax_face_nodes", "nele"),
+        attrs={**nv.attrs, "start_index": 1},
+    )
+    ds = ds.drop_vars("nv").assign(nv=transposed)
+    ds["mesh_topology"].attrs["face_dimension"] = "nele"
+    mesh = detect_mesh(ds)
+    assert mesh is not None
+    faces = load_connectivity(ds, mesh)
+    assert faces.shape == (266, 3)
+
+
+def test_ugrid_dispatch_when_meta_none_from_cf_sub():
+    """guess_grid_system re-runs guess_grid_metadata on full ds when cf_sub gives no grid."""
+    ds = FVCOM_MACHIAS_BAY.create()
+    ds.attrs["_xpublish_id"] = "ugrid_meta_none_test"
+    # Force meta=None from cf_sub by raising GridDetectionError on the first call,
+    # letting the second call (on full ds) succeed normally.
+    original = guess_grid_metadata
+
+    call_count = {"n": 0}
+
+    def patched(d, **kw):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise GridDetectionError("forced miss")
+        return original(d, **kw)
+
+    with patch("xpublish_tiles.grids.guess_grid_metadata", side_effect=patched):
+        grid = guess_grid_system(ds, "foo")
+
+    assert isinstance(grid, Triangular)
+    assert isinstance(grid.indexes[0], CellTreeIndex)
+    assert grid.indexes[0].tree.faces.shape == (266, 3)
+
+
+def test_triangular_from_dataset_uses_ugrid_connectivity():
+    """from_dataset with mesh skips Delaunay and uses provided connectivity."""
+    ds = FVCOM_MACHIAS_BAY.create()
+    mesh = detect_mesh(ds)
+    assert mesh is not None
+    with patch("xpublish_tiles.grids.triangle.delaunay") as mock_delaunay:
+        grid = Triangular.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat", mesh=mesh)
+
+    mock_delaunay.assert_not_called()
+    assert isinstance(grid, Triangular)
+    assert isinstance(grid.indexes[0], CellTreeIndex)
+    assert grid.indexes[0].tree.faces.shape == (266, 3)
+    assert grid.face_dim == "nele"
+
+
+def test_triangular_from_dataset_fallback():
+    """Non-UGRID dataset still runs Delaunay triangulation as before."""
+    ds = REDGAUSS_N320.create()
+    # Add a unique ID to avoid cache hits
+    ds.attrs["_xpublish_id"] = "triangular_fallback_test"
+    with patch(
+        "xpublish_tiles.grids.triangle.delaunay", wraps=triangle.delaunay
+    ) as mock_delaunay:
+        grid = guess_grid_system(ds, "foo")
+    assert mock_delaunay.call_count > 0
+    assert isinstance(grid, Triangular)
+
+
+class TestUgridDetection:
+    @pytest.fixture
+    def ugrid_ds(self) -> xr.Dataset:
+        return UGRID_TRIANGLES.create()
+
+    @pytest.fixture
+    def fvcom_ds(self) -> xr.Dataset:
+        return FVCOM.create()
+
+    def test_detect_strict_cf_ugrid(self, ugrid_ds: xr.Dataset) -> None:
+        mesh = detect_mesh(ugrid_ds)
+        assert mesh is not None
+        assert mesh.name == "mesh"
+        assert mesh.node_dim == "node"
+        assert mesh.face_dim == "face"
+        assert mesh.vertex_dim == "three"
+        assert mesh.node_coordinates == ("lon", "lat")
+        assert mesh.face_coordinates == ("lonc", "latc")
+        assert mesh.face_node_connectivity == "nv"
+        assert mesh.start_index == 0
+
+    def test_detect_fvcom_style(self, fvcom_ds: xr.Dataset) -> None:
+        """FVCOM-style: 1-based connectivity laid out as (three, nele)."""
+        mesh = detect_mesh(fvcom_ds)
+        assert mesh is not None
+        assert mesh.name == "mesh"
+        assert mesh.node_dim == "node"
+        assert mesh.face_dim == "nele"
+        assert mesh.vertex_dim == "three"
+        assert mesh.start_index == 1
+
+    def test_detect_returns_none_for_rectilinear(self) -> None:
+        ds = xr.Dataset(
+            {"foo": (("lat", "lon"), np.zeros((3, 3), dtype=np.float32))},
+            coords={
+                "lat": ("lat", np.linspace(0, 1, 3)),
+                "lon": ("lon", np.linspace(0, 1, 3)),
+            },
+        )
+        assert detect_mesh(ds) is None
+
+    def test_guess_grid_system_node_var(self, ugrid_ds: xr.Dataset) -> None:
+        grid = guess_grid_system(ugrid_ds, "zeta")
+        assert isinstance(grid, Triangular)
+        assert grid.face_dim == "face"
+
+    def test_guess_grid_system_face_var(self, ugrid_ds: xr.Dataset) -> None:
+        grid = guess_grid_system(ugrid_ds, "u")
+        assert isinstance(grid, Triangular)
+        assert grid.face_dim == "face"
+
+    def test_edge_located_var_raises(self, ugrid_ds: xr.Dataset) -> None:
+        ds = ugrid_ds.assign(
+            tau=xr.DataArray(
+                np.zeros(8, dtype=np.float32),
+                dims=("face",),
+                attrs={"mesh": "mesh", "location": "edge"},
+            )
+        )
+        with pytest.raises(NotImplementedError, match="edge-located"):
+            guess_grid_system(ds, "tau")
+
+    def test_global_explicit_mesh_raises(self) -> None:
+        lon = np.array([-179.0, 179.0, 0.0, 0.0], dtype=np.float64)
+        lat = np.array([0.0, 0.0, 80.0, -80.0], dtype=np.float64)
+        ds = xr.Dataset(
+            data_vars={
+                "mesh": xr.DataArray(
+                    np.int32(0),
+                    attrs={
+                        "cf_role": "mesh_topology",
+                        "topology_dimension": 2,
+                        "node_coordinates": "lon lat",
+                        "face_node_connectivity": "nv",
+                    },
+                ),
+                "nv": xr.DataArray(
+                    np.array([[0, 1, 2], [0, 1, 3]], dtype=np.int32),
+                    dims=("face", "three"),
+                    attrs={"start_index": 0},
+                ),
+                "zeta": xr.DataArray(
+                    np.zeros(4, dtype=np.float32),
+                    dims=("node",),
+                    attrs={"mesh": "mesh", "location": "node"},
+                ),
+            },
+            coords={
+                "lon": ("node", lon, {"standard_name": "longitude"}),
+                "lat": ("node", lat, {"standard_name": "latitude"}),
+            },
+        )
+        with pytest.raises(NotImplementedError, match="Global UGRID"):
+            _guess_grid_for_dataset(ds)
+
+    def test_load_connectivity_rebases_fvcom(self, fvcom_ds: xr.Dataset) -> None:
+        mesh = detect_mesh(fvcom_ds)
+        assert mesh is not None
+        conn = load_connectivity(fvcom_ds, mesh)
+        assert conn.shape == (8, 3)
+        assert conn.min() == 0
+        assert conn.max() == 8
+
+    def test_from_dataset_skips_delaunay(self, fvcom_ds: xr.Dataset) -> None:
+        mesh = detect_mesh(fvcom_ds)
+        assert mesh is not None
+        with patch.object(triangle, "delaunay", side_effect=AssertionError("called")):
+            grid = Triangular.from_dataset(
+                fvcom_ds, CRS.from_epsg(4326), "lon", "lat", mesh=mesh
+            )
+        assert isinstance(grid, Triangular)
+        assert grid.face_dim == "nele"
+        assert grid.dim == "node"
+        assert grid.dims == {"node"}
+        zeta = fvcom_ds["zeta"]
+        u = fvcom_ds["u"]
+        assert grid.dims_for(zeta) == {"node"}
+        assert grid.dims_for(u) == {"nele"}
+
+    def test_build_subset_dataset_face_only_var(self, ugrid_ds: xr.Dataset) -> None:
+        """A face-located variable arrives without node X/Y coords; the grid
+        synthesizes them from its stored vertex array."""
+        grid = guess_grid_system(ugrid_ds, "u")
+        assert isinstance(grid, Triangular)
+        u = ugrid_ds["u"]
+        assert grid.X not in u.coords
+        ds = grid.build_subset_dataset(u)
+        assert grid.X in ds and grid.Y in ds
+        assert ds[grid.X].dims == (grid.dim,)
+        npt.assert_array_equal(ds[grid.X].values, ugrid_ds[grid.X].values)
+
+    def test_isel_indexer_face_only_var(self, ugrid_ds: xr.Dataset) -> None:
+        grid = guess_grid_system(ugrid_ds, "u")
+        assert isinstance(grid, Triangular)
+        ds = grid.build_subset_dataset(ugrid_ds["u"])
+        slicers = grid.sel(bbox=BBox(west=-75.5, east=-72.5, south=39.5, north=42.5))
+        (sl,) = slicers[grid.dim]
+        assert isinstance(sl, UgridIndexer)
+        sliced = grid.isel_indexer(ds, sl)
+        assert sliced.sizes[grid.dim] == sl.vertices.size
+        assert sliced.sizes[grid.face_dim] == sl.connectivity.shape[0]
+        assert sliced["u"].dims == (grid.face_dim,)
+        assert sliced[grid.X].dims == (grid.dim,)
+
+    def test_sel_returns_face_indices(self, fvcom_ds: xr.Dataset) -> None:
+        mesh = detect_mesh(fvcom_ds)
+        assert mesh is not None
+        grid = Triangular.from_dataset(
+            fvcom_ds, CRS.from_epsg(4326), "lon", "lat", mesh=mesh
+        )
+        bbox = BBox(west=-75.5, east=-72.5, south=39.5, north=42.5)
+        slicers = grid.sel(bbox=bbox)
+        (sl,) = slicers["node"]
+        assert isinstance(sl, UgridIndexer)
+        assert sl.face_indices is not None
+        assert sl.face_indices.shape == (sl.connectivity.shape[0],)
+        assert sl.face_indices.size == 8
+        assert sl.vertices.size == 9
+
+    def test_guess_grid_metadata_routes_to_ugrid(self, fvcom_ds: xr.Dataset) -> None:
+        meta = guess_grid_metadata(fvcom_ds)
+        assert meta is not None
+        assert meta.grid_cls is Triangular
+        assert meta.mesh is not None
+        assert meta.mesh.face_dim == "nele"
+
+    def test_end_to_end_no_delaunay(self, fvcom_ds: xr.Dataset) -> None:
+        with patch.object(triangle, "delaunay", side_effect=AssertionError("called")):
+            grid = _guess_grid_for_dataset(fvcom_ds)
+        assert isinstance(grid, Triangular)
+        assert grid.face_dim == "nele"
