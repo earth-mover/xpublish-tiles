@@ -1737,7 +1737,7 @@ class Rectilinear(RectilinearMixin, GridSystem):
             y_left = y_ii.left
             widths = y_right - y_left
             self.dYmin = float(np.min(widths)) if len(widths) > 0 else 0.0
-            self.y_is_increasing = y_index.index.is_monotonic_increasing
+            self.y_is_increasing = bool(y_left.is_monotonic_increasing)
 
     @property
     def dims(self) -> set[str]:
