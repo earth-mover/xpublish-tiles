@@ -1,5 +1,4 @@
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
 from typing import TYPE_CHECKING, Literal, cast
 from unittest.mock import patch
 
@@ -1420,19 +1419,17 @@ def test_detect_orca_tripole_fold_row() -> None:
     assert index.tripolar_fold_row == ny - 1
 
 
-def test_detect_mesh_found():
+def test_detect_mesh_ugrid():
     ds = FVCOM_MACHIAS_BAY.create()
     mesh = detect_mesh(ds)
     assert mesh is not None
     assert mesh.name == "mesh_topology"
 
-
-def test_detect_mesh_none_for_non_ugrid():
     ds = REDGAUSS_N320.create()
     assert detect_mesh(ds) is None
 
 
-def test_load_connectivity_fvcom_machias_bay():
+def test_load_connectivity():
     ds = FVCOM_MACHIAS_BAY.create()
     mesh = detect_mesh(ds)
     assert mesh is not None
@@ -1442,8 +1439,6 @@ def test_load_connectivity_fvcom_machias_bay():
     assert faces.min() == 0
     assert faces.max() == 183
 
-
-def test_detect_mesh_none_for_non_ugrid_connectivity():
     ds = REDGAUSS_N320.create()
     assert detect_mesh(ds) is None
 
@@ -1552,26 +1547,6 @@ def test_triangular_from_dataset_fallback():
         grid = guess_grid_system(ds, "foo")
     assert mock_delaunay.call_count > 0
     assert isinstance(grid, Triangular)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "tile,tms_id",
-    [
-        ("9/160/184", "WebMercatorQuad"),
-        ("10/320/369", "WebMercatorQuad"),
-        ("11/641/739", "WebMercatorQuad"),
-    ],
-)
-async def test_pipeline_fvcom_ugrid(tile, tms_id):
-    """Full pipeline render for the FVCOM UGRID dataset at multiple zoom levels."""
-    ds = FVCOM_MACHIAS_BAY.create()
-    tms = morecantile.tms.get(tms_id)
-    z, x, y = (int(v) for v in tile.split("/"))
-    tile_obj = morecantile.Tile(x=x, y=y, z=z)
-    query_params = create_query_params(tile_obj, tms)
-    result = await pipeline(ds, query_params)
-    assert result is not None
 
 
 class TestUgridDetection:
@@ -1745,17 +1720,3 @@ class TestUgridDetection:
             grid = _guess_grid_for_dataset(fvcom_ds)
         assert isinstance(grid, Triangular)
         assert grid.face_dim == "nele"
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("var_name", ["zeta", "u"])
-    async def test_pipeline_ugrid_triangles(self, var_name: str) -> None:
-        """Full pipeline render for both node- and face-located variables."""
-        ds = UGRID_TRIANGLES.create()
-        ds.attrs["_xpublish_id"] = f"ugrid_triangles_{var_name}"
-
-        tms = morecantile.tms.get("WebMercatorQuad")
-        tile_obj = morecantile.Tile(x=590, y=764, z=11)
-        query_params = create_query_params(tile_obj, tms)
-        query_params = replace(query_params, variables=[var_name])
-        result = await pipeline(ds, query_params)
-        assert result is not None

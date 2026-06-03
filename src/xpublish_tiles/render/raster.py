@@ -225,11 +225,12 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                     # Only drop the dimension coordinate if it exists as a variable
                     data = data.drop_vars(context.grid.dim)
                 df = data.to_dataframe()
-                verts_df = df[[context.grid.X, context.grid.Y, data.name]]
-                simps_df = pd.DataFrame(
-                    context.ugrid_indexer.connectivity, columns=["v0", "v1", "v2"]
+                mesh = cvs.trimesh(
+                    df[[context.grid.X, context.grid.Y, data.name]],
+                    pd.Dataframe(
+                        context.ugrid_indexer.connectivity, columns=["v0", "v1", "v2"]
+                    ),
                 )
-                mesh = cvs.trimesh(verts_df, simps_df)
         else:
             raise NotImplementedError(
                 f"Grid type {type(context.grid)} not supported by DatashaderRasterRenderer"
