@@ -13,9 +13,11 @@ from xpublish_tiles.lib import VariableNotFoundError
 from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
     ERA5,
+    GEOZARR_MULTISCALE,
     GLOBAL_HEALPIX_L3,
     HRRR,
     IFS,
+    NATIVE_AT_ROOT_MULTISCALE,
     REGIONAL_HEALPIX_NA,
     UTM50S_HIRES,
 )
@@ -795,6 +797,8 @@ def _normalize_for_snapshot(obj):
         pytest.param(GLOBAL_HEALPIX_L3, id="global_healpix_l3"),
         pytest.param(REGIONAL_HEALPIX_NA, id="regional_healpix_na"),
         pytest.param(CUBED_SPHERE, id="cubed_sphere"),
+        pytest.param(GEOZARR_MULTISCALE, id="geozarr_multiscale"),
+        pytest.param(NATIVE_AT_ROOT_MULTISCALE, id="native_at_root_multiscale"),
     ],
 )
 def test_tiles_endpoint_snapshot(fixture, snapshot):
