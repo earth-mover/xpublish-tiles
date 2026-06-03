@@ -1599,8 +1599,8 @@ def create_fvcom_ugrid(
 ) -> xr.Dataset:
     """Load the Machias Bay FVCOM UGRID fixture and expose ``h`` as ``foo``."""
     nc = Path(__file__).parent / "grids" / "machias_bay_fvcom.nc"
-    ds = xr.open_dataset(nc, chunks={})
-    ds = ds[["h", "mesh_topology", "nv"]].rename({"h": "foo"})
+    ds: xr.Dataset = xr.open_dataset(nc, chunks={})
+    ds = ds[["h", "mesh_topology", "nv"]].rename({"h": "foo"})  # type: ignore[assignment]
     # CF disambiguation: two longitude coords (lon, lonc) exist; declare which
     # belongs to foo so _guess_coordinates_for_mapping picks lon/lat over lonc/latc.
     ds["foo"].attrs["coordinates"] = "lon lat"
