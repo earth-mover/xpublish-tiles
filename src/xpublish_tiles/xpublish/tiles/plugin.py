@@ -187,7 +187,7 @@ class TilesPlugin(Plugin):
             tileset_results = await asyncio.gather(
                 *[
                     create_tileset_for_tms(
-                        dataset,
+                        minzoom_dataset,
                         tms_id,
                         layer_extents,
                         title,
@@ -196,7 +196,6 @@ class TilesPlugin(Plugin):
                         dataset_attrs,
                         styles,
                         cf_coords=cf_coords,
-                        minzoom_dataset=minzoom_dataset,
                     )
                     for tms_id in supported_tms
                 ]
