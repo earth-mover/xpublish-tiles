@@ -1739,31 +1739,6 @@ REGIONAL_HEALPIX_NA = Dataset(
 )
 
 
-def _generate_level_data(
-    y_coords: np.ndarray,
-    x_coords: np.ndarray,
-    size: int,
-    dtype: npt.DTypeLike,
-    num_waves: int = 3,
-) -> dask.array.Array:
-    """Generate wave data with a specific number of waves.
-
-    Each level gets a different wave count to make them visually distinguishable.
-    """
-    # Normalize coordinates to [0, 1]
-    x_norm = (x_coords - x_coords.min()) / (x_coords.max() - x_coords.min())
-    y_norm = (y_coords - y_coords.min()) / (y_coords.max() - y_coords.min())
-
-    # Create meshgrid
-    xx, yy = np.meshgrid(x_norm, y_norm)
-
-    # Generate wave pattern with level-specific frequency
-    freq = num_waves * 2 * np.pi
-    data = np.sin(freq * xx) * np.cos(freq * yy)
-
-    return dask.array.from_array(data.astype(dtype), chunks=(size, size))
-
-
 def geozarr_multiscale_grid(
     *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
 ) -> DataTree:
@@ -1848,18 +1823,17 @@ def geozarr_multiscale_grid(
     }
 
     # Create datasets for each resolution level
-    # Each level gets a different number of waves so we can visually identify which level is used
     children = {}
     for i, (_, size, res) in enumerate(levels):
         # Generate coordinate arrays for this level
         x_coords = origin_x + (np.arange(size) + 0.5) * res
         y_coords = origin_y - (np.arange(size) + 0.5) * res
 
-        # Level-specific wave count: level 0 = 4 waves, level 1 = 2 waves, level 2 = 1 wave
-        # This makes each level visually distinct in rendered tiles
-        num_waves = 4 // (2**i)
-        data_array = _generate_level_data(
-            y_coords, x_coords, size, dtype, num_waves=max(1, num_waves)
+        data_array = generate_tanh_wave_data(
+            coords=(y_coords, x_coords),
+            sizes=(size, size),
+            chunks=(size, size),
+            dtype=dtype,
         )
 
         # Create dataset for this level
@@ -1950,9 +1924,11 @@ def native_at_root_multiscale_grid(
     native_x_coords = origin_x + (np.arange(native_size) + 0.5) * native_res
     native_y_coords = origin_y - (np.arange(native_size) + 0.5) * native_res
 
-    # Root (native) gets 4 waves - most detail
-    native_data = _generate_level_data(
-        native_y_coords, native_x_coords, native_size, dtype, num_waves=4
+    native_data = generate_tanh_wave_data(
+        coords=(native_y_coords, native_x_coords),
+        sizes=(native_size, native_size),
+        chunks=(native_size, native_size),
+        dtype=dtype,
     )
 
     # Root dataset: spatial:transform on array, proj: on group
@@ -1991,10 +1967,11 @@ def native_at_root_multiscale_grid(
         x_coords = origin_x + (np.arange(size) + 0.5) * res
         y_coords = origin_y - (np.arange(size) + 0.5) * res
 
-        # Level-specific wave count: level 0 = 2 waves, level 1 = 1 wave
-        num_waves = 2 // (2**i)
-        data_array = _generate_level_data(
-            y_coords, x_coords, size, dtype, num_waves=max(1, num_waves)
+        data_array = generate_tanh_wave_data(
+            coords=(y_coords, x_coords),
+            sizes=(int(size), int(size)),
+            chunks=(int(size), int(size)),
+            dtype=dtype,
         )
 
         # Use unique dimension names for each overview level (Y_0, X_0, Y_1, X_1, etc.)
