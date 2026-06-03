@@ -227,7 +227,7 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                 df = data.to_dataframe()
                 mesh = cvs.trimesh(
                     df[[context.grid.X, context.grid.Y, data.name]],
-                    pd.Dataframe(
+                    pd.DataFrame(
                         context.ugrid_indexer.connectivity, columns=["v0", "v1", "v2"]
                     ),
                 )
