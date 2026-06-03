@@ -42,6 +42,7 @@ from xpublish_tiles.grids import (
 from xpublish_tiles.lib import (
     GridDetectionError,
     TileTooBigError,
+    VariableNotFoundError,
     _iter_subset_shapes,
     _prevent_slice_overlap,
     apply_default_pad,
@@ -529,6 +530,25 @@ def test_detect_grid_metadata_unsupported_ndim():
     )
     with pytest.raises(GridDetectionError, match="Unsupported coordinate dimensionality"):
         guess_grid_system(ds, "temp")
+
+
+@pytest.mark.parametrize("xpublish_id", [None, "missing_var_test"])
+def test_guess_grid_system_missing_variable(xpublish_id):
+    """Requesting a variable not in the dataset must raise VariableNotFoundError,
+    not a raw KeyError. The cache-key path (``_xpublish_id`` set) used to call
+    ``ds[name]`` and leak the KeyError before the clean check was reached."""
+    ds = xr.Dataset(
+        {"temp": (("y", "x"), np.ones((3, 4)))},
+        coords={
+            "lat": ("y", np.arange(3.0), {"standard_name": "latitude"}),
+            "lon": ("x", np.arange(4.0), {"standard_name": "longitude"}),
+        },
+    )
+    if xpublish_id is not None:
+        ds.attrs["_xpublish_id"] = xpublish_id
+
+    with pytest.raises(VariableNotFoundError, match="not found in dataset"):
+        guess_grid_system(ds, "does_not_exist")
 
 
 @pytest.mark.parametrize(

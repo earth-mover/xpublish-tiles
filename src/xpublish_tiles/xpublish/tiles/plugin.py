@@ -350,7 +350,7 @@ class TilesPlugin(Plugin):
             except VariableNotFoundError as e:
                 logger.error("VariableNotFoundError", str(e))
                 raise HTTPException(
-                    status_code=422,
+                    status_code=404,
                     detail=f"Invalid variable name(s): {query.variables!r}.",
                 ) from None
             except GridDetectionError as e:
