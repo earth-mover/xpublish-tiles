@@ -1183,8 +1183,8 @@ wheels = [
 
 [[package]]
 name = "datashader"
-version = "0.19.0.post1.dev6+g2ff83af86"
-source = { git = "https://github.com/holoviz/datashader.git?rev=2ff83af86022f667015488d2b2d602409b931cf4#2ff83af86022f667015488d2b2d602409b931cf4" }
+version = "0.19.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "colorcet" },
     { name = "multipledispatch" },
@@ -1198,6 +1198,10 @@ dependencies = [
     { name = "scipy" },
     { name = "toolz" },
     { name = "xarray" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/53/4b/a9141f286f0c01685e9715ba3404769a6138e74575c4d5ccbaa95a22c3bd/datashader-0.19.1.tar.gz", hash = "sha256:f62d880a4a431813f9bb3959e565feda79c1634f889aaadcf948cb0d0c114cdd", size = 10581968, upload-time = "2026-05-19T07:53:06.574Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cb/41/247627c8b9fef5c605d00546b85771a8fe42975b9616a557cead5468789b/datashader-0.19.1-py3-none-any.whl", hash = "sha256:7ce7154ff3ed070607f429355f57002fee5a17964e47c0b6447eeafe8cef9c82", size = 10715897, upload-time = "2026-05-19T07:53:03.431Z" },
 ]
 
 [[package]]
@@ -5165,7 +5169,7 @@ requires-dist = [
     { name = "cachetools", specifier = ">=5.5.2" },
     { name = "cf-xarray", specifier = ">=0.11.1" },
     { name = "cftime", specifier = ">=1.6.4.post1" },
-    { name = "datashader", git = "https://github.com/holoviz/datashader.git?rev=2ff83af86022f667015488d2b2d602409b931cf4" },
+    { name = "datashader", specifier = ">=0.19.1" },
     { name = "donfig", specifier = ">=0.8.0" },
     { name = "fastapi" },
     { name = "healpix-geo", marker = "extra == 'complete'", specifier = ">=0.0.10" },
