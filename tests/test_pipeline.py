@@ -2,6 +2,7 @@
 
 
 import io
+from dataclasses import replace
 
 import cf_xarray  # noqa: F401 - Enable cf accessor
 import morecantile
@@ -36,6 +37,7 @@ from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
     CURVILINEAR,
     FORECAST,
+    FVCOM_MACHIAS_BAY,
     GLOBAL_6KM,
     GLOBAL_6KM_360,
     GLOBAL_HEALPIX_L3,
@@ -46,6 +48,7 @@ from xpublish_tiles.testing.datasets import (
     REDGAUSS_N320,
     REGIONAL_HEALPIX_NA,
     TRIPOLE_ANTIMERIDIAN,
+    UGRID_TRIANGLES,
     _create_global_healpix,
     create_global_dataset,
 )
@@ -1045,6 +1048,46 @@ async def test_cubed_sphere_tile(tile, tms, png_snapshot, pytestconfig):
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
     assert_render_matches_snapshot(result, png_snapshot)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tile,tms",
+    [
+        pytest.param(Tile(x=160, y=184, z=9), WEBMERC_TMS, id="9/160/184"),
+        pytest.param(Tile(x=320, y=369, z=10), WEBMERC_TMS, id="10/320/369"),
+        pytest.param(Tile(x=641, y=739, z=11), WEBMERC_TMS, id="11/641/739"),
+    ],
+)
+async def test_pipeline_fvcom_ugrid(tile, tms, png_snapshot, pytestconfig):
+    """Full pipeline render for the FVCOM UGRID dataset at multiple zoom levels."""
+    ds = FVCOM_MACHIAS_BAY.create()
+    query_params = create_query_params(tile, tms)
+    result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(
+        result, png_snapshot, tile=tile, tms=tms, skip_transparency_check=True
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("var_name", ["zeta", "u"])
+async def test_pipeline_ugrid_triangles(var_name, png_snapshot, pytestconfig):
+    """Full pipeline render for both node- and face-located variables."""
+    ds = UGRID_TRIANGLES.create()
+    ds.attrs["_xpublish_id"] = f"ugrid_triangles_{var_name}"
+
+    tms = morecantile.tms.get("WebMercatorQuad")
+    tile_obj = morecantile.Tile(x=75, y=95, z=8)
+    query_params = create_query_params(tile_obj, tms)
+    query_params = replace(query_params, variables=[var_name])
+    result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile_obj)
+    assert_render_matches_snapshot(
+        result, png_snapshot, tile=tile_obj, tms=tms, skip_transparency_check=True
+    )
 
 
 async def test_pipeline_raster_style_not_supported():
