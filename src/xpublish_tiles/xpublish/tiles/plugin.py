@@ -132,6 +132,11 @@ class TilesPlugin(Plugin):
             # Extract dataset from datatree
             # If multiscale, returns finest (highest resolution) level available
             dataset = get_dataset(datatree)
+
+            # For multiscale datasets, get coarsest level for minzoom calculation
+            # Coarsest level determines the minimum zoom since it has fewer pixels
+            coarsest_level = get_coarsest_level(datatree)
+            minzoom_dataset = coarsest_level.dataset if coarsest_level else dataset
             # Get dataset metadata
             dataset_attrs = dataset.attrs
             title = dataset_attrs.get("title", "Dataset")
@@ -191,6 +196,7 @@ class TilesPlugin(Plugin):
                         dataset_attrs,
                         styles,
                         cf_coords=cf_coords,
+                        minzoom_dataset=minzoom_dataset,
                     )
                     for tms_id in supported_tms
                 ]

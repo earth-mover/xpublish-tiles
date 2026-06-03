@@ -295,6 +295,7 @@ async def create_tileset_for_tms(
     styles: list[Style],
     *,
     cf_coords: dict | None = None,
+    minzoom_dataset: Dataset | None = None,
 ) -> TilesetSummary | None:
     """Create a tileset summary for a specific tile matrix set
 
@@ -359,8 +360,9 @@ async def create_tileset_for_tms(
         layers.append(layer)
 
     # Define tile matrix limits
+    # Use minzoom_dataset (coarsest level) if provided for minzoom calculation
     tileMatrixSetLimits = await get_tile_matrix_limits(
-        tms_id, dataset, cf_coords=cf_coords
+        tms_id, minzoom_dataset or dataset, cf_coords=cf_coords
     )
 
     tileset = TilesetSummary(
