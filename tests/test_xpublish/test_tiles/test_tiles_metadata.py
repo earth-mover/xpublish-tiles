@@ -13,9 +13,11 @@ from xpublish_tiles.lib import VariableNotFoundError
 from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
     ERA5,
+    GEOZARR_MULTISCALE,
     GLOBAL_HEALPIX_L3,
     HRRR,
     IFS,
+    NATIVE_AT_ROOT_MULTISCALE,
     REGIONAL_HEALPIX_NA,
     UTM50S_HIRES,
 )
@@ -795,6 +797,8 @@ def _normalize_for_snapshot(obj):
         pytest.param(GLOBAL_HEALPIX_L3, id="global_healpix_l3"),
         pytest.param(REGIONAL_HEALPIX_NA, id="regional_healpix_na"),
         pytest.param(CUBED_SPHERE, id="cubed_sphere"),
+        pytest.param(GEOZARR_MULTISCALE, id="geozarr_multiscale"),
+        pytest.param(NATIVE_AT_ROOT_MULTISCALE, id="native_at_root_multiscale"),
     ],
 )
 def test_tiles_endpoint_snapshot(fixture, snapshot):
@@ -875,3 +879,34 @@ def test_tiles_endpoint_no_renderable_vars_returns_422():
     response = client.get("/datasets/ds/tiles/")
     assert response.status_code == 422
     assert "No renderable variables" in response.json()["detail"]
+
+
+def test_multiscale_uses_coarsest_level_for_minzoom():
+    """Multiscale datasets should use coarsest level for tileMatrixSetLimits minzoom.
+
+    The coarsest level has the fewest pixels, so it determines the minimum
+    zoom level that can be rendered without upscaling too much.
+    """
+    ds = GEOZARR_MULTISCALE.create()
+    rest = xpublish.Rest({GEOZARR_MULTISCALE.name: ds}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+    response = client.get(f"/datasets/{GEOZARR_MULTISCALE.name}/tiles/")
+    assert response.status_code == 200
+
+    body = response.json()
+    tilesets = body.get("tilesets", [])
+    assert tilesets, "expected at least one tileset"
+
+    webmercator_tileset = next(
+        (ts for ts in tilesets if "WebMercatorQuad" in ts.get("tileMatrixSetURI", "")),
+        None,
+    )
+    assert webmercator_tileset is not None, "WebMercatorQuad tileset not found"
+
+    limits = webmercator_tileset.get("tileMatrixSetLimits", [])
+    assert limits, "expected tileMatrixSetLimits"
+
+    min_zoom = int(limits[0]["tileMatrix"])
+    # Coarsest level (128x256 at 4 degrees/pixel) should give minzoom ~0
+    # If we incorrectly used finest level (512x1024), minzoom would be ~2-3
+    assert min_zoom <= 1, f"minzoom {min_zoom} too high - should use coarsest level"

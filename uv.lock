@@ -4110,7 +4110,7 @@ wheels = [
 
 [[package]]
 name = "rasterix"
-version = "0.2.1"
+version = "0.2.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "affine" },
@@ -4119,9 +4119,9 @@ dependencies = [
     { name = "xarray" },
     { name = "xproj" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/33/ab/92ea6124b9182f01b7c36d93028363e72ad5910df6a69c3d11208056be19/rasterix-0.2.1.tar.gz", hash = "sha256:aafc21b2bed1b6034576f6c45bef2f0538e8231be267b925f7bf312347b29ff9", size = 102739, upload-time = "2026-02-18T20:57:00.964Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b7/f7/22a616c59845a5fa8369148aa4855b377b9ca32bad850b05554c4fb21d5c/rasterix-0.2.2.tar.gz", hash = "sha256:6d1d189a45934c4c7ac87e0d0311f7b8fba5146908db4983f297b5ab10b311d4", size = 103620, upload-time = "2026-06-03T15:10:59.972Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/da/9e/0f2401926a5a465dd6eaf2877cabb4e5557d1817fd55f68356fb74273105/rasterix-0.2.1-py3-none-any.whl", hash = "sha256:308779392ec0d59fc6bb6ba2180c4eeabb922fd31c2c9efb2c29be359f16f5b5", size = 49436, upload-time = "2026-02-18T20:56:59.88Z" },
+    { url = "https://files.pythonhosted.org/packages/34/d8/903115db5b3ca29e43bbe276a84c279581c4f524f6c82a42e5e6d20a56b8/rasterix-0.2.2-py3-none-any.whl", hash = "sha256:c79041205b70c7523b2d933f4f07f51f31b33b473782af52e6b49664cdae9501", size = 50007, upload-time = "2026-06-03T15:10:58.691Z" },
 ]
 
 [[package]]
@@ -5072,24 +5072,21 @@ wheels = [
 
 [[package]]
 name = "xpublish"
-version = "0.4.2"
+version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cachey" },
-    { name = "dask" },
     { name = "fastapi" },
-    { name = "numcodecs" },
     { name = "numpy" },
     { name = "pluggy" },
     { name = "pydantic" },
     { name = "toolz" },
     { name = "uvicorn" },
     { name = "xarray" },
-    { name = "zarr" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/55/f2/a5bd36cc0e39dccdfe9df85a71f9a4f43de105131a3ae47f81d986b728a9/xpublish-0.4.2.tar.gz", hash = "sha256:3d091edf9b86cf2f5e0090701ea58d2aebe056e7772d78cca107d91a5627da77", size = 25280, upload-time = "2026-01-12T02:43:26.227Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/eb/fab6b697371b9957af854111630cc200ff3dd2fe856d63a9c1d754f46b5b/xpublish-0.5.0.tar.gz", hash = "sha256:512f2a1d755343b6e816315166728b6ec6fbb410947239f6a79524d7ec950f2d", size = 23901, upload-time = "2026-05-26T18:51:30.498Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8a/2a/db61f609c850b519b263de9a543802c547d56dc81044c040ea1abd598bad/xpublish-0.4.2-py3-none-any.whl", hash = "sha256:66ebd3f5068e746db04b07c606f3146e2b51b8a8f936ddf3f5bd877511086ade", size = 31792, upload-time = "2026-01-12T02:43:24.749Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/02/1e840bcb4b3b9bcab36351638165373abdaa8e788e44f823df88e4ca24b1/xpublish-0.5.0-py3-none-any.whl", hash = "sha256:76df655379885f0487002f9cd51921fbd8bb1fcba97c3c445efebfb614d5d4d0", size = 29800, upload-time = "2026-05-26T18:51:29.35Z" },
 ]
 
 [[package]]
@@ -5194,7 +5191,7 @@ requires-dist = [
     { name = "pytest-randomly", marker = "extra == 'testing'", specifier = ">=3.16.0" },
     { name = "pytest-split", marker = "extra == 'testing'", specifier = ">=0.10.0" },
     { name = "pytest-xdist", marker = "extra == 'testing'", specifier = ">=3.6.1" },
-    { name = "rasterix", specifier = ">=0.1a4" },
+    { name = "rasterix", specifier = ">=0.2.2" },
     { name = "requests", specifier = ">=2.32.5" },
     { name = "scikit-image", specifier = ">=0.25.2" },
     { name = "scikit-image", marker = "extra == 'testing'", specifier = ">=0.25.2" },
@@ -5208,7 +5205,7 @@ requires-dist = [
     { name = "xarray", specifier = ">=2025.12.0" },
     { name = "xdggs", marker = "extra == 'complete'", specifier = ">=0.5.0" },
     { name = "xdggs", marker = "extra == 'healpix'", specifier = ">=0.5.0" },
-    { name = "xpublish", specifier = ">=0.3.0" },
+    { name = "xpublish", specifier = ">=0.5.0" },
     { name = "zarr", specifier = ">=3.1.2" },
 ]
 provides-extras = ["complete", "healpix", "testing"]

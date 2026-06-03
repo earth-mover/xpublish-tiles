@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from xpublish import Dependencies, Plugin, hookimpl
 
-from xarray import Dataset
+from xarray import DataTree
 from xpublish_tiles.grids import guess_grid_system
 from xpublish_tiles.lib import (
     AsyncLoadTimeoutError,
@@ -28,6 +28,11 @@ from xpublish_tiles.logger import (
     logger,
     set_context_logger,
     with_accumulated_logs,
+)
+from xpublish_tiles.multiscale import (
+    get_coarsest_level,
+    get_dataset,
+    get_resolution_level,
 )
 from xpublish_tiles.pipeline import _infer_datatype, pipeline
 from xpublish_tiles.tiles_lib import get_min_zoom
@@ -114,16 +119,24 @@ class TilesPlugin(Plugin):
 
         @router.get("/", response_model=TilesetsList, response_model_exclude_none=True)
         @with_accumulated_logs(
-            log_message_fn=lambda dataset: f"tiles_list {getattr(dataset, '_xpublish_id', 'unknown')}",
-            context_fn=lambda dataset: {
+            log_message_fn=lambda datatree: f"tiles_list {getattr(datatree, '_xpublish_id', 'unknown')}",
+            context_fn=lambda datatree: {
                 "endpoint": "tiles_list",
-                "dataset_id": getattr(dataset, "_xpublish_id", "unknown"),
+                "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
             },
         )
         async def get_dataset_tiles_list(
-            dataset: Dataset = Depends(deps.dataset),
+            datatree: DataTree = Depends(deps.datatree),
         ):
             """List of available tilesets for this dataset"""
+            # Extract dataset from datatree
+            # If multiscale, returns finest (highest resolution) level available
+            dataset = get_dataset(datatree)
+
+            # For multiscale datasets, get coarsest level for minzoom calculation
+            # Coarsest level determines the minimum zoom since it has fewer pixels
+            coarsest_level = get_coarsest_level(datatree)
+            minzoom_dataset = coarsest_level.dataset if coarsest_level else dataset
             # Get dataset metadata
             dataset_attrs = dataset.attrs
             title = dataset_attrs.get("title", "Dataset")
@@ -174,7 +187,7 @@ class TilesPlugin(Plugin):
             tileset_results = await asyncio.gather(
                 *[
                     create_tileset_for_tms(
-                        dataset,
+                        minzoom_dataset,
                         tms_id,
                         layer_extents,
                         title,
@@ -194,18 +207,21 @@ class TilesPlugin(Plugin):
         @router.get("/legend")
         @with_accumulated_logs(
             log_message_fn=lambda query,
-            dataset: f"legend {query.variables} {query.style} {getattr(dataset, '_xpublish_id', 'unknown')}",
-            context_fn=lambda query, dataset: {
+            datatree: f"legend {query.variables} {query.style} {getattr(datatree, '_xpublish_id', 'unknown')}",
+            context_fn=lambda query, datatree: {
                 "endpoint": "legend",
                 "variables": query.variables,
-                "dataset_id": getattr(dataset, "_xpublish_id", "unknown"),
+                "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
             },
         )
         async def get_dataset_legend(
             query: Annotated[LegendQuery, Query()],
-            dataset: Dataset = Depends(deps.dataset),
+            datatree: DataTree = Depends(deps.datatree),
         ):
             """Render a legend image for a styled variable."""
+            # Extract dataset from datatree
+            # If multiscale, returns finest (highest resolution) level available
+            dataset = get_dataset(datatree)
             var_name = query.variables[0]
             if var_name not in dataset.data_vars:
                 raise HTTPException(
@@ -288,17 +304,20 @@ class TilesPlugin(Plugin):
         )
         @with_accumulated_logs(
             log_message_fn=lambda tileMatrixSetId,
-            dataset: f"tileset_metadata {tileMatrixSetId} {getattr(dataset, '_xpublish_id', 'unknown')}",
-            context_fn=lambda tileMatrixSetId, dataset: {
+            datatree: f"tileset_metadata {tileMatrixSetId} {getattr(datatree, '_xpublish_id', 'unknown')}",
+            context_fn=lambda tileMatrixSetId, datatree: {
                 "tileMatrixSetId": tileMatrixSetId,
-                "dataset_id": getattr(dataset, "_xpublish_id", "unknown"),
+                "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
             },
         )
         async def get_dataset_tileset_metadata(
             tileMatrixSetId: str,
-            dataset: Dataset = Depends(deps.dataset),
+            datatree: DataTree = Depends(deps.datatree),
         ):
             """Get tileset metadata for this dataset"""
+            # Extract dataset from datatree
+            # If multiscale, returns finest (highest resolution) level available
+            dataset = get_dataset(datatree)
             try:
                 return await async_run(create_tileset_metadata, dataset, tileMatrixSetId)
             except ValueError as e:
@@ -313,23 +332,27 @@ class TilesPlugin(Plugin):
             log_message_fn=lambda request,
             tileMatrixSetId,
             query,
-            dataset: f"tilejson {tileMatrixSetId} {query.variables} {getattr(dataset, '_xpublish_id', 'unknown')}",
-            context_fn=lambda request, tileMatrixSetId, query, dataset: {
+            datatree: f"tilejson {tileMatrixSetId} {query.variables} {getattr(datatree, '_xpublish_id', 'unknown')}",
+            context_fn=lambda request, tileMatrixSetId, query, datatree: {
                 "tileMatrixSetId": tileMatrixSetId,
                 "variables": query.variables,
-                "dataset_id": getattr(dataset, "_xpublish_id", "unknown"),
+                "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
             },
         )
         async def get_dataset_tilejson(
             request: Request,
             tileMatrixSetId: str,
             query: Annotated[TileQuery, Query()],
-            dataset: Dataset = Depends(deps.dataset),
+            datatree: DataTree = Depends(deps.datatree),
         ):
             """Get TileJSON specification for this dataset and tile matrix set"""
             # Validate that the tile matrix set exists
             if tileMatrixSetId not in TILE_MATRIX_SET_SUMMARIES:
                 raise HTTPException(status_code=404, detail="Tile matrix set not found")
+
+            # Extract dataset from datatree
+            # If multiscale, returns finest (highest resolution) level available
+            dataset = get_dataset(datatree)
 
             # Extract dimension selectors from query parameters
             selectors = {}
@@ -431,14 +454,22 @@ class TilesPlugin(Plugin):
                 )
 
             # Determine min/max zoom from dataset characteristics
-            # Get the original morecantile TMS for minzoom/maxzoom properties
             tms = morecantile.tms.get(tileMatrixSetId)
 
-            # Calculate optimal zoom levels based on grid and data characteristics
-            # Get the first variable's grid system
+            # For minzoom calculation, use the coarsest overview level if available.
+            # Minzoom is based on avoiding TileTooBigError - coarse overviews have
+            # fewer pixels per tile, enabling lower zoom levels. Without this,
+            # minzoom would be calculated from the finest level, preventing
+            # low-zoom rendering even when overviews exist.
             var_name = query.variables[0]
-            grid = await async_run(guess_grid_system, dataset, var_name)
-            da = dataset.cf[var_name]
+            coarsest_level = get_coarsest_level(datatree)
+            if coarsest_level is not None:
+                minzoom_dataset = coarsest_level.dataset
+            else:
+                minzoom_dataset = dataset
+
+            grid = await async_run(guess_grid_system, minzoom_dataset, var_name)
+            da = minzoom_dataset.cf[var_name]
 
             bound_logger = get_context_logger()
             bound_logger = bound_logger.bind(tms=tms.id)
@@ -472,17 +503,17 @@ class TilesPlugin(Plugin):
             tileRow,
             tileCol,
             query,
-            dataset: f"{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} {query.variables} {getattr(dataset, '_xpublish_id', 'unknown')}",
+            datatree: f"{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} {query.variables} {getattr(datatree, '_xpublish_id', 'unknown')}",
             context_fn=lambda request,
             tileMatrixSetId,
             tileMatrix,
             tileRow,
             tileCol,
             query,
-            dataset: {
+            datatree: {
                 "tile": f"{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}",
                 "variables": query.variables,
-                "dataset_id": getattr(dataset, "_xpublish_id", "unknown"),
+                "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
             },
         )
         async def get_dataset_tile(
@@ -492,7 +523,7 @@ class TilesPlugin(Plugin):
             tileRow: int,
             tileCol: int,
             query: Annotated[TileQuery, Query()],
-            dataset: Dataset = Depends(deps.dataset),
+            datatree: DataTree = Depends(deps.datatree),
         ):
             """Get individual tile from this dataset"""
             try:
@@ -502,6 +533,21 @@ class TilesPlugin(Plugin):
             except ValueError as e:
                 raise HTTPException(status_code=404, detail=str(e)) from e
 
+            # Get the TMS for level selection
+            tms = morecantile.tms.get(tileMatrixSetId)
+
+            # Extract dataset at appropriate resolution level for this zoom
+            level = get_resolution_level(datatree, zoom=tileMatrix, tms=tms)
+            if level is not None:
+                dataset = level.dataset
+                resolution_level = level.path if level.path is not None else "root"
+            else:
+                dataset = datatree.to_dataset()
+                resolution_level = None
+
+            style = query.style[0] if query.style else "raster"
+            variant = query.style[1] if query.style else "default"
+
             # Extract dimension selectors from query parameters
             selectors = {}
             for param_name, param_value in request.query_params.items():
@@ -510,9 +556,6 @@ class TilesPlugin(Plugin):
                     # Check if this parameter corresponds to a dataset dimension
                     if param_name in dataset.dims:
                         selectors[param_name] = param_value
-
-            style = query.style[0] if query.style else "raster"
-            variant = query.style[1] if query.style else "default"
 
             render_params = QueryParams(
                 variables=query.variables,
@@ -580,6 +623,10 @@ class TilesPlugin(Plugin):
                         format=query.f,
                     )
 
-            return Response(buffer.getbuffer(), media_type="image/png")
+            headers = {}
+            if resolution_level is not None:
+                headers["X-Multiscale-Level"] = resolution_level
+
+            return Response(buffer.getbuffer(), media_type="image/png", headers=headers)
 
         return router

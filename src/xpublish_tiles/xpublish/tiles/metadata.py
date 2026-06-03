@@ -299,7 +299,7 @@ async def create_tileset_for_tms(
     """Create a tileset summary for a specific tile matrix set
 
     Args:
-        dataset: xarray Dataset
+        dataset: xarray Dataset (coarsest level for multiscale datasets)
         tms_id: Tile matrix set identifier
         layer_extents: Pre-computed layer extents for all variables
         title: Dataset title
@@ -358,7 +358,6 @@ async def create_tileset_for_tms(
         )
         layers.append(layer)
 
-    # Define tile matrix limits
     tileMatrixSetLimits = await get_tile_matrix_limits(
         tms_id, dataset, cf_coords=cf_coords
     )

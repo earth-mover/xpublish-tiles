@@ -37,7 +37,7 @@ from xpublish_tiles.lib import (
     transformer_from_crs,
     unwrap,
 )
-from xpublish_tiles.logger import get_context_logger, log_duration
+from xpublish_tiles.logger import get_context_logger, log_duration, logger
 from xpublish_tiles.ugrid import MeshTopology, detect_mesh, load_connectivity
 from xpublish_tiles.utils import NUMBA_THREADING_LOCK, time_debug, xarray_object_key
 
@@ -158,17 +158,24 @@ class GridMetadata:
 
 @dataclass
 class GridMappingInfo:
-    """Information about a grid mapping and its coordinates."""
+    """Information about a grid mapping and its coordinates.
 
-    grid_mapping: xr.DataArray | None
+    The grid_mapping dict contains attrs from either:
+    - CF convention: grid_mapping_var.attrs (e.g., spatial_ref.attrs)
+    - GeoZarr convention: spatial: and proj: attributes
+    """
+
+    grid_mapping: dict[str, Any]
     crs: CRS | None
     coordinates: tuple[str, ...] | None
+    # Variable name (e.g., "spatial_ref"), not the CF attr grid_mapping_name (e.g., "healpix")
+    grid_mapping_var_name: str | None = None
 
     def __repr__(self) -> str:
         gm_repr = (
-            f"<DataArray: {self.grid_mapping.name}>"
-            if self.grid_mapping is not None
-            else "None"
+            f"<attrs from {self.grid_mapping_var_name!r}>"
+            if self.grid_mapping_var_name is not None
+            else f"<{len(self.grid_mapping)} attrs>"
         )
         return (
             f"GridMappingInfo(grid_mapping={gm_repr}, "
@@ -1611,11 +1618,16 @@ class RasterAffine(RectilinearMixin, GridSystem):
         Xname: str,
         Yname: str,
     ) -> "RasterAffine":
-        """Create a RasterAffine grid from a dataset using rasterix."""
+        """Create a RasterAffine grid from a dataset using rasterix.
+
+        Uses rasterix auto-detection to create the affine transform from:
+        - GeoZarr spatial:transform (requires zarr_conventions with spatial:)
+        - CF/GDAL GeoTransform attribute
+        - Explicit coordinate variables
+        """
         ds = rasterix.assign_index(ds, x_dim=Xname, y_dim=Yname)
-        index = ds.xindexes[Xname]
-        # After assign_index, the index should be a RasterIndex
-        raster_index = cast(rasterix.RasterIndex, index)
+        raster_index = cast(rasterix.RasterIndex, ds.xindexes[Xname])
+
         return cls(
             crs=crs,
             X=Xname,
@@ -1701,6 +1713,7 @@ class Rectilinear(RectilinearMixin, GridSystem):
     dYmin: float = field(init=False)
     left_break: float = field(init=False)
     right_break: float = field(init=False)
+    y_is_increasing: bool = field(init=False)
 
     def __post_init__(self) -> None:
         self.Xdim = self.X
@@ -1740,6 +1753,7 @@ class Rectilinear(RectilinearMixin, GridSystem):
             y_left = y_ii.left
             widths = y_right - y_left
             self.dYmin = float(np.min(widths)) if len(widths) > 0 else 0.0
+            self.y_is_increasing = bool(y_left.is_monotonic_increasing)
 
     @property
     def dims(self) -> set[str]:
@@ -1830,7 +1844,7 @@ class Rectilinear(RectilinearMixin, GridSystem):
 
         return self._rectilinear_sel(
             bbox=bbox,
-            y_is_increasing=y_index.index.is_monotonic_increasing,
+            y_is_increasing=self.y_is_increasing,
             x_size=x_size,
             y_size=y_size,
         )
@@ -3011,6 +3025,24 @@ GridSystem1D = Triangular
 GridSystem2D = RasterAffine | Rectilinear | Curvilinear | Polar
 
 
+def _parse_proj_convention_crs(attrs: dict) -> CRS | None:
+    """Parse CRS from proj: convention attributes.
+
+    The proj: convention uses proj:code (e.g. "EPSG:4326") or proj:wkt2.
+    """
+    if "proj:code" in attrs:
+        try:
+            return CRS.from_user_input(attrs["proj:code"])
+        except Exception as e:
+            logger.error(f"Failed to parse proj:code {attrs['proj:code']!r}: {e}")
+    if "proj:wkt2" in attrs:
+        try:
+            return CRS.from_wkt(attrs["proj:wkt2"])
+        except Exception as e:
+            logger.error(f"Failed to parse proj:wkt2: {e}")
+    return None
+
+
 def _guess_grid_mappings_and_crs(
     ds: xr.Dataset,
 ) -> list[GridMappingInfo]:
@@ -3033,7 +3065,14 @@ def _guess_grid_mappings_and_crs(
             coordinates = (
                 coords if coords and len(coords) == 2 and coords != ([], []) else None
             )
-            result.append(GridMappingInfo(grid_mapping_var, crs, coordinates))
+            result.append(
+                GridMappingInfo(
+                    dict(grid_mapping_var.attrs),
+                    crs,
+                    coordinates,
+                    grid_mapping_var_name=str(grid_mapping_var.name),
+                )
+            )
         return result
 
     # Fall back to existing single grid mapping approach - construct default grid mapping
@@ -3051,37 +3090,68 @@ def _guess_grid_mappings_and_crs(
             coordinates = (
                 tuple(itertools.chain(Xname, Yname)) if Xname and Yname else None
             )
-            return [GridMappingInfo(None, DEFAULT_CRS, coordinates)]
-        else:
-            warnings.warn("No CRS detected", UserWarning, stacklevel=2)
-            return [GridMappingInfo(None, None, None)]
+            return [GridMappingInfo({}, DEFAULT_CRS, coordinates)]
+
+        # Check for GeoZarr conventions (spatial: on arrays, proj: on group)
+        # Per GeoZarr spec: array-level attrs override group-level attrs
+        grid_mapping_attrs: dict[str, Any] = {}
+        for var in ds.data_vars:
+            var_attrs = ds[var].attrs
+            if "spatial:transform" in var_attrs:
+                grid_mapping_attrs = {
+                    k: v for k, v in var_attrs.items() if k.startswith("spatial:")
+                }
+                break
+        if not grid_mapping_attrs and "spatial:transform" in ds.attrs:
+            grid_mapping_attrs = {
+                k: v for k, v in ds.attrs.items() if k.startswith("spatial:")
+            }
+
+        if grid_mapping_attrs:
+            # Add proj: attrs from group level
+            proj_attrs = {k: v for k, v in ds.attrs.items() if k.startswith("proj:")}
+            grid_mapping_attrs.update(proj_attrs)
+
+            crs = _parse_proj_convention_crs(ds.attrs)
+            if crs is not None:
+                return [GridMappingInfo(grid_mapping_attrs, crs, None)]
+
+        warnings.warn("No CRS detected", UserWarning, stacklevel=2)
+        return [GridMappingInfo({}, None, None)]
 
     # Handle case where spatial_ref is present but not linked to by a grid_mapping attribute
     result = []
-    for grid_mapping_var in grid_mapping_names:
-        grid_mapping = ds[grid_mapping_var]
-        crs = CRS.from_cf(grid_mapping.attrs)
+    for grid_mapping_var_name in grid_mapping_names:
+        grid_mapping_var = ds[grid_mapping_var_name]
+        crs = CRS.from_cf(grid_mapping_var.attrs)
         # For legacy approach, we don't have explicit coordinate info, so pass None
-        result.append(GridMappingInfo(grid_mapping, crs, None))
+        result.append(
+            GridMappingInfo(
+                dict(grid_mapping_var.attrs),
+                crs,
+                None,
+                grid_mapping_var_name=grid_mapping_var_name,
+            )
+        )
     return result
 
 
 def _guess_grid_mapping_and_crs(
     ds: xr.Dataset,
-) -> tuple[xr.DataArray | None, CRS | None]:
+) -> tuple[dict[str, Any], CRS | None]:
     """
-    Returns the first grid mapping and CRS (backwards compatibility).
+    Returns the first grid mapping attrs and CRS (backwards compatibility).
 
     Returns
     -------
-    grid_mapping variable
+    grid_mapping attrs dict
     CRS
     """
     all_mappings = _guess_grid_mappings_and_crs(ds)
     return (
         (all_mappings[0].grid_mapping, all_mappings[0].crs)
         if all_mappings
-        else (None, None)
+        else ({}, None)
     )
 
 
@@ -3146,8 +3216,14 @@ def _guess_coordinates_for_mapping(
     """
     assert mapping.crs is not None, "CRS must not be None at this point"
 
-    if mapping.coordinates:
-        # Use explicit coordinate pair if provided
+    # Check for GeoZarr spatial:dimensions first
+    spatial_dims = mapping.grid_mapping.get("spatial:dimensions")
+    if spatial_dims and len(spatial_dims) == 2:
+        # spatial:dimensions is [Y, X] order
+        Xname: tuple[str, ...] | None = (spatial_dims[1],)
+        Yname: tuple[str, ...] | None = (spatial_dims[0],)
+    elif mapping.coordinates:
+        # Use explicit coordinates from CF conventions
         Xname, Yname = guess_coordinate_vars(
             ds.reset_coords()[list(mapping.coordinates)].set_coords(
                 list(mapping.coordinates)
@@ -3155,7 +3231,7 @@ def _guess_coordinates_for_mapping(
             mapping.crs,
         )
     else:
-        # No explicit coordinates, guess from full dataset
+        # Fall back to guessing from full dataset
         Xname, Yname = guess_coordinate_vars(ds, mapping.crs)
         if Xname is None or Yname is None:
             # FIXME: Can we be a little more targeted in what we are guessing?
@@ -3172,8 +3248,11 @@ def _guess_coordinates_for_mapping(
 
     if len(Xname) > 1 or (len(Yname) > 1 and len(ds.data_vars) == 1):
         first = next(iter(ds.data_vars.values()))
-        Xname = [x for x in Xname if x in first.attrs.get("coordinates", [])]
-        Yname = [y for y in Yname if y in first.attrs.get("coordinates", [])]
+        Xname = tuple(x for x in Xname if x in first.attrs.get("coordinates", []))
+        Yname = tuple(y for y in Yname if y in first.attrs.get("coordinates", []))
+
+    if not Xname or not Yname:
+        return None, None
 
     if len(Xname) > 1 or len(Yname) > 1:
         raise GridDetectionError(
@@ -3244,29 +3323,52 @@ def _detect_grid_metadata(
 
     Xname, Yname = _guess_coordinates_for_mapping(ds, mapping, skip_coordinates)
 
-    if (
-        mapping.grid_mapping is not None
-        and mapping.grid_mapping.attrs.get("grid_mapping_name") == "healpix"
-    ):
+    if mapping.grid_mapping.get("grid_mapping_name") == "healpix":
         assert Xname is not None and Yname is not None
         return GridMetadata(X=Xname, Y=Yname, grid_cls=Healpix, crs=mapping.crs)
 
+    # GeoZarr with spatial:transform uses RasterAffine
+    spatial_transform = mapping.grid_mapping.get("spatial:transform")
+    if spatial_transform is not None and Xname is not None and Yname is not None:
+        return GridMetadata(
+            X=Xname,
+            Y=Yname,
+            crs=mapping.crs,
+            grid_cls=RasterAffine,
+        )
+
     if Xname is None or Yname is None:
         # Handle the fallback case where coordinates can't be determined normally
-        if mapping.grid_mapping is None:
+        # Check for GeoZarr spatial:dimensions in mapping (already collected from array/group attrs)
+        spatial_dims = mapping.grid_mapping.get("spatial:dimensions")
+        if spatial_dims is not None and len(spatial_dims) == 2:
+            # spatial:dimensions is [Y, X] order
+            y_dim, x_dim = spatial_dims[0], spatial_dims[1]
+            Xname, Yname = x_dim, y_dim
+            return GridMetadata(
+                X=Xname,
+                Y=Yname,
+                crs=mapping.crs,
+                grid_cls=RasterAffine,
+            )
+
+        if not mapping.grid_mapping:
             raise GridDetectionError(
                 "Creating raster affine grid system failed. "
                 "No explicit coordinate variables were detected and "
                 "no grid_mapping variable was detected."
             )
 
-        if "GeoTransform" not in mapping.grid_mapping.attrs:
-            # Return None to indicate no GeoTransform available
+        # Check for spatial:transform (GeoZarr) or GeoTransform (CF/GDAL)
+        spatial_transform = mapping.grid_mapping.get("spatial:transform")
+        geo_transform = mapping.grid_mapping.get("GeoTransform")
+
+        if spatial_transform is None and geo_transform is None:
             raise GridDetectionError(
                 "Creating raster affine grid system failed. "
                 "No explicit coordinate variables were detected and "
-                "no GeoTransform attribute is present on "
-                f"grid mapping variable: {mapping.grid_mapping!r}"
+                "no spatial:transform or GeoTransform attribute is present on "
+                f"grid mapping variable: {mapping.grid_mapping_var_name!r}"
             )
 
         # Use regex patterns to find coordinate dimensions
@@ -3283,26 +3385,30 @@ def _detect_grid_metadata(
                 "No explicit coordinate variables were detected and "
                 "no x or y dimensions could be inferred. "
             )
-        Xname, Yname = x_dim, y_dim
-        grid_cls = RasterAffine
-    else:
-        # Determine the appropriate grid class based on coordinate structure
-        X = ds[Xname]
-        Y = ds[Yname]
+        return GridMetadata(
+            X=x_dim,
+            Y=y_dim,
+            crs=mapping.crs,
+            grid_cls=RasterAffine,
+        )
 
-        if _is_polar_grid(X, Y):
-            grid_cls = Polar
-        elif X.ndim == 1 and Y.ndim == 1:
-            if is_rotated_pole(mapping.crs):
-                raise NotImplementedError("Rotated pole grids are not supported yet.")
-            grid_cls = Triangular if X.dims == Y.dims else Rectilinear
-        elif X.ndim == 2 and Y.ndim == 2:
-            grid_cls = Curvilinear
-        else:
-            raise GridDetectionError(
-                f"Unsupported coordinate dimensionality: {Xname} has ndim={X.ndim}, "
-                f"{Yname} has ndim={Y.ndim}. Expected 1D or 2D coordinate arrays."
-            )
+    # From here, Xname and Yname are known - determine the appropriate grid class
+    X = ds[Xname]
+    Y = ds[Yname]
+
+    if _is_polar_grid(X, Y):
+        grid_cls = Polar
+    elif X.ndim == 1 and Y.ndim == 1:
+        if is_rotated_pole(mapping.crs):
+            raise NotImplementedError("Rotated pole grids are not supported yet.")
+        grid_cls = Triangular if X.dims == Y.dims else Rectilinear
+    elif X.ndim == 2 and Y.ndim == 2:
+        grid_cls = Curvilinear
+    else:
+        raise GridDetectionError(
+            f"Unsupported coordinate dimensionality: {Xname} has ndim={X.ndim}, "
+            f"{Yname} has ndim={Y.ndim}. Expected 1D or 2D coordinate arrays."
+        )
 
     return GridMetadata(X=Xname, Y=Yname, crs=mapping.crs, grid_cls=grid_cls)
 
@@ -3381,13 +3487,9 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
                 raise GridDetectionError("Could not detect grid metadata")
         except GridDetectionError as e:
             # Skip grid systems that can't be created but warn about it
-            grid_mapping_name = (
-                mapping.grid_mapping.name
-                if mapping.grid_mapping is not None
-                else "unknown"
-            )
+            gm_name = mapping.grid_mapping_var_name or "unknown"
             warnings.warn(
-                f"Could not create alternate grid for grid mapping '{grid_mapping_name}': {e}",
+                f"Could not create alternate grid for grid mapping '{gm_name}': {e}",
                 RuntimeWarning,
                 stacklevel=2,
             )
@@ -3465,6 +3567,11 @@ def guess_grid_system(
         cf_coords = ds.cf.coordinates
 
     xpublish_id = ds.attrs.get("_xpublish_id")
+    if xpublish_id is None:
+        logger.warning(
+            "Dataset has no '_xpublish_id' attr; grid system caching is disabled "
+            "and the grid will be rebuilt on every request."
+        )
     cache_key = (
         (xpublish_id, xarray_object_key(ds[name], cf_coords=cf_coords))
         if xpublish_id is not None

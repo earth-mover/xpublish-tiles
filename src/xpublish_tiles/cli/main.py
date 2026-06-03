@@ -15,8 +15,10 @@ import xpublish
 from fastapi.middleware.cors import CORSMiddleware
 
 import xarray as xr
+from xarray import DataTree
 from xpublish_tiles.cli.bench import run_benchmark
 from xpublish_tiles.logger import setup_logging
+from xpublish_tiles.multiscale import assign_leaf_xpublish_ids
 from xpublish_tiles.testing.datasets import (
     DATASET_LOOKUP,
     GLOBAL_BENCHMARK_TILES,
@@ -62,13 +64,16 @@ def create_onecrs_dataset(ds: xr.Dataset) -> xr.Dataset:
 
 def get_dataset_for_name(
     name: str, branch: str = "main", group: str = "", icechunk_cache: bool = False
-) -> xr.Dataset:
+) -> xr.Dataset | DataTree:
+    """Returns a datatree for multiscale datasets, or a dataset for single-scale datasets."""
     if name == "global":
         ds = create_global_dataset().assign_attrs(_xpublish_id=name)
     elif name == "air":
         ds = xr.tutorial.open_dataset("air_temperature").assign_attrs(_xpublish_id=name)
     elif name in DATASET_LOOKUP:
-        ds = DATASET_LOOKUP[name].create().assign_attrs(_xpublish_id=name)
+        # create() may return a DataTree (multiscale), which has no assign_attrs.
+        ds = DATASET_LOOKUP[name].create()
+        ds.attrs["_xpublish_id"] = name
     elif name.startswith("xarray://"):
         # xarray tutorial dataset - format: xarray://dataset_name
         tutorial_name = name.removeprefix("xarray://")
@@ -206,12 +211,13 @@ def get_dataset_for_name(
             client = Client()
             repo = client.get_repo(name, config=config)
             session = repo.readonly_session(branch=branch)
-            ds = xr.open_zarr(
-                session.store,
+            ds: xr.DataTree = xr.open_datatree(
+                session.store,  # ty: ignore[invalid-argument-type]
                 group=group or None,
                 zarr_format=3,
                 consolidated=False,
                 chunks=None,
+                engine="zarr",
             )
             # Add _xpublish_id for caching - use name, branch, and group for arraylake
             xpublish_id = f"{name}:{branch}"
@@ -226,6 +232,8 @@ def get_dataset_for_name(
                 f"Error occurred while getting dataset from Arraylake: {e}"
             ) from e
 
+    if isinstance(ds, DataTree):
+        assign_leaf_xpublish_ids(ds)
     return ds
 
 
@@ -356,6 +364,9 @@ def _run_single_dataset_benchmark(dataset_name, args, ds=None):
 
         # Use titiler.xarray if requested
         if hasattr(args, "titiler") and args.titiler:
+            if not isinstance(ds, xr.Dataset):
+                print("  WARNING: titiler benchmark only supports Dataset, not DataTree")
+                return None
             from xpublish_tiles.cli.titiler_bench import run_titiler_benchmark
 
             return run_titiler_benchmark(
@@ -652,7 +663,7 @@ def main():
 
             if not ds.data_vars:
                 raise ValueError(f"No data variables found in dataset '{dataset_name}'")
-            first_var = next(iter(ds.data_vars))
+            first_var = str(next(iter(ds.data_vars)))
 
             needs_colorscale = (
                 "valid_min" not in ds[first_var].attrs

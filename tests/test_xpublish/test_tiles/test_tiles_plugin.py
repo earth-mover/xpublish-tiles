@@ -1,6 +1,7 @@
 import io
 import json
 import urllib.parse
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -10,7 +11,16 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import xarray as xr
-from xpublish_tiles.testing.datasets import EU3035, IFS, PARA_HIRES, REDGAUSS_N320
+from xpublish_tiles.config import config
+from xpublish_tiles.lib import TileTooBigError
+from xpublish_tiles.testing.datasets import (
+    EU3035,
+    GEOZARR_MULTISCALE,
+    IFS,
+    NATIVE_AT_ROOT_MULTISCALE,
+    REDGAUSS_N320,
+)
+from xpublish_tiles.tiles_lib import _MIN_ZOOM_CACHE
 from xpublish_tiles.xpublish.tiles import TilesPlugin
 from xpublish_tiles.xpublish.tiles.tile_matrix import extract_dimension_extents
 
@@ -586,20 +596,47 @@ def test_no_bbox_overlap_transparent_png():
     assert img.size == (512, 512), "Image should have correct dimensions"
 
 
-def test_para_hires_zoom_level_2_size_limit():
-    """Test that requesting zoom level 2 for PARA_HIRES dataset triggers size limit error"""
-    rest = xpublish.Rest(
-        {"para_hires": PARA_HIRES.create()}, plugins={"tiles": TilesPlugin()}
-    )
+def test_zoom_level_below_minimum():
+    """Test that requesting a zoom level below the minimum returns 413 error"""
+    # Clear the minzoom cache to ensure fresh computation with our config
+    _MIN_ZOOM_CACHE.clear()
+
+    # Use IFS dataset which has proper grid detection
+    rest = xpublish.Rest({"ifs": IFS.create()}, plugins={"tiles": TilesPlugin()})
     client = TestClient(rest.app)
 
-    response = client.get(
-        "/datasets/para_hires/tiles/WebMercatorQuad/2/1/1"
-        "?variables=foo&style=raster/viridis&width=256&height=256"
-    )
+    # With a very small max_renderable_size, the tile will be too big to render
+    with config.set(max_renderable_size=1000):
+        response = client.get(
+            "/datasets/ifs/tiles/WebMercatorQuad/0/0/0"
+            "?variables=foo&style=raster/viridis&width=256&height=256"
+        )
     assert response.status_code == 413
     error_detail = response.json()["detail"]
-    assert "WebMercatorQuad/2/1/1" in error_detail
+    assert "too big" in error_detail
+    assert "higher zoom level" in error_detail
+
+
+def test_tile_too_big_error():
+    """Test that TileTooBigError (413) is triggered when rendering exceeds memory limits"""
+    # Clear the minzoom cache to ensure clean state
+    _MIN_ZOOM_CACHE.clear()
+
+    rest = xpublish.Rest({"ifs": IFS.create()}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    # Mock the pipeline to raise TileTooBigError to test the error handling path
+    # Minimum zoom error will be triggered before we get to TileTooBigError, so we mock
+    with patch(
+        "xpublish_tiles.xpublish.tiles.plugin.pipeline",
+        side_effect=TileTooBigError("test error"),
+    ):
+        response = client.get(
+            "/datasets/ifs/tiles/WebMercatorQuad/5/10/10"
+            "?variables=foo&style=raster/viridis&width=256&height=256"
+        )
+    assert response.status_code == 413
+    error_detail = response.json()["detail"]
     assert "request too big" in error_detail
     assert "Please choose a higher zoom level" in error_detail
 
@@ -1150,3 +1187,171 @@ def test_colormap_with_style_parameter_succeeds(xpublish_client):
         f"?variables=air&width=256&height=256&colormap={colormap_encoded}&style=raster/default"
     )
     assert response.status_code == 422
+
+
+def test_geozarr_multiscale_tiles():
+    """Test tiles plugin works with GeoZarr multiscale DataTree."""
+    tree = GEOZARR_MULTISCALE.create()
+    rest = xpublish.Rest({"pyramid": tree}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    # Tiles list
+    response = client.get("/datasets/pyramid/tiles/")
+    assert response.status_code == 200
+    data = response.json()
+    assert "tilesets" in data and len(data["tilesets"]) >= 1
+    tileset = data["tilesets"][0]
+    assert "layers" in tileset
+    layer_ids = [layer["id"] for layer in tileset["layers"]]
+    assert "data" in layer_ids
+
+    # Tileset metadata
+    response = client.get("/datasets/pyramid/tiles/WebMercatorQuad")
+    assert response.status_code == 200
+
+    # TileJSON
+    response = client.get(
+        "/datasets/pyramid/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=data&width=256&height=256"
+    )
+    assert response.status_code == 200
+    tilejson = response.json()
+    assert "tiles" in tilejson
+    assert "{z}" in tilejson["tiles"][0]
+
+    # High zoom should use finest level (level "0")
+    high_zoom = 15
+    response = client.get(
+        f"/datasets/pyramid/tiles/WebMercatorQuad/{high_zoom}/16/15"
+        "?variables=data&width=256&height=256"
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["X-Multiscale-Level"] == "0"
+
+    # Low zoom should use coarsest level (level "2")
+    low_zoom = 0
+    response = client.get(
+        f"/datasets/pyramid/tiles/WebMercatorQuad/{low_zoom}/0/0"
+        "?variables=data&width=256&height=256"
+    )
+    assert response.status_code == 200
+    assert response.headers["X-Multiscale-Level"] == "2"
+
+
+def test_native_at_root_multiscale_tiles():
+    """Test tiles plugin works with native-at-root multiscale DataTree."""
+    tree = NATIVE_AT_ROOT_MULTISCALE.create()
+    rest = xpublish.Rest({"native_root": tree}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    # Tiles list
+    response = client.get("/datasets/native_root/tiles/")
+    assert response.status_code == 200
+    data = response.json()
+    assert "tilesets" in data and len(data["tilesets"]) >= 1
+    tileset = data["tilesets"][0]
+    layer_ids = [layer["id"] for layer in tileset["layers"]]
+    assert "data" in layer_ids
+
+    # TileJSON
+    response = client.get(
+        "/datasets/native_root/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=data&width=256&height=256"
+    )
+    assert response.status_code == 200
+
+    # High zoom should use finest level (root)
+    high_zoom = 15
+    response = client.get(
+        f"/datasets/native_root/tiles/WebMercatorQuad/{high_zoom}/16/15"
+        "?variables=data&width=256&height=256"
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["X-Multiscale-Level"] == "root"
+
+    # Low zoom should use coarsest level (level "1")
+    low_zoom = 0
+    response = client.get(
+        f"/datasets/native_root/tiles/WebMercatorQuad/{low_zoom}/0/0"
+        "?variables=data&width=256&height=256"
+    )
+    assert response.status_code == 200
+    assert response.headers["X-Multiscale-Level"] == "1"
+
+
+def test_tilejson_minzoom_uses_coarsest_level():
+    """Test that tilejson minzoom is calculated from the coarsest overview level.
+
+    For multiscale datasets, minzoom should be based on the coarsest (lowest
+    resolution) overview level, not the finest. This enables low-zoom rendering
+    since coarse overviews have fewer pixels per tile and won't hit TileTooBigError.
+    """
+    tree = GEOZARR_MULTISCALE.create()
+    rest = xpublish.Rest({"pyramid": tree}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    response = client.get(
+        "/datasets/pyramid/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=data&width=256&height=256"
+    )
+    assert response.status_code == 200
+    tilejson = response.json()
+
+    # For GEOZARR_MULTISCALE with 64x64 native and 4x downsampled coarsest level,
+    # minzoom should be 0 (the coarsest 16x16 level can render at any zoom).
+    # If minzoom were calculated from the finest level, it would be higher.
+    assert tilejson["minzoom"] == 0
+
+
+@pytest.mark.parametrize(
+    "zoom,tile_row,tile_col,expected_level",
+    [
+        # Zoom 7: tile ~2.8° each, data (0.64°) fills ~23% - uses finest level
+        pytest.param(7, 43, 60, "0", id="zoom7_finest"),
+        # Zoom 5: tile ~11° each, uses coarsest level
+        pytest.param(5, 10, 15, "2", id="zoom5_coarsest"),
+    ],
+)
+def test_geozarr_multiscale_snapshot(
+    png_snapshot, zoom, tile_row, tile_col, expected_level
+):
+    """Snapshot test for GeoZarr multiscale tiles at different zoom levels."""
+    tree = GEOZARR_MULTISCALE.create()
+    rest = xpublish.Rest({"pyramid": tree}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    response = client.get(
+        f"/datasets/pyramid/tiles/WebMercatorQuad/{zoom}/{tile_row}/{tile_col}"
+        "?variables=data&width=256&height=256"
+    )
+    assert response.status_code == 200
+    assert response.headers["X-Multiscale-Level"] == expected_level
+    assert response.content == png_snapshot
+
+
+@pytest.mark.parametrize(
+    "zoom,tile_row,tile_col,expected_level",
+    [
+        # Zoom 7: tile ~2.8° each, data (0.64°) fills ~23% - uses finest level (root)
+        pytest.param(7, 43, 60, "root", id="zoom7_root"),
+        # Zoom 5: tile ~11° each, uses coarsest overview
+        pytest.param(5, 10, 15, "1", id="zoom5_overview1"),
+    ],
+)
+def test_native_at_root_multiscale_snapshot(
+    png_snapshot, zoom, tile_row, tile_col, expected_level
+):
+    """Snapshot test for native-at-root multiscale tiles at different zoom levels."""
+    tree = NATIVE_AT_ROOT_MULTISCALE.create()
+    rest = xpublish.Rest({"native_root": tree}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    response = client.get(
+        f"/datasets/native_root/tiles/WebMercatorQuad/{zoom}/{tile_row}/{tile_col}"
+        "?variables=data&width=256&height=256"
+    )
+    assert response.status_code == 200
+    assert response.headers["X-Multiscale-Level"] == expected_level
+    assert response.content == png_snapshot

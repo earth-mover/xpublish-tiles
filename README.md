@@ -25,7 +25,7 @@ The goal of this project is to transform xarray datasets to raster, vector and o
 
 | Grid type    | Coordinate signature               | Detection / notes                                                                                                     | Supported styles |
 |--------------|------------------------------------|-----------------------------------------------------------------------------------------------------------------------|------------------|
-| Raster       | Affine transform                   | `GeoTransform` attribute on the grid mapping variable (`spatial_ref`).                                                | All              |
+| Raster       | Affine transform                   | `GeoTransform` on `spatial_ref`, or GeoZarr `spatial:transform` attribute.                                            | All              |
 | Rectilinear  | `lat[lat], lon[lon]`               | Two 1D orthogonal coordinates.                                                                                        | All              |
 | Curvilinear  | `lat[nlat, nlon], lon[nlat, nlon]` | Two 2D coordinates.                                                                                                   | All              |
 | Unstructured | `lat[point], lon[point]`           | UGRID conventions OR Two 1D coordinates interpreted as vertices, triangulated using `scipy.spatial.Delaunay`.         | All              |
@@ -39,6 +39,12 @@ Here `lat[lat]` means a coordinate variable named `lat` with one dimension named
 
 We attempt to require as little metadata as possible, and attempts to infer as much as possible. However, it is *always* better
 for you to annotate your dataset using the CF & ACDD conventions as well as possible.
+
+### GeoZarr & Multiscale Overviews Support
+
+`xpublish-tiles` supports [GeoZarr](https://geozarr.org)-conformant datasets and automatically handles multiscale pyramids (overviews). Multiscale support requires datasets to follow the GeoZarr conventions: [`proj:`](https://github.com/zarr-conventions/geo-proj), [`spatial:`](https://github.com/zarr-conventions/spatial), and [`multiscales`](https://github.com/zarr-conventions/multiscales).
+
+When serving a `DataTree` with multiple resolution levels, the appropriate level is automatically selected based on the requested zoom. Level selection compares each level's pixel size to the tile's pixel size and selects the coarsest level that is still finer than the tile resolution. This minimizes data loading while maintaining visual quality.
 
 ### Styles
 
