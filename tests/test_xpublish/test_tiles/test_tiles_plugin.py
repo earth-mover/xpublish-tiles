@@ -597,7 +597,7 @@ def test_no_bbox_overlap_transparent_png():
 
 
 def test_zoom_level_below_minimum():
-    """Test that requesting a zoom level below the minimum returns 400 error"""
+    """Test that requesting a zoom level below the minimum returns 413 error"""
     # Clear the minzoom cache to ensure fresh computation with our config
     _MIN_ZOOM_CACHE.clear()
 
@@ -605,16 +605,16 @@ def test_zoom_level_below_minimum():
     rest = xpublish.Rest({"ifs": IFS.create()}, plugins={"tiles": TilesPlugin()})
     client = TestClient(rest.app)
 
-    # With a very small max_renderable_size, minzoom will be high
+    # With a very small max_renderable_size, the tile will be too big to render
     with config.set(max_renderable_size=1000):
         response = client.get(
             "/datasets/ifs/tiles/WebMercatorQuad/0/0/0"
             "?variables=foo&style=raster/viridis&width=256&height=256"
         )
-    assert response.status_code == 400
+    assert response.status_code == 413
     error_detail = response.json()["detail"]
-    assert "Zoom level 0 is below minimum zoom" in error_detail
-    assert "Use zoom >=" in error_detail
+    assert "too big" in error_detail
+    assert "higher zoom level" in error_detail
 
 
 def test_tile_too_big_error():
@@ -1284,8 +1284,10 @@ def test_native_at_root_multiscale_tiles():
 @pytest.mark.parametrize(
     "zoom,tile_row,tile_col,expected_level",
     [
-        pytest.param(15, 11113, 15473, "0", id="zoom15_finest"),
-        pytest.param(0, 0, 0, "2", id="zoom0_coarsest"),
+        # Zoom 7: tile ~2.8° each, data (0.64°) fills ~23% - uses finest level
+        pytest.param(7, 43, 60, "0", id="zoom7_finest"),
+        # Zoom 5: tile ~11° each, uses coarsest level
+        pytest.param(5, 10, 15, "2", id="zoom5_coarsest"),
     ],
 )
 def test_geozarr_multiscale_snapshot(
@@ -1308,8 +1310,10 @@ def test_geozarr_multiscale_snapshot(
 @pytest.mark.parametrize(
     "zoom,tile_row,tile_col,expected_level",
     [
-        pytest.param(15, 11113, 15473, "root", id="zoom15_root"),
-        pytest.param(0, 0, 0, "1", id="zoom0_overview1"),
+        # Zoom 7: tile ~2.8° each, data (0.64°) fills ~23% - uses finest level (root)
+        pytest.param(7, 43, 60, "root", id="zoom7_root"),
+        # Zoom 5: tile ~11° each, uses coarsest overview
+        pytest.param(5, 10, 15, "1", id="zoom5_overview1"),
     ],
 )
 def test_native_at_root_multiscale_snapshot(

@@ -162,36 +162,20 @@ def get_resolution_level(
     if not levels:
         return None
 
-    if zoom is not None and tms is not None:
-        return _select_level_for_zoom_from_levels(levels, tms, zoom)
+    # No zoom specified - return finest level (first in sorted list)
+    if zoom is None or tms is None:
+        return levels[0]
 
-    # Return finest level (first in sorted list)
-    return levels[0]
-
-
-def _select_level_for_zoom_from_levels(
-    levels: list[ResolutionLevel],
-    tms: morecantile.TileMatrixSet,
-    zoom: int,
-) -> ResolutionLevel:
-    """Select the best resolution level from pre-scanned levels.
-
-    Internal helper that operates on already-scanned levels to avoid rescanning.
-    """
-    # Get CRS from the first level's dataset for unit conversion
+    # Select best level for the requested zoom
     data_crs = get_crs(levels[0].dataset)
-
-    tile_matrix = tms.matrix(zoom)
-    tile_pixel_size = tile_matrix.cellSize
+    tile_pixel_size = tms.matrix(zoom).cellSize
 
     # Levels are sorted finest (smallest pixel) to coarsest (largest pixel)
     # Default to finest level (for when all are coarser than tile - need upscaling)
     selected = levels[0]
 
-    # Iterate from coarsest to finest, find coarsest level with pixel spacing
-    # still finer than tile
+    # Iterate from coarsest to finest, find coarsest level still finer than tile
     for level in reversed(levels):
-        # Convert pixel size to TMS units for proper comparison
         pixel_size_tms = _pixel_size_in_tms_units(level.pixel_size, data_crs, tms)
         if pixel_size_tms <= tile_pixel_size:
             selected = level
