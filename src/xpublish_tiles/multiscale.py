@@ -26,7 +26,7 @@ def get_pixel_size(ds: xr.Dataset) -> float | None:
     transform = None
     # Check array-level attrs first (GeoZarr: arrays override group)
     for var in ds.data_vars:
-        transform = ds[var].attrs.get("spatial:transform")
+        transform = ds._variables[var].attrs.get("spatial:transform")
         if transform is not None:
             break
     # Fall back to dataset/group-level attrs

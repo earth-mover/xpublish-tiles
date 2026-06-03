@@ -1697,6 +1697,7 @@ class Rectilinear(RectilinearMixin, GridSystem):
     dYmin: float = field(init=False)
     left_break: float = field(init=False)
     right_break: float = field(init=False)
+    y_is_increasing: bool = field(init=False)
 
     def __post_init__(self) -> None:
         self.Xdim = self.X
@@ -1736,6 +1737,7 @@ class Rectilinear(RectilinearMixin, GridSystem):
             y_left = y_ii.left
             widths = y_right - y_left
             self.dYmin = float(np.min(widths)) if len(widths) > 0 else 0.0
+            self.y_is_increasing = y_index.index.is_monotonic_increasing
 
     @property
     def dims(self) -> set[str]:
@@ -1826,7 +1828,7 @@ class Rectilinear(RectilinearMixin, GridSystem):
 
         return self._rectilinear_sel(
             bbox=bbox,
-            y_is_increasing=y_index.index.is_monotonic_increasing,
+            y_is_increasing=self.y_is_increasing,
             x_size=x_size,
             y_size=y_size,
         )
