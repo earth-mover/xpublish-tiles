@@ -236,6 +236,7 @@ def _bounds_from_combined(
     Ylen: int,
     Xlen: int,
     combine: np.ufunc = np.logical_and,
+    seam_mask: np.ndarray | None = None,
 ) -> tuple[list[int], list[int], list[slice]]:
     """Per-slice combine of ``lat_mask`` with the slice's lon_mask, reduced to
     a per-slice bounding box. Returns ``(y_starts, y_stops, x_indexers)``;
@@ -244,6 +245,10 @@ def _bounds_from_combined(
     Set ``combine`` to ``np.logical_and`` for the normal AABB selection,
     or ``np.logical_or`` for the polar-cap cube-edge-seam fallback
     where the intersection is empty but a union AABB over both candidate sets is desired.
+
+    ``seam_mask`` (polar-cap only) flags cells whose naive lon AABB is
+    meaningless because they straddle the 0/360 seam; such cells are OR'd into
+    the per-slice lon_mask so they always pass the longitude test.
     """
     y_starts: list[int] = []
     y_stops: list[int] = []
@@ -252,6 +257,8 @@ def _bounds_from_combined(
     for sl in lon_slices:
         mask |= x_min <= sl.stop
         mask &= x_max >= sl.start
+        if seam_mask is not None:
+            mask |= seam_mask
         combine(mask, lat_mask, out=mask)
         if mask.any():
             y_s, y_e = _bounds_from_mask(mask, axis=xaxis, size=Ylen)
@@ -812,6 +819,7 @@ class CurvilinearCellIndex(xr.Index):
     cell_x_max: np.ndarray
     cell_y_min: np.ndarray
     cell_y_max: np.ndarray
+    cell_crosses_seam: np.ndarray
     _dXmin: float
     _dYmin: float
     tripolar_fold_row: int | None
@@ -906,6 +914,15 @@ class CurvilinearCellIndex(xr.Index):
         self.cell_x_min, self.cell_x_max = _cell_min_max(
             self.corner_x, xaxis=xaxis, yaxis=yaxis
         )
+        # Cells whose 4 corners straddle the 0/360 (or ±180) longitude seam have
+        # a naive (min, max) AABB spanning the *complementary* arc, so the
+        # standard interval-overlap test wrongly excludes them. Flag them so
+        # polar-cap `.sel` can treat them as matching any longitude: they wind
+        # around the pole and genuinely span a wide lon range, and the
+        # over-selection is clipped to the canvas at render time. Non-polar-cap
+        # grids have unwrapped, monotonic lons (see `Curvilinear.from_dataset`),
+        # so the span never exceeds 180° and this mask is all-False there.
+        self.cell_crosses_seam = (self.cell_x_max - self.cell_x_min) > 180.0
         # 1D per-row lat aggregates used by `.sel` to find the row-bbox of a
         # query without materializing the full 2D ``lat_mask``: for a small
         # bbox this collapses ~15M-element work into a 1D scan of ~Ylen
@@ -943,7 +960,7 @@ class CurvilinearCellIndex(xr.Index):
         else:
             lat_row_start = int(row_nonzero[0])
             lat_row_stop = int(row_nonzero[-1]) + 1
-        lat_mask, x_min, x_max = self._lat_mask_for_rows(
+        lat_mask, x_min, x_max, seam_mask = self._lat_mask_for_rows(
             slice(lat_row_start, lat_row_stop), bbox=bbox
         )
 
@@ -976,6 +993,7 @@ class CurvilinearCellIndex(xr.Index):
             yaxis=yaxis,
             Ylen=lat_row_stop - lat_row_start,
             Xlen=Xlen,
+            seam_mask=seam_mask if self.is_polar_cap else None,
         )
         if x_indexers:
             y_start = min(y_starts) + lat_row_start
@@ -992,8 +1010,8 @@ class CurvilinearCellIndex(xr.Index):
                 # This is a rare case caught by property testing. There is a unit test now for
                 # Tile(x=30948, y=0, z=16). Again a more principled solution would be to transform
                 # to the face-local coordinate system
-                full_lat_mask, full_x_min, full_x_max = self._lat_mask_for_rows(
-                    slice(0, Ylen), bbox=bbox
+                full_lat_mask, full_x_min, full_x_max, full_seam_mask = (
+                    self._lat_mask_for_rows(slice(0, Ylen), bbox=bbox)
                 )
                 y_starts, y_stops, x_indexers = _bounds_from_combined(
                     lat_mask=full_lat_mask,
@@ -1005,6 +1023,7 @@ class CurvilinearCellIndex(xr.Index):
                     Ylen=Ylen,
                     Xlen=Xlen,
                     combine=np.logical_or,
+                    seam_mask=full_seam_mask,
                 )
                 if x_indexers:
                     y_start = min(y_starts)
@@ -1034,18 +1053,23 @@ class CurvilinearCellIndex(xr.Index):
 
     def _lat_mask_for_rows(
         self, y_slice: slice, *, bbox: BBox
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Slice the cached cell bounds to ``y_slice`` rows and build the per-
         cell lat-overlap mask for ``bbox``. Returns
-        ``(lat_mask, x_min, x_max)`` over those rows for downstream lon-mask
-        combines.
+        ``(lat_mask, x_min, x_max, seam_mask)`` over those rows for downstream
+        lon-mask combines.
         """
         sl: list[slice] = [slice(None), slice(None)]
         sl[self.yaxis] = y_slice
         idx = tuple(sl)
         lat_mask = self.cell_y_min[idx] <= bbox.north
         lat_mask &= self.cell_y_max[idx] >= bbox.south
-        return lat_mask, self.cell_x_min[idx], self.cell_x_max[idx]
+        return (
+            lat_mask,
+            self.cell_x_min[idx],
+            self.cell_x_max[idx],
+            self.cell_crosses_seam[idx],
+        )
 
     def equals(self, other: xr.Index, **kwargs: Any) -> bool:
         if not isinstance(other, CurvilinearCellIndex):
