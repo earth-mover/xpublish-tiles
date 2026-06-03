@@ -29,7 +29,11 @@ from xpublish_tiles.logger import (
     set_context_logger,
     with_accumulated_logs,
 )
-from xpublish_tiles.multiscale import get_dataset, get_resolution_level
+from xpublish_tiles.multiscale import (
+    get_coarsest_level,
+    get_dataset,
+    get_resolution_level,
+)
 from xpublish_tiles.pipeline import _infer_datatype, pipeline
 from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import ImageFormat, LegendFormat, QueryParams
@@ -445,14 +449,22 @@ class TilesPlugin(Plugin):
                 )
 
             # Determine min/max zoom from dataset characteristics
-            # Get the original morecantile TMS for minzoom/maxzoom properties
             tms = morecantile.tms.get(tileMatrixSetId)
 
-            # Calculate optimal zoom levels based on grid and data characteristics
-            # Get the first variable's grid system
+            # For minzoom calculation, use the coarsest overview level if available.
+            # Minzoom is based on avoiding TileTooBigError - coarse overviews have
+            # fewer pixels per tile, enabling lower zoom levels. Without this,
+            # minzoom would be calculated from the finest level, preventing
+            # low-zoom rendering even when overviews exist.
             var_name = query.variables[0]
-            grid = await async_run(guess_grid_system, dataset, var_name)
-            da = dataset.cf[var_name]
+            coarsest_level = get_coarsest_level(datatree)
+            if coarsest_level is not None:
+                minzoom_dataset = coarsest_level.dataset
+            else:
+                minzoom_dataset = dataset
+
+            grid = await async_run(guess_grid_system, minzoom_dataset, var_name)
+            da = minzoom_dataset.cf[var_name]
 
             bound_logger = get_context_logger()
             bound_logger = bound_logger.bind(tms=tms.id)

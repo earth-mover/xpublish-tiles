@@ -1281,6 +1281,30 @@ def test_native_at_root_multiscale_tiles():
     assert response.headers["X-Multiscale-Level"] == "1"
 
 
+def test_tilejson_minzoom_uses_coarsest_level():
+    """Test that tilejson minzoom is calculated from the coarsest overview level.
+
+    For multiscale datasets, minzoom should be based on the coarsest (lowest
+    resolution) overview level, not the finest. This enables low-zoom rendering
+    since coarse overviews have fewer pixels per tile and won't hit TileTooBigError.
+    """
+    tree = GEOZARR_MULTISCALE.create()
+    rest = xpublish.Rest({"pyramid": tree}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    response = client.get(
+        "/datasets/pyramid/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=data&width=256&height=256"
+    )
+    assert response.status_code == 200
+    tilejson = response.json()
+
+    # For GEOZARR_MULTISCALE with 64x64 native and 4x downsampled coarsest level,
+    # minzoom should be 0 (the coarsest 16x16 level can render at any zoom).
+    # If minzoom were calculated from the finest level, it would be higher.
+    assert tilejson["minzoom"] == 0
+
+
 @pytest.mark.parametrize(
     "zoom,tile_row,tile_col,expected_level",
     [

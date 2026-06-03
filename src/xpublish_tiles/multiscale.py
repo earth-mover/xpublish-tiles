@@ -140,6 +140,19 @@ def scan_resolution_levels(tree: DataTree) -> list[ResolutionLevel]:
     return levels
 
 
+def get_coarsest_level(tree: DataTree) -> ResolutionLevel | None:
+    """Get the coarsest (lowest resolution) level from a DataTree.
+
+    Used for calculating minzoom in tilejson - the coarsest overview
+    determines the lowest zoom level that can be rendered.
+    """
+    levels = scan_resolution_levels(tree)
+    if not levels:
+        return None
+    # levels are sorted finest to coarsest, so last is coarsest
+    return levels[-1]
+
+
 def get_resolution_level(
     tree: DataTree,
     *,
