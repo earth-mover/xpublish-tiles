@@ -15,6 +15,7 @@ import dask.array
 import xarray as xr
 from xarray import DataTree
 from xpublish_tiles.lib import transformer_from_crs
+from xpublish_tiles.multiscale import assign_leaf_xpublish_ids
 from xpublish_tiles.testing.tiles import (
     ETRS89_TILES,
     ETRS89_TILES_EDGE_CASES,
@@ -58,6 +59,8 @@ class Dataset:
         ds = self.setup(dims=self.dims, dtype=self.dtype, attrs=self.attrs)
         ds.attrs["name"] = self.name
         ds.attrs["_xpublish_id"] = self.name
+        if isinstance(ds, DataTree):
+            assign_leaf_xpublish_ids(ds)
         return ds
 
 

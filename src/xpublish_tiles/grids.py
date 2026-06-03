@@ -3409,6 +3409,11 @@ def guess_grid_system(
         cf_coords = ds.cf.coordinates
 
     xpublish_id = ds.attrs.get("_xpublish_id")
+    if xpublish_id is None:
+        logger.warning(
+            "Dataset has no '_xpublish_id' attr; grid system caching is disabled "
+            "and the grid will be rebuilt on every request."
+        )
     cache_key = (
         (xpublish_id, xarray_object_key(ds[name], cf_coords=cf_coords))
         if xpublish_id is not None

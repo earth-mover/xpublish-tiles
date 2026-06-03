@@ -171,6 +171,23 @@ def get_resolution_level(
     return selected
 
 
+def assign_leaf_xpublish_ids(tree: DataTree) -> None:
+    """Give each child node a distinct, path-qualified ``_xpublish_id``.
+
+    Multiscale levels share dimension names, so the grid cache key
+    (``(_xpublish_id, dim names)``) collides across levels unless each leaf
+    carries a distinct id. Without this, the grid is rebuilt on every tile.
+    No-op when the root has no ``_xpublish_id``.
+    """
+    root_id = tree.attrs.get("_xpublish_id")
+    if root_id is None:
+        return
+    for path, node in tree.subtree_with_keys:
+        if path == ".":
+            continue
+        node.attrs["_xpublish_id"] = f"{root_id}/{path}"
+
+
 def get_dataset(
     tree: DataTree,
     *,

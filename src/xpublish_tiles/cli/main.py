@@ -18,6 +18,7 @@ import xarray as xr
 from xarray import DataTree
 from xpublish_tiles.cli.bench import run_benchmark
 from xpublish_tiles.logger import setup_logging
+from xpublish_tiles.multiscale import assign_leaf_xpublish_ids
 from xpublish_tiles.testing.datasets import (
     DATASET_LOOKUP,
     GLOBAL_BENCHMARK_TILES,
@@ -70,7 +71,9 @@ def get_dataset_for_name(
     elif name == "air":
         ds = xr.tutorial.open_dataset("air_temperature").assign_attrs(_xpublish_id=name)
     elif name in DATASET_LOOKUP:
-        ds = DATASET_LOOKUP[name].create().assign_attrs(_xpublish_id=name)
+        # create() may return a DataTree (multiscale), which has no assign_attrs.
+        ds = DATASET_LOOKUP[name].create()
+        ds.attrs["_xpublish_id"] = name
     elif name.startswith("xarray://"):
         # xarray tutorial dataset - format: xarray://dataset_name
         tutorial_name = name.removeprefix("xarray://")
@@ -229,6 +232,8 @@ def get_dataset_for_name(
                 f"Error occurred while getting dataset from Arraylake: {e}"
             ) from e
 
+    if isinstance(ds, DataTree):
+        assign_leaf_xpublish_ids(ds)
     return ds
 
 
