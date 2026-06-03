@@ -25,8 +25,9 @@ def get_pixel_size(ds: xr.Dataset) -> float | None:
     """
     transform = None
     # Check array-level attrs first (GeoZarr: arrays override group)
+    # Use _variables to avoid expensive DataArray construction
     for var in ds.data_vars:
-        transform = ds[var].attrs.get("spatial:transform")
+        transform = ds._variables[var].attrs.get("spatial:transform")
         if transform is not None:
             break
     # Fall back to dataset/group-level attrs
@@ -95,8 +96,8 @@ def scan_resolution_levels(tree: DataTree) -> list[ResolutionLevel]:
     levels: list[ResolutionLevel] = []
 
     for path, node in tree.subtree_with_keys:
-        ds = node.to_dataset()
-        if not ds.data_vars:
+        ds = node.dataset
+        if ds is None or not ds.data_vars:
             continue
 
         pixel_size = get_pixel_size(ds)
