@@ -15,7 +15,6 @@ import pandas as pd
 import pyproj
 import rasterix
 import triangle
-from affine import Affine
 from numba_celltree import CellTree2d
 from pyproj import CRS
 from pyproj.aoi import BBox
@@ -137,9 +136,6 @@ class GridMetadata:
     ``face_dim`` is set only for faceted grids (currently ``CubedSphere``),
     where it identifies the dimension that enumerates faces (size 6 for GFDL
     / GMAO mosaic gridspec).
-
-    ``spatial_transform`` is set for GeoZarr datasets using the spatial: convention,
-    containing the 6-element affine transform coefficients [a, b, c, d, e, f].
     """
 
     X: str
@@ -147,7 +143,6 @@ class GridMetadata:
     crs: CRS
     grid_cls: type["GridSystem"]
     face_dim: str | None = None
-    spatial_transform: list[float] | None = None
 
     def __repr__(self) -> str:
         face = f", face_dim={self.face_dim!r}" if self.face_dim is not None else ""
@@ -1581,30 +1576,16 @@ class RasterAffine(RectilinearMixin, GridSystem):
         crs: CRS,
         Xname: str,
         Yname: str,
-        *,
-        spatial_transform: list[float] | None = None,
     ) -> "RasterAffine":
         """Create a RasterAffine grid from a dataset using rasterix.
 
-        Parameters
-        ----------
-        spatial_transform
-            Optional GeoZarr spatial:transform coefficients [a, b, c, d, e, f].
-            If provided, used to create the affine transform directly.
-            Otherwise falls back to rasterix auto-detection.
+        Uses rasterix auto-detection to create the affine transform from:
+        - GeoZarr spatial:transform (requires zarr_conventions with spatial:)
+        - CF/GDAL GeoTransform attribute
+        - Explicit coordinate variables
         """
-        if spatial_transform is not None:
-            # Create RasterIndex from spatial:transform
-            affine = Affine(*spatial_transform[:6])
-            width = ds.sizes[Xname]
-            height = ds.sizes[Yname]
-            raster_index = rasterix.RasterIndex.from_transform(
-                affine, width=width, height=height, x_dim=Xname, y_dim=Yname
-            )
-        else:
-            # Fallback: let rasterix auto-detect (works with coords or GeoTransform)
-            ds = rasterix.assign_index(ds, x_dim=Xname, y_dim=Yname)
-            raster_index = cast(rasterix.RasterIndex, ds.xindexes[Xname])
+        ds = rasterix.assign_index(ds, x_dim=Xname, y_dim=Yname)
+        raster_index = cast(rasterix.RasterIndex, ds.xindexes[Xname])
 
         return cls(
             crs=crs,
@@ -3191,7 +3172,6 @@ def _detect_grid_metadata(
             Y=Yname,
             crs=mapping.crs,
             grid_cls=RasterAffine,
-            spatial_transform=spatial_transform,
         )
 
     if Xname is None or Yname is None:
@@ -3207,7 +3187,6 @@ def _detect_grid_metadata(
                 Y=Yname,
                 crs=mapping.crs,
                 grid_cls=RasterAffine,
-                spatial_transform=mapping.grid_mapping.get("spatial:transform"),
             )
 
         if not mapping.grid_mapping:
@@ -3248,7 +3227,6 @@ def _detect_grid_metadata(
             Y=y_dim,
             crs=mapping.crs,
             grid_cls=RasterAffine,
-            spatial_transform=spatial_transform,
         )
 
     # From here, Xname and Yname are known - determine the appropriate grid class
@@ -3322,8 +3300,6 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
     extra: dict[str, Any] = {}
     if primary_grid_metadata.face_dim is not None:
         extra["face_dim"] = primary_grid_metadata.face_dim
-    if primary_grid_metadata.spatial_transform is not None:
-        extra["spatial_transform"] = primary_grid_metadata.spatial_transform
     primary_grid = primary_grid_metadata.grid_cls.from_dataset(
         ds,
         primary_grid_metadata.crs,

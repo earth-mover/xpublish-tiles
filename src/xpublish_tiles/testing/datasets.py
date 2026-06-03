@@ -1856,6 +1856,7 @@ def geozarr_multiscale_grid(
         )
         ds.attrs["proj:code"] = "EPSG:4326"
         ds.attrs["proj:wkt2"] = crs_wkt
+        ds.attrs["zarr_conventions"] = [{"name": "spatial:"}]
 
         ds["data"].encoding["chunks"] = (size, size)
 
@@ -1948,6 +1949,7 @@ def native_at_root_multiscale_grid(
         attrs={
             "proj:code": "EPSG:4326",
             "proj:wkt2": crs_wkt,
+            "zarr_conventions": [{"name": "spatial:"}],
             "spatial:bbox": [origin_x, ymin, xmax, origin_y],
             "multiscales": {
                 "layout": multiscales_layout,
@@ -1995,6 +1997,7 @@ def native_at_root_multiscale_grid(
             attrs={
                 "proj:code": "EPSG:4326",
                 "proj:wkt2": crs_wkt,
+                "zarr_conventions": [{"name": "spatial:"}],
             },
         )
         ds["data"].encoding["chunks"] = (size, size)

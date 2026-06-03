@@ -4106,18 +4106,14 @@ wheels = [
 
 [[package]]
 name = "rasterix"
-version = "0.2.1"
-source = { registry = "https://pypi.org/simple" }
+version = "0.2.2.dev5+g2b0a3aad1"
+source = { git = "https://github.com/xarray-contrib/rasterix.git?rev=spatial-dimensions#2b0a3aad1aa2314a7b01ecf62f0f2606a0adf45d" }
 dependencies = [
     { name = "affine" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "xarray" },
     { name = "xproj" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/33/ab/92ea6124b9182f01b7c36d93028363e72ad5910df6a69c3d11208056be19/rasterix-0.2.1.tar.gz", hash = "sha256:aafc21b2bed1b6034576f6c45bef2f0538e8231be267b925f7bf312347b29ff9", size = 102739, upload-time = "2026-02-18T20:57:00.964Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/da/9e/0f2401926a5a465dd6eaf2877cabb4e5557d1817fd55f68356fb74273105/rasterix-0.2.1-py3-none-any.whl", hash = "sha256:308779392ec0d59fc6bb6ba2180c4eeabb922fd31c2c9efb2c29be359f16f5b5", size = 49436, upload-time = "2026-02-18T20:56:59.88Z" },
 ]
 
 [[package]]
@@ -5187,7 +5183,7 @@ requires-dist = [
     { name = "pytest-randomly", marker = "extra == 'testing'", specifier = ">=3.16.0" },
     { name = "pytest-split", marker = "extra == 'testing'", specifier = ">=0.10.0" },
     { name = "pytest-xdist", marker = "extra == 'testing'", specifier = ">=3.6.1" },
-    { name = "rasterix", specifier = ">=0.1a4" },
+    { name = "rasterix", git = "https://github.com/xarray-contrib/rasterix.git?rev=spatial-dimensions" },
     { name = "requests", specifier = ">=2.32.5" },
     { name = "scikit-image", specifier = ">=0.25.2" },
     { name = "scikit-image", marker = "extra == 'testing'", specifier = ">=0.25.2" },
