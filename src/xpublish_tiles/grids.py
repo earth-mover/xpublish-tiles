@@ -164,12 +164,13 @@ class GridMappingInfo:
     grid_mapping: dict[str, Any]
     crs: CRS | None
     coordinates: tuple[str, ...] | None
-    grid_mapping_name: str | None = None
+    # Variable name (e.g., "spatial_ref"), not the CF attr grid_mapping_name (e.g., "healpix")
+    grid_mapping_var_name: str | None = None
 
     def __repr__(self) -> str:
         gm_repr = (
-            f"<attrs from {self.grid_mapping_name!r}>"
-            if self.grid_mapping_name is not None
+            f"<attrs from {self.grid_mapping_var_name!r}>"
+            if self.grid_mapping_var_name is not None
             else f"<{len(self.grid_mapping)} attrs>"
         )
         return (
@@ -2917,7 +2918,7 @@ def _guess_grid_mappings_and_crs(
                     dict(grid_mapping_var.attrs),
                     crs,
                     coordinates,
-                    grid_mapping_name=str(grid_mapping_var.name),
+                    grid_mapping_var_name=str(grid_mapping_var.name),
                 )
             )
         return result
@@ -2977,7 +2978,7 @@ def _guess_grid_mappings_and_crs(
                 dict(grid_mapping_var.attrs),
                 crs,
                 None,
-                grid_mapping_name=grid_mapping_var_name,
+                grid_mapping_var_name=grid_mapping_var_name,
             )
         )
     return result
@@ -3205,7 +3206,7 @@ def _detect_grid_metadata(
                 "Creating raster affine grid system failed. "
                 "No explicit coordinate variables were detected and "
                 "no spatial:transform or GeoTransform attribute is present on "
-                f"grid mapping variable: {mapping.grid_mapping_name!r}"
+                f"grid mapping variable: {mapping.grid_mapping_var_name!r}"
             )
 
         # Use regex patterns to find coordinate dimensions
@@ -3320,7 +3321,7 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
                 raise GridDetectionError("Could not detect grid metadata")
         except GridDetectionError as e:
             # Skip grid systems that can't be created but warn about it
-            gm_name = mapping.grid_mapping_name or "unknown"
+            gm_name = mapping.grid_mapping_var_name or "unknown"
             warnings.warn(
                 f"Could not create alternate grid for grid mapping '{gm_name}': {e}",
                 RuntimeWarning,

@@ -150,6 +150,8 @@ def get_resolution_level(
 
     Behavior:
     - If zoom + tms provided: Select best resolution level for that zoom
+      by comparing each level's pixel size to the tile's pixel size.
+      Selects the coarsest level that is still finer than the tile.
     - If no zoom: Return finest (highest resolution) level available
     - If no valid levels found: Return None
 
@@ -186,7 +188,8 @@ def _select_level_for_zoom_from_levels(
     # Default to finest level (for when all are coarser than tile - need upscaling)
     selected = levels[0]
 
-    # Iterate from coarsest to finest, find coarsest level still finer than tile
+    # Iterate from coarsest to finest, find coarsest level with pixel spacing
+    # still finer than tile
     for level in reversed(levels):
         # Convert pixel size to TMS units for proper comparison
         pixel_size_tms = _pixel_size_in_tms_units(level.pixel_size, data_crs, tms)
@@ -207,6 +210,8 @@ def get_dataset(
 
     Behavior:
     - If zoom + tms provided: Select best resolution level for that zoom
+      by comparing each level's pixel size to the tile's pixel size.
+      Selects the coarsest level that is still finer than the tile.
     - If no zoom: Return finest (highest resolution) level available
     - If no valid levels found: Try root dataset, else raise ValueError
     """

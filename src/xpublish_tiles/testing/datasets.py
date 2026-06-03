@@ -1876,6 +1876,7 @@ GEOZARR_MULTISCALE = Dataset(
     ),
     dtype=np.float32,
     setup=geozarr_multiscale_grid,
+    attrs={"origin_x": -10.004},
 )
 
 
@@ -2020,6 +2021,7 @@ NATIVE_AT_ROOT_MULTISCALE = Dataset(
     ),
     dtype=np.float32,
     setup=native_at_root_multiscale_grid,
+    attrs={"origin_x": -10.004},
 )
 
 
