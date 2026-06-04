@@ -33,6 +33,7 @@ from xpublish_tiles.lib import (
     fill_rings_from_corners,
     is_degree_geographic,
     round_bbox,
+    suppress_cf_dangling_ref_warnings,
     sync_load_async,
     transformer_from_crs,
     unwrap,
@@ -3669,15 +3670,7 @@ def guess_grid_system(
         _validate_grid_dims(cached, ds[name])
         return cached
 
-    with GRID_DETECTION_LOCK, warnings.catch_warnings():
-        # GOES-style vars reference band coords/ancillary vars that get dropped
-        # during subsetting; cf-xarray warns harmlessly about the dangling refs
-        # on every ``.cf`` access during detection.
-        warnings.filterwarnings(
-            "ignore",
-            message="Variables .* not found in object but are referred to in the CF attributes",
-            category=UserWarning,
-        )
+    with GRID_DETECTION_LOCK, suppress_cf_dangling_ref_warnings():
         # Double-check in case another thread populated cache while we waited
         if cache_key is not None and cache_key in _GRID_CACHE:
             cached = _GRID_CACHE[cache_key]

@@ -1,9 +1,11 @@
 """Library utility functions for xpublish-tiles."""
 
 import asyncio
+import contextlib
 import io
 import math
 import operator
+import warnings
 from collections.abc import Hashable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -128,6 +130,19 @@ def _coarsen_indices_impl(
 
         result[dim] = (starts, ends)
     return result
+
+
+@contextlib.contextmanager
+def suppress_cf_dangling_ref_warnings():
+    """Silence cf-xarray's harmless warning about CF-referenced variables that
+    were dropped during subsetting (e.g. GOES band/ancillary coords)."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Variables .* not found in object but are referred to in the CF attributes",
+            category=UserWarning,
+        )
+        yield
 
 
 def crs_repr(crs: CRS | None) -> str:
