@@ -1,14 +1,16 @@
-from typing import Any, Literal, Union, overload
+from typing import Annotated, Any, Literal, TypeAlias, Union, overload
 
 from pydantic import (
     AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
+    GetPydanticSchema,
     RootModel,
     field_validator,
     model_validator,
 )
+from pydantic_core import core_schema
 from pydantic_xml import BaseXmlModel, attr, element
 from pyproj import CRS
 from pyproj.aoi import BBox
@@ -23,6 +25,82 @@ from xpublish_tiles.validators import (
     validate_range_color,
     validate_style,
 )
+
+
+def _parse_crs(value: CRS | str) -> CRS:
+    if isinstance(value, CRS):
+        return value
+
+    parsed = validate_crs(value)
+    if parsed is None:
+        raise ValueError("crs is required")
+    return parsed
+
+
+def _parse_bbox(value: BBox | str) -> BBox:
+    if isinstance(value, BBox):
+        return value
+
+    parsed = validate_bbox(value)
+    if parsed is None:
+        raise ValueError("bbox is required")
+    return parsed
+
+
+def _serialize_crs(value: CRS) -> str:
+    return value.to_string()
+
+
+def _serialize_bbox(value: BBox) -> str:
+    return f"{value.west:g},{value.south:g},{value.east:g},{value.north:g}"
+
+
+def _crs_schema(_source_type, _handler) -> core_schema.CoreSchema:
+    return core_schema.json_or_python_schema(
+        json_schema=core_schema.no_info_after_validator_function(
+            _parse_crs,
+            core_schema.str_schema(),
+        ),
+        python_schema=core_schema.union_schema(
+            [
+                core_schema.is_instance_schema(CRS),
+                core_schema.no_info_after_validator_function(
+                    _parse_crs,
+                    core_schema.str_schema(),
+                ),
+            ]
+        ),
+        serialization=core_schema.plain_serializer_function_ser_schema(
+            _serialize_crs,
+            return_schema=core_schema.str_schema(),
+        ),
+    )
+
+
+def _bbox_schema(_source_type, _handler) -> core_schema.CoreSchema:
+    return core_schema.json_or_python_schema(
+        json_schema=core_schema.no_info_after_validator_function(
+            _parse_bbox,
+            core_schema.str_schema(),
+        ),
+        python_schema=core_schema.union_schema(
+            [
+                core_schema.is_instance_schema(BBox),
+                core_schema.no_info_after_validator_function(
+                    _parse_bbox,
+                    core_schema.str_schema(),
+                ),
+            ]
+        ),
+        serialization=core_schema.plain_serializer_function_ser_schema(
+            _serialize_bbox,
+            return_schema=core_schema.str_schema(),
+        ),
+    )
+
+
+CRSParam: TypeAlias = Annotated[CRS, GetPydanticSchema(_crs_schema)]
+BBoxParam: TypeAlias = Annotated[BBox, GetPydanticSchema(_bbox_schema)]
 
 
 class WMSBaseQuery(BaseModel):
@@ -54,8 +132,9 @@ class WMSGetMapQuery(WMSBaseQuery):
         ("raster", "default"),
         description="Style to use for the query. Defaults to raster/default. Default may be replaced by the name of any colormap available to matplotlibs",
     )
-    crs: CRS = Field(
-        CRS.from_epsg(4326),
+    crs: CRSParam = Field(
+        "EPSG:4326",
+        validate_default=True,
         description="Coordinate reference system to use for the query. Default is EPSG:4326",
     )
     time: str | None = Field(
@@ -66,7 +145,7 @@ class WMSGetMapQuery(WMSBaseQuery):
         None,
         description="Optional elevation to get map for. Only valid when the layer has an elevation dimension. When not specified, the default elevation is used",
     )
-    bbox: BBox = Field(
+    bbox: BBoxParam = Field(
         ...,
         description="Bounding box to use for the query in the format 'minx,miny,maxx,maxy'",
     )
@@ -109,11 +188,6 @@ class WMSGetMapQuery(WMSBaseQuery):
     def validate_colormap(cls, v: str | dict | None) -> dict[str, str] | None:
         return validate_colormap(v)
 
-    @field_validator("bbox", mode="before")
-    @classmethod
-    def validate_bbox(cls, v: str | None) -> BBox | None:
-        return validate_bbox(v)
-
     @field_validator("styles", mode="before")
     @classmethod
     def validate_style(cls, v: str | None) -> tuple[str, str] | None:
@@ -121,11 +195,6 @@ class WMSGetMapQuery(WMSBaseQuery):
         if valid_style is None:
             return ("raster", "default")
         return valid_style
-
-    @field_validator("crs", mode="before")
-    @classmethod
-    def validate_crs(cls, v: str | None) -> CRS | None:
-        return validate_crs(v)
 
     @field_validator("format", mode="before")
     @classmethod
@@ -178,11 +247,12 @@ class WMSGetFeatureInfoQuery(WMSBaseQuery):
         None,
         description="Optional elevation to get feature info for. Only valid when the layer has an elevation dimension. To get all elevations, use 'all', to get a range of elevations, use 'start/end'",
     )
-    crs: CRS = Field(
-        CRS.from_epsg(4326),
+    crs: CRSParam = Field(
+        "EPSG:4326",
+        validate_default=True,
         description="Coordinate reference system to use for the query. Currently only EPSG:4326 is supported for this request",
     )
-    bbox: BBox = Field(
+    bbox: BBoxParam = Field(
         ...,
         description="Bounding box to use for the query in the format 'minx,miny,maxx,maxy'",
     )
@@ -202,16 +272,6 @@ class WMSGetFeatureInfoQuery(WMSBaseQuery):
         ...,
         description="The y coordinate of the point to query. This is the index of the point in the y dimension",
     )
-
-    @field_validator("bbox", mode="before")
-    @classmethod
-    def validate_bbox(cls, v: str | None) -> BBox | None:
-        return validate_bbox(v)
-
-    @field_validator("crs", mode="before")
-    @classmethod
-    def validate_crs(cls, v: str | None) -> CRS | None:
-        return validate_crs(v)
 
 
 class WMSGetLegendGraphicQuery(WMSBaseQuery):
