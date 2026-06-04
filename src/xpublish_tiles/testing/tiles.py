@@ -374,6 +374,8 @@ RADAR_TILES = [
 
 # Geostationary tiles (GOES-style full disk centered on -75°W, 0°N)
 GEOSTATIONARY_TILES = [
+    # z1/0/0 spans the western limb — exercises off-disk transparency
+    TileTestParam(tile=Tile(x=0, y=0, z=1), tms=WEBMERC_TMS, name="geos_limb_z1"),
     TileTestParam(tile=Tile(x=1, y=2, z=2), tms=WEBMERC_TMS, name="geos_disk_z2"),
     TileTestParam(tile=Tile(x=2, y=4, z=3), tms=WEBMERC_TMS, name="geos_subsatellite_z3"),
     TileTestParam(tile=Tile(x=1, y=3, z=3), tms=WEBMERC_TMS, name="geos_conus_z3"),
