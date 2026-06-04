@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import pyproj
 import rasterix
-import triangle
+import triangular
 from numba_celltree import CellTree2d
 from pyproj import CRS
 from pyproj.aoi import BBox
@@ -526,7 +526,7 @@ class CellTreeIndex(xr.Index):
             # the line at 180, -180; calculate the neighbours of those faces; extract those vertices and pad those.
             # However this does not work if the boundary faces without padding don't intersect those bounding longitudes
             # e.g. consider if vertices are between -178.4 and +178.4, how do we connect the boundary without the convex hull approach?
-            boundary = pd.unique(triangle.convex_hull(vertices).ravel())
+            boundary = pd.unique(triangular.convex_hull(vertices).ravel())
             nverts = vertices.shape[0]
             pos_verts = vertices[boundary, ...]
             neg_verts = pos_verts.copy()
@@ -536,7 +536,7 @@ class CellTreeIndex(xr.Index):
 
             vertices = np.concatenate([vertices, pos_verts, neg_verts], axis=0)
             with log_duration("re-triangulating", "▲"):
-                faces = triangle.delaunay(vertices)
+                faces = triangular.delaunay(vertices)
             # need to reindex the data to match the padding
             self.reindexer = np.concatenate([np.arange(nverts), boundary, boundary])
 
@@ -2541,7 +2541,7 @@ class Triangular(GridSystem):
                     f"Triangulation failed. Variables {Xname!r} or {Yname!r} contain NaNs."
                 )
             try:
-                faces = triangle.delaunay(vertices)
+                faces = triangular.delaunay(vertices)
             except Exception as e:
                 raise ValueError(
                     f"Triangulation failed. This may indicate bad data in variables {Xname!r}, {Yname!r}."

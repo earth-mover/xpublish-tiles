@@ -4809,23 +4809,11 @@ wheels = [
 ]
 
 [[package]]
-name = "triangle"
-version = "20250106"
-source = { registry = "https://pypi.org/simple" }
+name = "triangular"
+version = "0.2.0"
+source = { git = "https://github.com/earth-mover/triangular/#c88f41350d4a86e623a09e433381dcdc41aa2448" }
 dependencies = [
     { name = "numpy" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/6f/ba/22c552b21aa5a7724e712372d29c9397db19086e99c62f876c1b73025df2/triangle-20250106-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:64106544f6d137b619f7f724abbb7c2c78353691cccfc163e9d0b2e2476e0853", size = 1439851, upload-time = "2025-01-07T04:54:03.857Z" },
-    { url = "https://files.pythonhosted.org/packages/fa/93/ce4d0c46ff570993f4302ce55300dd310b7c957a8e66890ed00691229f5b/triangle-20250106-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:38c221bb6e403f81de49050899502a8326c9565f62c4d69171070b41dc25cb69", size = 2089547, upload-time = "2025-01-07T04:56:09.463Z" },
-    { url = "https://files.pythonhosted.org/packages/23/e0/bd0a7e624fc5fc8636d0ad281c5b0624027dc1855218ce6a251c581d7127/triangle-20250106-cp312-cp312-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:b582b342cddb660dffc6bd7d7233f66952d2a3d18ccbc097660a8e370ee38d0c", size = 2009167, upload-time = "2025-01-07T04:56:12.221Z" },
-    { url = "https://files.pythonhosted.org/packages/26/3f/7c79202ec374bd122b63250d768be34674043be9b97f6bb8c115df64e880/triangle-20250106-cp312-cp312-win32.whl", hash = "sha256:9532797a15687225a0ee67619ad6f3baeb72bf193541eb96f782e41c577cc81b", size = 1407116, upload-time = "2025-01-07T05:00:13.664Z" },
-    { url = "https://files.pythonhosted.org/packages/a1/a5/4a09c3f9d2687d8752c912a97f2c5086cdd83721b3b13f8288f13b771fa7/triangle-20250106-cp312-cp312-win_amd64.whl", hash = "sha256:0327032a7984a7262180ef2ddd78b36dfdcdecbc79f0f9f173732ce7c670b8ed", size = 1426720, upload-time = "2025-01-07T05:00:17.789Z" },
-    { url = "https://files.pythonhosted.org/packages/67/8a/a40f1c55deb6933877409d1473c4883f6654b6a7d304f66c0e127e0c3a11/triangle-20250106-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:5f7ebba7ff2dc80d588e8a9286659160cdd35ee00b8cce375181a860c478deaf", size = 1438947, upload-time = "2025-01-07T04:54:05.388Z" },
-    { url = "https://files.pythonhosted.org/packages/e9/55/e2659dfa50823ee136084013af34b24fc09db9e2afbd5f61e92e3a996e57/triangle-20250106-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:4b2f2c3510a8e810a9edefdf9b3ce7f2fae6980b91ba89271446370bff09c849", size = 2089816, upload-time = "2025-01-07T04:56:13.822Z" },
-    { url = "https://files.pythonhosted.org/packages/d5/a8/c448a60073c84d1d5dd73419c76fc3f62167b8afaf49c0afbf8b415d914f/triangle-20250106-cp313-cp313-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:fde20cb1f18a63faf3fa8d62210a1907367f5c7dd961cee8fb6a2f6fabbe8c53", size = 2008891, upload-time = "2025-01-07T04:56:15.163Z" },
-    { url = "https://files.pythonhosted.org/packages/c8/5f/002f403604ce419867cf718c6d8a9405afe5ea8cf6a49d2fc440b7bf9eb9/triangle-20250106-cp313-cp313-win32.whl", hash = "sha256:54cc9eb2d585632f09fe95f6741e995284b9a990cbabd3cea36b392312d70e30", size = 1406951, upload-time = "2025-01-07T05:00:20.828Z" },
-    { url = "https://files.pythonhosted.org/packages/94/45/7ef91af7b9b82fc049163d1840c0c2cabba774cca4752c3ddf3bef1fa71a/triangle-20250106-cp313-cp313-win_amd64.whl", hash = "sha256:f1eadad15ad9ceabf967342de54f6d4619647ddced83ddce18d33d8e08841b31", size = 1426523, upload-time = "2025-01-07T05:00:22.12Z" },
 ]
 
 [[package]]
@@ -5117,7 +5105,7 @@ dependencies = [
     { name = "structlog" },
     { name = "tbb", marker = "sys_platform == 'linux'" },
     { name = "toolz" },
-    { name = "triangle" },
+    { name = "triangular" },
     { name = "xarray" },
     { name = "xpublish" },
     { name = "zarr" },
@@ -5201,7 +5189,7 @@ requires-dist = [
     { name = "tbb", marker = "sys_platform == 'linux'", specifier = ">=2022.2.0" },
     { name = "titiler", marker = "extra == 'testing'", specifier = ">=0.24.0" },
     { name = "toolz", specifier = ">=1.0.0" },
-    { name = "triangle", specifier = ">=20250106" },
+    { name = "triangular", git = "https://github.com/earth-mover/triangular/" },
     { name = "xarray", specifier = ">=2025.12.0" },
     { name = "xdggs", marker = "extra == 'complete'", specifier = ">=0.5.0" },
     { name = "xdggs", marker = "extra == 'healpix'", specifier = ">=0.5.0" },
