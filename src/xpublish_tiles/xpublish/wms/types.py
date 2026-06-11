@@ -1,4 +1,4 @@
-from typing import Annotated, Any, Literal, TypeAlias, Union, overload
+from typing import Annotated, Any, Literal, Union, overload
 
 from pydantic import (
     AliasChoices,
@@ -99,8 +99,8 @@ def _bbox_schema(_source_type, _handler) -> core_schema.CoreSchema:
     )
 
 
-CRSParam: TypeAlias = Annotated[CRS, GetPydanticSchema(_crs_schema)]
-BBoxParam: TypeAlias = Annotated[BBox, GetPydanticSchema(_bbox_schema)]
+type CRSParam = Annotated[CRS, GetPydanticSchema(_crs_schema)]
+type BBoxParam = Annotated[BBox, GetPydanticSchema(_bbox_schema)]
 
 
 class WMSBaseQuery(BaseModel):
