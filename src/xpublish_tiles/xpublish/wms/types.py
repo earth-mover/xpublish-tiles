@@ -1,11 +1,13 @@
-from typing import Any, Literal, Union, overload
+from typing import Annotated, Any, Literal, Union, overload
 
 from pydantic import (
     AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
+    PlainSerializer,
     RootModel,
+    WithJsonSchema,
     field_validator,
     model_validator,
 )
@@ -23,6 +25,18 @@ from xpublish_tiles.validators import (
     validate_range_color,
     validate_style,
 )
+
+
+def _serialize_crs(crs: CRS) -> str:
+    authority = crs.to_authority()
+    return ":".join(authority) if authority else crs.to_wkt()
+
+
+CRSQueryParam = Annotated[
+    CRS,
+    PlainSerializer(_serialize_crs, return_type=str),
+    WithJsonSchema({"type": "string", "examples": ["EPSG:4326"]}),
+]
 
 
 class WMSBaseQuery(BaseModel):
@@ -54,8 +68,9 @@ class WMSGetMapQuery(WMSBaseQuery):
         ("raster", "default"),
         description="Style to use for the query. Defaults to raster/default. Default may be replaced by the name of any colormap available to matplotlibs",
     )
-    crs: CRS = Field(
-        CRS.from_epsg(4326),
+    crs: CRSQueryParam = Field(
+        "EPSG:4326",
+        validate_default=True,
         description="Coordinate reference system to use for the query. Default is EPSG:4326",
     )
     time: str | None = Field(
@@ -178,8 +193,9 @@ class WMSGetFeatureInfoQuery(WMSBaseQuery):
         None,
         description="Optional elevation to get feature info for. Only valid when the layer has an elevation dimension. To get all elevations, use 'all', to get a range of elevations, use 'start/end'",
     )
-    crs: CRS = Field(
-        CRS.from_epsg(4326),
+    crs: CRSQueryParam = Field(
+        "EPSG:4326",
+        validate_default=True,
         description="Coordinate reference system to use for the query. Currently only EPSG:4326 is supported for this request",
     )
     bbox: BBox = Field(
