@@ -243,6 +243,9 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                 if isinstance(grid, Geostationary):
                     xcoord, ycoord = data[grid.X], data[grid.Y]
                     with NUMBA_THREADING_LOCK:
+                        # Transformation of points near the edge of the disk is undefined
+                        # and corrupts the rendering. Mask them out but only for
+                        # Geostationary to avoid the perf hit.
                         bad = _offdisk_quad_mask(
                             np.asarray(xcoord.data), np.asarray(ycoord.data)
                         )
@@ -252,9 +255,6 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                 ):
                     # Lock is only used when tbb is not available (e.g., on macOS)
                     # AND if we use the rectilinear or raster code path.
-                    # errstate: off-disk NaN coords (geostationary) cast to garbage
-                    # ints inside datashader's quad scaling; those quads no-op via
-                    # the NaN data mask above, so the warning is expected noise.
                     with NUMBA_THREADING_LOCK, np.errstate(invalid="ignore"):
                         mesh = cvs.quadmesh(
                             data.transpose(grid.Ydim, grid.Xdim), x=grid.X, y=grid.Y
