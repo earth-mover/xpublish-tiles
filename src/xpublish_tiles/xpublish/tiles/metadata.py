@@ -9,14 +9,9 @@ import xarray as xr
 from xarray import Dataset
 from xpublish_tiles.grids import (
     CubedSphere,
+    GridSystem,
     Healpix,
-    guess_grid_metadata,
-    guess_grid_system,
-)
-from xpublish_tiles.lib import (
-    GridDetectionError,
-    async_run,
-    suppress_cf_dangling_ref_warnings,
+    detect_grids,
 )
 from xpublish_tiles.logger import logger
 from xpublish_tiles.render import RenderRegistry
@@ -36,18 +31,23 @@ from xpublish_tiles.xpublish.tiles.types import (
     TilesetSummary,
 )
 
-# Result of ``allowed_styles`` is dataset-wide and stable, but the body
-# loops every data var and pays a ``guess_grid_system`` cache-miss for each
-# unique dim signature. Memoize per dataset so repeat /tiles/ requests skip
-# all of that.
+# Result of ``allowed_styles`` is dataset-wide and stable. Memoize per dataset
+# so repeat /tiles/ requests skip grid detection entirely.
 _ALLOWED_STYLES_CACHE: dict[str, list[str]] = {}
 
 
-def allowed_styles(dataset: Dataset | None = None) -> list[str]:
+def allowed_styles(
+    dataset: Dataset | None = None,
+    *,
+    var_grids: dict[str, GridSystem] | None = None,
+) -> list[str]:
     """Return the style IDs supported by ``dataset``'s grid.
 
     Healpix and Faceted grids (e.g. cubed sphere) only support ``polygons``;
     every other grid supports both ``raster`` and ``polygons``.
+
+    ``var_grids`` may be a precomputed ``detect_grids`` mapping; passing it
+    avoids re-running grid detection on the hot path.
     """
     if dataset is None:
         return ["raster", "polygons"]
@@ -56,27 +56,25 @@ def allowed_styles(dataset: Dataset | None = None) -> list[str]:
     if xpublish_id is not None and xpublish_id in _ALLOWED_STYLES_CACHE:
         return _ALLOWED_STYLES_CACHE[xpublish_id]
 
+    if var_grids is None:
+        var_grids = detect_grids(dataset)
+
     result = ["raster", "polygons"]
-    for var_name, var_data in dataset.data_vars.items():
-        if var_data.ndim == 0:
-            continue
-        try:
-            with suppress_cf_dangling_ref_warnings():
-                meta = guess_grid_metadata(dataset.cf[[str(var_name)]])
-        except (KeyError, GridDetectionError):
-            continue
-        if meta is not None and meta.grid_cls in (Healpix, CubedSphere):
-            result = ["polygons"]
-            break
+    if any(isinstance(grid, (Healpix, CubedSphere)) for grid in var_grids.values()):
+        result = ["polygons"]
 
     if xpublish_id is not None:
         _ALLOWED_STYLES_CACHE[xpublish_id] = result
     return result
 
 
-def get_styles(dataset: Dataset | None = None) -> list[Style]:
+def get_styles(
+    dataset: Dataset | None = None,
+    *,
+    var_grids: dict[str, GridSystem] | None = None,
+) -> list[Style]:
     """Return supported styles for ``dataset``'s grid."""
-    allowed = set(allowed_styles(dataset))
+    allowed = set(allowed_styles(dataset, var_grids=var_grids))
     styles: list[Style] = []
     for style_id in RenderRegistry.all():
         if style_id not in allowed:
@@ -250,22 +248,14 @@ def _calculate_temporal_resolution(values: xr.DataArray) -> str | None:
         return None
 
 
-async def extract_variable_bounding_box(
-    dataset: Dataset,
-    variable_name: str,
+def extract_variable_bounding_box(
     target_crs: str | morecantile.models.CRS,
     *,
-    cf_coords: dict | None = None,
+    grid: GridSystem,
 ) -> BoundingBox | None:
-    """Extract variable-specific bounding box and transform to target CRS
+    """Transform ``grid``'s bounding box into ``target_crs``.
 
-    Args:
-        dataset: xarray Dataset
-        variable_name: Name of the variable to extract bounds for
-        target_crs: Target coordinate reference system
-
-    Returns:
-        BoundingBox object if bounds can be extracted, None otherwise
+    Returns ``None`` if the projection transform fails.
     """
     # ``morecantile.CRS.srs`` returns the cached pyproj ``_srs`` string;
     # ``to_epsg`` round-trips through the EPSG database and is unexpectedly
@@ -275,7 +265,6 @@ async def extract_variable_bounding_box(
     else:
         target_crs_str = target_crs
 
-    grid = await async_run(guess_grid_system, dataset, variable_name, cf_coords=cf_coords)
     try:
         transformed_bounds = grid.transform_bbox(target_crs_str)
     except pyproj.exceptions.ProjError as e:
@@ -298,6 +287,7 @@ async def create_tileset_for_tms(
     keywords: list[str],
     dataset_attrs: dict[str, Any],
     styles: list[Style],
+    var_grids: dict[str, GridSystem],
     *,
     cf_coords: dict | None = None,
 ) -> TilesetSummary | None:
@@ -312,6 +302,7 @@ async def create_tileset_for_tms(
         keywords: Dataset keywords
         dataset_attrs: Dataset attributes
         styles: Available styles
+        var_grids: Renderable variable -> grid mapping (from ``detect_grids``)
 
     Returns:
         TilesetSummary object if tile matrix set exists, None otherwise
@@ -321,20 +312,18 @@ async def create_tileset_for_tms(
 
     tms_summary = TILE_MATRIX_SET_SUMMARIES[tms_id]()
 
-    # Create layers for each data variable
+    # Create layers for each renderable data variable
     layers = []
-    for var_name_, var_data in dataset.data_vars.items():
-        # Skip scalar variables
-        if var_data.ndim == 0:
-            continue
-        var_name = str(var_name_)
+    for var_name in var_grids:
         if var_name not in layer_extents:
             continue
+        var_data = dataset[var_name]
         extents = layer_extents[var_name]
 
-        # Extract variable-specific bounding box, fallback to dataset bounds
-        var_bounding_box = await extract_variable_bounding_box(
-            dataset, var_name, tms_summary.crs, cf_coords=cf_coords
+        # The transform is memoized per crs on the grid (transform_bbox), so
+        # variables sharing a grid don't re-transform.
+        var_bounding_box = extract_variable_bounding_box(
+            tms_summary.crs, grid=var_grids[var_name]
         )
 
         layer = Layer(
@@ -363,8 +352,13 @@ async def create_tileset_for_tms(
         )
         layers.append(layer)
 
+    # Pass a known-renderable variable so limits aren't computed from an
+    # ancillary variable whose grid can't be detected.
     tileMatrixSetLimits = await get_tile_matrix_limits(
-        tms_id, dataset, cf_coords=cf_coords
+        tms_id,
+        dataset,
+        representative_var=next(iter(var_grids)),
+        cf_coords=cf_coords,
     )
 
     tileset = TilesetSummary(
