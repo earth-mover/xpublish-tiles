@@ -23,7 +23,7 @@ def _has_threadsafe_numba_layer() -> bool:
     """
     from numba import config as numba_config
 
-    forced = numba_config.THREADING_LAYER
+    forced = getattr(numba_config, "THREADING_LAYER", "default")
     if forced in ("tbb", "omp", "safe", "threadsafe"):
         return True
     if forced != "default":
@@ -31,7 +31,10 @@ def _has_threadsafe_numba_layer() -> bool:
     if HAS_TBB:
         return True
     try:
-        from numba.np.ufunc import omppool  # noqa: F401
+        # must actually import (not find_spec): on macOS the omppool extension
+        # exists but fails to dlopen because the numba wheel lacks a usable
+        # libomp rpath (https://github.com/numba/numba/issues/10492)
+        importlib.import_module("numba.np.ufunc.omppool")
     except ImportError:
         return False
     return True
