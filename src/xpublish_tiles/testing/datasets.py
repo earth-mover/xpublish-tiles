@@ -1376,6 +1376,94 @@ RADAR = Dataset(
 )
 
 
+def geostationary_grid(
+    *,
+    dims: tuple[Dim, ...],
+    dtype: npt.DTypeLike,
+    attrs: dict[str, Any],
+) -> xr.Dataset:
+    """Create a GOES-style geostationary full-disk grid.
+
+    1D x/y are fixed-grid scan angles in radians; the geostationary grid mapping
+    carries ``perspective_point_height`` so detection routes to ``Geostationary``,
+    which scales the angles to projection metres at render time.
+    """
+    by_name = {d.name: d for d in dims}
+    x_dim, y_dim = by_name["x"], by_name["y"]
+
+    perspective_point_height = 35786023.0
+    # full-disk scan-angle half-extent in radians (~GOES-16 ABI)
+    half = 0.151844
+    x = np.linspace(-half, half, x_dim.size)
+    y = np.linspace(half, -half, y_dim.size)  # north-to-south, like GOES
+
+    data = generate_tanh_wave_data(
+        coords=(y, x),
+        sizes=(y_dim.size, x_dim.size),
+        chunks=(4 * y_dim.chunk_size, 4 * x_dim.chunk_size),
+        dtype=dtype,
+    )
+
+    foo_attrs = {
+        "valid_min": -1,
+        "valid_max": 1,
+        **attrs,
+        "grid_mapping": "goes_imager_projection",
+    }
+    ds = xr.Dataset(
+        data_vars={"foo": (["y", "x"], data, foo_attrs)},
+        coords={
+            "x": (
+                "x",
+                x,
+                {
+                    "units": "rad",
+                    "axis": "X",
+                    "standard_name": "projection_x_coordinate",
+                    "long_name": "GOES fixed grid projection x-coordinate",
+                },
+            ),
+            "y": (
+                "y",
+                y,
+                {
+                    "units": "rad",
+                    "axis": "Y",
+                    "standard_name": "projection_y_coordinate",
+                    "long_name": "GOES fixed grid projection y-coordinate",
+                },
+            ),
+            "goes_imager_projection": (
+                (),
+                0,
+                {
+                    "long_name": "GOES-R ABI fixed grid projection",
+                    "grid_mapping_name": "geostationary",
+                    "perspective_point_height": perspective_point_height,
+                    "semi_major_axis": 6378137.0,
+                    "semi_minor_axis": 6356752.31414,
+                    "inverse_flattening": 298.2572221,
+                    "longitude_of_projection_origin": -75.0,
+                    "sweep_angle_axis": "x",
+                },
+            ),
+        },
+    )
+    ds.foo.encoding["chunks"] = (y_dim.chunk_size, x_dim.chunk_size)
+    return ds
+
+
+GEOSTATIONARY = Dataset(
+    name="geostationary",
+    dims=(
+        Dim(name="y", size=500, chunk_size=250, data=None),
+        Dim(name="x", size=500, chunk_size=250, data=None),
+    ),
+    dtype=np.float32,
+    setup=geostationary_grid,
+)
+
+
 POPDS = xr.Dataset(
     {
         "TEMP": (
@@ -2293,6 +2381,7 @@ DATASET_LOOKUP = {
     "ugrid_triangles": UGRID_TRIANGLES,
     "tripole_antimeridian": TRIPOLE_ANTIMERIDIAN,
     "cubed_sphere": CUBED_SPHERE,
+    "geostationary": GEOSTATIONARY,
     "global_healpix_l3": GLOBAL_HEALPIX_L3,
     "global_healpix_l5": GLOBAL_HEALPIX_L5,
     "regional_healpix_na": REGIONAL_HEALPIX_NA,

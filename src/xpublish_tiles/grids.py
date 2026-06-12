@@ -33,6 +33,7 @@ from xpublish_tiles.lib import (
     fill_rings_from_corners,
     is_degree_geographic,
     round_bbox,
+    suppress_cf_dangling_ref_warnings,
     sync_load_async,
     transformer_from_crs,
     unwrap,
@@ -1880,6 +1881,132 @@ class Rectilinear(RectilinearMixin, GridSystem):
             return False
 
 
+@dataclass(kw_only=True, eq=False)
+class Geostationary(Rectilinear):
+    """Geostationary fixed-grid where 1D X/Y are scan angles in radians.
+
+    The geostationary CRS works in metres, but the stored coordinates are scan angles.
+    """
+
+    scale: float
+    semi_major: float
+    semi_minor: float
+    lon0: float
+
+    @classmethod
+    def from_dataset(
+        cls,
+        ds: xr.Dataset,
+        crs: CRS,
+        Xname: str,
+        Yname: str,
+    ) -> "Geostationary":
+        gm_name = next(
+            (
+                name
+                for name in ds.cf.grid_mapping_names.get("geostationary", [])
+                if "perspective_point_height" in ds[name].attrs
+            ),
+            None,
+        )
+        if gm_name is None:
+            raise GridDetectionError(
+                "Geostationary grid mapping has no 'perspective_point_height' "
+                "attribute; cannot convert scan-angle (radian) coordinates to "
+                "projection metres."
+            )
+        gm_attrs = ds[gm_name].attrs
+        h = float(gm_attrs["perspective_point_height"])
+        lon0 = float(gm_attrs.get("longitude_of_projection_origin", 0.0))
+        scaled = ds.assign_coords({Xname: ds[Xname] * h, Yname: ds[Yname] * h})
+        base = Rectilinear.from_dataset(scaled, crs, Xname, Yname)
+        ellipsoid = base.crs.ellipsoid
+        if ellipsoid is None:
+            raise GridDetectionError(
+                "Geostationary CRS has no ellipsoid; cannot determine the visible-disk extent."
+            )
+        return cls(
+            crs=base.crs,
+            X=base.X,
+            Y=base.Y,
+            bbox=base.bbox,
+            indexes=base.indexes,
+            Z=base.Z,
+            scale=h,
+            semi_major=float(ellipsoid.semi_major_metre),
+            semi_minor=float(ellipsoid.semi_minor_metre),
+            lon0=lon0,
+        )
+
+    def assign_index(self, da: xr.DataArray) -> xr.DataArray:
+        return da.assign_coords(
+            {self.X: da[self.X] * self.scale, self.Y: da[self.Y] * self.scale}
+        )
+
+    def transform_bbox(self, target_crs: str) -> tuple[float, float, float, float]:
+        """Return the visible-disk bounds in ``target_crs``.
+
+        The projection-plane bbox is a rectangle whose off-disk parts transform
+        to ``inf``. Remember the disk is inscribed in a rectangle; the corners are off-disk.
+        The cardinal points give the *exact* full-disk extremes.
+        """
+        cached = self._bbox_xform_cache.get(target_crs)
+        if cached is not None:
+            return cached
+        w, e = self.bbox.west, self.bbox.east
+        s, n = self.bbox.south, self.bbox.north
+
+        # Analytic disk-limb cardinal points give the exact full-disk extremes.
+        # projection coords are used only to keep the ones within the bbox.
+        lons, lats, cpx, cpy = self._limb_cardinals()
+        inside = (w <= cpx) & (cpx <= e) & (s <= cpy) & (cpy <= n)
+        if not inside.any():
+            # No limb in view — an on-disk subset whose corners transform cleanly.
+            return super().transform_bbox(target_crs)
+
+        # handle case with limbs where a transform would blow up
+        geo = transformer_from_crs(crs_from="EPSG:4326", crs_to=target_crs)
+        ctx, cty = geo.transform(lons[inside], lats[inside])
+        cfin = np.isfinite(ctx) & np.isfinite(cty)
+        cx = np.atleast_1d(ctx)[cfin]
+        cy = np.atleast_1d(cty)[cfin]
+        bounds = (float(cx.min()), float(cy.min()), float(cx.max()), float(cy.max()))
+        self._bbox_xform_cache[target_crs] = bounds
+        return bounds
+
+    def _limb_cardinals(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Geographic and projection coords of the visible disk's N/S/E/W limb.
+
+        Returns ``(lons, lats, px, py)`` — the geographic extremes and their
+        projection-plane coords. The geographic values are exact; the projection
+        coords (used only to test whether a cardinal lies within the data
+        rectangle) are the limb scan-angle radii ``h·arcsin(R_e/d)`` (E/W) and
+        ``h·arctan(R_p/√(h(2R_e+h)))`` (N/S). We compute them directly rather
+        than forward-transforming the geographic points, since those sit exactly
+        on the limb where the geos forward transform returns ``inf``.
+        """
+        h = self.scale
+        re = self.semi_major
+        rp = self.semi_minor
+        d = re + h
+        lon_off = np.degrees(np.arccos(re / d))
+        x = re**2 / d
+        z = rp * np.sqrt(1.0 - (re / d) ** 2)
+        phi = np.degrees(np.arctan((re**2 / rp**2) * (z / x)))
+        lons = np.array([self.lon0 + lon_off, self.lon0 - lon_off, self.lon0, self.lon0])
+        lats = np.array([0.0, 0.0, phi, -phi])
+        rx = h * np.arcsin(re / d)
+        ry = h * np.arctan(rp / np.sqrt(h * (2 * re + h)))
+        px = np.array([rx, -rx, 0.0, 0.0])
+        py = np.array([0.0, 0.0, ry, -ry])
+        return lons, lats, px, py
+
+    def equals(self, other: object) -> bool:
+        if not isinstance(other, Geostationary):
+            return False
+        return super().equals(other)
+
+
 _CURVILINEAR_BBOX_SENTINEL = BBox(west=0, east=0, south=0, north=0)
 
 
@@ -3177,19 +3304,19 @@ def guess_coordinate_vars(
     if Xname is not None:
         filtered = tuple(x for x in Xname if ds[x].ndim > 0)
         if Xname and not filtered:
-            warnings.warn(
-                f"All X coordinate candidates are scalar: {Xname}. "
-                f"No spatial grid coordinates found.",
-                stacklevel=2,
+            logger.debug(
+                "All X coordinate candidates are scalar: %s. "
+                "No spatial grid coordinates found.",
+                Xname,
             )
         Xname = filtered or None
     if Yname is not None:
         filtered = tuple(y for y in Yname if ds[y].ndim > 0)
         if Yname and not filtered:
-            warnings.warn(
-                f"All Y coordinate candidates are scalar: {Yname}. "
-                f"No spatial grid coordinates found.",
-                stacklevel=2,
+            logger.debug(
+                "All Y coordinate candidates are scalar: %s. "
+                "No spatial grid coordinates found.",
+                Yname,
             )
         Yname = filtered or None
 
@@ -3401,7 +3528,14 @@ def _detect_grid_metadata(
     elif X.ndim == 1 and Y.ndim == 1:
         if is_rotated_pole(mapping.crs):
             raise NotImplementedError("Rotated pole grids are not supported yet.")
-        grid_cls = Triangular if X.dims == Y.dims else Rectilinear
+        if X.dims == Y.dims:
+            grid_cls = Triangular
+        elif mapping.grid_mapping.get(
+            "grid_mapping_name"
+        ) == "geostationary" and X.attrs.get("units") in {"rad", "radian", "radians"}:
+            grid_cls = Geostationary
+        else:
+            grid_cls = Rectilinear
     elif X.ndim == 2 and Y.ndim == 2:
         grid_cls = Curvilinear
     else:
@@ -3583,7 +3717,7 @@ def guess_grid_system(
         _validate_grid_dims(cached, ds[name])
         return cached
 
-    with GRID_DETECTION_LOCK:
+    with GRID_DETECTION_LOCK, suppress_cf_dangling_ref_warnings():
         # Double-check in case another thread populated cache while we waited
         if cache_key is not None and cache_key in _GRID_CACHE:
             cached = _GRID_CACHE[cache_key]
