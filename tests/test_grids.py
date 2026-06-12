@@ -9,7 +9,7 @@ import numpy.testing as npt
 import pandas as pd
 import pytest
 import rasterix
-import triangle
+import triangular
 from affine import Affine
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
@@ -1546,7 +1546,7 @@ def test_triangular_from_dataset_uses_ugrid_connectivity():
     ds = FVCOM_MACHIAS_BAY.create()
     mesh = detect_mesh(ds)
     assert mesh is not None
-    with patch("xpublish_tiles.grids.triangle.delaunay") as mock_delaunay:
+    with patch("xpublish_tiles.grids.triangular.delaunay") as mock_delaunay:
         grid = Triangular.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat", mesh=mesh)
 
     mock_delaunay.assert_not_called()
@@ -1562,7 +1562,7 @@ def test_triangular_from_dataset_fallback():
     # Add a unique ID to avoid cache hits
     ds.attrs["_xpublish_id"] = "triangular_fallback_test"
     with patch(
-        "xpublish_tiles.grids.triangle.delaunay", wraps=triangle.delaunay
+        "xpublish_tiles.grids.triangular.delaunay", wraps=triangular.delaunay
     ) as mock_delaunay:
         grid = guess_grid_system(ds, "foo")
     assert mock_delaunay.call_count > 0
@@ -1675,7 +1675,7 @@ class TestUgridDetection:
     def test_from_dataset_skips_delaunay(self, fvcom_ds: xr.Dataset) -> None:
         mesh = detect_mesh(fvcom_ds)
         assert mesh is not None
-        with patch.object(triangle, "delaunay", side_effect=AssertionError("called")):
+        with patch.object(triangular, "delaunay", side_effect=AssertionError("called")):
             grid = Triangular.from_dataset(
                 fvcom_ds, CRS.from_epsg(4326), "lon", "lat", mesh=mesh
             )
@@ -1736,7 +1736,7 @@ class TestUgridDetection:
         assert meta.mesh.face_dim == "nele"
 
     def test_end_to_end_no_delaunay(self, fvcom_ds: xr.Dataset) -> None:
-        with patch.object(triangle, "delaunay", side_effect=AssertionError("called")):
+        with patch.object(triangular, "delaunay", side_effect=AssertionError("called")):
             grid = _guess_grid_for_dataset(fvcom_ds)
         assert isinstance(grid, Triangular)
         assert grid.face_dim == "nele"
