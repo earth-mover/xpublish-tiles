@@ -13,7 +13,7 @@ from fastapi.responses import Response
 from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import DataTree
-from xpublish_tiles.grids import guess_grid_system
+from xpublish_tiles.grids import detect_grids, guess_grid_system
 from xpublish_tiles.lib import (
     AsyncLoadTimeoutError,
     GridDetectionError,
@@ -152,18 +152,21 @@ class TilesPlugin(Plugin):
             # attrs) and would otherwise be repeated per variable per TMS.
             cf_coords = await async_run(lambda d: d.cf.coordinates, dataset)
 
+            # Detect the grid once per spatial-dim signature. Variables sharing
+            # a grid (e.g. every GOES band) resolve to a single detection, and
+            # ancillary variables with no detectable grid are excluded here
+            # rather than re-attempted per variable per TMS downstream.
+            var_grids = await async_run(detect_grids, dataset, cf_coords=cf_coords)
+
             # Get available styles from registered renderers
             logger.info(f"Getting available styles for dataset '{title}'")
 
-            styles = await async_run(get_styles, dataset)
+            styles = await async_run(get_styles, dataset, var_grids=var_grids)
 
             logger.info("loading extents for dataset vars")
 
             layer_extents: dict[str, dict[str, Any]] = {}
-            for var_name_ in sorted(dataset.data_vars.keys()):
-                # Skip scalar variables
-                if dataset[var_name_].ndim == 0:
-                    continue
+            for var_name_ in sorted(var_grids):
                 var_name = str(var_name_)
                 try:
                     extents = await extract_dataset_extents(
@@ -195,6 +198,7 @@ class TilesPlugin(Plugin):
                         keywords,
                         dataset_attrs,
                         styles,
+                        var_grids,
                         cf_coords=cf_coords,
                     )
                     for tms_id in supported_tms
@@ -367,8 +371,8 @@ class TilesPlugin(Plugin):
                 raise HTTPException(status_code=422, detail="No variables specified")
 
             try:
-                bounds = await extract_variable_bounding_box(
-                    dataset, query.variables[0], "EPSG:4326"
+                bounds_grid = await async_run(
+                    guess_grid_system, dataset, query.variables[0]
                 )
             except VariableNotFoundError as e:
                 logger.error("VariableNotFoundError", str(e))
@@ -382,6 +386,7 @@ class TilesPlugin(Plugin):
                     status_code=422,
                     detail=f"Variable {query.variables[0]!r} cannot be tiled: {e}",
                 ) from None
+            bounds = extract_variable_bounding_box("EPSG:4326", grid=bounds_grid)
 
             logger.info(f"base_url: {request.base_url}")
             logger.info(f"url: {request.url.path}")

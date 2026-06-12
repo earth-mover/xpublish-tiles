@@ -13,6 +13,7 @@ from xpublish_tiles.lib import VariableNotFoundError
 from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
     ERA5,
+    GEOSTATIONARY,
     GEOZARR_MULTISCALE,
     GLOBAL_HEALPIX_L3,
     HRRR,
@@ -441,6 +442,7 @@ async def test_create_tileset_metadata_no_extents():
 
 async def test_extract_variable_bounding_box():
     """Test extract_variable_bounding_box function"""
+    from xpublish_tiles.grids import guess_grid_system
     from xpublish_tiles.xpublish.tiles.metadata import extract_variable_bounding_box
 
     # Create a dataset with known coordinates
@@ -466,7 +468,8 @@ async def test_extract_variable_bounding_box():
     )
 
     # Test with EPSG:4326 (should be identity transform)
-    bbox = await extract_variable_bounding_box(dataset, "temperature", "EPSG:4326")
+    grid = guess_grid_system(dataset, "temperature")
+    bbox = extract_variable_bounding_box("EPSG:4326", grid=grid)
 
     if bbox is not None:
         # Check that bounding box has correct structure
@@ -492,6 +495,7 @@ async def test_extract_variable_bounding_box():
 
 async def test_extract_variable_bounding_box_web_mercator():
     """Test extract_variable_bounding_box with Web Mercator transformation"""
+    from xpublish_tiles.grids import guess_grid_system
     from xpublish_tiles.xpublish.tiles.metadata import extract_variable_bounding_box
 
     # Create a dataset with known coordinates
@@ -517,7 +521,8 @@ async def test_extract_variable_bounding_box_web_mercator():
     )
 
     # Test with EPSG:3857 (Web Mercator)
-    bbox = await extract_variable_bounding_box(dataset, "temperature", "EPSG:3857")
+    grid = guess_grid_system(dataset, "temperature")
+    bbox = extract_variable_bounding_box("EPSG:3857", grid=grid)
 
     if bbox is not None:
         # Check that bounding box has correct structure
@@ -539,9 +544,9 @@ async def test_extract_variable_bounding_box_web_mercator():
         assert bbox.crs == "EPSG:3857"
 
 
-async def test_extract_variable_bounding_box_invalid_variable():
-    """Test extract_variable_bounding_box with invalid variable name"""
-    from xpublish_tiles.xpublish.tiles.metadata import extract_variable_bounding_box
+def test_bounding_box_invalid_variable():
+    """A non-existent variable raises VariableNotFoundError during grid detection."""
+    from xpublish_tiles.grids import guess_grid_system
 
     # Create a simple dataset
     dataset = xr.Dataset(
@@ -559,7 +564,7 @@ async def test_extract_variable_bounding_box_invalid_variable():
 
     # Test with non-existent variable
     with pytest.raises(VariableNotFoundError):
-        await extract_variable_bounding_box(dataset, "nonexistent", "EPSG:4326")
+        guess_grid_system(dataset, "nonexistent")
 
 
 def test_variable_bounding_boxes_in_tileset_metadata():
@@ -640,6 +645,7 @@ def test_variable_bounding_boxes_in_tileset_metadata():
 async def test_layers_use_variable_specific_bounding_boxes():
     """Test that layers get variable-specific bounding boxes rather than dataset-wide bounds"""
 
+    from xpublish_tiles.grids import guess_grid_system
     from xpublish_tiles.xpublish.tiles.metadata import extract_variable_bounding_box
 
     # Create dataset with variables having different spatial extents
@@ -685,9 +691,11 @@ async def test_layers_use_variable_specific_bounding_boxes():
     )
 
     # Test variable-specific bounding boxes directly
-    global_bbox = await extract_variable_bounding_box(dataset, "global_temp", "EPSG:4326")
-    regional_bbox = await extract_variable_bounding_box(
-        dataset, "regional_temp", "EPSG:4326"
+    global_bbox = extract_variable_bounding_box(
+        "EPSG:4326", grid=guess_grid_system(dataset, "global_temp")
+    )
+    regional_bbox = extract_variable_bounding_box(
+        "EPSG:4326", grid=guess_grid_system(dataset, "regional_temp")
     )
 
     if global_bbox and regional_bbox:
@@ -797,6 +805,7 @@ def _normalize_for_snapshot(obj):
         pytest.param(GLOBAL_HEALPIX_L3, id="global_healpix_l3"),
         pytest.param(REGIONAL_HEALPIX_NA, id="regional_healpix_na"),
         pytest.param(CUBED_SPHERE, id="cubed_sphere"),
+        pytest.param(GEOSTATIONARY, id="geostationary"),
         pytest.param(GEOZARR_MULTISCALE, id="geozarr_multiscale"),
         pytest.param(NATIVE_AT_ROOT_MULTISCALE, id="native_at_root_multiscale"),
     ],

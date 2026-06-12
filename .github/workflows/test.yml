@@ -58,7 +58,7 @@ jobs:
         uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
   # Install only the base dependencies, no extras, and ensure the CLI can still be imported
   # Intended to reproduce <https://github.com/earth-mover/xpublish-tiles/issues/179>

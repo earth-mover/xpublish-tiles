@@ -1,9 +1,11 @@
 """Library utility functions for xpublish-tiles."""
 
 import asyncio
+import contextlib
 import io
 import math
 import operator
+import warnings
 from collections.abc import Hashable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -128,6 +130,19 @@ def _coarsen_indices_impl(
 
         result[dim] = (starts, ends)
     return result
+
+
+@contextlib.contextmanager
+def suppress_cf_dangling_ref_warnings():
+    """Silence cf-xarray's harmless warning about CF-referenced variables that
+    were dropped during subsetting (e.g. GOES band/ancillary coords)."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Variables .* not found in object but are referred to in the CF attributes",
+            category=UserWarning,
+        )
+        yield
 
 
 def crs_repr(crs: CRS | None) -> str:
@@ -558,8 +573,16 @@ async def transform_coordinates(
         newX, newY = await async_run(transformer.transform, bx.data, by.data)
 
     if not transformer.target_crs.is_geographic:
+        # A point undefined in the source projection (e.g. off the geostationary
+        # disk) transforms to inf in *both* axes — drop those cells (NaN) so they
+        # render transparent instead of smearing. A single-axis inf is a pole
+        # under the output projection (Web Mercator lat=±90); clamp it so the
+        # polar-cap cell still rasterizes.
+        both_bad = ~np.isfinite(newX) & ~np.isfinite(newY)
         _clamp_infinite(newX)
         _clamp_infinite(newY)
+        newX[both_bad] = np.nan
+        newY[both_bad] = np.nan
 
     return bx.copy(data=newX), by.copy(data=newY)
 

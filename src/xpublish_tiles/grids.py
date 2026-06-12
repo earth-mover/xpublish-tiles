@@ -33,6 +33,7 @@ from xpublish_tiles.lib import (
     fill_rings_from_corners,
     is_degree_geographic,
     round_bbox,
+    suppress_cf_dangling_ref_warnings,
     sync_load_async,
     transformer_from_crs,
     unwrap,
@@ -194,6 +195,10 @@ Y_COORD_PATTERN = re.compile(
 )
 
 _GRID_CACHE = cachetools.LRUCache(maxsize=config["grid_cache_max_size"])
+
+# Sentinel cached when detection fails, so a repeat lookup for the same
+# (xpublish_id, dim-signature) fails immediately.
+_GRID_DETECTION_FAILED = object()
 
 
 def _cell_min_max(
@@ -1880,6 +1885,132 @@ class Rectilinear(RectilinearMixin, GridSystem):
             return False
 
 
+@dataclass(kw_only=True, eq=False)
+class Geostationary(Rectilinear):
+    """Geostationary fixed-grid where 1D X/Y are scan angles in radians.
+
+    The geostationary CRS works in metres, but the stored coordinates are scan angles.
+    """
+
+    scale: float
+    semi_major: float
+    semi_minor: float
+    lon0: float
+
+    @classmethod
+    def from_dataset(
+        cls,
+        ds: xr.Dataset,
+        crs: CRS,
+        Xname: str,
+        Yname: str,
+    ) -> "Geostationary":
+        gm_name = next(
+            (
+                name
+                for name in ds.cf.grid_mapping_names.get("geostationary", [])
+                if "perspective_point_height" in ds[name].attrs
+            ),
+            None,
+        )
+        if gm_name is None:
+            raise GridDetectionError(
+                "Geostationary grid mapping has no 'perspective_point_height' "
+                "attribute; cannot convert scan-angle (radian) coordinates to "
+                "projection metres."
+            )
+        gm_attrs = ds[gm_name].attrs
+        h = float(gm_attrs["perspective_point_height"])
+        lon0 = float(gm_attrs.get("longitude_of_projection_origin", 0.0))
+        scaled = ds.assign_coords({Xname: ds[Xname] * h, Yname: ds[Yname] * h})
+        base = Rectilinear.from_dataset(scaled, crs, Xname, Yname)
+        ellipsoid = base.crs.ellipsoid
+        if ellipsoid is None:
+            raise GridDetectionError(
+                "Geostationary CRS has no ellipsoid; cannot determine the visible-disk extent."
+            )
+        return cls(
+            crs=base.crs,
+            X=base.X,
+            Y=base.Y,
+            bbox=base.bbox,
+            indexes=base.indexes,
+            Z=base.Z,
+            scale=h,
+            semi_major=float(ellipsoid.semi_major_metre),
+            semi_minor=float(ellipsoid.semi_minor_metre),
+            lon0=lon0,
+        )
+
+    def assign_index(self, da: xr.DataArray) -> xr.DataArray:
+        return da.assign_coords(
+            {self.X: da[self.X] * self.scale, self.Y: da[self.Y] * self.scale}
+        )
+
+    def transform_bbox(self, target_crs: str) -> tuple[float, float, float, float]:
+        """Return the visible-disk bounds in ``target_crs``.
+
+        The projection-plane bbox is a rectangle whose off-disk parts transform
+        to ``inf``. Remember the disk is inscribed in a rectangle; the corners are off-disk.
+        The cardinal points give the *exact* full-disk extremes.
+        """
+        cached = self._bbox_xform_cache.get(target_crs)
+        if cached is not None:
+            return cached
+        w, e = self.bbox.west, self.bbox.east
+        s, n = self.bbox.south, self.bbox.north
+
+        # Analytic disk-limb cardinal points give the exact full-disk extremes.
+        # projection coords are used only to keep the ones within the bbox.
+        lons, lats, cpx, cpy = self._limb_cardinals()
+        inside = (w <= cpx) & (cpx <= e) & (s <= cpy) & (cpy <= n)
+        if not inside.any():
+            # No limb in view — an on-disk subset whose corners transform cleanly.
+            return super().transform_bbox(target_crs)
+
+        # handle case with limbs where a transform would blow up
+        geo = transformer_from_crs(crs_from="EPSG:4326", crs_to=target_crs)
+        ctx, cty = geo.transform(lons[inside], lats[inside])
+        cfin = np.isfinite(ctx) & np.isfinite(cty)
+        cx = np.atleast_1d(ctx)[cfin]
+        cy = np.atleast_1d(cty)[cfin]
+        bounds = (float(cx.min()), float(cy.min()), float(cx.max()), float(cy.max()))
+        self._bbox_xform_cache[target_crs] = bounds
+        return bounds
+
+    def _limb_cardinals(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Geographic and projection coords of the visible disk's N/S/E/W limb.
+
+        Returns ``(lons, lats, px, py)`` — the geographic extremes and their
+        projection-plane coords. The geographic values are exact; the projection
+        coords (used only to test whether a cardinal lies within the data
+        rectangle) are the limb scan-angle radii ``h·arcsin(R_e/d)`` (E/W) and
+        ``h·arctan(R_p/√(h(2R_e+h)))`` (N/S). We compute them directly rather
+        than forward-transforming the geographic points, since those sit exactly
+        on the limb where the geos forward transform returns ``inf``.
+        """
+        h = self.scale
+        re = self.semi_major
+        rp = self.semi_minor
+        d = re + h
+        lon_off = np.degrees(np.arccos(re / d))
+        x = re**2 / d
+        z = rp * np.sqrt(1.0 - (re / d) ** 2)
+        phi = np.degrees(np.arctan((re**2 / rp**2) * (z / x)))
+        lons = np.array([self.lon0 + lon_off, self.lon0 - lon_off, self.lon0, self.lon0])
+        lats = np.array([0.0, 0.0, phi, -phi])
+        rx = h * np.arcsin(re / d)
+        ry = h * np.arctan(rp / np.sqrt(h * (2 * re + h)))
+        px = np.array([rx, -rx, 0.0, 0.0])
+        py = np.array([0.0, 0.0, ry, -ry])
+        return lons, lats, px, py
+
+    def equals(self, other: object) -> bool:
+        if not isinstance(other, Geostationary):
+            return False
+        return super().equals(other)
+
+
 _CURVILINEAR_BBOX_SENTINEL = BBox(west=0, east=0, south=0, north=0)
 
 
@@ -3177,19 +3308,19 @@ def guess_coordinate_vars(
     if Xname is not None:
         filtered = tuple(x for x in Xname if ds[x].ndim > 0)
         if Xname and not filtered:
-            warnings.warn(
-                f"All X coordinate candidates are scalar: {Xname}. "
-                f"No spatial grid coordinates found.",
-                stacklevel=2,
+            logger.debug(
+                "All X coordinate candidates are scalar: %s. "
+                "No spatial grid coordinates found.",
+                Xname,
             )
         Xname = filtered or None
     if Yname is not None:
         filtered = tuple(y for y in Yname if ds[y].ndim > 0)
         if Yname and not filtered:
-            warnings.warn(
-                f"All Y coordinate candidates are scalar: {Yname}. "
-                f"No spatial grid coordinates found.",
-                stacklevel=2,
+            logger.debug(
+                "All Y coordinate candidates are scalar: %s. "
+                "No spatial grid coordinates found.",
+                Yname,
             )
         Yname = filtered or None
 
@@ -3401,7 +3532,14 @@ def _detect_grid_metadata(
     elif X.ndim == 1 and Y.ndim == 1:
         if is_rotated_pole(mapping.crs):
             raise NotImplementedError("Rotated pole grids are not supported yet.")
-        grid_cls = Triangular if X.dims == Y.dims else Rectilinear
+        if X.dims == Y.dims:
+            grid_cls = Triangular
+        elif mapping.grid_mapping.get(
+            "grid_mapping_name"
+        ) == "geostationary" and X.attrs.get("units") in {"rad", "radian", "radians"}:
+            grid_cls = Geostationary
+        else:
+            grid_cls = Rectilinear
     elif X.ndim == 2 and Y.ndim == 2:
         grid_cls = Curvilinear
     else:
@@ -3413,13 +3551,20 @@ def _detect_grid_metadata(
     return GridMetadata(X=Xname, Y=Yname, crs=mapping.crs, grid_cls=grid_cls)
 
 
-def guess_grid_metadata(ds: xr.Dataset) -> GridMetadata | None:
+def guess_grid_metadata(
+    ds: xr.Dataset,
+    *,
+    all_mappings: list[GridMappingInfo] | None = None,
+) -> GridMetadata | None:
     """Return ``GridMetadata`` for ``ds``'s primary grid mapping, or ``None``
     if no CRS can be detected from attributes alone.
 
     Inspects grid_mapping variables, CF coordinate attributes, and coordinate
     shapes only. Use this when you need the grid class or primary X/Y coordinate names
     without paying to construct the full grid system.
+
+    Pass ``all_mappings`` to reuse a previously computed
+    ``_guess_grid_mappings_and_crs(ds)`` result and avoid recomputing it.
     """
     face_dim = find_cubed_sphere_face_dim(ds)
     if face_dim is not None:
@@ -3441,7 +3586,8 @@ def guess_grid_metadata(ds: xr.Dataset) -> GridMetadata | None:
                 face_dim=face_dim,
             )
 
-    all_mappings = _guess_grid_mappings_and_crs(ds)
+    if all_mappings is None:
+        all_mappings = _guess_grid_mappings_and_crs(ds)
     if not all_mappings or all_mappings[0].crs is None:
         return None
     skip_coordinates = set(
@@ -3457,7 +3603,8 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
 
     Raises RuntimeError to indicate that we might try again.
     """
-    primary_grid_metadata = guess_grid_metadata(ds)
+    all_mappings = _guess_grid_mappings_and_crs(ds)
+    primary_grid_metadata = guess_grid_metadata(ds, all_mappings=all_mappings)
     if primary_grid_metadata is None:
         raise GridDetectionError("CRS/grid system not detected")
     extra: dict[str, Any] = {}
@@ -3476,7 +3623,6 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
     )
 
     # Create alternate grid systems from remaining mappings
-    all_mappings = _guess_grid_mappings_and_crs(ds)
     alternates = []
     for mapping in all_mappings[1:]:
         try:
@@ -3544,6 +3690,21 @@ def _validate_grid_dims(grid: GridSystem, var: xr.DataArray) -> None:
             )
 
 
+def _lookup_cached_grid(cache_key: tuple | None, name: Hashable) -> GridSystem | None:
+    """Return a cached grid for ``cache_key``, or ``None`` if absent.
+
+    Raises ``GridDetectionError`` if a previous detection failure was cached for
+    this key (see ``_GRID_DETECTION_FAILED``).
+    """
+    if cache_key is None or cache_key not in _GRID_CACHE:
+        return None
+    if (cached := _GRID_CACHE[cache_key]) is _GRID_DETECTION_FAILED:
+        raise GridDetectionError(
+            f"No grid system detected for {name!r} (cached failure)."
+        )
+    return cached
+
+
 def guess_grid_system(
     ds: xr.Dataset,
     name: Hashable,
@@ -3566,8 +3727,7 @@ def guess_grid_system(
     if cf_coords is None:
         cf_coords = ds.cf.coordinates
 
-    xpublish_id = ds.attrs.get("_xpublish_id")
-    if xpublish_id is None:
+    if (xpublish_id := ds.attrs.get("_xpublish_id")) is None:
         logger.warning(
             "Dataset has no '_xpublish_id' attr; grid system caching is disabled "
             "and the grid will be rebuilt on every request."
@@ -3578,98 +3738,146 @@ def guess_grid_system(
         else None
     )
 
-    if cache_key is not None and cache_key in _GRID_CACHE:
-        cached = _GRID_CACHE[cache_key]
+    if (cached := _lookup_cached_grid(cache_key, name)) is not None:
         _validate_grid_dims(cached, ds[name])
         return cached
 
-    with GRID_DETECTION_LOCK:
+    with GRID_DETECTION_LOCK, suppress_cf_dangling_ref_warnings():
         # Double-check in case another thread populated cache while we waited
-        if cache_key is not None and cache_key in _GRID_CACHE:
-            cached = _GRID_CACHE[cache_key]
+        if (cached := _lookup_cached_grid(cache_key, name)) is not None:
             _validate_grid_dims(cached, ds[name])
             return cached
 
         try:
-            cf_sub = ds.cf[[name]]
-        except KeyError:
-            raise VariableNotFoundError(
-                f"Variable {name!r} not found in dataset."
-            ) from None
-
-        # cf-xarray doesn't follow the UGRID ``mesh`` attribute, so the cf
-        # subset drops the mesh_topology variable, connectivity, and node coords.
-        # Without those, detect_mesh returns None and detection falls back to
-        # Delaunay on face centroids. Work from the full ds whenever the variable
-        # points at a UGRID mesh.
-        mesh_attr = ds[name].attrs.get("mesh")
-        is_ugrid_var = bool(
-            mesh_attr
-            and mesh_attr in ds.variables
-            and ds[mesh_attr].attrs.get("cf_role") == "mesh_topology"
-        )
-        if is_ugrid_var:
-            cf_sub = ds
-
-        try:
-            meta = guess_grid_metadata(cf_sub)
+            grid = _detect_grid_system(ds, name)
         except GridDetectionError:
-            meta = None
-
-        # Preload the primary mapping's X/Y on the *outer* ds.
-        # This allows reuse of loaded coordinates for datasets where
-        # some arrays have a vertical dimension.
-        # TODO: delete this when we cache the horizontal grid separately
-        if (
-            meta is not None
-            and meta.grid_cls is not RasterAffine
-            and meta.X in ds.variables
-            and meta.Y in ds.variables
-        ):
-            sync_load_async(ds[[meta.X, meta.Y]])
-            # Refresh cf_sub — for UGRID stay on the full ds to keep mesh+connectivity.
-            cf_sub = ds if is_ugrid_var else ds.cf[[name]]
-
-        # Cubed sphere has its own construction signature (face_dim) and uses
-        # the outer ds for Z lookup, so dispatch directly instead of going
-        # through ``_guess_grid_for_dataset``.
-        if meta is not None and meta.grid_cls is CubedSphere:
-            assert meta.face_dim is not None
-            grid = CubedSphere.from_dataset(
-                ds, meta.crs, meta.X, meta.Y, face_dim=meta.face_dim
-            )
-            grid.Z = _guess_z_dimension(ds[name])
-            _validate_grid_dims(grid, ds[name])
+            # Cache the failure so callers sharing this dim-signature don't
+            # repeat the (sometimes multi-second) fallback chain.
             if cache_key is not None:
-                _GRID_CACHE[cache_key] = grid
-            return grid
-
-        try:
-            grid = _guess_grid_for_dataset(cf_sub)
-        except GridDetectionError:
-            # Check for polar radar grid (needs full ds for scalar lat/lon)
-            az_coord, rng_coord = _find_polar_coords(ds)
-            if az_coord is not None and rng_coord is not None:
-                grid = Polar.from_dataset(ds, CRS.from_epsg(4326), az_coord, rng_coord)
-            else:
-                try:
-                    grid = _guess_grid_for_dataset(ds)
-                except GridDetectionError:
-                    ds = ds.cf.guess_coord_axis()
-                    grid = _guess_grid_for_dataset(ds)
-        except KeyError:
-            raise VariableNotFoundError(
-                f"Variable {name!r} not found in dataset."
-            ) from None
-
-        # The full-dataset fallback above can return a grid that doesn't
-        # actually apply to ``name`` (e.g. an auxiliary var like ``contacts``
-        # on a cubed-sphere dataset shares the ``face_dim`` but lacks the
-        # 2D lat/lon dims). Reject these so per-variable callers can skip them.
-        grid.Z = _guess_z_dimension(ds.cf[name])
-        _validate_grid_dims(grid, ds[name])
+                _GRID_CACHE[cache_key] = _GRID_DETECTION_FAILED
+            raise
 
         if cache_key is not None:
             _GRID_CACHE[cache_key] = grid
 
         return grid
+
+
+def _detect_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
+    """Run grid detection for ``name`` without any caching.
+
+    Raises ``GridDetectionError`` if no grid applies to ``name`` and
+    ``VariableNotFoundError`` if ``name`` isn't in ``ds``.
+    """
+    try:
+        cf_sub = ds.cf[[name]]
+    except KeyError:
+        raise VariableNotFoundError(f"Variable {name!r} not found in dataset.") from None
+
+    # cf-xarray doesn't follow the UGRID ``mesh`` attribute, so the cf
+    # subset drops the mesh_topology variable, connectivity, and node coords.
+    # Without those, detect_mesh returns None and detection falls back to
+    # Delaunay on face centroids. Work from the full ds whenever the variable
+    # points at a UGRID mesh.
+    mesh_attr = ds[name].attrs.get("mesh")
+    is_ugrid_var = bool(
+        mesh_attr
+        and mesh_attr in ds.variables
+        and ds[mesh_attr].attrs.get("cf_role") == "mesh_topology"
+    )
+    if is_ugrid_var:
+        cf_sub = ds
+
+    try:
+        meta = guess_grid_metadata(cf_sub)
+    except GridDetectionError:
+        meta = None
+
+    # Preload the primary mapping's X/Y on the *outer* ds.
+    # This allows reuse of loaded coordinates for datasets where
+    # some arrays have a vertical dimension.
+    # TODO: delete this when we cache the horizontal grid separately
+    if (
+        meta is not None
+        and meta.grid_cls is not RasterAffine
+        and meta.X in ds.variables
+        and meta.Y in ds.variables
+    ):
+        sync_load_async(ds[[meta.X, meta.Y]])
+        # Refresh cf_sub — for UGRID stay on the full ds to keep mesh+connectivity.
+        cf_sub = ds if is_ugrid_var else ds.cf[[name]]
+
+    # Cubed sphere has its own construction signature (face_dim) and uses
+    # the outer ds for Z lookup, so dispatch directly instead of going
+    # through ``_guess_grid_for_dataset``.
+    if meta is not None and meta.grid_cls is CubedSphere:
+        assert meta.face_dim is not None
+        grid = CubedSphere.from_dataset(
+            ds, meta.crs, meta.X, meta.Y, face_dim=meta.face_dim
+        )
+        grid.Z = _guess_z_dimension(ds[name])
+        _validate_grid_dims(grid, ds[name])
+        return grid
+
+    try:
+        grid = _guess_grid_for_dataset(cf_sub)
+    except GridDetectionError:
+        # Check for polar radar grid (needs full ds for scalar lat/lon)
+        az_coord, rng_coord = _find_polar_coords(ds)
+        if az_coord is not None and rng_coord is not None:
+            grid = Polar.from_dataset(ds, CRS.from_epsg(4326), az_coord, rng_coord)
+        else:
+            try:
+                grid = _guess_grid_for_dataset(ds)
+            except GridDetectionError:
+                ds = ds.cf.guess_coord_axis()
+                grid = _guess_grid_for_dataset(ds)
+    except KeyError:
+        raise VariableNotFoundError(f"Variable {name!r} not found in dataset.") from None
+
+    # The full-dataset fallback above can return a grid that doesn't
+    # actually apply to ``name`` (e.g. an auxiliary var like ``contacts``
+    # on a cubed-sphere dataset shares the ``face_dim`` but lacks the
+    # 2D lat/lon dims). Reject these so per-variable callers can skip them.
+    grid.Z = _guess_z_dimension(ds.cf[name])
+    _validate_grid_dims(grid, ds[name])
+    return grid
+
+
+def detect_grids(
+    ds: xr.Dataset,
+    *,
+    cf_coords: dict | None = None,
+) -> dict[str, GridSystem]:
+    """Map each renderable data variable to its grid system.
+
+    Variables that share a spatial-dimension signature (see
+    ``xarray_object_key``) share a grid, so detection runs once per signature
+    group and the result fans out to every member. This collapses the
+    per-variable (and per-TMS) detection the metadata endpoints used to do —
+    e.g. a GOES dataset with dozens of bands on one geostationary grid resolves
+    to a single detection.
+
+    Groups with no non-time spatial dimensions, or whose detection finds no
+    grid (e.g. ancillary/metadata variables like ``goes_imager_projection``),
+    are skipped — their variables are not renderable as tiles and are absent
+    from the returned mapping.
+    """
+    if cf_coords is None:
+        cf_coords = ds.cf.coordinates
+
+    groups: dict[tuple, list[str]] = {}
+    for name, var in ds.data_vars.items():
+        if not (signature := xarray_object_key(var, cf_coords=cf_coords)):
+            continue
+        groups.setdefault(signature, []).append(str(name))
+
+    grids: dict[str, GridSystem] = {}
+    for names in groups.values():
+        try:
+            grid = guess_grid_system(ds, names[0], cf_coords=cf_coords)
+        except (GridDetectionError, VariableNotFoundError):
+            continue
+        for name in names:
+            grids[name] = grid
+    return grids

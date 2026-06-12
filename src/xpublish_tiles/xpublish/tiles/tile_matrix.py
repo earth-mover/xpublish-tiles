@@ -169,6 +169,7 @@ async def get_tile_matrix_limits(
     dataset: xr.Dataset,
     zoom_levels: range | None = None,
     *,
+    representative_var: Hashable,
     cf_coords: dict | None = None,
 ) -> list[TileMatrixSetLimit]:
     """Generate tile matrix limits for the specified zoom levels based on dataset bounds.
@@ -176,28 +177,22 @@ async def get_tile_matrix_limits(
     Args:
         tms_id: Tile matrix set identifier
         dataset: xarray Dataset to extract bounds from
+        representative_var: A renderable variable to detect the grid from.
         zoom_levels: Range of zoom levels to generate limits for. If None, will be calculated
                     from the Grid's min/max zoom levels.
 
     Returns:
         List of TileMatrixSetLimit objects
     """
-    for name, var in dataset.data_vars.items():
-        if var.ndim >= 1:
-            first_data_var = name
-            break
-    else:
-        raise ValueError("Could not find a DataArray with at least one dimension.")
-
     grid = await async_run(
-        guess_grid_system, dataset, first_data_var, cf_coords=cf_coords
+        guess_grid_system, dataset, representative_var, cf_coords=cf_coords
     )
     tms = morecantile.tms.get(tms_id)
 
     if zoom_levels is None:
         xpublish_id = dataset.attrs.get("_xpublish_id")
         min_zoom = await async_run(
-            get_min_zoom, grid, tms, dataset[first_data_var], xpublish_id
+            get_min_zoom, grid, tms, dataset[representative_var], xpublish_id
         )
         zoom_levels = range(min_zoom, tms.maxzoom)
 

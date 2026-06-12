@@ -550,14 +550,14 @@ wheels = [
 
 [[package]]
 name = "cf-xarray"
-version = "0.11.1"
+version = "0.11.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "xarray" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a3/03/c7e3b996e404103b540427160f14df063fd31a9859df2b198b48ebf536ff/cf_xarray-0.11.1.tar.gz", hash = "sha256:c5935d7bf6d95a7229ba9741501d8491164d35f0e5b5d366c2dce302ae742276", size = 691204, upload-time = "2026-05-12T20:58:52.839Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ba/53/eac17f1d80b0eea5ee9259f2d1b316002b30bed8d84542fddab3c083e35a/cf_xarray-0.11.2.tar.gz", hash = "sha256:9e78c12d7a5ac7f77cb3e984455d7e821c5069c9bd6ba3aad8942b65619db008", size = 692790, upload-time = "2026-06-12T05:41:04.534Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f4/2f/2d4f04e27c2481fd697522340df04f3a278dfe9a1f13292b2f9e39b98a44/cf_xarray-0.11.1-py3-none-any.whl", hash = "sha256:b55c77af7bc5c0768a65ab6eafef89646e5cbf003a12ec37513983565e25f888", size = 79377, upload-time = "2026-05-12T20:58:51.016Z" },
+    { url = "https://files.pythonhosted.org/packages/89/21/374ad9c7b01a44a9d2fbc80c97392f3d55c2d0e319e4d9e397a3fd108212/cf_xarray-0.11.2-py3-none-any.whl", hash = "sha256:e68ed870bafd58ac9ce81287ead785e5952b0c023fdee6a3ce1a3b6e7fac2ebc", size = 80077, upload-time = "2026-06-12T05:41:03.238Z" },
 ]
 
 [[package]]
@@ -5162,7 +5162,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.12.15" },
     { name = "cachetools", specifier = ">=5.5.2" },
-    { name = "cf-xarray", specifier = ">=0.11.1" },
+    { name = "cf-xarray", specifier = ">=0.11.2" },
     { name = "cftime", specifier = ">=1.6.4.post1" },
     { name = "datashader", specifier = ">=0.19.1" },
     { name = "donfig", specifier = ">=0.8.0" },
