@@ -38,6 +38,7 @@ from xpublish_tiles.testing.datasets import (
     CURVILINEAR,
     FORECAST,
     FVCOM_MACHIAS_BAY,
+    GEOSTATIONARY,
     GLOBAL_6KM,
     GLOBAL_6KM_360,
     GLOBAL_HEALPIX_L3,
@@ -61,6 +62,7 @@ from xpublish_tiles.testing.lib import (
 )
 from xpublish_tiles.testing.tiles import (
     CURVILINEAR_TILES,
+    GEOSTATIONARY_TILES,
     PARA_TILES,
     TILES,
     WEBMERC_TMS,
@@ -308,6 +310,20 @@ async def test_curvilinear_data(tile, tms, png_snapshot, pytestconfig):
         tile_info=(tile, tms),
         debug_visual=pytestconfig.getoption("--debug-visual"),
         debug_visual_save=pytestconfig.getoption("--debug-visual-save"),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tile,tms", as_pytestparams(GEOSTATIONARY_TILES))
+async def test_geostationary_data(tile, tms, png_snapshot, pytestconfig):
+    ds = GEOSTATIONARY.create()
+    query_params = create_query_params(tile, tms, colorscalerange=(-1.0, 1.0))
+    result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    # Full-disk geostationary coverage leaves off-disk corners transparent
+    assert_render_matches_snapshot(
+        result, png_snapshot, tile=tile, tms=tms, skip_transparency_check=True
     )
 
 

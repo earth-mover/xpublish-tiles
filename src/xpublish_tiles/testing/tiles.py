@@ -372,6 +372,21 @@ RADAR_TILES = [
     TileTestParam(tile=Tile(x=67, y=95, z=8), tms=WEBMERC_TMS, name="radar_zoom_z8"),
 ]
 
+# Geostationary tiles (GOES-style full disk centered on -75°W, 0°N)
+GEOSTATIONARY_TILES = [
+    # z1/0/0 spans the western limb — exercises off-disk transparency
+    TileTestParam(tile=Tile(x=0, y=0, z=1), tms=WEBMERC_TMS, name="geos_limb_z1"),
+    TileTestParam(tile=Tile(x=1, y=2, z=2), tms=WEBMERC_TMS, name="geos_disk_z2"),
+    TileTestParam(tile=Tile(x=2, y=4, z=3), tms=WEBMERC_TMS, name="geos_subsatellite_z3"),
+    TileTestParam(tile=Tile(x=1, y=3, z=3), tms=WEBMERC_TMS, name="geos_conus_z3"),
+    # z3/4/3 straddles the eastern limb — only a thin on-disk sliver, the rest
+    # off-disk; exercises non-finite quad skipping (no smear across the tile)
+    TileTestParam(tile=Tile(x=4, y=3, z=3), tms=WEBMERC_TMS, name="geos_east_limb_z3"),
+    # z4/1/8 hugs the western limb — foreshortened limb cells produce a comb
+    # edge; locks in the limb rendering after non-finite quad skipping
+    TileTestParam(tile=Tile(x=1, y=8, z=4), tms=WEBMERC_TMS, name="geos_west_limb_z4"),
+]
+
 # South America benchmark tiles (for Sentinel dataset)
 # Coverage area roughly: -82°W to -27°W, 13°N to -55°S
 # Focused on the region that's working in the logs (tiles 120-122, 72-73)
