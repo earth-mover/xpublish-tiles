@@ -10,8 +10,6 @@ import cf_xarray  # noqa: F401
 import xarray as xr
 from xpublish_tiles.logger import log_duration, logger
 
-HAS_TBB = importlib.util.find_spec("tbb") is not None
-
 
 def _has_threadsafe_numba_layer() -> bool:
     """Whether numba will select a threading layer that is safe for concurrent
@@ -28,7 +26,7 @@ def _has_threadsafe_numba_layer() -> bool:
         return True
     if forced != "default":
         return False
-    if HAS_TBB:
+    if importlib.util.find_spec("tbb") is not None:
         return True
     try:
         # must actually import (not find_spec): on macOS the omppool extension
