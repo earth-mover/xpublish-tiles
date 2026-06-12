@@ -3500,13 +3500,20 @@ def _detect_grid_metadata(
     return GridMetadata(X=Xname, Y=Yname, crs=mapping.crs, grid_cls=grid_cls)
 
 
-def guess_grid_metadata(ds: xr.Dataset) -> GridMetadata | None:
+def guess_grid_metadata(
+    ds: xr.Dataset,
+    *,
+    all_mappings: list[GridMappingInfo] | None = None,
+) -> GridMetadata | None:
     """Return ``GridMetadata`` for ``ds``'s primary grid mapping, or ``None``
     if no CRS can be detected from attributes alone.
 
     Inspects grid_mapping variables, CF coordinate attributes, and coordinate
     shapes only. Use this when you need the grid class or primary X/Y coordinate names
     without paying to construct the full grid system.
+
+    Pass ``all_mappings`` to reuse a previously computed
+    ``_guess_grid_mappings_and_crs(ds)`` result and avoid recomputing it.
     """
     face_dim = find_cubed_sphere_face_dim(ds)
     if face_dim is not None:
@@ -3528,7 +3535,8 @@ def guess_grid_metadata(ds: xr.Dataset) -> GridMetadata | None:
                 face_dim=face_dim,
             )
 
-    all_mappings = _guess_grid_mappings_and_crs(ds)
+    if all_mappings is None:
+        all_mappings = _guess_grid_mappings_and_crs(ds)
     if not all_mappings or all_mappings[0].crs is None:
         return None
     skip_coordinates = set(
@@ -3544,7 +3552,8 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
 
     Raises RuntimeError to indicate that we might try again.
     """
-    primary_grid_metadata = guess_grid_metadata(ds)
+    all_mappings = _guess_grid_mappings_and_crs(ds)
+    primary_grid_metadata = guess_grid_metadata(ds, all_mappings=all_mappings)
     if primary_grid_metadata is None:
         raise GridDetectionError("CRS/grid system not detected")
     extra: dict[str, Any] = {}
@@ -3563,7 +3572,6 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
     )
 
     # Create alternate grid systems from remaining mappings
-    all_mappings = _guess_grid_mappings_and_crs(ds)
     alternates = []
     for mapping in all_mappings[1:]:
         try:
