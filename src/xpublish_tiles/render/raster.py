@@ -5,6 +5,7 @@ from typing import cast
 import datashader as dsh
 import datashader.reductions
 import matplotlib.colors as mcolors
+import numba
 import numbagg
 import numpy as np
 import pandas as pd
@@ -12,7 +13,7 @@ from PIL import Image
 from scipy.interpolate import NearestNDInterpolator
 
 import xarray as xr
-from xpublish_tiles.grids import Curvilinear, GridSystem2D, Triangular
+from xpublish_tiles.grids import Curvilinear, Geostationary, GridSystem2D, Triangular
 from xpublish_tiles.lib import (
     maybe_cast_data,
 )
@@ -25,6 +26,37 @@ from xpublish_tiles.types import (
     RenderContext,
 )
 from xpublish_tiles.utils import NUMBA_THREADING_LOCK
+
+
+@numba.njit(parallel=True, cache=True, boundscheck=False)
+def _offdisk_quad_mask(xc, yc):
+    """Mark cells whose quadmesh quad touches a non-finite (off-disk) vertex.
+
+    A cell participates in a quad with a non-finite corner iff any cell in its
+    3x3 neighbourhood has a non-finite transformed coordinate. Marked cells are
+    set to NaN before rasterization so datashader's reductions drop them,
+    rendering the geostationary limb transparent instead of smearing.
+    """
+    ny, nx = xc.shape
+    bad = np.zeros((ny, nx), dtype=np.bool_)
+    for j in numba.prange(ny):  # ty: ignore[not-iterable]
+        for i in range(nx):
+            found = False
+            for dj in range(-1, 2):
+                jj = j + dj
+                if jj < 0 or jj >= ny:
+                    continue
+                for di in range(-1, 2):
+                    ii = i + di
+                    if ii < 0 or ii >= nx:
+                        continue
+                    if not (np.isfinite(xc[jj, ii]) and np.isfinite(yc[jj, ii])):
+                        found = True
+                        break
+                if found:
+                    break
+            bad[j, i] = found
+    return bad
 
 
 def nearest_on_uniform_grid_scipy(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.DataArray:
@@ -208,12 +240,22 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                         )
             else:
                 data = maybe_cast_data(context.da)
+                if isinstance(grid, Geostationary):
+                    xcoord, ycoord = data[grid.X], data[grid.Y]
+                    with NUMBA_THREADING_LOCK:
+                        bad = _offdisk_quad_mask(
+                            np.asarray(xcoord.data), np.asarray(ycoord.data)
+                        )
+                    data = data.where(xr.DataArray(~bad, dims=xcoord.dims))
                 with log_duration(
                     f"render (continuous) {data.shape} quadmesh", "🎨", logger
                 ):
                     # Lock is only used when tbb is not available (e.g., on macOS)
-                    # AND if we use the rectilinear or raster code path
-                    with NUMBA_THREADING_LOCK:
+                    # AND if we use the rectilinear or raster code path.
+                    # errstate: off-disk NaN coords (geostationary) cast to garbage
+                    # ints inside datashader's quad scaling; those quads no-op via
+                    # the NaN data mask above, so the warning is expected noise.
+                    with NUMBA_THREADING_LOCK, np.errstate(invalid="ignore"):
                         mesh = cvs.quadmesh(
                             data.transpose(grid.Ydim, grid.Xdim), x=grid.X, y=grid.Y
                         )
