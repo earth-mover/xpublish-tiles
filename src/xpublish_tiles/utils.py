@@ -10,9 +10,36 @@ import cf_xarray  # noqa: F401
 import xarray as xr
 from xpublish_tiles.logger import log_duration, logger
 
-# Only use lock if tbb is not available
 HAS_TBB = importlib.util.find_spec("tbb") is not None
-NUMBA_THREADING_LOCK = contextlib.nullcontext() if HAS_TBB else threading.Lock()
+
+
+def _has_threadsafe_numba_layer() -> bool:
+    """Whether numba will select a threading layer that is safe for concurrent
+    entry into parallel regions from multiple Python threads.
+
+    tbb and omp are threadsafe; the workqueue fallback is not, so without one
+    of the safe layers we serialize numba sections with a lock instead.
+    https://numba.readthedocs.io/en/stable/user/threading-layer.html
+    """
+    from numba import config as numba_config
+
+    forced = numba_config.THREADING_LAYER
+    if forced in ("tbb", "omp", "safe", "threadsafe"):
+        return True
+    if forced != "default":
+        return False
+    if HAS_TBB:
+        return True
+    try:
+        from numba.np.ufunc import omppool  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+NUMBA_THREADING_LOCK = (
+    contextlib.nullcontext() if _has_threadsafe_numba_layer() else threading.Lock()
+)
 
 
 def xarray_object_key(
