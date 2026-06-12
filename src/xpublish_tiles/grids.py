@@ -196,6 +196,10 @@ Y_COORD_PATTERN = re.compile(
 
 _GRID_CACHE = cachetools.LRUCache(maxsize=config["grid_cache_max_size"])
 
+# Sentinel cached when detection fails, so a repeat lookup for the same
+# (xpublish_id, dim-signature) fails immediately.
+_GRID_DETECTION_FAILED = object()
+
 
 def _cell_min_max(
     corners: np.ndarray, *, xaxis: int, yaxis: int
@@ -3639,6 +3643,21 @@ def _validate_grid_dims(grid: GridSystem, var: xr.DataArray) -> None:
             )
 
 
+def _lookup_cached_grid(cache_key: tuple | None, name: Hashable) -> GridSystem | None:
+    """Return a cached grid for ``cache_key``, or ``None`` if absent.
+
+    Raises ``GridDetectionError`` if a previous detection failure was cached for
+    this key (see ``_GRID_DETECTION_FAILED``).
+    """
+    if cache_key is None or cache_key not in _GRID_CACHE:
+        return None
+    if (cached := _GRID_CACHE[cache_key]) is _GRID_DETECTION_FAILED:
+        raise GridDetectionError(
+            f"No grid system detected for {name!r} (cached failure)."
+        )
+    return cached
+
+
 def guess_grid_system(
     ds: xr.Dataset,
     name: Hashable,
@@ -3661,8 +3680,7 @@ def guess_grid_system(
     if cf_coords is None:
         cf_coords = ds.cf.coordinates
 
-    xpublish_id = ds.attrs.get("_xpublish_id")
-    if xpublish_id is None:
+    if (xpublish_id := ds.attrs.get("_xpublish_id")) is None:
         logger.warning(
             "Dataset has no '_xpublish_id' attr; grid system caching is disabled "
             "and the grid will be rebuilt on every request."
@@ -3673,98 +3691,146 @@ def guess_grid_system(
         else None
     )
 
-    if cache_key is not None and cache_key in _GRID_CACHE:
-        cached = _GRID_CACHE[cache_key]
+    if (cached := _lookup_cached_grid(cache_key, name)) is not None:
         _validate_grid_dims(cached, ds[name])
         return cached
 
     with GRID_DETECTION_LOCK, suppress_cf_dangling_ref_warnings():
         # Double-check in case another thread populated cache while we waited
-        if cache_key is not None and cache_key in _GRID_CACHE:
-            cached = _GRID_CACHE[cache_key]
+        if (cached := _lookup_cached_grid(cache_key, name)) is not None:
             _validate_grid_dims(cached, ds[name])
             return cached
 
         try:
-            cf_sub = ds.cf[[name]]
-        except KeyError:
-            raise VariableNotFoundError(
-                f"Variable {name!r} not found in dataset."
-            ) from None
-
-        # cf-xarray doesn't follow the UGRID ``mesh`` attribute, so the cf
-        # subset drops the mesh_topology variable, connectivity, and node coords.
-        # Without those, detect_mesh returns None and detection falls back to
-        # Delaunay on face centroids. Work from the full ds whenever the variable
-        # points at a UGRID mesh.
-        mesh_attr = ds[name].attrs.get("mesh")
-        is_ugrid_var = bool(
-            mesh_attr
-            and mesh_attr in ds.variables
-            and ds[mesh_attr].attrs.get("cf_role") == "mesh_topology"
-        )
-        if is_ugrid_var:
-            cf_sub = ds
-
-        try:
-            meta = guess_grid_metadata(cf_sub)
+            grid = _detect_grid_system(ds, name)
         except GridDetectionError:
-            meta = None
-
-        # Preload the primary mapping's X/Y on the *outer* ds.
-        # This allows reuse of loaded coordinates for datasets where
-        # some arrays have a vertical dimension.
-        # TODO: delete this when we cache the horizontal grid separately
-        if (
-            meta is not None
-            and meta.grid_cls is not RasterAffine
-            and meta.X in ds.variables
-            and meta.Y in ds.variables
-        ):
-            sync_load_async(ds[[meta.X, meta.Y]])
-            # Refresh cf_sub — for UGRID stay on the full ds to keep mesh+connectivity.
-            cf_sub = ds if is_ugrid_var else ds.cf[[name]]
-
-        # Cubed sphere has its own construction signature (face_dim) and uses
-        # the outer ds for Z lookup, so dispatch directly instead of going
-        # through ``_guess_grid_for_dataset``.
-        if meta is not None and meta.grid_cls is CubedSphere:
-            assert meta.face_dim is not None
-            grid = CubedSphere.from_dataset(
-                ds, meta.crs, meta.X, meta.Y, face_dim=meta.face_dim
-            )
-            grid.Z = _guess_z_dimension(ds[name])
-            _validate_grid_dims(grid, ds[name])
+            # Cache the failure so callers sharing this dim-signature don't
+            # repeat the (sometimes multi-second) fallback chain.
             if cache_key is not None:
-                _GRID_CACHE[cache_key] = grid
-            return grid
-
-        try:
-            grid = _guess_grid_for_dataset(cf_sub)
-        except GridDetectionError:
-            # Check for polar radar grid (needs full ds for scalar lat/lon)
-            az_coord, rng_coord = _find_polar_coords(ds)
-            if az_coord is not None and rng_coord is not None:
-                grid = Polar.from_dataset(ds, CRS.from_epsg(4326), az_coord, rng_coord)
-            else:
-                try:
-                    grid = _guess_grid_for_dataset(ds)
-                except GridDetectionError:
-                    ds = ds.cf.guess_coord_axis()
-                    grid = _guess_grid_for_dataset(ds)
-        except KeyError:
-            raise VariableNotFoundError(
-                f"Variable {name!r} not found in dataset."
-            ) from None
-
-        # The full-dataset fallback above can return a grid that doesn't
-        # actually apply to ``name`` (e.g. an auxiliary var like ``contacts``
-        # on a cubed-sphere dataset shares the ``face_dim`` but lacks the
-        # 2D lat/lon dims). Reject these so per-variable callers can skip them.
-        grid.Z = _guess_z_dimension(ds.cf[name])
-        _validate_grid_dims(grid, ds[name])
+                _GRID_CACHE[cache_key] = _GRID_DETECTION_FAILED
+            raise
 
         if cache_key is not None:
             _GRID_CACHE[cache_key] = grid
 
         return grid
+
+
+def _detect_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
+    """Run grid detection for ``name`` without any caching.
+
+    Raises ``GridDetectionError`` if no grid applies to ``name`` and
+    ``VariableNotFoundError`` if ``name`` isn't in ``ds``.
+    """
+    try:
+        cf_sub = ds.cf[[name]]
+    except KeyError:
+        raise VariableNotFoundError(f"Variable {name!r} not found in dataset.") from None
+
+    # cf-xarray doesn't follow the UGRID ``mesh`` attribute, so the cf
+    # subset drops the mesh_topology variable, connectivity, and node coords.
+    # Without those, detect_mesh returns None and detection falls back to
+    # Delaunay on face centroids. Work from the full ds whenever the variable
+    # points at a UGRID mesh.
+    mesh_attr = ds[name].attrs.get("mesh")
+    is_ugrid_var = bool(
+        mesh_attr
+        and mesh_attr in ds.variables
+        and ds[mesh_attr].attrs.get("cf_role") == "mesh_topology"
+    )
+    if is_ugrid_var:
+        cf_sub = ds
+
+    try:
+        meta = guess_grid_metadata(cf_sub)
+    except GridDetectionError:
+        meta = None
+
+    # Preload the primary mapping's X/Y on the *outer* ds.
+    # This allows reuse of loaded coordinates for datasets where
+    # some arrays have a vertical dimension.
+    # TODO: delete this when we cache the horizontal grid separately
+    if (
+        meta is not None
+        and meta.grid_cls is not RasterAffine
+        and meta.X in ds.variables
+        and meta.Y in ds.variables
+    ):
+        sync_load_async(ds[[meta.X, meta.Y]])
+        # Refresh cf_sub — for UGRID stay on the full ds to keep mesh+connectivity.
+        cf_sub = ds if is_ugrid_var else ds.cf[[name]]
+
+    # Cubed sphere has its own construction signature (face_dim) and uses
+    # the outer ds for Z lookup, so dispatch directly instead of going
+    # through ``_guess_grid_for_dataset``.
+    if meta is not None and meta.grid_cls is CubedSphere:
+        assert meta.face_dim is not None
+        grid = CubedSphere.from_dataset(
+            ds, meta.crs, meta.X, meta.Y, face_dim=meta.face_dim
+        )
+        grid.Z = _guess_z_dimension(ds[name])
+        _validate_grid_dims(grid, ds[name])
+        return grid
+
+    try:
+        grid = _guess_grid_for_dataset(cf_sub)
+    except GridDetectionError:
+        # Check for polar radar grid (needs full ds for scalar lat/lon)
+        az_coord, rng_coord = _find_polar_coords(ds)
+        if az_coord is not None and rng_coord is not None:
+            grid = Polar.from_dataset(ds, CRS.from_epsg(4326), az_coord, rng_coord)
+        else:
+            try:
+                grid = _guess_grid_for_dataset(ds)
+            except GridDetectionError:
+                ds = ds.cf.guess_coord_axis()
+                grid = _guess_grid_for_dataset(ds)
+    except KeyError:
+        raise VariableNotFoundError(f"Variable {name!r} not found in dataset.") from None
+
+    # The full-dataset fallback above can return a grid that doesn't
+    # actually apply to ``name`` (e.g. an auxiliary var like ``contacts``
+    # on a cubed-sphere dataset shares the ``face_dim`` but lacks the
+    # 2D lat/lon dims). Reject these so per-variable callers can skip them.
+    grid.Z = _guess_z_dimension(ds.cf[name])
+    _validate_grid_dims(grid, ds[name])
+    return grid
+
+
+def detect_grids(
+    ds: xr.Dataset,
+    *,
+    cf_coords: dict | None = None,
+) -> dict[str, GridSystem]:
+    """Map each renderable data variable to its grid system.
+
+    Variables that share a spatial-dimension signature (see
+    ``xarray_object_key``) share a grid, so detection runs once per signature
+    group and the result fans out to every member. This collapses the
+    per-variable (and per-TMS) detection the metadata endpoints used to do —
+    e.g. a GOES dataset with dozens of bands on one geostationary grid resolves
+    to a single detection.
+
+    Groups with no non-time spatial dimensions, or whose detection finds no
+    grid (e.g. ancillary/metadata variables like ``goes_imager_projection``),
+    are skipped — their variables are not renderable as tiles and are absent
+    from the returned mapping.
+    """
+    if cf_coords is None:
+        cf_coords = ds.cf.coordinates
+
+    groups: dict[tuple, list[str]] = {}
+    for name, var in ds.data_vars.items():
+        if not (signature := xarray_object_key(var, cf_coords=cf_coords)):
+            continue
+        groups.setdefault(signature, []).append(str(name))
+
+    grids: dict[str, GridSystem] = {}
+    for names in groups.values():
+        try:
+            grid = guess_grid_system(ds, names[0], cf_coords=cf_coords)
+        except (GridDetectionError, VariableNotFoundError):
+            continue
+        for name in names:
+            grids[name] = grid
+    return grids
