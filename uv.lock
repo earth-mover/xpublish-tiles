@@ -4811,9 +4811,16 @@ wheels = [
 [[package]]
 name = "triangular"
 version = "0.2.0"
-source = { git = "https://github.com/earth-mover/triangular/#c88f41350d4a86e623a09e433381dcdc41aa2448" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9b/d9/02c76b645f21aa1c2aebe163067a879fe8d58439801f1a898b8b13de0190/triangular-0.2.0.tar.gz", hash = "sha256:1c80c814b04b13fd89c0d25eefa3852f902e0b2cf26731e30b06c21a9de3edd0", size = 7724350, upload-time = "2026-06-12T20:00:47.129Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c3/05/68db813198cd2279b26b1ef289aeee45665f5c93d8bc4adc46a5a3f049af/triangular-0.2.0-cp312-abi3-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:9235d8e7b82467064d7b7ced5eb83cb16348cb7bc44b8f976d5544169355f753", size = 631058, upload-time = "2026-06-12T20:00:40.659Z" },
+    { url = "https://files.pythonhosted.org/packages/11/09/ccc093ad175961c836484e36df331389990ec7ac713ee79c55f276332c04/triangular-0.2.0-cp312-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:9eeead455ae988191a0e127a8f11a17ef586432cbf97cee09a211b91076861b0", size = 348504, upload-time = "2026-06-12T20:00:42.297Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/bd/daa28b7c62098e97615af6d8ca88a43ba64fac8d171d77e1e8c5b5e01dcc/triangular-0.2.0-cp312-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3d7a7773611de08fc501f7a6e32a95ad018c14aaa683f63e0db48fd877c20da7", size = 356243, upload-time = "2026-06-12T20:00:43.678Z" },
+    { url = "https://files.pythonhosted.org/packages/11/92/c7f7ef0257b8d71b94bf2f4307cb2cc3a53ea02537091add681f462c4d39/triangular-0.2.0-cp312-abi3-win_amd64.whl", hash = "sha256:b38b35a072c795de1e2ebfce89a4d1201268fa0c900018489f5d3e065cd99ec0", size = 226790, upload-time = "2026-06-12T20:00:45.278Z" },
 ]
 
 [[package]]
@@ -5189,7 +5196,7 @@ requires-dist = [
     { name = "tbb", marker = "sys_platform == 'linux'", specifier = ">=2022.2.0" },
     { name = "titiler", marker = "extra == 'testing'", specifier = ">=0.24.0" },
     { name = "toolz", specifier = ">=1.0.0" },
-    { name = "triangular", git = "https://github.com/earth-mover/triangular/" },
+    { name = "triangular", specifier = ">=0.2.0" },
     { name = "xarray", specifier = ">=2025.12.0" },
     { name = "xdggs", marker = "extra == 'complete'", specifier = ">=0.5.0" },
     { name = "xdggs", marker = "extra == 'healpix'", specifier = ">=0.5.0" },
