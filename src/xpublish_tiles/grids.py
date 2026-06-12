@@ -1893,6 +1893,9 @@ class Geostationary(Rectilinear):
     """
 
     scale: float
+    semi_major: float
+    semi_minor: float
+    lon0: float
 
     @classmethod
     def from_dataset(
@@ -1902,22 +1905,30 @@ class Geostationary(Rectilinear):
         Xname: str,
         Yname: str,
     ) -> "Geostationary":
-        h = next(
+        gm_name = next(
             (
-                float(ds[name].attrs["perspective_point_height"])
+                name
                 for name in ds.cf.grid_mapping_names.get("geostationary", [])
                 if "perspective_point_height" in ds[name].attrs
             ),
             None,
         )
-        if h is None:
+        if gm_name is None:
             raise GridDetectionError(
                 "Geostationary grid mapping has no 'perspective_point_height' "
                 "attribute; cannot convert scan-angle (radian) coordinates to "
                 "projection metres."
             )
+        gm_attrs = ds[gm_name].attrs
+        h = float(gm_attrs["perspective_point_height"])
+        lon0 = float(gm_attrs.get("longitude_of_projection_origin", 0.0))
         scaled = ds.assign_coords({Xname: ds[Xname] * h, Yname: ds[Yname] * h})
         base = Rectilinear.from_dataset(scaled, crs, Xname, Yname)
+        ellipsoid = base.crs.ellipsoid
+        if ellipsoid is None:
+            raise GridDetectionError(
+                "Geostationary CRS has no ellipsoid; cannot determine the visible-disk extent."
+            )
         return cls(
             crs=base.crs,
             X=base.X,
@@ -1926,6 +1937,9 @@ class Geostationary(Rectilinear):
             indexes=base.indexes,
             Z=base.Z,
             scale=h,
+            semi_major=float(ellipsoid.semi_major_metre),
+            semi_minor=float(ellipsoid.semi_minor_metre),
+            lon0=lon0,
         )
 
     def assign_index(self, da: xr.DataArray) -> xr.DataArray:
@@ -1936,27 +1950,60 @@ class Geostationary(Rectilinear):
     def transform_bbox(self, target_crs: str) -> tuple[float, float, float, float]:
         """Return the visible-disk bounds in ``target_crs``.
 
-        The projection-plane bbox is a square whose corners fall off the Earth's
-        disk and transform to ``inf``. Sample interior points and keep only the
-        finite results so the reported geographic extent is the visible disk.
+        The projection-plane bbox is a rectangle whose off-disk parts transform
+        to ``inf``. Remember the disk is inscribed in a rectangle; the corners are off-disk.
+        The cardinal points give the *exact* full-disk extremes.
         """
         cached = self._bbox_xform_cache.get(target_crs)
         if cached is not None:
             return cached
-        transformer = transformer_from_crs(crs_from=self.crs, crs_to=target_crs)
-        xs = np.linspace(self.bbox.west, self.bbox.east, 101)
-        ys = np.linspace(self.bbox.south, self.bbox.north, 101)
-        gx, gy = np.meshgrid(xs, ys)
-        tx, ty = transformer.transform(gx.ravel(), gy.ravel())
-        finite = np.isfinite(tx) & np.isfinite(ty)
-        bounds = (
-            float(tx[finite].min()),
-            float(ty[finite].min()),
-            float(tx[finite].max()),
-            float(ty[finite].max()),
-        )
+        w, e = self.bbox.west, self.bbox.east
+        s, n = self.bbox.south, self.bbox.north
+
+        # Analytic disk-limb cardinal points give the exact full-disk extremes.
+        # projection coords are used only to keep the ones within the bbox.
+        lons, lats, cpx, cpy = self._limb_cardinals()
+        inside = (w <= cpx) & (cpx <= e) & (s <= cpy) & (cpy <= n)
+        if not inside.any():
+            # No limb in view — an on-disk subset whose corners transform cleanly.
+            return super().transform_bbox(target_crs)
+
+        # handle case with limbs where a transform would blow up
+        geo = transformer_from_crs(crs_from="EPSG:4326", crs_to=target_crs)
+        ctx, cty = geo.transform(lons[inside], lats[inside])
+        cfin = np.isfinite(ctx) & np.isfinite(cty)
+        cx = np.atleast_1d(ctx)[cfin]
+        cy = np.atleast_1d(cty)[cfin]
+        bounds = (float(cx.min()), float(cy.min()), float(cx.max()), float(cy.max()))
         self._bbox_xform_cache[target_crs] = bounds
         return bounds
+
+    def _limb_cardinals(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Geographic and projection coords of the visible disk's N/S/E/W limb.
+
+        Returns ``(lons, lats, px, py)`` — the geographic extremes and their
+        projection-plane coords. The geographic values are exact; the projection
+        coords (used only to test whether a cardinal lies within the data
+        rectangle) are the limb scan-angle radii ``h·arcsin(R_e/d)`` (E/W) and
+        ``h·arctan(R_p/√(h(2R_e+h)))`` (N/S). We compute them directly rather
+        than forward-transforming the geographic points, since those sit exactly
+        on the limb where the geos forward transform returns ``inf``.
+        """
+        h = self.scale
+        re = self.semi_major
+        rp = self.semi_minor
+        d = re + h
+        lon_off = np.degrees(np.arccos(re / d))
+        x = re**2 / d
+        z = rp * np.sqrt(1.0 - (re / d) ** 2)
+        phi = np.degrees(np.arctan((re**2 / rp**2) * (z / x)))
+        lons = np.array([self.lon0 + lon_off, self.lon0 - lon_off, self.lon0, self.lon0])
+        lats = np.array([0.0, 0.0, phi, -phi])
+        rx = h * np.arcsin(re / d)
+        ry = h * np.arctan(rp / np.sqrt(h * (2 * re + h)))
+        px = np.array([rx, -rx, 0.0, 0.0])
+        py = np.array([0.0, 0.0, ry, -ry])
+        return lons, lats, px, py
 
     def equals(self, other: object) -> bool:
         if not isinstance(other, Geostationary):

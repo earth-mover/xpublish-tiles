@@ -243,6 +243,9 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                 if isinstance(grid, Geostationary):
                     xcoord, ycoord = data[grid.X], data[grid.Y]
                     with NUMBA_THREADING_LOCK:
+                        # Transformation of points near the edge of the disk is undefined
+                        # and corrupts the rendering. Mask them out but only for
+                        # Geostationary to avoid the perf hit.
                         bad = _offdisk_quad_mask(
                             np.asarray(xcoord.data), np.asarray(ycoord.data)
                         )
