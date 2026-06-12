@@ -286,3 +286,17 @@ def test_get_legend_graphic_missing_colorscalerange():
     )
     assert r.status_code == 422
     assert "colorscalerange" in r.json()["detail"]
+
+
+def test_wms_openapi_schema_generation(xpublish_client):
+    """OpenAPI generation should succeed and expose CRS/BBox as string params."""
+    response = xpublish_client.get("/openapi.json")
+    assert response.status_code == 200
+
+    schema = response.json()
+    wms_get = schema["paths"]["/datasets/{dataset_id}/wms/"]["get"]
+    assert any(param["name"] == "root" for param in wms_get["parameters"])
+
+    map_schema = schema["components"]["schemas"]["WMSGetMapQuery"]
+    assert map_schema["properties"]["crs"]["type"] == "string"
+    assert map_schema["properties"]["bbox"]["type"] == "string"
