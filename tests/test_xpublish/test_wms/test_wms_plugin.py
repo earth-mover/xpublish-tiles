@@ -297,6 +297,5 @@ def test_wms_openapi_schema_generation(xpublish_client):
     wms_get = schema["paths"]["/datasets/{dataset_id}/wms/"]["get"]
     assert any(param["name"] == "root" for param in wms_get["parameters"])
 
-    map_schema = schema["components"]["schemas"]["WMSGetMapQuery"]
-    assert map_schema["properties"]["crs"]["type"] == "string"
-    assert map_schema["properties"]["bbox"]["type"] == "string"
+    assert schema["components"]["schemas"]["CRSParam"]["type"] == "string"
+    assert schema["components"]["schemas"]["BBoxParam"]["type"] == "string"
