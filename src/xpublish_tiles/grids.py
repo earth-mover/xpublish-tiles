@@ -471,6 +471,22 @@ def _min_nonzero_diff(hi: np.ndarray, lo: np.ndarray) -> float:
     return 0.0 if np.isinf(result) else float(result)
 
 
+def _has_longitude_seam(data: np.ndarray, *, width: float) -> bool:
+    """True if adjacent longitudes jump by more than half a period along any
+    axis — the signature of a ±``width`` discontinuity that ``unwrap`` fixes.
+
+    Regional grids confined to a single longitude branch (e.g. [-98°, -36°])
+    have no such jump, so unwrapping them is a costly no-op.
+    """
+    threshold = width / 2
+    for axis in range(data.ndim):
+        if data.shape[axis] < 2:
+            continue
+        if numbagg.nanmax(np.abs(np.diff(data, axis=axis))) > threshold:
+            return True
+    return False
+
+
 def _compute_interval_bounds(centers: np.ndarray) -> np.ndarray:
     """
     Compute interval bounds from cell centers, handling non-uniform spacing.
@@ -906,8 +922,8 @@ class CurvilinearCellIndex(xr.Index):
         if tripolar_fold_row is not None:
             first_col = first_col[:tripolar_fold_row]
             last_col = last_col[:tripolar_fold_row]
-        self.left_break = float(np.min(first_col))
-        self.right_break = float(np.max(last_col))
+        self.left_break = float(numbagg.nanmin(first_col))
+        self.right_break = float(numbagg.nanmax(last_col))
 
         # Determine if Y is increasing along the Y axis by checking the first
         # row. Don't use .all() because tripolar grids have dY=0 in the fold
@@ -1278,6 +1294,15 @@ def _indexes_equal(a: xr.Index, b: xr.Index) -> bool:
             )
 
     return a.equals(b)
+
+
+def _bboxes_close(a: BBox, b: BBox) -> bool:
+    return bool(
+        np.allclose(
+            (a.west, a.south, a.east, a.north),
+            (b.west, b.south, b.east, b.north),
+        )
+    )
 
 
 @dataclass(eq=False)
@@ -2169,13 +2194,27 @@ class Curvilinear(GridSystem):
         corner_x = _corner_mesh(ds, Xname)
         corner_y = _corner_mesh(ds, Yname)
 
-        if crs.is_geographic and not is_polar_cap:
+        if (
+            crs.is_geographic
+            and not is_polar_cap
+            and _has_longitude_seam(X.data, width=360)
+        ):
             # Fix longitude discontinuities without centering. Ensures datasets
             # with the meridian discontinuity in the "middle" of the dataset
             # maintain a continuous coordinate system. Skip for polar-cap faces:
             # lon is not monotonic along either axis near the pole, so unwrap
             # can stretch values into spurious ranges. The polar-cap path in
             # `CurvilinearCellIndex.sel` handles wrap with a 2-convention test.
+            # Also skipped for regional grids with no seam — see
+            # `_has_longitude_seam`.
+            if numbagg.anynan(X.data):
+                # The 2D `unwrap_phase` path degenerates into a non-terminating
+                # traversal when the array contains NaNs: NaN poisons its
+                # per-pixel reliability ordering. We have no NaN-safe unwrap yet.
+                raise NotImplementedError(
+                    "Cannot unwrap longitudes for a curvilinear grid that crosses "
+                    "the ±180°/360° seam and contains NaNs (e.g. a masked grid)."
+                )
             X = X.copy(data=unwrap(X.data, width=360))
             if corner_x is not None:
                 corner_x = unwrap(corner_x, width=360)
@@ -2208,7 +2247,7 @@ class Curvilinear(GridSystem):
         if not isinstance(other, Curvilinear):
             return False
         if (
-            (self.crs == other.crs and self.bbox == other.bbox)
+            (self.crs == other.crs and _bboxes_close(self.bbox, other.bbox))
             and (self.X == other.X and self.Y == other.Y)
             and self.indexes[0].equals(other.indexes[0])
         ):
