@@ -63,7 +63,11 @@ def create_onecrs_dataset(ds: xr.Dataset) -> xr.Dataset:
 
 
 def get_dataset_for_name(
-    name: str, branch: str = "main", group: str = "", icechunk_cache: bool = False
+    name: str,
+    branch: str = "main",
+    group: str = "",
+    icechunk_cache: bool = False,
+    as_dataset: bool = False,
 ) -> xr.Dataset | DataTree:
     """Returns a datatree for multiscale datasets, or a dataset for single-scale datasets."""
     if name == "global":
@@ -211,14 +215,23 @@ def get_dataset_for_name(
             client = Client()
             repo = client.get_repo(name, config=config)
             session = repo.readonly_session(branch=branch)
-            ds: xr.DataTree = xr.open_datatree(
-                session.store,  # ty: ignore[invalid-argument-type]
-                group=group or None,
-                zarr_format=3,
-                consolidated=False,
-                chunks=None,
-                engine="zarr",
-            )
+            if as_dataset:
+                ds = xr.open_zarr(
+                    session.store,
+                    group=group or None,
+                    zarr_format=3,
+                    consolidated=False,
+                    chunks=None,
+                )
+            else:
+                ds: xr.DataTree = xr.open_datatree(
+                    session.store,  # ty: ignore[invalid-argument-type]
+                    group=group or None,
+                    zarr_format=3,
+                    consolidated=False,
+                    chunks=None,
+                    engine="zarr",
+                )
             # Add _xpublish_id for caching - use name, branch, and group for arraylake
             xpublish_id = f"{name}:{branch}"
             xpublish_id += f":{group}" if group else ""
@@ -564,6 +577,11 @@ def main():
         help="Group to use for Arraylake (default: '').",
     )
     parser.add_argument(
+        "--as-xarray-dataset",
+        action="store_true",
+        help="Load the root group as an xr.Dataset instead of an xr.DataTree (Arraylake datasets only)",
+    )
+    parser.add_argument(
         "--cache",
         action="store_true",
         default=True,
@@ -629,7 +647,9 @@ def main():
         dataset_name = f"local://{dataset_name}"
 
     # Load dataset and setup server
-    ds = get_dataset_for_name(dataset_name, args.branch, args.group, args.cache)
+    ds = get_dataset_for_name(
+        dataset_name, args.branch, args.group, args.cache, args.as_xarray_dataset
+    )
 
     xr.set_options(keep_attrs=True)
     if args.where == "local":
