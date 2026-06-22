@@ -1345,6 +1345,18 @@ class GridSystem(ABC):
     def from_dataset(cls, ds: xr.Dataset, crs: CRS, Xname: str, Yname: str) -> Self:
         pass
 
+    def is_structural_variable(self, var: xr.DataArray) -> bool:
+        """True for variables that are not renderable data layers: this grid's
+        own coordinate variables (X/Y/Z), and UGRID structural variables — the
+        mesh-topology dummy and connectivity arrays like ``nv``. These carry a
+        spatial dim, so they'd otherwise be advertised as layers.
+        """
+        name = str(var.name)
+        if name in {self.X, self.Y} or (self.Z is not None and name == self.Z):
+            return True
+        cf_role = var.attrs.get("cf_role", "")
+        return cf_role == "mesh_topology" or cf_role.endswith("_connectivity")
+
     @property
     @abstractmethod
     def dims(self) -> set[str]:
@@ -2610,11 +2622,12 @@ class Triangular(GridSystem):
         node_coords = cell_index.tree.vertices[selected]
         conn = indexer.connectivity
         face_vals = np.asarray(subset.values, dtype=np.float64)
-        node_vals = numbagg.group_nanmean(
-            np.repeat(face_vals, 3),
-            conn.ravel(),
-            num_labels=len(selected),
-        )
+        with NUMBA_THREADING_LOCK:
+            node_vals = numbagg.group_nanmean(
+                np.repeat(face_vals, 3),
+                conn.ravel(),
+                num_labels=len(selected),
+            )
         return xr.DataArray(
             node_vals,
             dims=[self.dim],
@@ -2640,6 +2653,24 @@ class Triangular(GridSystem):
             return ds.isel({self.face_dim: indexer.face_indices})
         else:
             return ds.isel({self.dim: indexer.vertices})
+
+    def renderable_cell_count(
+        self, da: xr.DataArray, indexer: UgridIndexer, *, style: str
+    ) -> int:
+        """Number of cells rendered for ``da`` under ``indexer``, for the
+        renderable-size budget.
+
+        Polygons draw one triangle per face, so are sized by face count
+        regardless of variable location. Raster loads the variable's own
+        values: one per face for face-located variables (mirroring
+        ``isel_indexer``), else one per node.
+        """
+        n_faces = indexer.connectivity.shape[0]
+        if style == "polygons" or (
+            self.face_dim is not None and self.face_dim in da.dims
+        ):
+            return n_faces
+        return indexer.vertices.size
 
     def sel(self, *, bbox: BBox) -> Slicers:
         index = next(iter(self.indexes))
@@ -3918,5 +3949,9 @@ def detect_grids(
         except (GridDetectionError, VariableNotFoundError):
             continue
         for name in names:
+            # Skip the grid's coordinate vars and UGRID structural vars (e.g.
+            # ``nv``); they share a spatial signature but aren't data layers.
+            if grid.is_structural_variable(ds[name]):
+                continue
             grids[name] = grid
     return grids

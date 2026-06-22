@@ -1079,6 +1079,14 @@ async def subset_to_bbox(
                 result[var_name] = NullRenderContext()
                 continue
 
+            # tile within the grid bbox but intersecting no triangles
+            # (e.g. a hole in the mesh or outside the hull)
+            if isinstance(grid, Triangular) and all(
+                isinstance(s, UgridIndexer) and s.size == 0 for s in slicers[grid.dim]
+            ):
+                result[var_name] = NullRenderContext()
+                continue
+
             da = grid.assign_index(array.da)
             coarsen_factors, new_slicers = estimate_coarsen_factors_and_slicers(
                 da,

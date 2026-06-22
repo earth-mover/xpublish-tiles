@@ -13,6 +13,7 @@ from xpublish_tiles.lib import VariableNotFoundError
 from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
     ERA5,
+    FVCOM,
     GEOSTATIONARY,
     GEOZARR_MULTISCALE,
     GLOBAL_HEALPIX_L3,
@@ -808,6 +809,7 @@ def _normalize_for_snapshot(obj):
         pytest.param(GEOSTATIONARY, id="geostationary"),
         pytest.param(GEOZARR_MULTISCALE, id="geozarr_multiscale"),
         pytest.param(NATIVE_AT_ROOT_MULTISCALE, id="native_at_root_multiscale"),
+        pytest.param(FVCOM, id="fvcom"),
     ],
 )
 def test_tiles_endpoint_snapshot(fixture, snapshot):
@@ -823,6 +825,51 @@ def test_tiles_endpoint_snapshot(fixture, snapshot):
     assert _normalize_for_snapshot(response.json()) == snapshot.use_extension(
         JSONSnapshotExtension
     )
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        pytest.param(ERA5, id="era5"),
+        pytest.param(HRRR, id="hrrr"),
+        pytest.param(IFS, id="ifs"),
+        pytest.param(GLOBAL_HEALPIX_L3, id="global_healpix_l3"),
+        pytest.param(REGIONAL_HEALPIX_NA, id="regional_healpix_na"),
+        pytest.param(CUBED_SPHERE, id="cubed_sphere"),
+        pytest.param(GEOSTATIONARY, id="geostationary"),
+        pytest.param(GEOZARR_MULTISCALE, id="geozarr_multiscale"),
+        pytest.param(NATIVE_AT_ROOT_MULTISCALE, id="native_at_root_multiscale"),
+        pytest.param(FVCOM, id="fvcom"),
+    ],
+)
+def test_tilejson_endpoint_snapshot(fixture, snapshot):
+    """Snapshot the tilejson.json endpoint for every advertised layer.
+
+    Exercises ``get_min_zoom`` per variable. For UGRID (FVCOM) this covers the
+    face-located variable ``u`` (no ``node`` dim), which the renderable-size
+    estimate must handle.
+    """
+    ds = fixture.create()
+    rest = xpublish.Rest({fixture.name: ds}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+    # Iterate every advertised layer (handles Dataset and DataTree fixtures,
+    # and covers both node- and face-located UGRID variables).
+    listing = client.get(f"/datasets/{fixture.name}/tiles/")
+    layers = [layer["id"] for layer in listing.json()["tilesets"][0]["layers"]]
+    result = {}
+    for var in layers:
+        response = client.get(
+            f"/datasets/{fixture.name}/tiles/WebMercatorQuad/tilejson.json"
+            f"?variables={var}&width=256&height=256"
+        )
+        assert response.status_code == 200, (var, response.json())
+        body = response.json()
+        # WGS84 bounds come from pyproj reprojection and diverge across PROJ
+        # versions (macOS vs Linux); elide them and keep the rest, which is
+        # stable.
+        body["bounds"] = "<elided>"
+        result[var] = _normalize_for_snapshot(body)
+    assert result == snapshot.use_extension(JSONSnapshotExtension)
 
 
 def test_tiles_metadata_no_dask_compute():

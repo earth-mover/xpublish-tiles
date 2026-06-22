@@ -192,7 +192,12 @@ async def get_tile_matrix_limits(
     if zoom_levels is None:
         xpublish_id = dataset.attrs.get("_xpublish_id")
         min_zoom = await async_run(
-            get_min_zoom, grid, tms, dataset[representative_var], xpublish_id
+            get_min_zoom,
+            grid=grid,
+            tms=tms,
+            da=dataset[representative_var],
+            style="raster",
+            xpublish_id=xpublish_id,
         )
         zoom_levels = range(min_zoom, tms.maxzoom)
 

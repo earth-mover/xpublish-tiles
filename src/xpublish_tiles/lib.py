@@ -984,6 +984,8 @@ def _iter_subset_shapes(
     slicers: "Slicers",
     da: xr.DataArray,
     grid: "GridSystem",
+    *,
+    style: str = "raster",
 ):
     """Iterate over individual subset shapes from slicers.
 
@@ -991,10 +993,17 @@ def _iter_subset_shapes(
     For GridSystem2D, yields (x_size, y_size) for each X slice.
     For Triangular, yields (size,) for the single slice.
     """
-    from xpublish_tiles.grids import FacetedGridSystem, FacetedIndexer, Triangular
+    from xpublish_tiles.grids import (
+        FacetedGridSystem,
+        FacetedIndexer,
+        Triangular,
+        UgridIndexer,
+    )
 
     if isinstance(grid, Triangular):
-        yield (_get_indexer_size(next(iter(slicers[grid.dim])), da.sizes[grid.dim]),)
+        indexer = next(iter(slicers[grid.dim]))
+        assert isinstance(indexer, UgridIndexer)
+        yield (grid.renderable_cell_count(da, indexer, style=style),)
         return
 
     if isinstance(grid, FacetedGridSystem):
@@ -1054,7 +1063,9 @@ def check_data_is_renderable_size(
     has_alternate = alternate.crs != grid.crs
     factor = 3 if has_alternate else 1
 
-    total_size = sum(math.prod(shape) for shape in _iter_subset_shapes(slicers, da, grid))
+    total_size = sum(
+        math.prod(shape) for shape in _iter_subset_shapes(slicers, da, grid, style=style)
+    )
     if style == "polygons":
         total_size *= grid.npoints_per_geometry
     return total_size * da.dtype.itemsize <= factor * config.get("max_renderable_size")

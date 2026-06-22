@@ -482,7 +482,14 @@ class TilesPlugin(Plugin):
 
             # Calculate min/max zoom based on data characteristics
             xpublish_id = dataset.attrs.get("_xpublish_id")
-            minzoom = await async_run(get_min_zoom, grid, tms, da, style, xpublish_id)
+            minzoom = await async_run(
+                get_min_zoom,
+                grid=grid,
+                tms=tms,
+                da=da,
+                style=style,
+                xpublish_id=xpublish_id,
+            )
             maxzoom = tms.maxzoom
 
             # Compose TileJSON
