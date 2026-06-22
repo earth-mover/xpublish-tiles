@@ -579,7 +579,7 @@ def test_unit_minmax_zoom_level(dataset: Dataset, minzoom, maxzoom):
     ds = dataset.create()
     grid = guess_grid_system(ds, "foo")
     tms = morecantile.tms.get("WebMercatorQuad")
-    assert get_min_zoom(grid, tms, ds["foo"], "raster") == minzoom
+    assert get_min_zoom(grid=grid, tms=tms, da=ds["foo"], style="raster") == minzoom
     if minzoom == 0:
         assert ds.foo.size < config.get("max_renderable_size")
     assert get_max_zoom(grid, tms) == maxzoom
@@ -1106,7 +1106,7 @@ class TestGridZoomMethods:
         ds = xr.Dataset({"temp": (["lat", "lon"], data)}, coords={"lat": y, "lon": x})
         grid = Rectilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
         tms = morecantile.tms.get("WebMercatorQuad")
-        assert get_min_zoom(grid, tms, ds["temp"], "raster") == expected
+        assert get_min_zoom(grid=grid, tms=tms, da=ds["temp"], style="raster") == expected
 
     def test_get_max_zoom_basic(self):
         x = np.linspace(-180, 180, 360)
@@ -1127,7 +1127,7 @@ class TestGridZoomMethods:
         ds = xr.Dataset({"temp": (["lat", "lon"], data)}, coords={"lat": y, "lon": x})
         grid = Rectilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
         tms = morecantile.tms.get(tms_id)
-        min_zoom = get_min_zoom(grid, tms, ds["temp"], "raster")
+        min_zoom = get_min_zoom(grid=grid, tms=tms, da=ds["temp"], style="raster")
         max_zoom = get_max_zoom(grid, tms)
         assert min_zoom <= max_zoom, (
             f"min_zoom ({min_zoom}) > max_zoom ({max_zoom}) for TMS {tms_id}"
@@ -1188,7 +1188,7 @@ class TestGridZoomMethods:
         with config.set(
             {"max_renderable_size": da.dtype.itemsize * (pixels_per_tile - 1) ** 2}
         ):
-            actual = get_min_zoom(grid, tms, da, "raster")
+            actual = get_min_zoom(grid=grid, tms=tms, da=da, style="raster")
         expected = target_zoom + 1
         assert expected == actual, (
             f"Expected {expected}, got {actual} for {tms_id} {grid_type} at zoom {target_zoom}"
@@ -1280,8 +1280,12 @@ def test_min_zoom_cache_hit():
         with patch(
             "xpublish_tiles.tiles_lib._compute_min_zoom", wraps=_compute_min_zoom
         ) as mock_compute:
-            result1 = get_min_zoom(grid, tms, da, "raster", xpublish_id)
-            result2 = get_min_zoom(grid, tms, da, "raster", xpublish_id)
+            result1 = get_min_zoom(
+                grid=grid, tms=tms, da=da, style="raster", xpublish_id=xpublish_id
+            )
+            result2 = get_min_zoom(
+                grid=grid, tms=tms, da=da, style="raster", xpublish_id=xpublish_id
+            )
 
         assert result1 == result2
         assert mock_compute.call_count == 1
@@ -1331,7 +1335,7 @@ async def test_curvilinear_memory_limit_and_minzoom():
 
     with config.set({"max_renderable_size": memory_limit}):
         # Calculate minzoom - should be high enough to avoid memory issues
-        minzoom = get_min_zoom(grid, tms, ds["foo"], "raster")
+        minzoom = get_min_zoom(grid=grid, tms=tms, da=ds["foo"], style="raster")
         assert minzoom == 2
 
         # Get slicers for a tile at minzoom to verify memory calculation

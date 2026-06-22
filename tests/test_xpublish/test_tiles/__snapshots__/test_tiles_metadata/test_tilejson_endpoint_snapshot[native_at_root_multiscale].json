@@ -1,0 +1,14 @@
+{
+  "data": {
+    "bounds": "<elided>",
+    "legend": "http://testserver/datasets/native_at_root_multiscale/tiles/legend?variables=data&style=raster/default",
+    "maxzoom": 24,
+    "minzoom": 0,
+    "name": "Dataset",
+    "scheme": "xyz",
+    "tilejson": "3.0.0",
+    "tiles": [
+      "http://testserver/datasets/native_at_root_multiscale/tiles/WebMercatorQuad/{z}/{y}/{x}?variables=data&style=raster/default&width=256&height=256&f=png&render_errors=false"
+    ]
+  }
+}

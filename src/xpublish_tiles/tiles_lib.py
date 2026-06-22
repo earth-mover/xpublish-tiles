@@ -173,6 +173,7 @@ def _compute_min_zoom(
 
 
 def get_min_zoom(
+    *,
     grid: GridSystem,
     tms: morecantile.TileMatrixSet,
     da: xr.DataArray,
