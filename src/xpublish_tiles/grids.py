@@ -29,6 +29,7 @@ from xpublish_tiles.lib import (
     _coarsen_indices_impl,
     _prevent_slice_overlap,
     aeqd_to_4326,
+    cf_get,
     crs_repr,
     fill_rings_from_corners,
     is_degree_geographic,
@@ -3909,7 +3910,7 @@ def _detect_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
     # actually apply to ``name`` (e.g. an auxiliary var like ``contacts``
     # on a cubed-sphere dataset shares the ``face_dim`` but lacks the
     # 2D lat/lon dims). Reject these so per-variable callers can skip them.
-    grid.Z = _guess_z_dimension(ds.cf[name])
+    grid.Z = _guess_z_dimension(cf_get(ds, name))
     _validate_grid_dims(grid, ds[name])
     return grid
 

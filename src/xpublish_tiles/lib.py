@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import io
+import itertools
 import math
 import operator
 import warnings
@@ -1106,3 +1107,21 @@ def round_bbox(bbox: BBox) -> BBox:
 
 def sum_tuples(*tuples):
     return tuple(sum(values) for values in zip(*tuples, strict=False))
+
+
+def cf_get(ds: xr.Dataset, name: Hashable) -> xr.DataArray:
+    """Return ``ds[name]`` with its CF-associated coordinate variables attached.
+
+    Mirrors the coordinate-promotion that scalar ``ds.cf[name]`` performs (e.g.
+    pulling in an auxiliary vertical coordinate referenced via the
+    ``coordinates`` attribute) but keys off the exact variable name, so it never
+    trips over multiple variables sharing a ``standard_name``.
+    """
+    da = ds[name]
+    assoc = ds.cf.get_associated_variable_names(name, error=False)
+    extra = {
+        c: ds[c]
+        for c in itertools.chain.from_iterable(assoc.values())
+        if c in ds.variables and c not in da.coords and set(ds[c].dims) <= set(da.dims)
+    }
+    return da.assign_coords(extra) if extra else da

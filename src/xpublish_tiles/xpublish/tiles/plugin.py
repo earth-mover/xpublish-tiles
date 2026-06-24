@@ -13,7 +13,10 @@ from fastapi.responses import Response
 from xpublish import Dependencies, Plugin, hookimpl
 
 from xarray import DataTree
-from xpublish_tiles.grids import detect_grids, guess_grid_system
+from xpublish_tiles.grids import (
+    detect_grids,
+    guess_grid_system,
+)
 from xpublish_tiles.lib import (
     AsyncLoadTimeoutError,
     GridDetectionError,
@@ -22,6 +25,7 @@ from xpublish_tiles.lib import (
     TileTooBigError,
     VariableNotFoundError,
     async_run,
+    cf_get,
 )
 from xpublish_tiles.logger import (
     get_context_logger,
@@ -474,7 +478,7 @@ class TilesPlugin(Plugin):
                 minzoom_dataset = dataset
 
             grid = await async_run(guess_grid_system, minzoom_dataset, var_name)
-            da = minzoom_dataset.cf[var_name]
+            da = cf_get(minzoom_dataset, var_name)
 
             bound_logger = get_context_logger()
             bound_logger = bound_logger.bind(tms=tms.id)

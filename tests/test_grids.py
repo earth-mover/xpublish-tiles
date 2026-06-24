@@ -50,6 +50,7 @@ from xpublish_tiles.lib import (
     _iter_subset_shapes,
     _prevent_slice_overlap,
     apply_default_pad,
+    cf_get,
     check_data_is_renderable_size,
     normalize_slicers,
     transformer_from_crs,
@@ -485,6 +486,91 @@ def test_z_coord_with_mismatched_dim_name():
     extent_names = {e.name for e in extents}
     assert "deptht" in extent_names
     assert "k" not in extent_names
+
+
+def test_grid_detection_duplicate_standard_name():
+    """Detection must not choke when two variables share a ``standard_name``.
+
+    WeatherBench2 has ``geopotential`` (level, lat, lon) and
+    ``geopotential_at_surface`` (lat, lon) both carrying
+    ``standard_name='geopotential'``. A scalar ``ds.cf['geopotential']``
+    matches both and raises, so Z detection must key off the real variable
+    name instead.
+    """
+    nz, ny, nx = 5, 3, 4
+    ds = xr.Dataset(
+        {
+            "geopotential": (("level", "lat", "lon"), np.zeros((nz, ny, nx))),
+            "geopotential_at_surface": (("lat", "lon"), np.zeros((ny, nx))),
+        },
+        coords={
+            "level": (
+                ("level",),
+                np.arange(nz, dtype="float64") * 100.0,
+                {"standard_name": "air_pressure", "axis": "Z", "positive": "down"},
+            ),
+            "lon": (
+                ("lon",),
+                np.linspace(-10, 10, nx),
+                {"standard_name": "longitude", "units": "degrees_east"},
+            ),
+            "lat": (
+                ("lat",),
+                np.linspace(-5, 5, ny),
+                {"standard_name": "latitude", "units": "degrees_north"},
+            ),
+        },
+    )
+    ds["geopotential"].attrs["standard_name"] = "geopotential"
+    ds["geopotential_at_surface"].attrs["standard_name"] = "geopotential"
+
+    grid = guess_grid_system(ds, "geopotential")
+    assert grid.Z == "level"
+    assert grid.X == "lon"
+    assert grid.Y == "lat"
+
+    surface_grid = guess_grid_system(ds, "geopotential_at_surface")
+    assert surface_grid.Z is None
+
+
+def test_cf_get_attaches_aux_vertical_coordinate():
+    """cf_get must promote an auxiliary Z coordinate referenced only via the
+    variable's ``coordinates`` attribute, mirroring scalar ``ds.cf[name]``."""
+    nz, ny, nx = 4, 3, 5
+    ds = xr.Dataset(
+        {
+            "foo": (
+                ("k", "lat", "lon"),
+                np.zeros((nz, ny, nx)),
+                {"coordinates": "depth_aux"},
+            ),
+            "depth_aux": (
+                ("k",),
+                np.arange(nz, dtype="float64"),
+                {"standard_name": "depth", "positive": "down", "units": "m"},
+            ),
+        },
+        coords={
+            "lon": (
+                ("lon",),
+                np.linspace(-10, 10, nx),
+                {"standard_name": "longitude", "units": "degrees_east"},
+            ),
+            "lat": (
+                ("lat",),
+                np.linspace(-5, 5, ny),
+                {"standard_name": "latitude", "units": "degrees_north"},
+            ),
+        },
+    )
+    assert "depth_aux" not in ds["foo"].coords
+
+    da = cf_get(ds, "foo")
+    assert "depth_aux" in da.coords
+    npt.assert_allclose(da["depth_aux"].values, np.arange(nz, dtype="float64"))
+
+    grid = guess_grid_system(ds, "foo")
+    assert grid.Z == "depth_aux"
 
 
 def test_polar_grid_from_dataset_missing_location():
