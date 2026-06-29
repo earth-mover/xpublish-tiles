@@ -29,8 +29,10 @@ The goal of this project is to transform xarray datasets to raster, vector and o
 | Rectilinear  | `lat[lat], lon[lon]`               | Two 1D orthogonal coordinates.                                                                                        | All              |
 | Curvilinear  | `lat[nlat, nlon], lon[nlat, nlon]` | Two 2D coordinates.                                                                                                   | All              |
 | Unstructured | `lat[point], lon[point]`           | UGRID conventions OR Two 1D coordinates interpreted as vertices, triangulated using `scipy.spatial.Delaunay`.         | All              |
-| Cubed sphere | `lat[face, y, x], lon[face, y, x]` | Faceted curvilinear grid, GMAO/MAPL `corner_lons`/`corner_lats` convention.                                           | All              |
+| Cubed sphere | `lat[face, y, x], lon[face, y, x]` | Faceted curvilinear grid, GMAO/MAPL `corner_lons`/`corner_lats` convention.                                           | `polygons` only  |
 | HEALPix      | cell-index coordinate              | Nested indexing scheme, following [CF Conventions PR #605](https://github.com/cf-convention/cf-conventions/pull/605). | `polygons` only  |
+| Polar        | `azimuth[azimuth], range[range]`   | Radar sweeps ([WMO FM-301](https://community.wmo.int/activity-areas/wis/wmo-cf-extensions)), detected via `ray_azimuth_angle` / `projection_range_coordinate` standard names. | `raster` only    |
+| Geostationary | `x[x], y[y]` (scan angles, radians) | Fixed-grid scan angles with a CF `geostationary` grid mapping; `perspective_point_height` is required to convert scan angles to metres. | All              |
 
 Here `lat[lat]` means a coordinate variable named `lat` with one dimension named `lat`.
 
