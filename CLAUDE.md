@@ -34,9 +34,12 @@ project-standard way to lock in behavior for a grid type. When adding one:
 3. Add render snapshot coverage: a tile list in `testing/tiles.py` and a
    parametrized `test_*_data` in `tests/test_pipeline.py` using
    `assert_render_matches_snapshot`.
-4. Add it to the `test_tiles_endpoint_snapshot` parametrization in
-   `tests/test_xpublish/test_tiles/test_tiles_metadata.py` to cover the `/tiles/`
-   metadata endpoint (bounds, styles, extents).
+4. Add it to BOTH parametrizations in
+   `tests/test_xpublish/test_tiles/test_tiles_metadata.py`:
+   `test_tiles_endpoint_snapshot` (the `/tiles/` metadata endpoint — bounds,
+   styles, extents) and `test_tilejson_endpoint_snapshot` (the
+   `{tms}/tilejson.json` endpoint — exercises `get_min_zoom` for the first
+   advertised variable).
 5. Generate the new snapshots once with `pytest <path> --snapshot-update`, then
    eyeball the resulting PNGs/JSON before committing.
 

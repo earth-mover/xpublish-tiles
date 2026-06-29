@@ -11,6 +11,7 @@ from xpublish_tiles.grids import (
     CubedSphere,
     GridSystem,
     Healpix,
+    Polar,
     detect_grids,
 )
 from xpublish_tiles.logger import logger
@@ -43,9 +44,6 @@ def allowed_styles(
 ) -> list[str]:
     """Return the style IDs supported by ``dataset``'s grid.
 
-    Healpix and Faceted grids (e.g. cubed sphere) only support ``polygons``;
-    every other grid supports both ``raster`` and ``polygons``.
-
     ``var_grids`` may be a precomputed ``detect_grids`` mapping; passing it
     avoids re-running grid detection on the hot path.
     """
@@ -60,8 +58,11 @@ def allowed_styles(
         var_grids = detect_grids(dataset)
 
     result = ["raster", "polygons"]
-    if any(isinstance(grid, (Healpix, CubedSphere)) for grid in var_grids.values()):
+    grids = var_grids.values()
+    if any(isinstance(grid, (Healpix, CubedSphere)) for grid in grids):
         result = ["polygons"]
+    elif any(isinstance(grid, Polar) for grid in grids):
+        result = ["raster"]
 
     if xpublish_id is not None:
         _ALLOWED_STYLES_CACHE[xpublish_id] = result
