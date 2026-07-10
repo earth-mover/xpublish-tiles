@@ -1,8 +1,12 @@
 import pytest
 from pyproj import CRS
 
-from xpublish_tiles.lib import create_listed_colormap_from_dict
-from xpublish_tiles.types import ImageFormat
+from xpublish_tiles.lib import (
+    ColormapError,
+    create_listed_colormap_from_dict,
+    validate_colormap_for_datatype,
+)
+from xpublish_tiles.types import ContinuousData, DiscreteData, ImageFormat
 from xpublish_tiles.validators import (
     validate_colormap,
     validate_colorscalerange,
@@ -265,24 +269,12 @@ class TestValidateColormap:
         ):
             validate_colormap({"-1": "#ffffff"})
 
-    def test_invalid_key_range(self):
-        with pytest.raises(
-            ValueError,
-            match="colormap keys must include 0 and 255 as minimum and maximum",
-        ):
-            validate_colormap({"0": "#000000", "1": "#123123"})
-
-        with pytest.raises(
-            ValueError,
-            match="colormap keys must include 0 and 255 as minimum and maximum",
-        ):
-            validate_colormap({"1": "#000000", "255": "#123123"})
-
-        with pytest.raises(
-            ValueError,
-            match="colormap keys must include 0 and 255 as minimum and maximum",
-        ):
-            validate_colormap({"1": "#000000", "254": "#123123"})
+    def test_partial_key_range_allowed(self):
+        # Categorical colormaps are keyed by flag_values, which need not span
+        # 0-255; the span requirement for continuous data is enforced later,
+        # once the datatype is known.
+        result = validate_colormap({"0": "#000000", "124": "#123123"})
+        assert result == {"0": "#000000", "124": "#123123"}
 
     def test_invalid_key_non_numeric(self):
         with pytest.raises(ValueError, match="colormap keys must be numeric, got 'abc'"):
@@ -316,6 +308,32 @@ class TestValidateColormap:
     def test_non_dict_json_input(self):
         with pytest.raises(ValueError, match="colormap must be a dictionary"):
             validate_colormap(["not", "a", "dict"])  # type: ignore  # this doesn't validate with the type checker
+
+
+class TestValidateColormapForDatatype:
+    def test_none_colormap(self):
+        validate_colormap_for_datatype(None, ContinuousData(None, None))
+
+    def test_continuous_requires_full_span(self):
+        validate_colormap_for_datatype(
+            {"0": "#000000", "255": "#ffffff"}, ContinuousData(None, None)
+        )
+        with pytest.raises(ColormapError, match="must include both 0 and 255 as keys"):
+            validate_colormap_for_datatype(
+                {"0": "#000000", "254": "#ffffff"}, ContinuousData(None, None)
+            )
+        with pytest.raises(ColormapError, match="must include both 0 and 255 as keys"):
+            validate_colormap_for_datatype(
+                {"1": "#000000", "255": "#ffffff"}, ContinuousData(None, None)
+            )
+
+    def test_categorical_keys_match_flag_values(self):
+        datatype = DiscreteData(values=[0, 5, 254], meanings=["a", "b", "c"], colors=None)
+        validate_colormap_for_datatype(
+            {"0": "#000000", "5": "#123456", "254": "#ffffff"}, datatype
+        )
+        with pytest.raises(ColormapError, match="missing entries for flag_values"):
+            validate_colormap_for_datatype({"0": "#000000", "5": "#123456"}, datatype)
 
 
 class TestCategoricalColormap:
