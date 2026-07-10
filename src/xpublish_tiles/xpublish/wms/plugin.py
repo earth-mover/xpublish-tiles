@@ -10,7 +10,11 @@ from fastapi.responses import Response
 from xpublish import Dependencies, Plugin, hookimpl
 
 import xarray as xr
-from xpublish_tiles.lib import AsyncLoadTimeoutError, MissingParameterError
+from xpublish_tiles.lib import (
+    AsyncLoadTimeoutError,
+    ColormapError,
+    MissingParameterError,
+)
 from xpublish_tiles.pipeline import _infer_datatype, pipeline
 from xpublish_tiles.render import RenderRegistry
 from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
@@ -188,6 +192,8 @@ async def handle_get_map(
         buffer = await pipeline(dataset, render_params)
     except AsyncLoadTimeoutError as e:
         raise HTTPException(status_code=504, detail=str(e)) from None
+    except ColormapError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
 
     return Response(buffer.getbuffer(), media_type="image/png")
 
@@ -225,7 +231,7 @@ async def handle_get_legend_graphic(
             label=label if query.show_label else None,
             format=query.format,
         )
-    except MissingParameterError as e:
+    except (MissingParameterError, ColormapError) as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 
     media_type = "image/png" if query.format == ImageFormat.PNG else "image/jpeg"

@@ -35,6 +35,7 @@ if TYPE_CHECKING:
         Slicer,
         Slicers,
     )
+    from xpublish_tiles.types import DataType
 from xpublish_tiles.logger import logger
 
 WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)  # from proj
@@ -207,6 +208,12 @@ class IndexingError(Exception):
 
 class MissingParameterError(Exception):
     """Raised when an expected parameter (e.g. colorscalerange) is not passed."""
+
+    pass
+
+
+class ColormapError(ValueError):
+    """Raised when a custom colormap is invalid for the data being rendered."""
 
     pass
 
@@ -854,8 +861,30 @@ def apply_range_colors(
     return cmap
 
 
+def validate_colormap_for_datatype(
+    colormap_dict: dict[str, str] | None, datatype: "DataType"
+) -> None:
+    """Validate a custom colormap against the data type it will render.
+
+    For discrete (categorical) data, keys must match the flag_values exactly.
+    For continuous data, keys must include both 0 and 255.
+    """
+    # avoid circular import: types -> grids -> lib
+    from xpublish_tiles.types import DiscreteData
+
+    if colormap_dict is None:
+        return
+    if isinstance(datatype, DiscreteData):
+        create_listed_colormap_from_dict(colormap_dict, datatype.values)
+    else:
+        create_colormap_from_dict(colormap_dict)
+
+
 def create_colormap_from_dict(colormap_dict: dict[str, str]) -> mcolors.Colormap:
     """Create a matplotlib colormap from a dictionary of index->color mappings."""
+    if not colormap_dict:
+        raise ColormapError("colormap must not be empty.")
+
     # Sort by numeric keys to ensure proper order
     sorted_items = sorted(colormap_dict.items(), key=lambda x: int(x[0]))
 
@@ -868,9 +897,11 @@ def create_colormap_from_dict(colormap_dict: dict[str, str]) -> mcolors.Colormap
         positions.append(position)
         colors.append(color)
 
-    if positions[0] != 0 and positions[-1] != 1:
+    if positions[0] != 0 or positions[-1] != 1:
         # this is a matplotlib requirement
-        raise ValueError("Provided colormap keys must contain 0 and 255.")
+        raise ColormapError(
+            "Custom colormaps for continuous data must include both 0 and 255 as keys."
+        )
 
     return mcolors.LinearSegmentedColormap.from_list(
         "custom", list(zip(positions, colors, strict=True)), N=256
@@ -893,7 +924,7 @@ def create_listed_colormap_from_dict(
     # Check for colormap keys that don't correspond to any flag_value
     invalid_keys = colormap_keys - flag_values_str
     if invalid_keys:
-        raise ValueError(
+        raise ColormapError(
             f"colormap contains keys not in flag_values: {sorted(invalid_keys)}. "
             f"Valid flag_values: {sorted(flag_values_str)}"
         )
@@ -901,7 +932,7 @@ def create_listed_colormap_from_dict(
     # Check for flag_values that don't have colormap entries
     missing_keys = flag_values_str - colormap_keys
     if missing_keys:
-        raise ValueError(
+        raise ColormapError(
             f"colormap is missing entries for flag_values: {sorted(missing_keys)}. "
             f"All flag_values must have corresponding colors."
         )

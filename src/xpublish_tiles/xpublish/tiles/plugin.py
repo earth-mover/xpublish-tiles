@@ -19,6 +19,7 @@ from xpublish_tiles.grids import (
 )
 from xpublish_tiles.lib import (
     AsyncLoadTimeoutError,
+    ColormapError,
     GridDetectionError,
     IndexingError,
     MissingParameterError,
@@ -264,7 +265,7 @@ class TilesPlugin(Plugin):
                         label=label,
                         units=units,
                     )
-                except MissingParameterError as e:
+                except (MissingParameterError, ColormapError) as e:
                     raise HTTPException(status_code=422, detail=str(e)) from e
                 return Response(
                     json.dumps(data),
@@ -299,7 +300,7 @@ class TilesPlugin(Plugin):
                     text_color=query.text_color,
                     format=ImageFormat(query.f.value),
                 )
-            except MissingParameterError as e:
+            except (MissingParameterError, ColormapError) as e:
                 raise HTTPException(status_code=422, detail=str(e)) from e
 
             media_type = "image/png" if query.f == LegendFormat.PNG else "image/jpeg"
@@ -613,6 +614,11 @@ class TilesPlugin(Plugin):
                 bound_logger.error("MissingParameterError", exc_info=e)
                 status_code = 422
                 detail = f"Missing parameter: {e!s}."
+            except ColormapError as e:
+                bound_logger = get_context_logger()
+                bound_logger.error("ColormapError", exc_info=e)
+                status_code = 422
+                detail = f"Invalid colormap: {e!s}"
             except AsyncLoadTimeoutError as e:
                 bound_logger = get_context_logger()
                 bound_logger.error("AsyncLoadTimeoutError", exc_info=e)

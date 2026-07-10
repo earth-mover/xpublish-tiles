@@ -50,6 +50,7 @@ from xpublish_tiles.lib import (
     transform_coordinates,
     transformer_from_crs,
     unwrap,
+    validate_colormap_for_datatype,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.types import (
@@ -782,6 +783,8 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     validated = await async_run(
         partial(apply_query, ds, variables=query.variables, selectors=query.selectors)
     )
+    for array in validated.values():
+        validate_colormap_for_datatype(query.colormap, array.datatype)
     max_shape = max_render_shape(
         style=query.style, width=query.width, height=query.height
     )

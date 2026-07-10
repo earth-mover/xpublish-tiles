@@ -238,7 +238,6 @@ def validate_colormap(v: str | dict | None) -> dict[str, str] | None:
 
     # Convert all keys to strings and validate format
     validated_colormap = {}
-    minkey, maxkey = 256, -1
     for key, value in colormap.items():
         # Convert numeric keys to strings
         str_key = str(key)
@@ -250,8 +249,6 @@ def validate_colormap(v: str | dict | None) -> dict[str, str] | None:
                 raise ValueError(
                     f"colormap keys must be integers between 0 and 255, got {numeric_key}"
                 )
-            minkey = min(minkey, numeric_key)
-            maxkey = max(maxkey, numeric_key)
         except ValueError as e:
             if "invalid literal" in str(e):
                 raise ValueError(f"colormap keys must be numeric, got '{key}'") from e
@@ -271,11 +268,5 @@ def validate_colormap(v: str | dict | None) -> dict[str, str] | None:
             )
 
         validated_colormap[str_key] = value
-
-    if minkey != 0 or maxkey != 255:
-        raise ValueError(
-            "colormap keys must include 0 and 255 as minimum and maximum."
-            f"Detected minimum={minkey!r} and maximum={maxkey!r}"
-        )
 
     return validated_colormap
