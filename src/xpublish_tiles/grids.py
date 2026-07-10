@@ -41,7 +41,12 @@ from xpublish_tiles.lib import (
 )
 from xpublish_tiles.logger import get_context_logger, log_duration, logger
 from xpublish_tiles.ugrid import MeshTopology, detect_mesh, load_connectivity
-from xpublish_tiles.utils import NUMBA_THREADING_LOCK, time_debug, xarray_object_key
+from xpublish_tiles.utils import (
+    NUMBA_THREADING_LOCK,
+    cf_ref_attr,
+    time_debug,
+    xarray_object_key,
+)
 
 if TYPE_CHECKING:
     from xdggs.healpix import HealpixIndex
@@ -419,7 +424,7 @@ def _sgrid_node_for_face(ds: xr.Dataset, face_coord_name: str) -> str | None:
         return None
     var = ds[topology_name]
     face_coords = str(var.attrs.get("face_coordinates", "")).split()
-    node_coords = str(var.attrs.get("node_coordinates", "")).split()
+    node_coords = str(cf_ref_attr(var, "node_coordinates") or "").split()
     if face_coord_name not in face_coords:
         return None
     if len(face_coords) != len(node_coords):

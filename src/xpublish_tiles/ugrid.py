@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 
 import xarray as xr
+from xpublish_tiles.utils import cf_ref_attr
 
 
 @dataclass
@@ -57,7 +58,7 @@ def detect_mesh(ds: xr.Dataset) -> MeshTopology | None:
     face_dim = str(conn.dims[face_axis])
     vertex_dim = str(conn.dims[vertex_axis])
 
-    node_coords_str = topo.attrs.get("node_coordinates")
+    node_coords_str = cf_ref_attr(topo, "node_coordinates")
     if not node_coords_str:
         return None
     nc = node_coords_str.split()
