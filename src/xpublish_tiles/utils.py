@@ -43,6 +43,19 @@ NUMBA_THREADING_LOCK = (
 )
 
 
+def cf_ref_attr(var: xr.DataArray, name: str) -> Any | None:
+    """Return a CF reference attribute like ``node_coordinates``.
+
+    xarray's ``decode_coords="all"`` relocates CF reference attributes from
+    ``.attrs`` to ``.encoding`` when it promotes the referenced variables to
+    coordinates, so check both.
+    """
+    value = var.attrs.get(name)
+    if value is None:
+        value = var.encoding.get(name)
+    return value
+
+
 def xarray_object_key(
     obj: xr.DataArray | xr.Dataset,
     *,

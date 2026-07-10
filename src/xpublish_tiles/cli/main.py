@@ -120,6 +120,7 @@ def get_dataset_for_name(
                 zarr_format=3,
                 consolidated=False,
                 chunks=None,
+                decode_coords="all",
             )
             # Add _xpublish_id for caching
             xpublish_id = f"local:{dataset_name}:{branch}"
@@ -162,6 +163,7 @@ def get_dataset_for_name(
                 zarr_format=3,
                 consolidated=False,
                 chunks=None,
+                decode_coords="all",
             )
             xpublish_id = f"icechunk+file:{repo_path}:{branch}"
             if group:
@@ -180,6 +182,7 @@ def get_dataset_for_name(
                 group=group or None,
                 consolidated=False,
                 chunks=None,
+                decode_coords="all",
             )
             xpublish_id = f"zarr+file:{zarr_path}"
             if group:
@@ -195,6 +198,7 @@ def get_dataset_for_name(
                 nc_path,
                 group=group or None,
                 chunks=None,
+                decode_coords="all",
             )
             xpublish_id = f"netcdf+file:{nc_path}"
             if group:
@@ -222,6 +226,7 @@ def get_dataset_for_name(
                     zarr_format=3,
                     consolidated=False,
                     chunks=None,
+                    decode_coords="all",
                 )
             else:
                 ds: xr.DataTree = xr.open_datatree(
@@ -230,6 +235,7 @@ def get_dataset_for_name(
                     zarr_format=3,
                     consolidated=False,
                     chunks=None,
+                    decode_coords="all",
                     engine="zarr",
                 )
             # Add _xpublish_id for caching - use name, branch, and group for arraylake

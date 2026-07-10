@@ -38,6 +38,7 @@ from xpublish_tiles.grids import (
     Triangular,
     UgridIndexer,
     _guess_grid_for_dataset,
+    _resolve_corner_name,
     find_cubed_sphere_face_dim,
     guess_coordinate_vars,
     guess_grid_metadata,
@@ -1537,6 +1538,29 @@ def test_detect_mesh_ugrid():
 
     ds = REDGAUSS_N320.create()
     assert detect_mesh(ds) is None
+
+
+def test_detect_mesh_decode_coords_all():
+    """xarray's ``decode_coords="all"`` relocates ``node_coordinates`` from
+    attrs to encoding when promoting the node coords; detection must look in
+    both places."""
+    ds = xr.decode_cf(FVCOM_MACHIAS_BAY.create(), decode_coords="all")
+    topo = ds["mesh_topology"]
+    assert "node_coordinates" not in topo.attrs
+    assert "node_coordinates" in topo.encoding
+    mesh = detect_mesh(ds)
+    assert mesh is not None
+    assert isinstance(guess_grid_system(ds, "foo"), Triangular)
+
+
+def test_sgrid_corner_resolution_decode_coords_all():
+    """Same ``node_coordinates`` relocation applies to SGRID ``grid_topology``
+    variables."""
+    ds = xr.decode_cf(CUBED_SPHERE.create(), decode_coords="all")
+    topo = ds["grid_topology"]
+    assert "node_coordinates" not in topo.attrs
+    assert "node_coordinates" in topo.encoding
+    assert _resolve_corner_name(ds, "lons") == "corner_lons"
 
 
 def test_load_connectivity():
