@@ -1,8 +1,10 @@
 import asyncio
+from typing import cast
 from unittest.mock import patch
 
 import matplotlib as mpl
 import numpy as np
+import pandas as pd
 import pyproj
 import pytest
 from hypothesis import given
@@ -16,9 +18,11 @@ from xpublish_tiles.lib import (
     apply_range_colors,
     coarsen_mean_pad,
     epsg4326to3857,
+    timedelta_to_iso8601,
     transform_chunk,
     transform_coordinates,
 )
+from xpublish_tiles.pipeline import _parse_timedelta
 
 
 @given(
@@ -376,3 +380,24 @@ def test_coarsen_mean_pad_dtypes(dtype):
     np.testing.assert_allclose(result.values, expected)
     assert result.dims == ("y", "x")
     assert result.dtype == np.float64
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        ("0ns", "PT0S"),
+        ("15D", "P15D"),
+        ("353h", "P14DT17H"),
+        ("100h", "P4DT4H"),
+        ("90min", "PT1H30M"),
+        ("1.5s", "PT1.5S"),
+        ("1ns", "PT0.000000001S"),
+        ("-6h", "-PT6H"),
+    ],
+)
+def test_timedelta_to_iso8601(value, expected):
+    delta = cast(pd.Timedelta, pd.Timedelta(value))
+    assert timedelta_to_iso8601(delta.to_timedelta64()) == expected
+    assert timedelta_to_iso8601(delta) == expected
+    # Whatever we advertise must round-trip through the selector parser.
+    assert pd.Timedelta(_parse_timedelta(expected)) == delta

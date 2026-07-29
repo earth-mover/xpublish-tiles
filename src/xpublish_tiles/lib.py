@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, cast
 import matplotlib.colors as mcolors
 import numba
 import numpy as np
+import pandas as pd
 import pyproj
 import toolz as tlz
 from PIL import Image
@@ -222,6 +223,37 @@ class AsyncLoadTimeoutError(Exception):
     """Raised when async data loading times out."""
 
     pass
+
+
+def timedelta_to_iso8601(value: np.timedelta64 | pd.Timedelta) -> str:
+    """Format a timedelta as an ISO 8601 duration (e.g. ``'P14DT17H'``).
+
+    Zero components are omitted; a zero duration is rendered as ``'PT0S'``.
+    Sub-second precision is carried on the seconds component.
+    """
+    # Round-trip through ``asm8``: ``np.timedelta64(pd.Timedelta(...), "ns")``
+    # goes via ``datetime.timedelta`` and silently truncates nanoseconds.
+    total_ns = int(pd.Timedelta(value).asm8.astype("timedelta64[ns]").astype("int64"))
+    sign = "-" if total_ns < 0 else ""
+    total_ns = abs(total_ns)
+
+    days, rem = divmod(total_ns, 86_400_000_000_000)
+    hours, rem = divmod(rem, 3_600_000_000_000)
+    minutes, rem = divmod(rem, 60_000_000_000)
+    seconds = rem / 1e9
+
+    date_part = f"{days}D" if days else ""
+    time_part = ""
+    if hours:
+        time_part += f"{hours}H"
+    if minutes:
+        time_part += f"{minutes}M"
+    if seconds:
+        time_part += f"{seconds:.9f}".rstrip("0").rstrip(".") + "S"
+
+    if not date_part and not time_part:
+        return "PT0S"
+    return f"{sign}P{date_part}" + (f"T{time_part}" if time_part else "")
 
 
 THREAD_POOL_NUM_THREADS = config.get("num_threads")

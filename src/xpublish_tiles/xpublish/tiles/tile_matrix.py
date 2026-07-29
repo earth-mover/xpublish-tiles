@@ -13,7 +13,7 @@ import pyproj.aoi
 
 import xarray as xr
 from xpublish_tiles.grids import guess_grid_system
-from xpublish_tiles.lib import async_run
+from xpublish_tiles.lib import async_run, timedelta_to_iso8601
 from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import OutputBBox, OutputCRS
 from xpublish_tiles.xpublish.tiles.types import (
@@ -289,9 +289,12 @@ async def extract_dimension_extents(
             extent = []
         elif np.issubdtype(values.dtype, np.timedelta64):
             dim_type = DimensionType.TEMPORAL
-            extent = [str(values[0]), str(values[-1])]
+            extent = [
+                timedelta_to_iso8601(values[0]),
+                timedelta_to_iso8601(values[-1]),
+            ]
             if len(values) <= max_actual_values:
-                actual_values = [str(value) for value in values]
+                actual_values = [timedelta_to_iso8601(value) for value in values]
             if len(values) > 1:
                 resolution = _calculate_temporal_resolution(coord)
         elif np.issubdtype(values.dtype, np.datetime64):
@@ -324,6 +327,10 @@ async def extract_dimension_extents(
 
         # Get units and description from attributes
         units = coord.attrs.get("units")
+        if np.issubdtype(values.dtype, np.timedelta64):
+            # Extents are ISO 8601 durations, which the coord's own units
+            # attribute (e.g. "nanoseconds") would contradict.
+            units = None
         description = coord.attrs.get("long_name") or coord.attrs.get("description")
 
         # Determine default value (first value)

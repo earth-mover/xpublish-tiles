@@ -12,10 +12,10 @@
           "description": "",
           "extents": {
             "step": {
-              "default": "172800 seconds",
+              "default": "P2D",
               "interval": [
-                "0 seconds",
-                "172800 seconds"
+                "PT0S",
+                "P2D"
               ],
               "resolution": "PT1H"
             },
@@ -1220,10 +1220,10 @@
           "description": "",
           "extents": {
             "step": {
-              "default": "172800 seconds",
+              "default": "P2D",
               "interval": [
-                "0 seconds",
-                "172800 seconds"
+                "PT0S",
+                "P2D"
               ],
               "resolution": "PT1H"
             },
@@ -2386,10 +2386,10 @@
           "description": "",
           "extents": {
             "step": {
-              "default": "172800 seconds",
+              "default": "P2D",
               "interval": [
-                "0 seconds",
-                "172800 seconds"
+                "PT0S",
+                "P2D"
               ],
               "resolution": "PT1H"
             },
@@ -3482,10 +3482,10 @@
           "description": "",
           "extents": {
             "step": {
-              "default": "172800 seconds",
+              "default": "P2D",
               "interval": [
-                "0 seconds",
-                "172800 seconds"
+                "PT0S",
+                "P2D"
               ],
               "resolution": "PT1H"
             },
@@ -4669,10 +4669,10 @@
           "description": "",
           "extents": {
             "step": {
-              "default": "172800 seconds",
+              "default": "P2D",
               "interval": [
-                "0 seconds",
-                "172800 seconds"
+                "PT0S",
+                "P2D"
               ],
               "resolution": "PT1H"
             },
@@ -5750,10 +5750,10 @@
           "description": "",
           "extents": {
             "step": {
-              "default": "172800 seconds",
+              "default": "P2D",
               "interval": [
-                "0 seconds",
-                "172800 seconds"
+                "PT0S",
+                "P2D"
               ],
               "resolution": "PT1H"
             },
@@ -6887,10 +6887,10 @@
           "description": "",
           "extents": {
             "step": {
-              "default": "172800 seconds",
+              "default": "P2D",
               "interval": [
-                "0 seconds",
-                "172800 seconds"
+                "PT0S",
+                "P2D"
               ],
               "resolution": "PT1H"
             },
@@ -8046,10 +8046,10 @@
           "description": "",
           "extents": {
             "step": {
-              "default": "172800 seconds",
+              "default": "P2D",
               "interval": [
-                "0 seconds",
-                "172800 seconds"
+                "PT0S",
+                "P2D"
               ],
               "resolution": "PT1H"
             },
@@ -9205,10 +9205,10 @@
           "description": "",
           "extents": {
             "step": {
-              "default": "172800 seconds",
+              "default": "P2D",
               "interval": [
-                "0 seconds",
-                "172800 seconds"
+                "PT0S",
+                "P2D"
               ],
               "resolution": "PT1H"
             },
@@ -10357,10 +10357,10 @@
           "description": "",
           "extents": {
             "step": {
-              "default": "172800 seconds",
+              "default": "P2D",
               "interval": [
-                "0 seconds",
-                "172800 seconds"
+                "PT0S",
+                "P2D"
               ],
               "resolution": "PT1H"
             },
@@ -11509,10 +11509,10 @@
           "description": "",
           "extents": {
             "step": {
-              "default": "172800 seconds",
+              "default": "P2D",
               "interval": [
-                "0 seconds",
-                "172800 seconds"
+                "PT0S",
+                "P2D"
               ],
               "resolution": "PT1H"
             },
@@ -12668,10 +12668,10 @@
           "description": "",
           "extents": {
             "step": {
-              "default": "172800 seconds",
+              "default": "P2D",
               "interval": [
-                "0 seconds",
-                "172800 seconds"
+                "PT0S",
+                "P2D"
               ],
               "resolution": "PT1H"
             },
@@ -13820,10 +13820,10 @@
           "description": "",
           "extents": {
             "step": {
-              "default": "172800 seconds",
+              "default": "P2D",
               "interval": [
-                "0 seconds",
-                "172800 seconds"
+                "PT0S",
+                "P2D"
               ],
               "resolution": "PT1H"
             },

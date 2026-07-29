@@ -1,4 +1,6 @@
 import asyncio
+import contextlib
+import datetime
 import io
 from collections.abc import Hashable, Iterable
 from dataclasses import dataclass
@@ -7,6 +9,7 @@ from typing import Any, cast
 
 import numpy as np
 import pandas as pd
+import pydantic
 import pyproj
 from pyproj.aoi import BBox
 
@@ -47,6 +50,7 @@ from xpublish_tiles.lib import (
     pad_slicers,
     round_bbox,
     sum_tuples,
+    timedelta_to_iso8601,
     transform_coordinates,
     transformer_from_crs,
     unwrap,
@@ -895,6 +899,121 @@ def parse_selector(value: str) -> tuple[str | None, str]:
     return method.xarray_method, actual_value
 
 
+_ISO_DURATION_ADAPTER = pydantic.TypeAdapter(datetime.timedelta)
+
+
+def _parse_timedelta(value: str) -> np.timedelta64:
+    """Parse ``value`` as a timedelta.
+
+    Accepts pandas-style strings (``'353 hours'``, ``'353h'``,
+    ``'1296000000000000 nanoseconds'``) and ISO 8601 durations (``'PT353H'``).
+    pandas' own ISO parser rejects components with more than two digits, so
+    ISO durations are handled separately.
+    """
+    parsed: Any = pd.NaT
+    try:
+        parsed = pd.Timedelta(value)
+    except ValueError:
+        with contextlib.suppress(pydantic.ValidationError):
+            parsed = pd.Timedelta(_ISO_DURATION_ADAPTER.validate_python(value))
+
+    if not isinstance(parsed, pd.Timedelta):
+        raise ValueError(
+            f"Could not interpret {value!r} as a duration. Expected either a "
+            f"pandas-style duration (e.g. '353 hours') or an ISO 8601 "
+            f"duration (e.g. 'PT353H')."
+        )
+    return parsed.to_timedelta64()
+
+
+def _cast_selector(coord: xr.DataArray, name: Hashable, value: str) -> Any:
+    """Cast a string selector to ``coord``'s dtype.
+
+    Raises
+    ------
+    IndexingError
+        If ``value`` cannot be interpreted as a label along ``coord``.
+    """
+    try:
+        typed = coord.dtype.type(value)
+        if coord.dtype.kind in "mM" and np.isnat(typed):
+            # e.g. ``np.timedelta64("")`` yields NaT rather than raising.
+            raise ValueError(value)
+        return typed
+    except ValueError as e:
+        logger = get_context_logger()
+
+        if coord.dtype.kind == "m":
+            try:
+                return _parse_timedelta(value)
+            except ValueError as tde:
+                logger.warning(
+                    "Failed to cast selector to timedelta64",
+                    selector=name,
+                    value=value,
+                    expected_type=coord.dtype,
+                )
+                raise IndexingError(f"Invalid value for {name!r}: {tde}") from None
+        elif coord.dtype.kind == "M":
+            try:
+                parsed = pd.Timestamp(value)
+                if parsed is pd.NaT:
+                    raise ValueError(value)
+                return parsed.to_datetime64()
+            except ValueError:
+                logger.warning(
+                    "Failed to cast selector to datetime64",
+                    selector=name,
+                    value=value,
+                    expected_type=coord.dtype,
+                )
+                raise IndexingError(
+                    f"Invalid value for {name!r}: could not interpret {value!r} as a datetime."
+                ) from None
+        else:
+            logger.warning(
+                "Failed to cast selector",
+                selector=name,
+                value=value,
+                expected_type=coord.dtype,
+            )
+            raise IndexingError(
+                f"Invalid value for {name!r}: could not interpret {value!r} "
+                f"as {coord.dtype}."
+            ) from e
+
+
+def _format_label(coord: xr.DataArray, value: Any) -> str:
+    """Render ``value`` the way the metadata endpoint advertises it."""
+    if coord.dtype.kind == "m":
+        return timedelta_to_iso8601(value)
+    if coord.dtype.kind == "M":
+        return pd.Timestamp(value).isoformat()
+    return str(value)
+
+
+def _describe_missing_label(
+    coord: xr.DataArray, name: Hashable, typed_value: Any, value: str
+) -> str:
+    """Build an actionable message for an exact-match miss along ``coord``."""
+    message = f"{value!r} is not a valid value for {name!r}."
+    hint = f" Pass 'nearest::{value}' to select the nearest value instead."
+
+    if coord.dtype.kind not in "mM" or coord.size == 0:
+        return message + hint
+
+    index = coord.to_index()
+    nearest = index[np.abs(index - typed_value).argmin()]
+    message += f" The nearest available value is {_format_label(coord, nearest)}."
+
+    if coord.size > 1:
+        deltas = np.diff(np.asarray(index))
+        if (deltas == deltas[0]).all():
+            message += f" Values are spaced {timedelta_to_iso8601(deltas[0])} apart."
+
+    return message + hint
+
+
 def apply_query(
     ds: xr.Dataset, *, variables: list[str], selectors: dict[str, Any]
 ) -> dict[str, ValidatedArray]:
@@ -921,48 +1040,16 @@ def apply_query(
                 raise IndexingError(str(e)) from None
 
             # If the value is not the same type as the variable, try to cast it
-            try:
-                typed_value = ds[name].dtype.type(value)
-            except ValueError as e:
-                logger = get_context_logger()
-
-                if ds[name].dtype.kind == "m":
-                    # Custom casting for timedelta64 if it fails
-                    try:
-                        typed_value = pd.to_timedelta(value).to_timedelta64()
-                    except ValueError as tde:
-                        logger.warning(
-                            "Failed to cast selector to timedelta64",
-                            selector=name,
-                            value=value,
-                            expected_type=ds[name].dtype,
-                        )
-                        raise tde
-                elif ds[name].dtype.kind == "M":
-                    # Custom casting for datetime64 if it fails
-                    try:
-                        typed_value = pd.to_datetime(value).to_datetime64()
-                    except ValueError as tde:
-                        logger.warning(
-                            "Failed to cast selector to datetime64",
-                            selector=name,
-                            value=value,
-                            expected_type=ds[name].dtype,
-                        )
-                        raise tde
-                else:
-                    logger.warning(
-                        "Failed to cast selector",
-                        selector=name,
-                        value=value,
-                        expected_type=ds[name].dtype,
-                    )
-                    raise e
+            typed_value = _cast_selector(ds[name], name, value)
 
             # Apply selection serially
             try:
                 ds = ds.sel({name: typed_value}, method=method)
             except KeyError as e:
+                if method is None:
+                    raise IndexingError(
+                        _describe_missing_label(ds[name], name, typed_value, value)
+                    ) from None
                 raise IndexingError(str(e)) from None
 
     for name in variables:
