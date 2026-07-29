@@ -42,7 +42,7 @@ from xpublish_tiles.multiscale import (
 from xpublish_tiles.pipeline import _infer_datatype, pipeline
 from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import ImageFormat, LegendFormat, QueryParams
-from xpublish_tiles.utils import normalize_tilejson_bounds
+from xpublish_tiles.utils import format_number_for_url, normalize_tilejson_bounds
 from xpublish_tiles.xpublish.tiles.metadata import (
     create_tileset_for_tms,
     create_tileset_metadata,
@@ -410,11 +410,17 @@ class TilesPlugin(Plugin):
             style = query.style[0] if query.style else "raster"
             variant = query.style[1] if query.style else "default"
 
+            colorscalerange = (
+                ",".join(map(format_number_for_url, query.colorscalerange))
+                if query.colorscalerange
+                else None
+            )
+
             # XYZ template
             url_template = f"{base_url}{tiles_path}/{{z}}/{{y}}/{{x}}?variables={','.join(query.variables)}&style={style}/{variant}&width={query.width}&height={query.height}&f={query.f}&render_errors={str(query.render_errors).lower()}"
             # Append optional color scale range
-            if query.colorscalerange:
-                url_template = f"{url_template}&colorscalerange={query.colorscalerange[0]:g},{query.colorscalerange[1]:g}"
+            if colorscalerange:
+                url_template = f"{url_template}&colorscalerange={colorscalerange}"
 
             if query.colormap:
                 url_template = (
@@ -433,7 +439,7 @@ class TilesPlugin(Plugin):
 
             # Append selectors
             if selectors:
-                selector_qs = "&".join(f"{k}={v}" for k, v in selectors.items())
+                selector_qs = "&".join(f"{k}={quote(v)}" for k, v in selectors.items())
                 url_template = f"{url_template}&{selector_qs}"
 
             # Build legend URL (sibling of tilejson.json)
@@ -442,8 +448,8 @@ class TilesPlugin(Plugin):
                 f"{base_url}{dataset_path}/legend?variables={','.join(query.variables)}"
                 f"&style={style}/{variant}"
             )
-            if query.colorscalerange:
-                legend_url = f"{legend_url}&colorscalerange={query.colorscalerange[0]:g},{query.colorscalerange[1]:g}"
+            if colorscalerange:
+                legend_url = f"{legend_url}&colorscalerange={colorscalerange}"
             if query.colormap:
                 legend_url = f"{legend_url}&colormap={quote(json.dumps(query.colormap))}"
             if query.belowmincolor:
