@@ -608,7 +608,7 @@ class TilesPlugin(Plugin):
                 bound_logger = get_context_logger()
                 bound_logger.error("IndexingError", exc_info=e)
                 status_code = 422
-                detail = f"Invalid indexer: {selectors!r}."
+                detail = f"Invalid indexer: {selectors!r}. {e!s}"
             except MissingParameterError as e:
                 bound_logger = get_context_logger()
                 bound_logger.error("MissingParameterError", exc_info=e)

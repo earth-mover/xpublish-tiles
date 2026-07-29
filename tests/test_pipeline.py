@@ -617,6 +617,43 @@ def test_apply_query_selectors():
         apply_query(ds, variables=["sst"], selectors={})
 
 
+@pytest.mark.parametrize(
+    "selector",
+    ["1 hours", "1h", "3600000000000 nanoseconds", "PT1H", "PT60M", "P0DT1H"],
+)
+def test_apply_query_timedelta_selector_formats(selector):
+    """Pandas-style and ISO 8601 durations both select along a timedelta dim."""
+    hrrr = HRRR.create()
+    actual = apply_query(hrrr, variables=["foo"], selectors={"step": selector})
+    xr.testing.assert_equal(actual["foo"].da, hrrr.foo.sel(step="1h").isel(time=-1))
+
+
+def test_apply_query_timedelta_selector_iso_long_components():
+    """pandas' own ISO parser rejects >2-digit components; ours must not."""
+    step = pd.to_timedelta(np.arange(0, 15 * 24 + 1, 3), unit="h")
+    hrrr = HRRR.create().reindex(step=step)
+    actual = apply_query(hrrr, variables=["foo"], selectors={"step": "PT354H"})
+    xr.testing.assert_equal(actual["foo"].da, hrrr.foo.sel(step="354h").isel(time=-1))
+
+
+def test_apply_query_timedelta_selector_errors():
+    step = pd.to_timedelta(np.arange(0, 15 * 24 + 1, 3), unit="h")
+    hrrr = HRRR.create().reindex(step=step)
+
+    # Off-grid value: the message names the nearest label and the spacing.
+    with pytest.raises(IndexingError) as excinfo:
+        apply_query(hrrr, variables=["foo"], selectors={"step": "353 hours"})
+    message = str(excinfo.value)
+    assert "P14DT18H" in message
+    assert "PT3H" in message
+    assert "nearest::353 hours" in message
+
+    # Unparsable values raise IndexingError (a 422), not a bare ValueError.
+    for value in ["garbage", ""]:
+        with pytest.raises(IndexingError, match="as a duration"):
+            apply_query(hrrr, variables=["foo"], selectors={"step": value})
+
+
 def test_apply_query_selectors_method_nearest():
     hrrr = HRRR.create().reindex(
         time=pd.date_range("2018-01-01", "2018-01-02", freq="6h")
