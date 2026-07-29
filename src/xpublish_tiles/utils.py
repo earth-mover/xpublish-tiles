@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 import cf_xarray  # noqa: F401
+import numpy as np
 
 import xarray as xr
 from xpublish_tiles.logger import log_duration, logger
@@ -153,6 +154,27 @@ def normalize_tilejson_bounds(
         w, e = -180.0, 180.0
 
     return [w, float(south), e, float(north)]
+
+
+def format_number_for_url(value: float) -> str:
+    """Format a number for inclusion in a URL query string.
+
+    ``%g`` is unusable here: it emits scientific notation whose ``+`` exponent
+    sign is decoded as a space by query string parsers (``1e+06`` -> ``1e 06``),
+    and it silently rounds to 6 significant digits.
+
+    Examples
+    --------
+    >>> [format_number_for_url(v) for v in (0.0, -3.0, 1.5)]
+    ['0', '-3', '1.5']
+    >>> [format_number_for_url(v) for v in (1e6, -1e6, 1234567.5, 1e21, 1e-7)]
+    ['1000000', '-1000000', '1234567.5', '1000000000000000000000', '0.0000001']
+    >>> [format_number_for_url(v) for v in (float("nan"), float("inf"))]
+    ['nan', 'inf']
+    """
+    if not np.isfinite(value):
+        return str(float(value))
+    return np.format_float_positional(value, trim="-")
 
 
 @contextlib.contextmanager
