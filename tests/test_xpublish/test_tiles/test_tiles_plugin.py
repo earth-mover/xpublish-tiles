@@ -774,6 +774,30 @@ def test_tilejson_endpoint():
     assert "belowmincolor=transparent" in legend_url
     assert "abovemaxcolor=%23ff0000" in legend_url
 
+    # Large/high-precision colorscalerange must not be serialized in scientific
+    # notation: the '+' of the exponent decodes back as a space, and %g would
+    # also round away significant digits.
+    response = client.get(
+        "/datasets/temp/tiles/WebMercatorQuad/tilejson.json",
+        params={
+            "variables": "temperature",
+            "width": 256,
+            "height": 256,
+            "colorscalerange": "0,1234567.5",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    tile_url = body["tiles"][0]
+    assert "colorscalerange=0,1234567.5" in tile_url
+    assert "colorscalerange=0,1234567.5" in body["legend"]
+
+    # The advertised template must be usable as-is
+    tile_response = client.get(
+        tile_url.replace("{z}", "0").replace("{y}", "0").replace("{x}", "0")
+    )
+    assert tile_response.status_code == 200, tile_response.text
+
 
 @pytest.fixture(scope="module")
 def legend_dataset():

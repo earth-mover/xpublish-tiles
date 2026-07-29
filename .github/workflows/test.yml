@@ -38,6 +38,10 @@ jobs:
         if: matrix.shard == 1
         run: uv run ty check src/ tests/
 
+      - name: Run doctests
+        if: matrix.shard == 1
+        run: uv run pytest --doctest-modules src/xpublish_tiles --ignore=src/xpublish_tiles/testing
+
       # To debug snapshot test failures run with --debug-visual-save and download the artifact zip created in the next step.
       - name: Run tests with coverage
         env:
