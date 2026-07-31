@@ -1437,8 +1437,8 @@ async def _transform_polygon_patch(
     """Transform one patch into ``(rings, values_1d, da)`` for the polygons style.
 
     Dispatches by patch grid type: GridSystem2D goes through the shared
-    cell-corners → transform → corners-to-rings core; Triangular/Healpix have
-    their own vertex/cell-corner machinery preserved here.
+    cell-corners → transform → corners-to-rings core; Triangular/Healpix share
+    the 1D variant below.
 
     ``out_width`` triggers the ring-level seam handling for Curvilinear face
     patches (polar caps and antimeridian-straddling faces); pass ``None`` for
@@ -1463,16 +1463,12 @@ async def _transform_polygon_patch(
         )
         return rings, values, xr.DataArray(values, dims=["cell"])
 
-    # Triangular / Healpix polygon path. Source data is 1D per-vertex/per-cell;
-    # cell_corners (Healpix) or pre-existing vertices (Triangular) feed the
-    # transform.
+    # Triangular / Healpix polygon path. Corners come from the grid, not the
+    # DataArray: face-located UGRID variables carry no node coords.
     alternate = patch.alternate or grid.to_metadata()
-    if isinstance(grid, Healpix):
-        to_transform = grid.cell_corners(
-            slicers=patch.slicers, coarsen_factors=patch.coarsen_factors
-        )
-    else:
-        to_transform = subset
+    to_transform = grid.cell_corners(
+        slicers=patch.slicers, coarsen_factors=patch.coarsen_factors
+    )
 
     has_discontinuity = False
     if source_crs.is_geographic:
@@ -1507,8 +1503,14 @@ async def _transform_polygon_patch(
     if isinstance(grid, Healpix):
         da = subset.isel({subset.dims[0]: healpix_cell_indexer})
     else:
-        # Triangular: per-vertex values, renderer averages via connectivity.
-        da = subset
+        assert isinstance(grid, Triangular) and ugrid_indexer is not None
+        if grid.face_dim in subset.dims:
+            da = subset
+        else:
+            # Node-located: one value per face for the polygons.
+            da = xr.DataArray(
+                grid.nodes_to_faces(subset.values, ugrid_indexer), dims=["cell"]
+            )
 
     cell_rings = grid.corners_to_rings(newX.data, newY.data, ugrid_indexer=ugrid_indexer)
     values = (
@@ -1631,14 +1633,12 @@ async def transform_for_render(
 
             rings_list: list[np.ndarray] = []
             values_list: list[np.ndarray] = []
-            last_da: xr.DataArray | None = None
             for patch in context.patches:
-                rings, values, da = await _transform_polygon_patch(
+                rings, values, _ = await _transform_polygon_patch(
                     patch, bbox=bbox, output_crs=crs, out_width=out_width
                 )
                 rings_list.append(rings)
                 values_list.append(values)
-                last_da = da
 
             # Different patches may emit different ring widths (polar-cap
             # patches widen to M=6 to carry the pole-edge split; equatorial
@@ -1654,16 +1654,7 @@ async def transform_for_render(
                     rings_list[i] = np.concatenate([r, pad], axis=1)
             cell_rings = np.concatenate(rings_list, axis=0)
 
-            # Triangular patches keep per-vertex values (renderer averages
-            # via connectivity); single-patch case preserves the original
-            # DataArray so the renderer's connectivity lookup works.
-            single = context.patches[0].grid if len(context.patches) == 1 else None
-            if isinstance(single, Triangular):
-                assert last_da is not None
-                da_out = last_da
-            else:
-                values_concat = np.concatenate(values_list, axis=0)
-                da_out = xr.DataArray(values_concat, dims=["cell"])
+            da_out = xr.DataArray(np.concatenate(values_list, axis=0), dims=["cell"])
 
             result[var_name] = PopulatedRenderContext(
                 grid=grid,

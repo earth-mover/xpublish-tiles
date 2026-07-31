@@ -1145,6 +1145,24 @@ async def test_pipeline_ugrid_triangles(var_name, png_snapshot, pytestconfig):
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("var_name", ["zeta", "u"])
+async def test_pipeline_ugrid_triangles_polygons(var_name, png_snapshot, pytestconfig):
+    """Face-located variables carry no node coords; corners must come from the mesh."""
+    ds = UGRID_TRIANGLES.create()
+
+    tms = morecantile.tms.get("WebMercatorQuad")
+    tile_obj = morecantile.Tile(x=75, y=95, z=8)
+    query_params = create_query_params(tile_obj, tms, style="polygons")
+    query_params = replace(query_params, variables=[var_name])
+    result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile_obj)
+    assert_render_matches_snapshot(
+        result, png_snapshot, tile=tile_obj, tms=tms, skip_transparency_check=True
+    )
+
+
 async def test_pipeline_raster_style_not_supported():
     ds = CUBED_SPHERE.create()
     tms = morecantile.tms.get("WebMercatorQuad")
