@@ -160,18 +160,13 @@ def get_resolution_level(
     data_crs = get_crs(levels[0].dataset)
     tile_pixel_size = tms.matrix(zoom).cellSize
 
-    # Iterate coarsest-first and require a strictly smaller distance (beyond
-    # float noise) to switch to a finer level, so exact midpoints resolve coarse.
-    selected = levels[-1]
-    best_distance = math.inf
-    for level in reversed(levels):
+    def _distance(level: ResolutionLevel) -> float:
         pixel_size_tms = _pixel_size_in_tms_units(level.pixel_size, data_crs, tms)
-        distance = abs(math.log(pixel_size_tms / tile_pixel_size))
-        if distance < best_distance - 1e-9:
-            best_distance = distance
-            selected = level
+        # quantize so float noise can't flip an exact tie to a finer level
+        return round(abs(math.log(pixel_size_tms / tile_pixel_size)), 9)
 
-    return selected
+    # min keeps the first of equal keys; coarsest-first makes ties resolve coarse
+    return min(reversed(levels), key=_distance)
 
 
 def assign_leaf_xpublish_ids(tree: DataTree) -> None:
