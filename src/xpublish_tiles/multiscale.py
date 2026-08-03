@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 
 import morecantile
@@ -136,9 +137,11 @@ def get_resolution_level(
     """Get the appropriate resolution level from a DataTree.
 
     Behavior:
-    - If zoom + tms provided: Select best resolution level for that zoom
-      by comparing each level's pixel size to the tile's pixel size.
-      Selects the coarsest level that is still finer than the tile.
+    - If zoom + tms provided: Select the level whose pixel size is nearest
+      the tile's pixel size in log space, so the crossover between adjacent
+      levels sits at the geometric mean of their pixel sizes. Ties break
+      toward the coarser level: oversampling costs far more (bytes read +
+      decode) than the slight blur of upsampling.
     - If no zoom: Return finest (highest resolution) level available
     - If no valid levels found: Return None
 
@@ -157,16 +160,16 @@ def get_resolution_level(
     data_crs = get_crs(levels[0].dataset)
     tile_pixel_size = tms.matrix(zoom).cellSize
 
-    # Levels are sorted finest (smallest pixel) to coarsest (largest pixel)
-    # Default to finest level (for when all are coarser than tile - need upscaling)
-    selected = levels[0]
-
-    # Iterate from coarsest to finest, find coarsest level still finer than tile
+    # Iterate coarsest-first and require a strictly smaller distance (beyond
+    # float noise) to switch to a finer level, so exact midpoints resolve coarse.
+    selected = levels[-1]
+    best_distance = math.inf
     for level in reversed(levels):
         pixel_size_tms = _pixel_size_in_tms_units(level.pixel_size, data_crs, tms)
-        if pixel_size_tms <= tile_pixel_size:
+        distance = abs(math.log(pixel_size_tms / tile_pixel_size))
+        if distance < best_distance - 1e-9:
+            best_distance = distance
             selected = level
-            break
 
     return selected
 
@@ -197,9 +200,9 @@ def get_dataset(
     """Extract the appropriate Dataset from a DataTree.
 
     Behavior:
-    - If zoom + tms provided: Select best resolution level for that zoom
-      by comparing each level's pixel size to the tile's pixel size.
-      Selects the coarsest level that is still finer than the tile.
+    - If zoom + tms provided: Select the level whose pixel size is nearest
+      the tile's pixel size in log space (ties toward coarser); see
+      ``get_resolution_level``.
     - If no zoom: Return finest (highest resolution) level available
     - If no valid levels found: Try root dataset, else raise ValueError
     """
