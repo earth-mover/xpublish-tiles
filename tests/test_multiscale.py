@@ -122,6 +122,67 @@ def test_get_resolution_level_returns_none_on_empty_tree(tms):
     assert level is None
 
 
+def _pyramid_tree(*pixel_sizes: float) -> DataTree:
+    return DataTree.from_dict(
+        {
+            str(i): xr.Dataset(
+                {"data": (("y", "x"), [[1, 2], [3, 4]])},
+                attrs={
+                    "spatial:transform": [pixel_size, 0, 0, 0, -pixel_size, 0],
+                    "proj:code": "EPSG:4326",
+                },
+            )
+            for i, pixel_size in enumerate(pixel_sizes)
+        }
+    )
+
+
+@pytest.fixture
+def wgs84_tms():
+    return morecantile.tms.get("WGS1984Quad")
+
+
+def test_get_resolution_level_picks_nearest_in_log_space(wgs84_tms):
+    tile_pixel_size = wgs84_tms.matrix(3).cellSize
+
+    # Tile pixel just inside the geometric mean of a 4x pyramid: finer wins
+    tree = _pyramid_tree(tile_pixel_size / 1.9, tile_pixel_size * 4 / 1.9)
+    level = get_resolution_level(tree, zoom=3, tms=wgs84_tms)
+    assert level is not None
+    assert level.pixel_size == tile_pixel_size / 1.9
+
+    # Just past the geometric mean: coarser wins, even though it is
+    # coarser than the tile (bounded upsampling instead of 16x the data)
+    tree = _pyramid_tree(tile_pixel_size / 2.1, tile_pixel_size * 4 / 2.1)
+    level = get_resolution_level(tree, zoom=3, tms=wgs84_tms)
+    assert level is not None
+    assert level.pixel_size == tile_pixel_size * 4 / 2.1
+
+
+def test_get_resolution_level_tie_prefers_coarser(wgs84_tms):
+    tile_pixel_size = wgs84_tms.matrix(3).cellSize
+
+    # Exactly at the geometric mean (2x finer vs 2x coarser): pick coarser
+    tree = _pyramid_tree(tile_pixel_size / 2, tile_pixel_size * 2)
+    level = get_resolution_level(tree, zoom=3, tms=wgs84_tms)
+    assert level is not None
+    assert level.pixel_size == tile_pixel_size * 2
+
+
+def test_get_resolution_level_4x_pyramid_zoom_transitions(wgs84_tms):
+    # 4x pyramid with native resolution exactly matching zoom 10 tiles:
+    # the 4x overview is exact at zoom 8. Zoom 9 sits at the midpoint and
+    # must use the overview, not native (16x the data for a 2x-fine tile).
+    native = wgs84_tms.matrix(10).cellSize
+    overview = 4 * native
+    tree = _pyramid_tree(native, overview)
+
+    for zoom, expected in [(8, overview), (9, overview), (10, native), (11, native)]:
+        level = get_resolution_level(tree, zoom=zoom, tms=wgs84_tms)
+        assert level is not None
+        assert level.pixel_size == expected, f"zoom {zoom}"
+
+
 def test_get_dataset_geozarr_high_zoom_returns_finest():
     tree = GEOZARR_MULTISCALE.create()
     tms = morecantile.tms.get("WebMercatorQuad")
