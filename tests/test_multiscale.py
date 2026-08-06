@@ -4,6 +4,7 @@ from pyproj import CRS
 
 import xarray as xr
 from xarray import DataTree
+from xpublish_tiles.config import config
 from xpublish_tiles.multiscale import (
     get_crs,
     get_dataset,
@@ -11,6 +12,7 @@ from xpublish_tiles.multiscale import (
     scan_resolution_levels,
 )
 from xpublish_tiles.testing.datasets import GEOZARR_MULTISCALE, NATIVE_AT_ROOT_MULTISCALE
+from xpublish_tiles.types import OverviewSelectionStrategy
 
 
 def test_multiscale_has_multiple_levels():
@@ -181,6 +183,91 @@ def test_get_resolution_level_4x_pyramid_zoom_transitions(wgs84_tms):
         level = get_resolution_level(tree, zoom=zoom, tms=wgs84_tms)
         assert level is not None
         assert level.pixel_size == expected, f"zoom {zoom}"
+
+
+@pytest.mark.parametrize(
+    "strategy,expected_index",
+    [
+        (OverviewSelectionStrategy.NEAREST, 0),
+        (OverviewSelectionStrategy.COARSER, 1),
+        (OverviewSelectionStrategy.FINER, 0),
+    ],
+)
+def test_get_resolution_level_strategies_closer_to_finer(
+    wgs84_tms, strategy, expected_index
+):
+    # Tile pixel size sits between the two levels, closer to the finer one
+    tile_pixel_size = wgs84_tms.matrix(3).cellSize
+    pixel_sizes = [tile_pixel_size / 1.9, tile_pixel_size * 4 / 1.9]
+    tree = _pyramid_tree(*pixel_sizes)
+
+    level = get_resolution_level(tree, zoom=3, tms=wgs84_tms, strategy=strategy)
+    assert level is not None
+    assert level.pixel_size == pixel_sizes[expected_index]
+
+
+@pytest.mark.parametrize(
+    "strategy,expected_index",
+    [
+        (OverviewSelectionStrategy.NEAREST, 1),
+        (OverviewSelectionStrategy.COARSER, 1),
+        (OverviewSelectionStrategy.FINER, 0),
+    ],
+)
+def test_get_resolution_level_strategies_closer_to_coarser(
+    wgs84_tms, strategy, expected_index
+):
+    # Tile pixel size sits between the two levels, closer to the coarser one
+    tile_pixel_size = wgs84_tms.matrix(3).cellSize
+    pixel_sizes = [tile_pixel_size / 2.1, tile_pixel_size * 4 / 2.1]
+    tree = _pyramid_tree(*pixel_sizes)
+
+    level = get_resolution_level(tree, zoom=3, tms=wgs84_tms, strategy=strategy)
+    assert level is not None
+    assert level.pixel_size == pixel_sizes[expected_index]
+
+
+@pytest.mark.parametrize("strategy", list(OverviewSelectionStrategy))
+def test_get_resolution_level_strategies_exact_match(wgs84_tms, strategy):
+    # A level matching the tile exactly wins under every strategy
+    tile_pixel_size = wgs84_tms.matrix(3).cellSize
+    tree = _pyramid_tree(tile_pixel_size / 4, tile_pixel_size, tile_pixel_size * 4)
+
+    level = get_resolution_level(tree, zoom=3, tms=wgs84_tms, strategy=strategy)
+    assert level is not None
+    assert level.pixel_size == tile_pixel_size
+
+
+@pytest.mark.parametrize("strategy", list(OverviewSelectionStrategy))
+def test_get_resolution_level_strategies_fall_back_when_out_of_range(wgs84_tms, strategy):
+    tile_pixel_size = wgs84_tms.matrix(3).cellSize
+
+    # All levels finer than the tile: nothing coarser to fall back to
+    tree = _pyramid_tree(tile_pixel_size / 8, tile_pixel_size / 4)
+    level = get_resolution_level(tree, zoom=3, tms=wgs84_tms, strategy=strategy)
+    assert level is not None
+    assert level.pixel_size == tile_pixel_size / 4
+
+    # All levels coarser than the tile: nothing finer to fall back to
+    tree = _pyramid_tree(tile_pixel_size * 4, tile_pixel_size * 8)
+    level = get_resolution_level(tree, zoom=3, tms=wgs84_tms, strategy=strategy)
+    assert level is not None
+    assert level.pixel_size == tile_pixel_size * 4
+
+
+def test_get_resolution_level_strategy_defaults_to_config(wgs84_tms):
+    tile_pixel_size = wgs84_tms.matrix(3).cellSize
+    pixel_sizes = [tile_pixel_size / 1.9, tile_pixel_size * 4 / 1.9]
+    tree = _pyramid_tree(*pixel_sizes)
+
+    level = get_resolution_level(tree, zoom=3, tms=wgs84_tms)
+    assert level is not None
+    assert level.pixel_size == pixel_sizes[0]
+
+    with config.set(overview_selection_strategy="coarser"):
+        level = get_resolution_level(tree, zoom=3, tms=wgs84_tms)
+    assert level is not None
+    assert level.pixel_size == pixel_sizes[1]
 
 
 def test_get_dataset_geozarr_high_zoom_returns_finest():

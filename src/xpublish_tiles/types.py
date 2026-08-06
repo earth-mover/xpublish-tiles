@@ -41,6 +41,19 @@ class LegendFormat(enum.StrEnum):
     JSON = "json"
 
 
+class OverviewSelectionStrategy(enum.StrEnum):
+    """How to pick a multiscale overview for a requested zoom level.
+
+    NEAREST: the level whose pixel size is nearest the tile's in log space.
+    COARSER: the finest level that is still no finer than the tile.
+    FINER: the coarsest level that is still no coarser than the tile.
+    """
+
+    NEAREST = "nearest"
+    COARSER = "coarser"
+    FINER = "finer"
+
+
 class SelectionMethod(str, enum.Enum):
     """Selection methods for dimension indexing.
 
