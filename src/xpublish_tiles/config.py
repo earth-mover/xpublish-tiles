@@ -25,6 +25,8 @@ config = donfig.Config(
             "async_load_timeout_per_tile": 20,  # seconds; None to disable
             "num_concurrent_data_loads": 4,  # max concurrent tile data loads; None to disable
             "grid_cache_max_size": 16,  # maximum number of grid systems to cache
+            # one of "nearest", "coarser", "finer"; see OverviewSelectionStrategy
+            "overview_selection_strategy": "nearest",
         }
     ],
     paths=[],

@@ -5,7 +5,7 @@ from pyproj import CRS
 from pyproj.aoi import BBox
 from pyproj.exceptions import CRSError
 
-from xpublish_tiles.types import ImageFormat
+from xpublish_tiles.types import ImageFormat, OverviewSelectionStrategy
 
 
 def validate_colorscalerange(v: str | list[str] | None) -> tuple[float, float] | None:
@@ -131,6 +131,22 @@ def validate_legend_format(v: str | None):
     except ValueError as e:
         raise ValueError(
             f"legend format {format_str} is not valid. Options are: {', '.join(LegendFormat.__members__.keys())}",
+        ) from e
+
+
+def validate_overview_selection_strategy(
+    v: str | None,
+) -> OverviewSelectionStrategy | None:
+    if v is None:
+        return None
+    if isinstance(v, OverviewSelectionStrategy):
+        return v
+    try:
+        return OverviewSelectionStrategy(v.lower())
+    except ValueError as e:
+        raise ValueError(
+            f"overview_selection_strategy {v} is not valid. Options are: "
+            f"{', '.join(s.value for s in OverviewSelectionStrategy)}",
         ) from e
 
 

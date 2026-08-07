@@ -560,7 +560,12 @@ class TilesPlugin(Plugin):
             tms = morecantile.tms.get(tileMatrixSetId)
 
             # Extract dataset at appropriate resolution level for this zoom
-            level = get_resolution_level(datatree, zoom=tileMatrix, tms=tms)
+            level = get_resolution_level(
+                datatree,
+                zoom=tileMatrix,
+                tms=tms,
+                strategy=query.overview_selection_strategy,
+            )
             if level is not None:
                 dataset = level.dataset
                 resolution_level = level.path if level.path is not None else "root"

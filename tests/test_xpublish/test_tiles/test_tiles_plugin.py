@@ -1330,6 +1330,42 @@ def test_tilejson_minzoom_uses_coarsest_level():
 
 
 @pytest.mark.parametrize(
+    "strategy,expected_level",
+    [
+        ("nearest", "0"),
+        ("coarser", "1"),
+        ("finer", "0"),
+    ],
+)
+def test_overview_selection_strategy_query_param(strategy, expected_level):
+    """The query param overrides which overview a tile is rendered from."""
+    tree = GEOZARR_MULTISCALE.create()
+    rest = xpublish.Rest({"pyramid": tree}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    # Zoom 7 tiles sit between the 0.01° and 0.02° levels, closer to 0.01°
+    response = client.get(
+        "/datasets/pyramid/tiles/WebMercatorQuad/7/43/60"
+        f"?variables=data&width=256&height=256&overview_selection_strategy={strategy}"
+    )
+    assert response.status_code == 200
+    assert response.headers["X-Multiscale-Level"] == expected_level
+
+
+def test_overview_selection_strategy_invalid():
+    tree = GEOZARR_MULTISCALE.create()
+    rest = xpublish.Rest({"pyramid": tree}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    response = client.get(
+        "/datasets/pyramid/tiles/WebMercatorQuad/7/43/60"
+        "?variables=data&width=256&height=256&overview_selection_strategy=bogus"
+    )
+    assert response.status_code == 422
+    assert "overview_selection_strategy" in response.text
+
+
+@pytest.mark.parametrize(
     "zoom,tile_row,tile_col,expected_level",
     [
         # Zoom 7: tile ~2.8° each, data (0.64°) fills ~23% - uses finest level

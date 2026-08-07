@@ -6,13 +6,14 @@ from typing import Annotated, Any, Union
 import morecantile.models
 from pydantic import BaseModel, Field, field_validator
 
-from xpublish_tiles.types import ImageFormat, LegendFormat
+from xpublish_tiles.types import ImageFormat, LegendFormat, OverviewSelectionStrategy
 from xpublish_tiles.validators import (
     validate_color,
     validate_colormap,
     validate_colorscalerange,
     validate_image_format,
     validate_legend_format,
+    validate_overview_selection_strategy,
     validate_range_color,
     validate_style,
 )
@@ -1312,6 +1313,22 @@ class TileQuery(BaseModel):
             },
         ),
     ]
+    overview_selection_strategy: Annotated[
+        OverviewSelectionStrategy | None,
+        Field(
+            default=None,
+            json_schema_extra={
+                "description": "How to choose a multiscale overview for this zoom level: 'nearest' (closest pixel size), 'coarser' (never finer than the tile), or 'finer' (never coarser than the tile). Defaults to the server configuration.",
+            },
+        ),
+    ] = None
+
+    @field_validator("overview_selection_strategy", mode="before")
+    @classmethod
+    def validate_overview_selection_strategy(
+        cls, v: str | None
+    ) -> OverviewSelectionStrategy | None:
+        return validate_overview_selection_strategy(v)
 
     @field_validator("style", mode="before")
     @classmethod
@@ -1537,6 +1554,7 @@ TILES_FILTERED_QUERY_PARAMS: list[str] = [
     "abovemaxcolor",
     "belowmincolor",
     "render_errors",
+    "overview_selection_strategy",
 ]
 
 
