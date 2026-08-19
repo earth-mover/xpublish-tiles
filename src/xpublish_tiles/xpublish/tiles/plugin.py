@@ -542,10 +542,22 @@ class TilesPlugin(Plugin):
 
         @router.get("/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}")
         @with_accumulated_logs(
-            log_message_fn=lambda request, tileMatrixSetId, tileMatrix, tileRow, tileCol, query, datatree: (
+            log_message_fn=lambda request,
+            tileMatrixSetId,
+            tileMatrix,
+            tileRow,
+            tileCol,
+            query,
+            datatree: (
                 f"{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} {query.variables} {getattr(datatree, '_xpublish_id', 'unknown')}"
             ),
-            context_fn=lambda request, tileMatrixSetId, tileMatrix, tileRow, tileCol, query, datatree: {
+            context_fn=lambda request,
+            tileMatrixSetId,
+            tileMatrix,
+            tileRow,
+            tileCol,
+            query,
+            datatree: {
                 "tile": f"{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}",
                 "variables": query.variables,
                 "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
