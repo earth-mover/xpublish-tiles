@@ -133,8 +133,9 @@ class TilesPlugin(Plugin):
 
         @router.get("/", response_model=TilesetsList, response_model_exclude_none=True)
         @with_accumulated_logs(
-            log_message_fn=lambda request,
-            datatree: f"tiles_list {getattr(datatree, '_xpublish_id', 'unknown')}",
+            log_message_fn=lambda request, datatree: (
+                f"tiles_list {getattr(datatree, '_xpublish_id', 'unknown')}"
+            ),
             context_fn=lambda request, datatree: {
                 "endpoint": "tiles_list",
                 "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
@@ -216,9 +217,7 @@ class TilesPlugin(Plugin):
                         styles,
                         var_grids,
                         cf_coords=cf_coords,
-                        tile_matrix_set_href=self._tile_matrix_set_href(
-                            request, tms_id
-                        ),
+                        tile_matrix_set_href=self._tile_matrix_set_href(request, tms_id),
                     )
                     for tms_id in supported_tms
                 ]
@@ -229,8 +228,9 @@ class TilesPlugin(Plugin):
 
         @router.get("/legend")
         @with_accumulated_logs(
-            log_message_fn=lambda query,
-            datatree: f"legend {query.variables} {query.style} {getattr(datatree, '_xpublish_id', 'unknown')}",
+            log_message_fn=lambda query, datatree: (
+                f"legend {query.variables} {query.style} {getattr(datatree, '_xpublish_id', 'unknown')}"
+            ),
             context_fn=lambda query, datatree: {
                 "endpoint": "legend",
                 "variables": query.variables,
@@ -326,9 +326,9 @@ class TilesPlugin(Plugin):
             response_model_exclude_none=True,
         )
         @with_accumulated_logs(
-            log_message_fn=lambda request,
-            tileMatrixSetId,
-            datatree: f"tileset_metadata {tileMatrixSetId} {getattr(datatree, '_xpublish_id', 'unknown')}",
+            log_message_fn=lambda request, tileMatrixSetId, datatree: (
+                f"tileset_metadata {tileMatrixSetId} {getattr(datatree, '_xpublish_id', 'unknown')}"
+            ),
             context_fn=lambda request, tileMatrixSetId, datatree: {
                 "tileMatrixSetId": tileMatrixSetId,
                 "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
@@ -361,10 +361,9 @@ class TilesPlugin(Plugin):
             response_model_exclude_none=True,
         )
         @with_accumulated_logs(
-            log_message_fn=lambda request,
-            tileMatrixSetId,
-            query,
-            datatree: f"tilejson {tileMatrixSetId} {query.variables} {getattr(datatree, '_xpublish_id', 'unknown')}",
+            log_message_fn=lambda request, tileMatrixSetId, query, datatree: (
+                f"tilejson {tileMatrixSetId} {query.variables} {getattr(datatree, '_xpublish_id', 'unknown')}"
+            ),
             context_fn=lambda request, tileMatrixSetId, query, datatree: {
                 "tileMatrixSetId": tileMatrixSetId,
                 "variables": query.variables,
@@ -543,20 +542,10 @@ class TilesPlugin(Plugin):
 
         @router.get("/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}")
         @with_accumulated_logs(
-            log_message_fn=lambda request,
-            tileMatrixSetId,
-            tileMatrix,
-            tileRow,
-            tileCol,
-            query,
-            datatree: f"{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} {query.variables} {getattr(datatree, '_xpublish_id', 'unknown')}",
-            context_fn=lambda request,
-            tileMatrixSetId,
-            tileMatrix,
-            tileRow,
-            tileCol,
-            query,
-            datatree: {
+            log_message_fn=lambda request, tileMatrixSetId, tileMatrix, tileRow, tileCol, query, datatree: (
+                f"{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol} {query.variables} {getattr(datatree, '_xpublish_id', 'unknown')}"
+            ),
+            context_fn=lambda request, tileMatrixSetId, tileMatrix, tileRow, tileCol, query, datatree: {
                 "tile": f"{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}",
                 "variables": query.variables,
                 "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
