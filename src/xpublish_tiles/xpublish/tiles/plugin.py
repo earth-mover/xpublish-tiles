@@ -78,6 +78,12 @@ class TilesPlugin(Plugin):
     dataset_router_prefix: str = "/tiles"
     dataset_router_tags: list[str | Enum] = ["tiles"]
 
+    @staticmethod
+    def _tile_matrix_set_href(request: Request, tile_matrix_set_id: str) -> str:
+        return request.url_for(
+            "get_tile_matrix_set", tileMatrixSetId=tile_matrix_set_id
+        ).path
+
     @hookimpl
     def app_router(self, deps: Dependencies):
         """Global tiles endpoints"""
@@ -95,10 +101,13 @@ class TilesPlugin(Plugin):
             )
 
         @router.get("/tileMatrixSets", response_model=TileMatrixSets)
-        async def get_tile_matrix_sets():
+        async def get_tile_matrix_sets(request: Request):
             """List available tile matrix sets"""
             summaries = [
-                summary_func() for summary_func in TILE_MATRIX_SET_SUMMARIES.values()
+                summary_func(
+                    tile_matrix_set_href=self._tile_matrix_set_href(request, tms_id)
+                )
+                for tms_id, summary_func in TILE_MATRIX_SET_SUMMARIES.items()
             ]
             return TileMatrixSets(tileMatrixSets=summaries)
 
@@ -124,13 +133,15 @@ class TilesPlugin(Plugin):
 
         @router.get("/", response_model=TilesetsList, response_model_exclude_none=True)
         @with_accumulated_logs(
-            log_message_fn=lambda datatree: f"tiles_list {getattr(datatree, '_xpublish_id', 'unknown')}",
-            context_fn=lambda datatree: {
+            log_message_fn=lambda request,
+            datatree: f"tiles_list {getattr(datatree, '_xpublish_id', 'unknown')}",
+            context_fn=lambda request, datatree: {
                 "endpoint": "tiles_list",
                 "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
             },
         )
         async def get_dataset_tiles_list(
+            request: Request,
             datatree: DataTree = Depends(deps.datatree),
         ):
             """List of available tilesets for this dataset"""
@@ -205,6 +216,9 @@ class TilesPlugin(Plugin):
                         styles,
                         var_grids,
                         cf_coords=cf_coords,
+                        tile_matrix_set_href=self._tile_matrix_set_href(
+                            request, tms_id
+                        ),
                     )
                     for tms_id in supported_tms
                 ]
@@ -312,14 +326,16 @@ class TilesPlugin(Plugin):
             response_model_exclude_none=True,
         )
         @with_accumulated_logs(
-            log_message_fn=lambda tileMatrixSetId,
+            log_message_fn=lambda request,
+            tileMatrixSetId,
             datatree: f"tileset_metadata {tileMatrixSetId} {getattr(datatree, '_xpublish_id', 'unknown')}",
-            context_fn=lambda tileMatrixSetId, datatree: {
+            context_fn=lambda request, tileMatrixSetId, datatree: {
                 "tileMatrixSetId": tileMatrixSetId,
                 "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
             },
         )
         async def get_dataset_tileset_metadata(
+            request: Request,
             tileMatrixSetId: str,
             datatree: DataTree = Depends(deps.datatree),
         ):
@@ -328,7 +344,14 @@ class TilesPlugin(Plugin):
             # If multiscale, returns finest (highest resolution) level available
             dataset = get_dataset(datatree)
             try:
-                return await async_run(create_tileset_metadata, dataset, tileMatrixSetId)
+                return await async_run(
+                    create_tileset_metadata,
+                    dataset,
+                    tileMatrixSetId,
+                    tile_matrix_set_href=self._tile_matrix_set_href(
+                        request, tileMatrixSetId
+                    ),
+                )
             except ValueError as e:
                 raise HTTPException(status_code=404, detail=str(e)) from e
 

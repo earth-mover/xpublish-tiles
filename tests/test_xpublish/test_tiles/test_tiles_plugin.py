@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import xpublish
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
 
@@ -81,6 +82,44 @@ def test_tilesets_list_endpoint(xpublish_client):
         assert "id" in layer
         assert "dataType" in layer
         assert "links" in layer
+
+
+def test_tile_matrix_set_links_respect_submount(xpublish_app):
+    app = FastAPI()
+    app.mount("/v1", xpublish_app)
+    client = TestClient(app)
+
+    matrix_sets = client.get("/v1/tiles/tileMatrixSets")
+    assert matrix_sets.status_code == 200
+    summary = next(
+        item
+        for item in matrix_sets.json()["tileMatrixSets"]
+        if item["id"] == "WebMercatorQuad"
+    )
+    assert summary["links"][0]["href"] == "/v1/tiles/tileMatrixSets/WebMercatorQuad"
+
+    tilesets = client.get("/v1/datasets/air/tiles/")
+    assert tilesets.status_code == 200
+    tileset = next(
+        item
+        for item in tilesets.json()["tilesets"]
+        if item["title"].endswith("WebMercatorQuad")
+    )
+    tiling_scheme = next(
+        link
+        for link in tileset["links"]
+        if link["rel"] == "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme"
+    )
+    assert tiling_scheme["href"] == "/v1/tiles/tileMatrixSets/WebMercatorQuad"
+
+    metadata = client.get("/v1/datasets/air/tiles/WebMercatorQuad")
+    assert metadata.status_code == 200
+    tiling_scheme = next(
+        link
+        for link in metadata.json()["links"]
+        if link["rel"] == "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme"
+    )
+    assert tiling_scheme["href"] == "/v1/tiles/tileMatrixSets/WebMercatorQuad"
 
 
 def test_tilesets_list_with_metadata():

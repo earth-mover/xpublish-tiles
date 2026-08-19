@@ -66,11 +66,14 @@ def get_tile_matrix_set(tms_id: str) -> TileMatrixSet:
     )
 
 
-def get_tile_matrix_set_summary(tms_id: str) -> TileMatrixSetSummary:
+def get_tile_matrix_set_summary(
+    tms_id: str, *, tile_matrix_set_href: str | None = None
+) -> TileMatrixSetSummary:
     """Get summary information for any morecantile tile matrix set.
 
     Args:
         tms_id: The tile matrix set identifier (e.g., 'WebMercatorQuad')
+        tile_matrix_set_href: Request-resolved URL for this tile matrix set.
 
     Returns:
         TileMatrixSetSummary object
@@ -92,7 +95,8 @@ def get_tile_matrix_set_summary(tms_id: str) -> TileMatrixSetSummary:
         crs=tms.crs,
         links=[
             Link(
-                href=f"/tiles/tileMatrixSets/{tms_id_str}",
+                href=tile_matrix_set_href
+                or f"/tiles/tileMatrixSets/{tms_id_str}",
                 rel="self",
                 type="application/json",
                 title=f"{tms_title} tile matrix set",
@@ -121,7 +125,12 @@ def _create_tms_registries() -> tuple[dict, dict]:
     for tms_id in morecantile.tms.list():
         # Create lambda functions that capture the tms_id
         tms_sets[tms_id] = lambda tid=tms_id: get_tile_matrix_set(tid)
-        tms_summaries[tms_id] = lambda tid=tms_id: get_tile_matrix_set_summary(tid)
+        tms_summaries[tms_id] = (
+            lambda tile_matrix_set_href=None,
+            tid=tms_id: get_tile_matrix_set_summary(
+                tid, tile_matrix_set_href=tile_matrix_set_href
+            )
+        )
 
     return tms_sets, tms_summaries
 
