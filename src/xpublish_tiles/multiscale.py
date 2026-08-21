@@ -6,7 +6,9 @@ from pyproj import CRS
 
 import xarray as xr
 from xarray import DataTree
+from xpublish_tiles.config import config
 from xpublish_tiles.logger import logger
+from xpublish_tiles.types import OverviewSelectionStrategy
 
 
 @dataclass
@@ -133,15 +135,22 @@ def get_resolution_level(
     *,
     zoom: int | None = None,
     tms: morecantile.TileMatrixSet | None = None,
+    strategy: OverviewSelectionStrategy | None = None,
 ) -> ResolutionLevel | None:
     """Get the appropriate resolution level from a DataTree.
 
     Behavior:
-    - If zoom + tms provided: Select the level whose pixel size is nearest
-      the tile's pixel size in log space, so the crossover between adjacent
-      levels sits at the geometric mean of their pixel sizes. Ties break
-      toward the coarser level: oversampling costs far more (bytes read +
-      decode) than the slight blur of upsampling.
+    - If zoom + tms provided: Select a level according to ``strategy``, which
+      defaults to the ``overview_selection_strategy`` config value.
+      NEAREST picks the level whose pixel size is nearest the tile's pixel
+      size in log space, so the crossover between adjacent levels sits at the
+      geometric mean of their pixel sizes. Ties break toward the coarser
+      level: oversampling costs far more (bytes read + decode) than the
+      slight blur of upsampling.
+      COARSER picks the finest level that is still no finer than the tile,
+      FINER the coarsest level that is still no coarser than the tile. Both
+      fall back to the closest level available when the tile's pixel size
+      falls outside the range of levels.
     - If no zoom: Return finest (highest resolution) level available
     - If no valid levels found: Return None
 
@@ -156,17 +165,34 @@ def get_resolution_level(
     if zoom is None or tms is None:
         return levels[0]
 
+    if strategy is None:
+        strategy = OverviewSelectionStrategy(config.get("overview_selection_strategy"))
+
     # Select best level for the requested zoom
     data_crs = get_crs(levels[0].dataset)
     tile_pixel_size = tms.matrix(zoom).cellSize
 
-    def _distance(level: ResolutionLevel) -> float:
+    def _log_ratio(level: ResolutionLevel) -> float:
         pixel_size_tms = _pixel_size_in_tms_units(level.pixel_size, data_crs, tms)
-        # quantize so float noise can't flip an exact tie to a finer level
-        return round(abs(math.log(pixel_size_tms / tile_pixel_size)), 9)
+        # quantize so float noise can't flip an exact match to the wrong side
+        return round(math.log(pixel_size_tms / tile_pixel_size), 9)
 
-    # min keeps the first of equal keys; coarsest-first makes ties resolve coarse
-    return min(reversed(levels), key=_distance)
+    match strategy:
+        case OverviewSelectionStrategy.NEAREST:
+            # min keeps the first of equal keys; coarsest-first makes ties resolve coarse
+            return min(reversed(levels), key=lambda level: abs(_log_ratio(level)))
+        case OverviewSelectionStrategy.COARSER:
+            # levels are finest-first, so the first non-finer level is the
+            # finest one that is still at least as coarse as the tile
+            return next(
+                (level for level in levels if _log_ratio(level) >= 0),
+                levels[-1],
+            )
+        case OverviewSelectionStrategy.FINER:
+            return next(
+                (level for level in reversed(levels) if _log_ratio(level) <= 0),
+                levels[0],
+            )
 
 
 def assign_leaf_xpublish_ids(tree: DataTree) -> None:
@@ -191,17 +217,17 @@ def get_dataset(
     *,
     zoom: int | None = None,
     tms: morecantile.TileMatrixSet | None = None,
+    strategy: OverviewSelectionStrategy | None = None,
 ) -> xr.Dataset:
     """Extract the appropriate Dataset from a DataTree.
 
     Behavior:
-    - If zoom + tms provided: Select the level whose pixel size is nearest
-      the tile's pixel size in log space (ties toward coarser); see
+    - If zoom + tms provided: Select a level according to ``strategy``; see
       ``get_resolution_level``.
     - If no zoom: Return finest (highest resolution) level available
     - If no valid levels found: Try root dataset, else raise ValueError
     """
-    level = get_resolution_level(tree, zoom=zoom, tms=tms)
+    level = get_resolution_level(tree, zoom=zoom, tms=tms, strategy=strategy)
 
     if level is not None:
         return level.dataset
