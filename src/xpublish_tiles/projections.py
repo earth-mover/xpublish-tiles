@@ -13,8 +13,6 @@ import numpy as np
 import pyproj
 from pyproj import CRS
 
-from xpublish_tiles.utils import NUMBA_THREADING_LOCK
-
 _XY = tuple[np.ndarray, np.ndarray]
 
 WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)  # from proj
@@ -196,13 +194,13 @@ def _project(dx, dy, slope, offset, rho_lo, inv_h, y_nodes):
     )
 
 
-@numba.njit(parallel=True, cache=True, boundscheck=False)
+@numba.njit(nogil=True, cache=True, boundscheck=False)
 def _grid_kernel(
     x, y, apex_x, apex_y, slope, offset, rho_lo, inv_h, y_nodes, out_x, out_y
 ):
     """Rectilinear source: the 1D axes are never broadcast."""
     missed = 0
-    for i in numba.prange(x.size):  # ty: ignore[not-iterable]
+    for i in range(x.size):
         dx = x[i] - apex_x
         for j in range(y.size):
             out_x[i, j], out_y[i, j], outside = _project(
@@ -212,13 +210,13 @@ def _grid_kernel(
     return missed
 
 
-@numba.njit(parallel=True, cache=True, boundscheck=False)
+@numba.njit(nogil=True, cache=True, boundscheck=False)
 def _points_kernel(
     x, y, apex_x, apex_y, slope, offset, rho_lo, inv_h, y_nodes, out_x, out_y
 ):
     """Curvilinear source: x and y are matching arrays of points."""
     missed = 0
-    for k in numba.prange(x.size):  # ty: ignore[not-iterable]
+    for k in range(x.size):
         out_x[k], out_y[k], outside = _project(
             x[k] - apex_x, apex_y - y[k], slope, offset, rho_lo, inv_h, y_nodes
         )
@@ -259,20 +257,19 @@ class ConicToCylindrical:
         return None if missed else (out_x, out_y)
 
     def _run(self, kernel, x, y, out_x, out_y):
-        with NUMBA_THREADING_LOCK:
-            return kernel(
-                np.ascontiguousarray(x, dtype=np.float64),
-                np.ascontiguousarray(y, dtype=np.float64),
-                self.apex_x,
-                self.apex_y,
-                self.x_slope,
-                self.x_offset,
-                self.rho_lo,
-                self.inv_h,
-                self.y_nodes,
-                out_x,
-                out_y,
-            )
+        return kernel(
+            np.ascontiguousarray(x, dtype=np.float64),
+            np.ascontiguousarray(y, dtype=np.float64),
+            self.apex_x,
+            self.apex_y,
+            self.x_slope,
+            self.x_offset,
+            self.rho_lo,
+            self.inv_h,
+            self.y_nodes,
+            out_x,
+            out_y,
+        )
 
 
 def _cone_apex(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:

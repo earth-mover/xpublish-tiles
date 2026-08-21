@@ -34,7 +34,7 @@ from xpublish_tiles.projections import (
     has_null_datum_shift,
     is_degree_geographic,
 )
-from xpublish_tiles.utils import NUMBA_THREADING_LOCK
+from xpublish_tiles.utils import NUMBA_PARALLEL
 
 if TYPE_CHECKING:
     from xpublish_tiles.grids import (
@@ -787,14 +787,14 @@ def polygons_from_rings(rings: np.ndarray):
     return PolygonArray(polys)
 
 
-@numba.njit(parallel=True, cache=True, boundscheck=False)
+@numba.njit(nogil=True, cache=True, boundscheck=False)
 def fill_rings_from_corners(out, corner_x, corner_y):
     """Fill a (n0, n1, 5, 2) ring array from a (n0+1, n1+1) corner grid.
 
     Ring order: (i,j), (i,j+1), (i+1,j+1), (i+1,j), (i,j) [close].
     """
     n0, n1 = out.shape[0], out.shape[1]
-    for i in numba.prange(n0):  # ty: ignore[not-iterable]
+    for i in range(n0):
         for j in range(n1):
             out[i, j, 0, 0] = corner_x[i, j]
             out[i, j, 0, 1] = corner_y[i, j]
@@ -927,7 +927,7 @@ def create_listed_colormap_from_dict(
     return colors
 
 
-@numba.jit(nopython=True, parallel=True, cache=True)
+@numba.jit(nopython=True, parallel=NUMBA_PARALLEL, nogil=True, cache=True)
 def _coarsen_nanmean_2d(arr, fy, fx, out):
     """Coarsen with nanmean, handling incomplete edge windows."""
     ny_out, nx_out = out.shape
@@ -971,8 +971,7 @@ def coarsen_mean_pad(da: xr.DataArray, factors: dict[str, int]) -> xr.DataArray:
 
     fy, fx = tuple(factors.get(str(dim), 1) for dim in dims)
     out = np.empty((math.ceil(H / fy), math.ceil(W / fx)), dtype=np.float64)
-    with NUMBA_THREADING_LOCK:
-        _coarsen_nanmean_2d(arr, fy, fx, out)
+    _coarsen_nanmean_2d(arr, fy, fx, out)
     return xr.DataArray(out, dims=dims, name=da.name)
 
 

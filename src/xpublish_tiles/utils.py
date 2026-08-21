@@ -39,9 +39,11 @@ def _has_threadsafe_numba_layer() -> bool:
     return True
 
 
-NUMBA_THREADING_LOCK = (
-    contextlib.nullcontext() if _has_threadsafe_numba_layer() else threading.Lock()
-)
+# Our own parallel=True kernels are only worth it when they need no lock to run:
+# paying a process-wide lock to get ~4x on one array is a bad trade for a server
+# that is already parallel across requests.
+NUMBA_PARALLEL = _has_threadsafe_numba_layer()
+NUMBA_THREADING_LOCK = contextlib.nullcontext() if NUMBA_PARALLEL else threading.Lock()
 
 
 def cf_ref_attr(var: xr.DataArray, name: str) -> Any | None:

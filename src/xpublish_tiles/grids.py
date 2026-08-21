@@ -1430,8 +1430,7 @@ class GridSystem(ABC):
             corner_x, corner_y = np.meshgrid(corner_x, corner_y)
         n0, n1 = corner_x.shape[0] - 1, corner_x.shape[1] - 1
         rings = np.empty((n0, n1, 5, 2), dtype=np.float64)
-        with NUMBA_THREADING_LOCK:
-            fill_rings_from_corners(rings, corner_x, corner_y)
+        fill_rings_from_corners(rings, corner_x, corner_y)
         return rings.reshape(-1, 5, 2)
 
     def coarsen_indices(

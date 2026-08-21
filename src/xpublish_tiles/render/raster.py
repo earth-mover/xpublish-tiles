@@ -25,10 +25,10 @@ from xpublish_tiles.types import (
     ImageFormat,
     RenderContext,
 )
-from xpublish_tiles.utils import NUMBA_THREADING_LOCK
+from xpublish_tiles.utils import NUMBA_PARALLEL, NUMBA_THREADING_LOCK
 
 
-@numba.njit(parallel=True, cache=True, boundscheck=False)
+@numba.njit(parallel=NUMBA_PARALLEL, nogil=True, cache=True, boundscheck=False)
 def _offdisk_quad_mask(xc, yc):
     """Mark cells whose quadmesh quad touches a non-finite (off-disk) vertex.
 
@@ -242,13 +242,12 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                 data = maybe_cast_data(context.da)
                 if isinstance(grid, Geostationary):
                     xcoord, ycoord = data[grid.X], data[grid.Y]
-                    with NUMBA_THREADING_LOCK:
-                        # Transformation of points near the edge of the disk is undefined
-                        # and corrupts the rendering. Mask them out but only for
-                        # Geostationary to avoid the perf hit.
-                        bad = _offdisk_quad_mask(
-                            np.asarray(xcoord.data), np.asarray(ycoord.data)
-                        )
+                    # Transformation of points near the edge of the disk is undefined
+                    # and corrupts the rendering. Mask them out but only for
+                    # Geostationary to avoid the perf hit.
+                    bad = _offdisk_quad_mask(
+                        np.asarray(xcoord.data), np.asarray(ycoord.data)
+                    )
                     data = data.where(xr.DataArray(~bad, dims=xcoord.dims))
                 with log_duration(
                     f"render (continuous) {data.shape} quadmesh", "🎨", logger
