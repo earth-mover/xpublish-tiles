@@ -324,6 +324,7 @@ def sync_load_async(obj: xr.DataArray | xr.Dataset) -> None:
 
 # 4326 with order of axes reversed.
 OTHER_4326 = pyproj.CRS.from_user_input("WGS 84 (CRS84)")
+WEB_MERCATOR = pyproj.CRS.from_epsg(3857)
 
 # https://pyproj4.github.io/pyproj/stable/advanced_examples.html#caching-pyproj-objects
 transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=True))
@@ -375,6 +376,46 @@ def is_degree_geographic(crs: CRS) -> bool:
     any residual datum shift is sub-meter and below pixel resolution.
     """
     return crs.is_geographic and all(ax.unit_name == "degree" for ax in crs.axis_info)
+
+
+# Below this, treating the source lon/lat as WGS84 lon/lat is sub-pixel at any
+# zoom we serve, so the numpy fastpaths may skip pyproj's datum step.
+MAX_DATUM_SHIFT_METERS = 1.0
+_PROBE_SIDE = 5
+
+
+@lru_cache
+def has_null_datum_shift(crs: CRS) -> bool:
+    """True when `crs` lon/lat may be treated as WGS84 lon/lat.
+
+    Probes the datum step over the CRS's area of use rather than pattern-matching
+    operation names: proj picks the operation per point, and a "null" one (e.g.
+    EPSG:1188 NAD83->WGS84) is indistinguishable from a ballpark fallback taken
+    because a shift grid is missing. Either way, what matters is the displacement.
+    """
+    lon, lat = _area_of_use_grid(crs, _PROBE_SIDE)
+    x, y = transformer_from_crs(crs, 4326).transform(lon, lat)
+    finite = np.isfinite(x) & np.isfinite(y)
+    if not finite.any():
+        return False
+    dlon = (x - lon)[finite]
+    dlon = (dlon + 180.0) % 360.0 - 180.0
+    shift = np.hypot(dlon * np.cos(np.deg2rad(lat[finite])), (y - lat)[finite]) * 111320
+    return bool(shift.max() < MAX_DATUM_SHIFT_METERS)
+
+
+def _area_of_use_grid(crs: CRS, side: int) -> tuple[np.ndarray, np.ndarray]:
+    """Flattened lon/lat sample grid covering the CRS's area of use."""
+    area = crs.area_of_use
+    west, south, east, north = (
+        (area.west, area.south, area.east, area.north)
+        if area is not None
+        else (-180.0, -85.0, 180.0, 85.0)
+    )
+    if east < west:
+        east += 360.0
+    lon, lat = np.meshgrid(np.linspace(west, east, side), np.linspace(south, north, side))
+    return lon.ravel(), lat.ravel()
 
 
 def epsg4326to3857(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -577,10 +618,17 @@ async def transform_coordinates(
     if transformer.source_crs == transformer.target_crs:
         return inx, iny
 
-    # preserve rectilinear-ness by reimplementing this (easy) transform
-    if (inx.ndim == 1 and iny.ndim == 1) and (
-        transformer == transformer_from_crs(4326, 3857)
-        or transformer == transformer_from_crs(OTHER_4326, 3857)
+    # preserve rectilinear-ness by reimplementing this (easy) transform.
+    # Any degree-geographic source whose datum step is a no-op qualifies (4326,
+    # CRS84, NAD83, ETRS89, ...) -- the spherical WebMercator formula only
+    # consumes degrees. Datums with a real shift (NAD27, OSGB36: >100m) fall
+    # through to pyproj.
+    if (
+        inx.ndim == 1
+        and iny.ndim == 1
+        and transformer.target_crs == WEB_MERCATOR
+        and is_degree_geographic(transformer.source_crs)
+        and has_null_datum_shift(transformer.source_crs)
     ):
         newx, newy = epsg4326to3857(inx.data, iny.data)
         _clamp_infinite(newx)
