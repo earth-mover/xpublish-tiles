@@ -54,13 +54,15 @@ from xpublish_tiles.lib import (
     cf_get,
     check_data_is_renderable_size,
     normalize_slicers,
-    transformer_from_crs,
 )
 from xpublish_tiles.pipeline import (
     apply_slicers,
     fix_coordinate_discontinuities,
     load_plans,
     pipeline,
+)
+from xpublish_tiles.projections import (
+    transformer_from_crs,
 )
 from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,

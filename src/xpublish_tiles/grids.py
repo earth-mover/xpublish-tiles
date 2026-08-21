@@ -28,18 +28,20 @@ from xpublish_tiles.lib import (
     VariableNotFoundError,
     _coarsen_indices_impl,
     _prevent_slice_overlap,
-    aeqd_to_4326,
     cf_get,
     crs_repr,
     fill_rings_from_corners,
-    is_degree_geographic,
     round_bbox,
     suppress_cf_dangling_ref_warnings,
     sync_load_async,
-    transformer_from_crs,
     unwrap,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration, logger
+from xpublish_tiles.projections import (
+    aeqd_to_4326,
+    is_degree_geographic,
+    transformer_from_crs,
+)
 from xpublish_tiles.ugrid import MeshTopology, detect_mesh, load_connectivity
 from xpublish_tiles.utils import (
     NUMBA_THREADING_LOCK,

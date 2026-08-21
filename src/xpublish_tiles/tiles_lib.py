@@ -16,6 +16,8 @@ from xpublish_tiles.lib import (
     apply_default_pad,
     check_data_is_renderable_size,
     normalize_slicers,
+)
+from xpublish_tiles.projections import (
     transformer_from_crs,
 )
 from xpublish_tiles.utils import time_debug, xarray_object_key
