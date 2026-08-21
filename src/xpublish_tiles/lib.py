@@ -10,7 +10,7 @@ import warnings
 from collections.abc import Hashable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from functools import lru_cache, partial
+from functools import partial
 from itertools import product
 from typing import TYPE_CHECKING, Any, cast
 
@@ -27,7 +27,14 @@ from skimage.restoration import unwrap_phase
 
 import xarray as xr
 from xpublish_tiles.config import config
-from xpublish_tiles.utils import NUMBA_THREADING_LOCK
+from xpublish_tiles.projections import (
+    WEB_MERCATOR,
+    conic_to_cylindrical,
+    epsg4326to3857,
+    has_null_datum_shift,
+    is_degree_geographic,
+)
+from xpublish_tiles.utils import NUMBA_PARALLEL
 
 if TYPE_CHECKING:
     from xpublish_tiles.grids import (
@@ -38,10 +45,6 @@ if TYPE_CHECKING:
     )
     from xpublish_tiles.types import DataType
 from xpublish_tiles.logger import logger
-
-WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)  # from proj
-M_PI = 3.14159265358979323846  # from proj
-M_2_PI = 6.28318530717958647693  # from proj
 
 
 def unwrap(data: np.ndarray, *, width: float, axis: int | None = None) -> np.ndarray:
@@ -322,13 +325,6 @@ def sync_load_async(obj: xr.DataArray | xr.Dataset) -> None:
     EXECUTOR.submit(lambda: asyncio.run(obj.load_async())).result()
 
 
-# 4326 with order of axes reversed.
-OTHER_4326 = pyproj.CRS.from_user_input("WGS 84 (CRS84)")
-
-# https://pyproj4.github.io/pyproj/stable/advanced_examples.html#caching-pyproj-objects
-transformer_from_crs = lru_cache(partial(pyproj.Transformer.from_crs, always_xy=True))
-
-
 # benchmarked with
 # import numpy as np
 # import pyproj
@@ -365,74 +361,6 @@ def get_transform_chunk_size(da: xr.DataArray):
     chunk_size = config.get("transform_chunk_size")
     # This way the chunks are C-contiguous and we avoid a memory copy inside pyproj \m/
     return (max(chunk_size * chunk_size // da.shape[-1], 1), da.shape[-1])
-
-
-def is_degree_geographic(crs: CRS) -> bool:
-    """True for any geographic CRS with lon/lat axes in degrees (EPSG:4326,
-    CRS84, custom spherical datums like HEALPix's, etc.). The 4326-fastpath
-    in :func:`transform_coordinates` uses this to skip the pyproj roundtrip
-    and just wrap lon to [-180, 180], which is valid for all such CRSes —
-    any residual datum shift is sub-meter and below pixel resolution.
-    """
-    return crs.is_geographic and all(ax.unit_name == "degree" for ax in crs.axis_info)
-
-
-def epsg4326to3857(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    a = WGS84_SEMI_MAJOR_AXIS
-
-    x = np.asarray(lon, dtype=np.float64, copy=True)
-    y = np.asarray(lat, dtype=np.float64, copy=True)
-
-    # Only normalize longitude values that are outside the [-180, 180] range
-    # This preserves precision for values already in the valid range
-    # pyproj accepts both -180 and 180 as valid values without wrapping
-    needs_normalization = (x > 180) | (x < -180)
-
-    np.deg2rad(x, out=x)
-    if np.any(needs_normalization):
-        # Only normalize the values that need it to preserve precision
-        # doing it this way matches proj
-        x[needs_normalization] = ((x[needs_normalization] + M_PI) % (2 * M_PI)) - M_PI
-    # Clamp latitude to avoid infinity at poles in-place
-    # Web Mercator is only valid between ~85.05 degrees
-    # Given our padding, we may be sending in data at latitudes poleward of MAX_LAT
-    # MAX_LAT = 85.051128779806604  # atan(sinh(pi)) * 180 / pi
-    # np.clip(y, -MAX_LAT, MAX_LAT, out=y)
-
-    # Y coordinate: use more stable formula for large latitudes
-    # Using: y = a * asinh(tan(φ)) for better numerical stability
-    # following the proj formula
-    # https://github.com/OSGeo/PROJ/blob/ff43c46b19802f5953a1546b05f59c5b9ee65795/src/projections/merc.cpp#L14
-    # https://proj.org/en/stable/operations/projections/merc.html#forward-projection
-    # Note: WebMercator uses the "spherical form"
-    np.deg2rad(y, out=y)
-    np.tan(y, out=y)
-    np.arcsinh(y, out=y)
-
-    x *= a
-    y *= a
-
-    return x, y
-
-
-def aeqd_to_4326(
-    x_m: np.ndarray,
-    y_m: np.ndarray,
-    center_lat: float,
-    center_lon: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Fast azimuthal equidistant (meters) to EPSG:4326 (degrees) conversion.
-
-    Uses flat-earth approximation. Accurate to 0.3% at 300km from center.
-    ~200x faster than pyproj for large arrays. Modifies x_m and y_m in place.
-    """
-    meters_per_deg_lat = 111320.0
-    meters_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat))
-    x_m /= meters_per_deg_lon
-    x_m += center_lon
-    y_m /= meters_per_deg_lat
-    y_m += center_lat
-    return x_m, y_m
 
 
 def slices_from_chunks(chunks):
@@ -577,15 +505,40 @@ async def transform_coordinates(
     if transformer.source_crs == transformer.target_crs:
         return inx, iny
 
-    # preserve rectilinear-ness by reimplementing this (easy) transform
-    if (inx.ndim == 1 and iny.ndim == 1) and (
-        transformer == transformer_from_crs(4326, 3857)
-        or transformer == transformer_from_crs(OTHER_4326, 3857)
+    # preserve rectilinear-ness by reimplementing this (easy) transform.
+    # Any degree-geographic source whose datum step is a no-op qualifies (4326,
+    # CRS84, NAD83, ETRS89, ...) -- the spherical WebMercator formula only
+    # consumes degrees. Datums with a real shift (NAD27, OSGB36: >100m) fall
+    # through to pyproj.
+    if (
+        inx.ndim == 1
+        and iny.ndim == 1
+        and transformer.target_crs == WEB_MERCATOR
+        and is_degree_geographic(transformer.source_crs)
+        and has_null_datum_shift(transformer.source_crs)
     ):
         newx, newy = epsg4326to3857(inx.data, iny.data)
         _clamp_infinite(newx)
         _clamp_infinite(newy)
         return inx.copy(data=newx), iny.copy(data=newy)
+
+    # A conic source into a cylindrical target factors through polar coordinates
+    # about the cone apex. We can do a bunch of operations on 1D vectors and then
+    # form the outer product itself. So the rendering still always gets curvilinear inputs,
+    # just that some intermediates are much faster to compute for input rectilinear grids.
+    factored = conic_to_cylindrical(transformer.source_crs, transformer.target_crs)
+    if factored is not None:
+        rectilinear = inx.ndim == 1 and iny.ndim == 1
+        convert = factored.transform_grid if rectilinear else factored.transform
+        result = await async_run(convert, inx.data, iny.data)
+        if result is not None:
+            dims = inx.dims + iny.dims if rectilinear else inx.dims
+            coords = {inx.name: inx.variable, iny.name: iny.variable}
+            newX = xr.DataArray(result[0], dims=dims, coords=coords, name=inx.name)
+            newY = xr.DataArray(result[1], dims=dims, coords=coords, name=iny.name)
+            _clamp_infinite(newX.data)
+            _clamp_infinite(newY.data)
+            return newX, newY
 
     # Broadcast coordinates
     # FIXME: dropping indexes is a workaround for broadcasting RasterIndex
@@ -834,14 +787,14 @@ def polygons_from_rings(rings: np.ndarray):
     return PolygonArray(polys)
 
 
-@numba.njit(parallel=True, cache=True, boundscheck=False)
+@numba.njit(nogil=True, cache=True, boundscheck=False)
 def fill_rings_from_corners(out, corner_x, corner_y):
     """Fill a (n0, n1, 5, 2) ring array from a (n0+1, n1+1) corner grid.
 
     Ring order: (i,j), (i,j+1), (i+1,j+1), (i+1,j), (i,j) [close].
     """
     n0, n1 = out.shape[0], out.shape[1]
-    for i in numba.prange(n0):  # ty: ignore[not-iterable]
+    for i in range(n0):
         for j in range(n1):
             out[i, j, 0, 0] = corner_x[i, j]
             out[i, j, 0, 1] = corner_y[i, j]
@@ -974,7 +927,7 @@ def create_listed_colormap_from_dict(
     return colors
 
 
-@numba.jit(nopython=True, parallel=True, cache=True)
+@numba.jit(nopython=True, parallel=NUMBA_PARALLEL, nogil=True, cache=True)
 def _coarsen_nanmean_2d(arr, fy, fx, out):
     """Coarsen with nanmean, handling incomplete edge windows."""
     ny_out, nx_out = out.shape
@@ -1018,8 +971,7 @@ def coarsen_mean_pad(da: xr.DataArray, factors: dict[str, int]) -> xr.DataArray:
 
     fy, fx = tuple(factors.get(str(dim), 1) for dim in dims)
     out = np.empty((math.ceil(H / fy), math.ceil(W / fx)), dtype=np.float64)
-    with NUMBA_THREADING_LOCK:
-        _coarsen_nanmean_2d(arr, fy, fx, out)
+    _coarsen_nanmean_2d(arr, fy, fx, out)
     return xr.DataArray(out, dims=dims, name=da.name)
 
 

@@ -52,11 +52,13 @@ from xpublish_tiles.lib import (
     sum_tuples,
     timedelta_to_iso8601,
     transform_coordinates,
-    transformer_from_crs,
     unwrap,
     validate_colormap_for_datatype,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
+from xpublish_tiles.projections import (
+    transformer_from_crs,
+)
 from xpublish_tiles.types import (
     ContinuousData,
     DataType,

@@ -17,12 +17,14 @@ from xpublish_tiles.config import config
 from xpublish_tiles.lib import (
     apply_range_colors,
     coarsen_mean_pad,
-    epsg4326to3857,
     timedelta_to_iso8601,
     transform_chunk,
     transform_coordinates,
 )
 from xpublish_tiles.pipeline import _parse_timedelta
+from xpublish_tiles.projections import (
+    epsg4326to3857,
+)
 
 
 @given(
