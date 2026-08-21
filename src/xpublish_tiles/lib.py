@@ -523,14 +523,14 @@ async def transform_coordinates(
         return inx.copy(data=newx), iny.copy(data=newy)
 
     # A conic source into a cylindrical target factors through polar coordinates
-    # about the cone apex. Rectilinear input never gets broadcast: the kernel
-    # forms the outer product itself.
+    # about the cone apex. We can do a bunch of operations on 1D vectors and then
+    # form the outer product itself. So the rendering still always gets curvilinear inputs,
+    # just that some intermediates are much faster to compute for input rectilinear grids.
     factored = conic_to_cylindrical(transformer.source_crs, transformer.target_crs)
     if factored is not None:
         rectilinear = inx.ndim == 1 and iny.ndim == 1
-        result = await async_run(
-            partial(factored.transform, grid=rectilinear), inx.data, iny.data
-        )
+        convert = factored.transform_grid if rectilinear else factored.transform
+        result = await async_run(convert, inx.data, iny.data)
         if result is not None:
             dims = inx.dims + iny.dims if rectilinear else inx.dims
             coords = {inx.name: inx.variable, iny.name: iny.variable}
