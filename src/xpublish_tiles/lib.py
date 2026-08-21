@@ -29,6 +29,7 @@ import xarray as xr
 from xpublish_tiles.config import config
 from xpublish_tiles.projections import (
     WEB_MERCATOR,
+    conic_to_cylindrical,
     epsg4326to3857,
     has_null_datum_shift,
     is_degree_geographic,
@@ -520,6 +521,24 @@ async def transform_coordinates(
         _clamp_infinite(newx)
         _clamp_infinite(newy)
         return inx.copy(data=newx), iny.copy(data=newy)
+
+    # A conic source into a cylindrical target factors through polar coordinates
+    # about the cone apex. Rectilinear input never gets broadcast: the kernel
+    # forms the outer product itself.
+    factored = conic_to_cylindrical(transformer.source_crs, transformer.target_crs)
+    if factored is not None:
+        rectilinear = inx.ndim == 1 and iny.ndim == 1
+        result = await async_run(
+            partial(factored.transform, grid=rectilinear), inx.data, iny.data
+        )
+        if result is not None:
+            dims = inx.dims + iny.dims if rectilinear else inx.dims
+            coords = {inx.name: inx.variable, iny.name: iny.variable}
+            newX = xr.DataArray(result[0], dims=dims, coords=coords, name=inx.name)
+            newY = xr.DataArray(result[1], dims=dims, coords=coords, name=iny.name)
+            _clamp_infinite(newX.data)
+            _clamp_infinite(newY.data)
+            return newX, newY
 
     # Broadcast coordinates
     # FIXME: dropping indexes is a workaround for broadcasting RasterIndex
