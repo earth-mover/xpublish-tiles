@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import xarray as xr
-from xpublish_tiles.testing.datasets import GEOZARR_MULTISCALE
+from xpublish_tiles.testing.datasets import EU3035, GEOZARR_MULTISCALE
 from xpublish_tiles.xpublish.wms import WMSPlugin
 
 
@@ -474,6 +474,52 @@ def test_get_map_opaque_bgcolor(xpublish_client):
     image = Image.open(io.BytesIO(response.content))
     assert image.mode == "RGB"
     assert image.getpixel((64, 2)) == (0, 0, 255)
+
+
+def test_get_map_native_crs_eu3035():
+    """Data on a projected native CRS is advertised and renderable natively.
+
+    EPSG:3035 is north-first, so both the advertised BoundingBox and the
+    GetMap BBOX use y,x order per WMS 1.3.0.
+    """
+    ds = EU3035.create()
+    rest = xpublish.Rest({"eu3035": ds}, plugins={"wms": WMSPlugin()})
+    client = TestClient(rest.app)
+
+    capabilities = client.get(
+        "/datasets/eu3035/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetCapabilities",
+            "format": "json",
+        },
+    )
+    layer = capabilities.json()["capability"]["layer"]["layers"][0]
+    assert "EPSG:3035" in layer["crs"]
+    native_bbox = next(b for b in layer["bounding_box"] if b["crs"] == "EPSG:3035")
+    # north-first: minx/miny attributes hold northing/easting
+    assert native_bbox["minx"] == pytest.approx(1802800.0)
+    assert native_bbox["miny"] == pytest.approx(2635780.0)
+    assert native_bbox["maxx"] == pytest.approx(5416000.0)
+    assert native_bbox["maxy"] == pytest.approx(6248980.0)
+
+    response = client.get(
+        "/datasets/eu3035/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetMap",
+            "layers": "foo",
+            "styles": "raster/viridis",
+            "crs": "EPSG:3035",
+            "bbox": f"{native_bbox['minx']},{native_bbox['miny']},{native_bbox['maxx']},{native_bbox['maxy']}",
+            "width": 256,
+            "height": 256,
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
 
 
 @pytest.mark.parametrize(
