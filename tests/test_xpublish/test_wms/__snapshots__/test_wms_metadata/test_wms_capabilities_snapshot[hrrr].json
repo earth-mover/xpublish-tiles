@@ -28,11 +28,11 @@
           "attributes": [
             {
               "name": "valid_max",
-              "value": "1"
+              "value": "1.0"
             },
             {
               "name": "valid_min",
-              "value": "-1"
+              "value": "-1.0"
             }
           ],
           "bounding_box": "<elided>",

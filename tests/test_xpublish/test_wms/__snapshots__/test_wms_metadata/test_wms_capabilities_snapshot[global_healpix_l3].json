@@ -10,11 +10,11 @@
       "attributes": [
         {
           "name": "valid_min",
-          "value": "-0.9965217285917831"
+          "value": "-0.996522"
         },
         {
           "name": "valid_max",
-          "value": "0.9965217285917831"
+          "value": "0.996522"
         },
         {
           "name": "name",
@@ -40,11 +40,11 @@
             },
             {
               "name": "valid_min",
-              "value": "-0.9965217285917831"
+              "value": "-0.996522"
             },
             {
               "name": "valid_max",
-              "value": "0.9965217285917831"
+              "value": "0.996522"
             }
           ],
           "bounding_box": "<elided>",

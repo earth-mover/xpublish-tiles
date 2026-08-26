@@ -35,13 +35,22 @@ def _make_client(fixture) -> TestClient:
     return TestClient(rest.app)
 
 
+def _round_stringified_float(v: str) -> str:
+    try:
+        return str(round(float(v), 6))
+    except ValueError:
+        return v
+
+
 def _normalize_for_snapshot(obj):
     """Normalize a GetCapabilities response so snapshots are stable across platforms.
 
     Bounding-box values come from pyproj reprojections that diverge between
     PROJ versions on macOS vs Linux, style ordering follows entry-point load
     order, and dimension value lists are huge — elide/sort them and keep the
-    rest of the structure.
+    rest of the structure. Attribute and dimension-default values are
+    stringified floats whose last digits differ across platforms when computed
+    from data (e.g. valid_max), so round those too.
     """
     if isinstance(obj, dict):
         out = {}
@@ -52,6 +61,8 @@ def _normalize_for_snapshot(obj):
                 out[k] = sorted(s["name"] for s in v)
             elif k == "values" and isinstance(v, str):
                 out[k] = f"<{len(v.split(','))} values>" if v else v
+            elif k in ("value", "default") and isinstance(v, str):
+                out[k] = _round_stringified_float(v)
             else:
                 out[k] = _normalize_for_snapshot(v)
         return out
