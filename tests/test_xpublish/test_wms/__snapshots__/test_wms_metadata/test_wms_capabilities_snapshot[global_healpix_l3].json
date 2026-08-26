@@ -1,0 +1,217 @@
+{
+  "capability": {
+    "exception": [
+      "XML",
+      "INIMAGE",
+      "BLANK"
+    ],
+    "layer": {
+      "abstract": "All available data layers with raster visualization styles",
+      "attributes": [
+        {
+          "name": "valid_min",
+          "value": "-0.996522"
+        },
+        {
+          "name": "valid_max",
+          "value": "0.996522"
+        },
+        {
+          "name": "name",
+          "value": "global_healpix_l3"
+        },
+        {
+          "name": "_xpublish_id",
+          "value": "global_healpix_l3"
+        }
+      ],
+      "bounding_box": "<elided>",
+      "dimensions": [],
+      "layers": [
+        {
+          "attributes": [
+            {
+              "name": "grid_mapping",
+              "value": "healpix"
+            },
+            {
+              "name": "coordinates",
+              "value": "lon lat"
+            },
+            {
+              "name": "valid_min",
+              "value": "-0.996522"
+            },
+            {
+              "name": "valid_max",
+              "value": "0.996522"
+            }
+          ],
+          "bounding_box": "<elided>",
+          "crs": [
+            "CRS:84",
+            "EPSG:4326",
+            "EPSG:3857"
+          ],
+          "dimensions": [],
+          "ex_geographic_bounding_box": "<elided>",
+          "layers": [],
+          "name": "foo",
+          "no_subsets": false,
+          "opaque": false,
+          "queryable": false,
+          "styles": [
+            "polygons/Accent",
+            "polygons/Blues",
+            "polygons/BrBG",
+            "polygons/BuGn",
+            "polygons/BuPu",
+            "polygons/CMRmap",
+            "polygons/Dark2",
+            "polygons/GnBu",
+            "polygons/Grays",
+            "polygons/Greens",
+            "polygons/Greys",
+            "polygons/OrRd",
+            "polygons/Oranges",
+            "polygons/PRGn",
+            "polygons/Paired",
+            "polygons/Pastel1",
+            "polygons/Pastel2",
+            "polygons/PiYG",
+            "polygons/PuBu",
+            "polygons/PuBuGn",
+            "polygons/PuOr",
+            "polygons/PuRd",
+            "polygons/Purples",
+            "polygons/RdBu",
+            "polygons/RdGy",
+            "polygons/RdPu",
+            "polygons/RdYlBu",
+            "polygons/RdYlGn",
+            "polygons/Reds",
+            "polygons/Set1",
+            "polygons/Set2",
+            "polygons/Set3",
+            "polygons/Spectral",
+            "polygons/Wistia",
+            "polygons/YlGn",
+            "polygons/YlGnBu",
+            "polygons/YlOrBr",
+            "polygons/YlOrRd",
+            "polygons/afmhot",
+            "polygons/autumn",
+            "polygons/berlin",
+            "polygons/binary",
+            "polygons/bone",
+            "polygons/brg",
+            "polygons/bwr",
+            "polygons/cividis",
+            "polygons/cool",
+            "polygons/coolwarm",
+            "polygons/copper",
+            "polygons/cubehelix",
+            "polygons/custom",
+            "polygons/default",
+            "polygons/flag",
+            "polygons/gist_earth",
+            "polygons/gist_gray",
+            "polygons/gist_grey",
+            "polygons/gist_heat",
+            "polygons/gist_ncar",
+            "polygons/gist_rainbow",
+            "polygons/gist_stern",
+            "polygons/gist_yarg",
+            "polygons/gist_yerg",
+            "polygons/gnuplot",
+            "polygons/gnuplot2",
+            "polygons/gray",
+            "polygons/grey",
+            "polygons/hot",
+            "polygons/hsv",
+            "polygons/inferno",
+            "polygons/jet",
+            "polygons/magma",
+            "polygons/managua",
+            "polygons/nipy_spectral",
+            "polygons/ocean",
+            "polygons/pink",
+            "polygons/plasma",
+            "polygons/prism",
+            "polygons/rainbow",
+            "polygons/seismic",
+            "polygons/spring",
+            "polygons/summer",
+            "polygons/tab10",
+            "polygons/tab20",
+            "polygons/tab20b",
+            "polygons/tab20c",
+            "polygons/terrain",
+            "polygons/turbo",
+            "polygons/twilight",
+            "polygons/twilight_shifted",
+            "polygons/vanimo",
+            "polygons/viridis",
+            "polygons/winter"
+          ],
+          "title": "foo"
+        }
+      ],
+      "no_subsets": false,
+      "opaque": false,
+      "queryable": false,
+      "styles": [],
+      "title": "Dataset Layers"
+    },
+    "request": {
+      "get_capabilities": {
+        "dcp_type": {
+          "http": {
+            "get": {
+              "href": "http://testserver/datasets/global_healpix_l3/wms",
+              "type": "simple"
+            }
+          }
+        },
+        "formats": [
+          {
+            "format": "text/xml"
+          },
+          {
+            "format": "application/json"
+          }
+        ]
+      },
+      "get_map": {
+        "dcp_type": {
+          "http": {
+            "get": {
+              "href": "http://testserver/datasets/global_healpix_l3/wms",
+              "type": "simple"
+            }
+          }
+        },
+        "formats": [
+          {
+            "format": "image/png"
+          },
+          {
+            "format": "image/jpeg"
+          }
+        ]
+      }
+    }
+  },
+  "service": {
+    "abstract": "Web Map Service powered by XPublish and xarray",
+    "access_constraints": "none",
+    "fees": "none",
+    "name": "WMS",
+    "online_resource": {
+      "href": "http://testserver/datasets/global_healpix_l3/wms",
+      "type": "simple"
+    },
+    "title": "XPublish WMS Service"
+  },
+  "version": "1.3.0"
+}

@@ -8,12 +8,36 @@ from xpublish_tiles.lib import (
 )
 from xpublish_tiles.types import ContinuousData, DiscreteData, ImageFormat
 from xpublish_tiles.validators import (
+    validate_bgcolor,
     validate_colormap,
     validate_colorscalerange,
     validate_crs,
     validate_image_format,
     validate_style,
 )
+
+
+class TestValidateBgcolor:
+    def test_none_input(self):
+        assert validate_bgcolor(None) is None
+
+    def test_wms_hex_format(self):
+        assert validate_bgcolor("0x0000FF") == "#0000FF"
+
+    def test_hash_hex_format(self):
+        assert validate_bgcolor("#00ff00") == "#00ff00"
+
+    def test_invalid_named_color(self):
+        with pytest.raises(ValueError, match="0xRRGGBB"):
+            validate_bgcolor("blue")
+
+    def test_invalid_short_hex(self):
+        with pytest.raises(ValueError, match="0xRRGGBB"):
+            validate_bgcolor("0x12345")
+
+    def test_invalid_hex_digits(self):
+        with pytest.raises(ValueError, match="0xRRGGBB"):
+            validate_bgcolor("0xZZZZZZ")
 
 
 class TestValidateColorscalerange:

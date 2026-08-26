@@ -18,6 +18,7 @@ from pyproj.aoi import BBox
 from xpublish_tiles.types import ImageFormat
 from xpublish_tiles.validators import (
     validate_bbox,
+    validate_bgcolor,
     validate_colormap,
     validate_colorscalerange,
     validate_crs,
@@ -27,9 +28,22 @@ from xpublish_tiles.validators import (
 )
 
 
+def crs_is_north_first(crs: CRS) -> bool:
+    """WMS 1.3.0 orders coordinates by CRS axis order, so north-first CRSes
+    like EPSG:4326 exchange lat,lon pairs."""
+    return bool(crs.axis_info) and crs.axis_info[0].direction.lower() in (
+        "north",
+        "south",
+    )
+
+
 def _parse_crs(value: CRS | str) -> CRS:
     if isinstance(value, CRS):
         return value
+
+    # pyproj does not recognize the WMS-spelled "CRS:84" authority code
+    if value.upper() == "CRS:84":
+        value = "OGC:CRS84"
 
     parsed = validate_crs(value)
     if parsed is None:
@@ -177,6 +191,19 @@ class WMSGetMapQuery(WMSBaseQuery):
         ImageFormat.PNG,
         description="The format of the image to return",
     )
+    transparent: bool = Field(
+        True,
+        description="Whether areas without data should be transparent. Only honored for PNG output; JPEG is always opaque",
+    )
+    bgcolor: str = Field(
+        "0xFFFFFF",
+        validate_default=True,
+        description="Background color for non-transparent maps in 0xRRGGBB format",
+    )
+    exceptions: Literal["XML", "INIMAGE", "BLANK"] = Field(
+        "XML",
+        description="Error reporting format. XML returns a ServiceExceptionReport, INIMAGE draws the error into the map image, BLANK returns an empty image",
+    )
 
     @field_validator("colorscalerange", mode="before")
     @classmethod
@@ -211,6 +238,16 @@ class WMSGetMapQuery(WMSBaseQuery):
     def validate_belowmincolor(cls, v: str | None) -> str | None:
         return validate_range_color(v)
 
+    @field_validator("bgcolor", mode="before")
+    @classmethod
+    def validate_bgcolor(cls, v: str | None) -> str | None:
+        return validate_bgcolor(v)
+
+    @field_validator("exceptions", mode="before")
+    @classmethod
+    def validate_exceptions(cls, v: str | None) -> str | None:
+        return v.upper() if isinstance(v, str) else v
+
     @model_validator(mode="after")
     def validate_colormap_requires_custom_style(self):
         """Validate that colormap requires style to be raster/custom."""
@@ -222,6 +259,19 @@ class WMSGetMapQuery(WMSBaseQuery):
                 raise ValueError(
                     f"When 'colormap' parameter is provided, 'styles' must be 'raster/custom'. Got styles='{style_str}' instead."
                 )
+        return self
+
+    @model_validator(mode="after")
+    def interpret_bbox_axis_order(self):
+        """WMS 1.3.0 BBOX coordinates follow the CRS axis order, so north-first
+        CRSes like EPSG:4326 send miny,minx,maxy,maxx."""
+        if self.version == "1.3.0" and crs_is_north_first(self.crs):
+            self.bbox = BBox(
+                west=self.bbox.south,
+                south=self.bbox.west,
+                east=self.bbox.north,
+                north=self.bbox.east,
+            )
         return self
 
 
@@ -294,6 +344,14 @@ class WMSGetLegendGraphicQuery(WMSBaseQuery):
         None,
         description="Custom colormap as JSON-encoded dictionary with numeric keys (0-255) and hex color values (#RRGGBB). When provided, overrides any colormap from the styles parameter.",
     )
+    abovemaxcolor: str | None = Field(
+        None,
+        description="Color for values above the max of colorscalerange. Accepted values: 'extend' (use max palette color), 'transparent', hex color (#RRGGBB or #RRGGBBAA), or named color.",
+    )
+    belowmincolor: str | None = Field(
+        None,
+        description="Color for values below the min of colorscalerange. Accepted values: 'extend' (use min palette color), 'transparent', hex color (#RRGGBB or #RRGGBBAA), or named color.",
+    )
     styles: tuple[str, str] = Field(
         ("raster", "default"),
         description="Style to use for the query. Defaults to raster/default. Default may be replaced by the name of any colormap defined by matplotlibs defaults",
@@ -312,6 +370,16 @@ class WMSGetLegendGraphicQuery(WMSBaseQuery):
     @classmethod
     def validate_colormap(cls, v: str | dict | None) -> dict[str, str] | None:
         return validate_colormap(v)
+
+    @field_validator("abovemaxcolor", mode="before")
+    @classmethod
+    def validate_abovemaxcolor(cls, v: str | None) -> str | None:
+        return validate_range_color(v)
+
+    @field_validator("belowmincolor", mode="before")
+    @classmethod
+    def validate_belowmincolor(cls, v: str | None) -> str | None:
+        return validate_range_color(v)
 
     @field_validator("styles", mode="before")
     @classmethod
@@ -369,11 +437,14 @@ class WMSQuery(RootModel):
         height: int,
         bbox: str | BBox | None = None,
         styles: str | tuple[str, str] = ("raster", "default"),
-        crs: Literal["EPSG:4326", "EPSG:3857"] = "EPSG:4326",
+        crs: Literal["EPSG:4326", "EPSG:3857", "CRS:84"] = "EPSG:4326",
         time: str | None = None,
         elevation: str | None = None,
         colorscalerange: str | tuple[float, float] | None = None,
         autoscale: bool = False,
+        transparent: bool = True,
+        bgcolor: str = "0xFFFFFF",
+        exceptions: Literal["XML", "INIMAGE", "BLANK"] = "XML",
     ) -> None: ...
 
     @overload
@@ -459,6 +530,11 @@ WMS_FILTERED_QUERY_PARAMS = {
     "range",
     "x",
     "y",
+    "format",
+    "show_label",
+    "transparent",
+    "bgcolor",
+    "exceptions",
 }
 
 
@@ -520,11 +596,18 @@ class WMSDimensionResponse(BaseXmlModel, tag="Dimension"):
     values: str
 
 
+class WMSLegendURLResponse(BaseXmlModel, tag="LegendURL"):
+    width: int = attr(name="width")
+    height: int = attr(name="height")
+    format: str = element(tag="Format")
+    online_resource: WMSOnlineResourceResponse = element(tag="OnlineResource")
+
+
 class WMSStyleResponse(BaseXmlModel, tag="Style"):
     name: str = element(tag="Name")
     title: str = element(tag="Title")
     abstract: str | None = element(tag="Abstract", default=None)
-    legend_url: WMSOnlineResourceResponse | None = element(tag="LegendURL", default=None)
+    legend_url: WMSLegendURLResponse | None = element(tag="LegendURL", default=None)
 
 
 class WMSAttributeResponse(BaseXmlModel, tag="Attribute"):
@@ -627,3 +710,17 @@ class WMSCapabilitiesResponse(
 
     service: WMSServiceResponse = element(tag="Service")
     capability: WMSCapabilityResponse = element(tag="Capability")
+
+
+class WMSServiceExceptionResponse(BaseXmlModel, tag="ServiceException"):
+    code: str | None = attr(name="code", default=None)
+    text: str
+
+
+class WMSServiceExceptionReportResponse(
+    BaseXmlModel,
+    tag="ServiceExceptionReport",
+    nsmap={"": "http://www.opengis.net/ogc"},
+):
+    version: str = attr(name="version", default="1.3.0")
+    exceptions: list[WMSServiceExceptionResponse] = element(tag="ServiceException")

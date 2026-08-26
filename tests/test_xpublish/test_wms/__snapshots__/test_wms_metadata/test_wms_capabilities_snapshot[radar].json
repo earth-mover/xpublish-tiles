@@ -1,0 +1,209 @@
+{
+  "capability": {
+    "exception": [
+      "XML",
+      "INIMAGE",
+      "BLANK"
+    ],
+    "layer": {
+      "abstract": "All available data layers with raster visualization styles",
+      "attributes": [
+        {
+          "name": "name",
+          "value": "radar"
+        },
+        {
+          "name": "_xpublish_id",
+          "value": "radar"
+        }
+      ],
+      "bounding_box": "<elided>",
+      "dimensions": [],
+      "layers": [
+        {
+          "attributes": [
+            {
+              "name": "long_name",
+              "value": "Equivalent reflectivity factor H"
+            },
+            {
+              "name": "units",
+              "value": "dBZ"
+            },
+            {
+              "name": "valid_min",
+              "value": "-10.0"
+            },
+            {
+              "name": "valid_max",
+              "value": "70.0"
+            }
+          ],
+          "bounding_box": "<elided>",
+          "crs": [
+            "CRS:84",
+            "EPSG:4326",
+            "EPSG:3857"
+          ],
+          "dimensions": [],
+          "ex_geographic_bounding_box": "<elided>",
+          "layers": [],
+          "name": "foo",
+          "no_subsets": false,
+          "opaque": false,
+          "queryable": false,
+          "styles": [
+            "raster/Accent",
+            "raster/Blues",
+            "raster/BrBG",
+            "raster/BuGn",
+            "raster/BuPu",
+            "raster/CMRmap",
+            "raster/Dark2",
+            "raster/GnBu",
+            "raster/Grays",
+            "raster/Greens",
+            "raster/Greys",
+            "raster/OrRd",
+            "raster/Oranges",
+            "raster/PRGn",
+            "raster/Paired",
+            "raster/Pastel1",
+            "raster/Pastel2",
+            "raster/PiYG",
+            "raster/PuBu",
+            "raster/PuBuGn",
+            "raster/PuOr",
+            "raster/PuRd",
+            "raster/Purples",
+            "raster/RdBu",
+            "raster/RdGy",
+            "raster/RdPu",
+            "raster/RdYlBu",
+            "raster/RdYlGn",
+            "raster/Reds",
+            "raster/Set1",
+            "raster/Set2",
+            "raster/Set3",
+            "raster/Spectral",
+            "raster/Wistia",
+            "raster/YlGn",
+            "raster/YlGnBu",
+            "raster/YlOrBr",
+            "raster/YlOrRd",
+            "raster/afmhot",
+            "raster/autumn",
+            "raster/berlin",
+            "raster/binary",
+            "raster/bone",
+            "raster/brg",
+            "raster/bwr",
+            "raster/cividis",
+            "raster/cool",
+            "raster/coolwarm",
+            "raster/copper",
+            "raster/cubehelix",
+            "raster/custom",
+            "raster/default",
+            "raster/flag",
+            "raster/gist_earth",
+            "raster/gist_gray",
+            "raster/gist_grey",
+            "raster/gist_heat",
+            "raster/gist_ncar",
+            "raster/gist_rainbow",
+            "raster/gist_stern",
+            "raster/gist_yarg",
+            "raster/gist_yerg",
+            "raster/gnuplot",
+            "raster/gnuplot2",
+            "raster/gray",
+            "raster/grey",
+            "raster/hot",
+            "raster/hsv",
+            "raster/inferno",
+            "raster/jet",
+            "raster/magma",
+            "raster/managua",
+            "raster/nipy_spectral",
+            "raster/ocean",
+            "raster/pink",
+            "raster/plasma",
+            "raster/prism",
+            "raster/rainbow",
+            "raster/seismic",
+            "raster/spring",
+            "raster/summer",
+            "raster/tab10",
+            "raster/tab20",
+            "raster/tab20b",
+            "raster/tab20c",
+            "raster/terrain",
+            "raster/turbo",
+            "raster/twilight",
+            "raster/twilight_shifted",
+            "raster/vanimo",
+            "raster/viridis",
+            "raster/winter"
+          ],
+          "title": "Equivalent reflectivity factor H"
+        }
+      ],
+      "no_subsets": false,
+      "opaque": false,
+      "queryable": false,
+      "styles": [],
+      "title": "Dataset Layers"
+    },
+    "request": {
+      "get_capabilities": {
+        "dcp_type": {
+          "http": {
+            "get": {
+              "href": "http://testserver/datasets/radar/wms",
+              "type": "simple"
+            }
+          }
+        },
+        "formats": [
+          {
+            "format": "text/xml"
+          },
+          {
+            "format": "application/json"
+          }
+        ]
+      },
+      "get_map": {
+        "dcp_type": {
+          "http": {
+            "get": {
+              "href": "http://testserver/datasets/radar/wms",
+              "type": "simple"
+            }
+          }
+        },
+        "formats": [
+          {
+            "format": "image/png"
+          },
+          {
+            "format": "image/jpeg"
+          }
+        ]
+      }
+    }
+  },
+  "service": {
+    "abstract": "Web Map Service powered by XPublish and xarray",
+    "access_constraints": "none",
+    "fees": "none",
+    "name": "WMS",
+    "online_resource": {
+      "href": "http://testserver/datasets/radar/wms",
+      "type": "simple"
+    },
+    "title": "XPublish WMS Service"
+  },
+  "version": "1.3.0"
+}

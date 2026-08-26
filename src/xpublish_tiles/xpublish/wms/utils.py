@@ -1,12 +1,15 @@
 """Utilities for WMS dataset introspection and metadata extraction"""
 
+import math
 from typing import Any
+from urllib.parse import quote
 
 import numpy as np
+from pyproj import CRS
 
 import xarray as xr
-from xpublish_tiles.grids import guess_grid_system
-from xpublish_tiles.projections import transformer_from_crs
+from xpublish_tiles.grids import GridSystem, detect_grids
+from xpublish_tiles.utils import normalize_tilejson_bounds
 from xpublish_tiles.xpublish.wms.types import (
     WMSAttributeResponse,
     WMSBoundingBoxResponse,
@@ -15,15 +18,25 @@ from xpublish_tiles.xpublish.wms.types import (
     WMSDCPTypeResponse,
     WMSDimensionResponse,
     WMSFormatResponse,
+    WMSGeographicBoundingBoxResponse,
     WMSGetCapabilitiesOperationResponse,
     WMSGetMapOperationResponse,
     WMSHTTPResponse,
     WMSLayerResponse,
+    WMSLegendURLResponse,
     WMSOnlineResourceResponse,
     WMSRequestResponse,
     WMSServiceResponse,
     WMSStyleResponse,
+    crs_is_north_first,
 )
+
+LEGEND_WIDTH = 100
+LEGEND_HEIGHT = 100
+
+CRS84 = CRS.from_user_input("OGC:CRS84")
+EPSG4326 = CRS.from_epsg(4326)
+EPSG3857 = CRS.from_epsg(3857)
 
 
 def convert_attributes_to_wms(attrs: dict[str, Any]) -> list[WMSAttributeResponse]:
@@ -54,8 +67,15 @@ def convert_attributes_to_wms(attrs: dict[str, Any]) -> list[WMSAttributeRespons
     return wms_attrs
 
 
-def extract_dimensions(dataset: xr.Dataset) -> list[WMSDimensionResponse]:
+def extract_dimensions(
+    dataset: xr.Dataset, var_dims: set[str] | None = None
+) -> list[WMSDimensionResponse]:
     """Extract all dimensions from dataset coordinates.
+
+    Args:
+        dataset: xarray Dataset
+        var_dims: When given, only include dimensions in this set so layers
+            don't advertise dimensions their variable doesn't have
 
     Returns:
         List of WMSDimensionResponse objects for all non-spatial dimensions
@@ -68,6 +88,8 @@ def extract_dimensions(dataset: xr.Dataset) -> list[WMSDimensionResponse]:
     for coord_name, coord in dataset.coords.items():
         coord_name_str = str(coord_name)
         if coord_name_str.lower() in spatial_coords:
+            continue
+        if var_dims is not None and coord_name_str not in var_dims:
             continue
         # Skip scalar coordinates (e.g., radar site latitude/longitude/altitude)
         if coord.ndim == 0:
@@ -174,10 +196,41 @@ def extract_dimensions(dataset: xr.Dataset) -> list[WMSDimensionResponse]:
     return dimensions
 
 
+def _style_response(
+    style_info: dict[str, str], base_url: str | None, layer_name: str | None
+) -> WMSStyleResponse:
+    legend_url = None
+    if base_url is not None and layer_name is not None:
+        href = (
+            f"{base_url}?service=WMS&version=1.3.0&request=GetLegendGraphic"
+            f"&layer={quote(layer_name)}&styles={quote(style_info['id'])}"
+            f"&width={LEGEND_WIDTH}&height={LEGEND_HEIGHT}&format=image/png"
+        )
+        legend_url = WMSLegendURLResponse(
+            width=LEGEND_WIDTH,
+            height=LEGEND_HEIGHT,
+            format="image/png",
+            online_resource=WMSOnlineResourceResponse(href=href),
+        )
+    return WMSStyleResponse(
+        name=style_info["id"],
+        title=style_info["title"],
+        abstract=style_info["description"],
+        legend_url=legend_url,
+    )
+
+
 def get_available_wms_styles(
     dataset: xr.Dataset | None = None,
+    *,
+    base_url: str | None = None,
+    layer_name: str | None = None,
 ) -> list[WMSStyleResponse]:
-    """Get all available styles from registered renderers, filtered for ``dataset``'s grid."""
+    """Get all available styles from registered renderers, filtered for ``dataset``'s grid.
+
+    When ``base_url`` and ``layer_name`` are given, each style carries a
+    LegendURL pointing at GetLegendGraphic for that layer.
+    """
     from xpublish_tiles.render import RenderRegistry
     from xpublish_tiles.xpublish.tiles.metadata import allowed_styles
 
@@ -196,26 +249,82 @@ def get_available_wms_styles(
         default_style_info["description"] = (
             f"Default {renderer_cls.style_id()} rendering (alias for {default_variant})"
         )
-        styles.append(
-            WMSStyleResponse(
-                name=default_style_info["id"],
-                title=default_style_info["title"],
-                abstract=default_style_info["description"],
-            )
-        )
+        styles.append(_style_response(default_style_info, base_url, layer_name))
 
         # Add all actual variants
         for variant in renderer_cls.supported_variants():
             style_info = renderer_cls.describe_style(variant)
-            styles.append(
-                WMSStyleResponse(
-                    name=style_info["id"],
-                    title=style_info["title"],
-                    abstract=style_info["description"],
+            styles.append(_style_response(style_info, base_url, layer_name))
+
+    return styles
+
+
+def _geographic_bounds(
+    bounds: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    west, south, east, north = bounds
+    west = west if math.isfinite(west) else -180.0
+    south = south if math.isfinite(south) else -90.0
+    east = east if math.isfinite(east) else 180.0
+    north = north if math.isfinite(north) else 90.0
+    # 0..360-convention grids keep their native longitudes through the
+    # identity transform to EPSG:4326; WMS wants [-180, 180]
+    west, south, east, north = normalize_tilejson_bounds((west, south, east, north))
+    return west, max(south, -90.0), east, min(north, 90.0)
+
+
+def _bounding_box_response(
+    crs_id: str, crs: CRS, bounds: tuple[float, float, float, float]
+) -> WMSBoundingBoxResponse:
+    west, south, east, north = bounds
+    if crs_is_north_first(crs):
+        return WMSBoundingBoxResponse(
+            crs=crs_id, minx=south, miny=west, maxx=north, maxy=east
+        )
+    return WMSBoundingBoxResponse(
+        crs=crs_id, minx=west, miny=south, maxx=east, maxy=north
+    )
+
+
+def _layer_bounds(
+    grid: GridSystem,
+) -> tuple[list[str], WMSGeographicBoundingBoxResponse, list[WMSBoundingBoxResponse]]:
+    geo_bounds = _geographic_bounds(grid.transform_bbox("EPSG:4326"))
+    west, south, east, north = geo_bounds
+
+    ex_geographic = WMSGeographicBoundingBoxResponse(
+        west_bound_longitude=west,
+        east_bound_longitude=east,
+        south_bound_latitude=south,
+        north_bound_latitude=north,
+    )
+
+    supported_crs = ["CRS:84", "EPSG:4326", "EPSG:3857"]
+    bounding_boxes = [
+        _bounding_box_response("CRS:84", CRS84, geo_bounds),
+        _bounding_box_response("EPSG:4326", EPSG4326, geo_bounds),
+    ]
+
+    mercator_bounds = grid.transform_bbox("EPSG:3857")
+    if all(map(math.isfinite, mercator_bounds)):
+        bounding_boxes.append(
+            _bounding_box_response("EPSG:3857", EPSG3857, mercator_bounds)
+        )
+
+    authority = grid.crs.to_authority()
+    if authority is not None:
+        native_crs = ":".join(authority)
+        if native_crs not in supported_crs:
+            supported_crs.append(native_crs)
+            bounding_boxes.append(
+                _bounding_box_response(
+                    native_crs,
+                    grid.crs,
+                    (grid.bbox.west, grid.bbox.south, grid.bbox.east, grid.bbox.north),
                 )
             )
 
-    return styles
+    return supported_crs, ex_geographic, bounding_boxes
 
 
 def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]:
@@ -226,56 +335,31 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
         base_url: Base URL for the service
 
     Returns:
-        List of WMSLayerResponse objects for each data variable
+        List of WMSLayerResponse objects for each renderable data variable
     """
     layers = []
 
-    # Extract dimensions
-    dimensions = extract_dimensions(dataset)
-
-    for var_name_, var in dataset.data_vars.items():
+    for var_name_, grid in detect_grids(dataset).items():
         var_name = str(var_name_)
-        # Extract variable metadata
+        var = dataset[var_name]
         title = str(getattr(var, "long_name", var_name))
         abstract = getattr(var, "description", getattr(var, "comment", None))
-
-        # Extract variable attributes
         wms_attributes = convert_attributes_to_wms(var.attrs)
-
-        # Extract geographic bounds
-        grid = guess_grid_system(dataset, var_name)
-        supported_crs = ["EPSG:4326", "EPSG:3857"]
-        supported_bounds = []
-        bounding_boxes = []
-
-        for crs in supported_crs:
-            transformer = transformer_from_crs(crs_from=grid.crs, crs_to=crs)
-            bounds = transformer.transform_bounds(
-                grid.bbox.west, grid.bbox.south, grid.bbox.east, grid.bbox.north
-            )
-            supported_bounds.append(bounds)
-
-        supported_crs.append(grid.crs.to_string())
-        bounding_boxes = [
-            WMSBoundingBoxResponse(
-                crs=grid.crs.to_string(),
-                minx=grid.bbox.west,
-                miny=grid.bbox.south,
-                maxx=grid.bbox.east,
-                maxy=grid.bbox.north,
-            )
-        ]
+        dimensions = extract_dimensions(dataset, set(map(str, var.dims)) - grid.dims)
+        supported_crs, ex_geographic, bounding_boxes = _layer_bounds(grid)
+        styles = get_available_wms_styles(dataset, base_url=base_url, layer_name=var_name)
 
         layer = WMSLayerResponse(
             name=var_name,
             title=title,
             abstract=abstract,
             crs=supported_crs,
+            ex_geographic_bounding_box=ex_geographic,
             bounding_box=bounding_boxes,
             dimensions=dimensions,
             attributes=wms_attributes,
-            styles=[],  # Styles inherited from root layer
-            queryable=True,
+            styles=styles,
+            queryable=False,  # GetFeatureInfo is not implemented yet
             opaque=False,
         )
         layers.append(layer)
@@ -337,11 +421,8 @@ def create_capabilities_response(
         ),
     )
 
-    # Extract layers from dataset
+    # Extract layers from dataset; styles (with legend URLs) live on each layer
     layers = extract_layers(dataset, base_url)
-
-    # Create root layer containing all data layers and styles
-    available_styles = get_available_wms_styles(dataset)
 
     # Extract dataset attributes for root layer
     dataset_wms_attributes = convert_attributes_to_wms(dataset.attrs)
@@ -351,7 +432,6 @@ def create_capabilities_response(
         abstract="All available data layers with raster visualization styles",
         layers=layers,
         attributes=dataset_wms_attributes,
-        styles=available_styles,  # All styles defined at root level
         queryable=False,
     )
 
