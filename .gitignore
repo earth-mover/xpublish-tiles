@@ -210,3 +210,6 @@ __marimo__/
 
 # Version file
 src/xpublish_tiles/_version.py
+
+# Claude Code worktrees
+.claude/worktrees/
