@@ -222,6 +222,28 @@ def validate_color(v: str | None) -> str | None:
         ) from None
 
 
+def validate_bgcolor(v: str | None) -> str | None:
+    """Validate a WMS BGCOLOR value (0xRRGGBB per spec, #RRGGBB also accepted).
+
+    Returns the color normalized to #RRGGBB.
+    """
+    if v is None:
+        return None
+
+    value = v.strip()
+    if value.lower().startswith("0x"):
+        value = f"#{value[2:]}"
+    if not value.startswith("#") or len(value) != 7:
+        raise ValueError(f"bgcolor '{v}' must be a hex color in 0xRRGGBB format")
+    try:
+        int(value[1:], 16)
+    except ValueError:
+        raise ValueError(
+            f"bgcolor '{v}' must be a hex color in 0xRRGGBB format"
+        ) from None
+    return value
+
+
 def validate_colormap(v: str | dict | None) -> dict[str, str] | None:
     """Validate and parse custom colormap parameter.
 

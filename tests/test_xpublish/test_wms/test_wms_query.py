@@ -1,4 +1,5 @@
 import pytest
+from pyproj.aoi import BBox
 
 from xpublish_tiles.types import ImageFormat
 from xpublish_tiles.xpublish.wms.types import (
@@ -118,3 +119,50 @@ def test_wms_query_discriminator():
         styles="raster/default",
     )
     assert isinstance(getlegendgraphic_query.root, WMSGetLegendGraphicQuery)
+
+
+def _getmap_query(**kwargs) -> WMSGetMapQuery:
+    query = WMSQuery(
+        service="WMS",
+        version="1.3.0",
+        request="GetMap",
+        layers="layer1",
+        width=100,
+        height=100,
+        **kwargs,
+    )
+    assert isinstance(query.root, WMSGetMapQuery)
+    return query.root
+
+
+def test_wms_getmap_bbox_axis_order():
+    """WMS 1.3.0 BBOX follows the CRS axis order."""
+    # EPSG:4326 is lat,lon in 1.3.0
+    query = _getmap_query(crs="EPSG:4326", bbox="15,-160,75,-30")
+    assert query.bbox == BBox(west=-160, south=15, east=-30, north=75)
+
+    # CRS:84 and projected CRSes are x,y
+    query = _getmap_query(crs="CRS:84", bbox="-160,15,-30,75")
+    assert query.crs.to_string() == "OGC:CRS84"
+    assert query.bbox == BBox(west=-160, south=15, east=-30, north=75)
+
+    query = _getmap_query(crs="EPSG:3857", bbox="0,1,2,3")
+    assert query.bbox == BBox(west=0, south=1, east=2, north=3)
+
+
+def test_wms_getmap_transparent_bgcolor_exceptions():
+    query = _getmap_query(crs="EPSG:3857", bbox="0,1,2,3")
+    assert query.transparent is True
+    assert query.bgcolor == "#FFFFFF"
+    assert query.exceptions == "XML"
+
+    query = _getmap_query(
+        crs="EPSG:3857",
+        bbox="0,1,2,3",
+        transparent="false",
+        bgcolor="0x0000FF",
+        exceptions="inimage",
+    )
+    assert query.transparent is False
+    assert query.bgcolor == "#0000FF"
+    assert query.exceptions == "INIMAGE"

@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>WMS Image - xpublish-tiles</title>
+        <meta
+            name="viewport"
+            content="initial-scale=1,maximum-scale=1,user-scalable=no"
+        />
+        <link
+            href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+            rel="stylesheet"
+        />
+        <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+            }
+            #map {
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                width: 100%;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="map"></div>
+        <script>
+            const map = new maplibregl.Map({
+                container: "map",
+                style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+                zoom: 3,
+                center: [10, 52],
+            });
+
+            map.on("load", () => {
+                map.addSource("wms-image-source", {
+                    type: "image",
+                    // A single untiled GetMap in the data's native CRS.
+                    // EPSG:3035 is north-first, so the WMS 1.3.0 bbox is
+                    // ymin,xmin,ymax,xmax.
+                    url: "http://localhost:8080/wms?service=WMS&version=1.3.0&request=GetMap&layers=foo&styles=raster/viridis&crs=EPSG:3035&bbox=1802800,2635780,5416000,6248980&width=1024&height=1024",
+                    // The lon/lat corners of the EPSG:3035 bbox above. MapLibre
+                    // warps the image into this quad; a projected image pinned
+                    // by its corners registers only approximately at
+                    // continental scale — request crs=EPSG:3857 instead for an
+                    // exact overlay.
+                    coordinates: [
+                        [-31.3907, 67.1202],
+                        [55.7392, 65.825],
+                        [31.7491, 36.8118],
+                        [-9.1042, 37.3948],
+                    ],
+                });
+                map.addLayer(
+                    {
+                        id: "wms-image-layer",
+                        type: "raster",
+                        source: "wms-image-source",
+                        paint: {
+                            "raster-opacity": 0.5,
+                        },
+                    },
+                    // 'building' // Place layer under labels, roads and buildings.
+                );
+            });
+
+            map.on("style.load", function () {
+                map.on("click", function (e) {
+                    var coordinates = e.lngLat;
+                    new maplibregl.Popup()
+                        .setLngLat(coordinates)
+                        .setHTML("you clicked here: <br/>" + coordinates)
+                        .addTo(map);
+                });
+            });
+        </script>
+    </body>
+</html>

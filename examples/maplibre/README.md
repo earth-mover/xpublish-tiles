@@ -22,3 +22,12 @@ Then you can try the examples:
 *More Instructions to Come*
 
 * [MapLibre XYZ Tiles with Projected Data](./tiles-projected.html)
+
+### Native EPSG:3035 WMS Image
+
+Run the server with the synthetic EU LAEA dataset:
+```
+uv run xpublish-tiles --dataset=local://eu3035
+```
+
+* [MapLibre WMS Single Image (native EPSG:3035)](./wms-image.html)

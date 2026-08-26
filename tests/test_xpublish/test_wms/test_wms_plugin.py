@@ -1,10 +1,14 @@
+import io
 import xml.etree.ElementTree as ET
 
+import morecantile
 import pytest
 import xpublish
 from fastapi.testclient import TestClient
+from PIL import Image
 
 import xarray as xr
+from xpublish_tiles.testing.datasets import EU3035, GEOZARR_MULTISCALE
 from xpublish_tiles.xpublish.wms import WMSPlugin
 
 
@@ -285,7 +289,269 @@ def test_get_legend_graphic_missing_colorscalerange():
         },
     )
     assert r.status_code == 422
-    assert "colorscalerange" in r.json()["detail"]
+    assert "ServiceExceptionReport" in r.text
+    assert "colorscalerange" in r.text
+
+
+def test_get_capabilities_bounds_and_legends(xpublish_client):
+    """Layers carry EX_GeographicBoundingBox, axis-order-correct BoundingBoxes,
+    per-layer styles with legend URLs, and are not queryable."""
+    response = xpublish_client.get(
+        "/datasets/air/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetCapabilities",
+            "format": "json",
+        },
+    )
+    assert response.status_code == 200
+
+    child_layers = response.json()["capability"]["layer"]["layers"]
+    air_layer = next(layer for layer in child_layers if layer.get("name") == "air")
+
+    assert air_layer["queryable"] is False
+
+    ex_bbox = air_layer["ex_geographic_bounding_box"]
+    assert ex_bbox["west_bound_longitude"] == pytest.approx(-161.25)
+    assert ex_bbox["east_bound_longitude"] == pytest.approx(-28.75)
+    assert ex_bbox["south_bound_latitude"] == pytest.approx(13.75)
+    assert ex_bbox["north_bound_latitude"] == pytest.approx(76.25)
+
+    bboxes = {bbox["crs"]: bbox for bbox in air_layer["bounding_box"]}
+    assert {"CRS:84", "EPSG:4326", "EPSG:3857"} <= set(bboxes)
+    # EPSG:4326 is north-first in WMS 1.3.0, CRS:84 stays lon,lat
+    assert bboxes["EPSG:4326"]["minx"] == bboxes["CRS:84"]["miny"]
+    assert bboxes["EPSG:4326"]["miny"] == bboxes["CRS:84"]["minx"]
+    assert bboxes["EPSG:4326"]["maxx"] == bboxes["CRS:84"]["maxy"]
+    assert bboxes["EPSG:4326"]["maxy"] == bboxes["CRS:84"]["maxx"]
+
+    styles = air_layer["styles"]
+    assert len(styles) > 0
+    href = styles[0]["legend_url"]["online_resource"]["href"]
+    assert "request=GetLegendGraphic" in href
+    assert "layer=air" in href
+
+
+def test_get_map_axis_order(xpublish_client):
+    """WMS 1.3.0 EPSG:4326 bboxes are lat,lon ordered; CRS:84 stays lon,lat."""
+    params = {
+        "service": "WMS",
+        "version": "1.3.0",
+        "request": "GetMap",
+        "layers": "air",
+        "styles": "raster/viridis",
+        "width": 256,
+        "height": 256,
+        "time": "2013-01-01T00:00:00",
+    }
+    latlon = xpublish_client.get(
+        "/datasets/air/wms",
+        params={**params, "crs": "EPSG:4326", "bbox": "15,-160,75,-30"},
+    )
+    lonlat = xpublish_client.get(
+        "/datasets/air/wms",
+        params={**params, "crs": "CRS:84", "bbox": "-160,15,-30,75"},
+    )
+    assert latlon.status_code == 200
+    assert lonlat.status_code == 200
+    assert latlon.content == lonlat.content
+
+
+def test_get_map_rejects_wms_111(xpublish_client):
+    response = xpublish_client.get(
+        "/datasets/air/wms",
+        params={
+            "service": "WMS",
+            "version": "1.1.1",
+            "request": "GetMap",
+            "layers": "air",
+            "crs": "EPSG:4326",
+            "bbox": "-160,15,-30,75",
+            "width": 256,
+            "height": 256,
+        },
+    )
+    assert response.status_code == 400
+    assert "ServiceExceptionReport" in response.text
+    assert "1.3.0" in response.text
+
+
+def test_get_map_exception_formats(xpublish_client):
+    """Errors honor the EXCEPTIONS parameter: XML report, in-image, or blank."""
+    params = {
+        "service": "WMS",
+        "version": "1.3.0",
+        "request": "GetMap",
+        "layers": "missing",
+        "crs": "EPSG:3857",
+        "bbox": "-8766409,5009377,-7514065,6261721",
+        "width": 64,
+        "height": 64,
+    }
+    response = xpublish_client.get("/datasets/air/wms", params=params)
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("text/xml")
+    assert "ServiceExceptionReport" in response.text
+    assert "LayerNotDefined" in response.text
+
+    response = xpublish_client.get(
+        "/datasets/air/wms", params={**params, "exceptions": "INIMAGE"}
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+
+    response = xpublish_client.get(
+        "/datasets/air/wms", params={**params, "exceptions": "BLANK"}
+    )
+    assert response.status_code == 200
+    blank = Image.open(io.BytesIO(response.content))
+    assert blank.size == (64, 64)
+    assert blank.getchannel("A").getextrema() == (0, 0)
+
+
+def test_get_feature_info_not_implemented(xpublish_client):
+    response = xpublish_client.get(
+        "/datasets/air/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetFeatureInfo",
+            "query_layers": "air",
+            "crs": "EPSG:4326",
+            "bbox": "15,-160,75,-30",
+            "width": 256,
+            "height": 256,
+            "x": 128,
+            "y": 128,
+        },
+    )
+    assert response.status_code == 501
+    assert "ServiceExceptionReport" in response.text
+    assert "OperationNotSupported" in response.text
+
+
+def test_get_map_jpeg(xpublish_client):
+    response = xpublish_client.get(
+        "/datasets/air/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetMap",
+            "layers": "air",
+            "crs": "CRS:84",
+            "bbox": "-160,15,-30,75",
+            "width": 128,
+            "height": 128,
+            "format": "image/jpeg",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    image = Image.open(io.BytesIO(response.content))
+    assert image.format == "JPEG"
+
+
+def test_get_map_opaque_bgcolor(xpublish_client):
+    """TRANSPARENT=FALSE flattens the map onto BGCOLOR."""
+    response = xpublish_client.get(
+        "/datasets/air/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetMap",
+            "layers": "air",
+            "crs": "CRS:84",
+            # extends north of the data so the background shows through
+            "bbox": "-140,60,-100,85",
+            "width": 128,
+            "height": 128,
+            "transparent": "false",
+            "bgcolor": "0x0000FF",
+        },
+    )
+    assert response.status_code == 200
+    image = Image.open(io.BytesIO(response.content))
+    assert image.mode == "RGB"
+    assert image.getpixel((64, 2)) == (0, 0, 255)
+
+
+def test_get_map_native_crs_eu3035():
+    """Data on a projected native CRS is advertised and renderable natively.
+
+    EPSG:3035 is north-first, so both the advertised BoundingBox and the
+    GetMap BBOX use y,x order per WMS 1.3.0.
+    """
+    ds = EU3035.create()
+    rest = xpublish.Rest({"eu3035": ds}, plugins={"wms": WMSPlugin()})
+    client = TestClient(rest.app)
+
+    capabilities = client.get(
+        "/datasets/eu3035/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetCapabilities",
+            "format": "json",
+        },
+    )
+    layer = capabilities.json()["capability"]["layer"]["layers"][0]
+    assert "EPSG:3035" in layer["crs"]
+    native_bbox = next(b for b in layer["bounding_box"] if b["crs"] == "EPSG:3035")
+    # north-first: minx/miny attributes hold northing/easting
+    assert native_bbox["minx"] == pytest.approx(1802800.0)
+    assert native_bbox["miny"] == pytest.approx(2635780.0)
+    assert native_bbox["maxx"] == pytest.approx(5416000.0)
+    assert native_bbox["maxy"] == pytest.approx(6248980.0)
+
+    response = client.get(
+        "/datasets/eu3035/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetMap",
+            "layers": "foo",
+            "styles": "raster/viridis",
+            "crs": "EPSG:3035",
+            "bbox": f"{native_bbox['minx']},{native_bbox['miny']},{native_bbox['maxx']},{native_bbox['maxy']}",
+            "width": 256,
+            "height": 256,
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+
+
+@pytest.mark.parametrize(
+    "tile,expected_level",
+    [
+        pytest.param(morecantile.Tile(x=15, y=10, z=5), "2", id="zoom5_coarsest"),
+        pytest.param(morecantile.Tile(x=60, y=43, z=7), "0", id="zoom7_finest"),
+    ],
+)
+def test_get_map_multiscale_levels(tile, expected_level):
+    """GetMap picks the overview level matching the requested resolution."""
+    tree = GEOZARR_MULTISCALE.create()
+    rest = xpublish.Rest({"pyramid": tree}, plugins={"wms": WMSPlugin()})
+    client = TestClient(rest.app)
+
+    tms = morecantile.tms.get("WebMercatorQuad")
+    bounds = tms.xy_bounds(tile)
+    response = client.get(
+        "/datasets/pyramid/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetMap",
+            "layers": "data",
+            "crs": "EPSG:3857",
+            "bbox": f"{bounds.left},{bounds.bottom},{bounds.right},{bounds.top}",
+            "width": 256,
+            "height": 256,
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["X-Multiscale-Level"] == expected_level
 
 
 def test_wms_openapi_schema_generation(xpublish_client):
