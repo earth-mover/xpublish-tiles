@@ -3,6 +3,7 @@ from typing import cast
 from unittest.mock import patch
 
 import matplotlib as mpl
+import morecantile
 import numpy as np
 import pandas as pd
 import pyproj
@@ -14,9 +15,14 @@ from hypothesis.extra import numpy as npst
 import xarray as xr
 from tests import NUMERIC_DTYPES
 from xpublish_tiles.config import config
+from xpublish_tiles.grids import guess_grid_system
 from xpublish_tiles.lib import (
+    _chunk_aligned_count,
+    _chunk_sizes,
     apply_range_colors,
     coarsen_mean_pad,
+    decompressed_size_bytes,
+    normalize_slicers,
     timedelta_to_iso8601,
     transform_chunk,
     transform_coordinates,
@@ -25,6 +31,8 @@ from xpublish_tiles.pipeline import _parse_timedelta
 from xpublish_tiles.projections import (
     epsg4326to3857,
 )
+from xpublish_tiles.testing.datasets import IFS
+from xpublish_tiles.tiles_lib import get_min_zoom
 
 
 @given(
@@ -403,3 +411,99 @@ def test_timedelta_to_iso8601(value, expected):
     assert timedelta_to_iso8601(delta) == expected
     # Whatever we advertise must round-trip through the selector parser.
     assert pd.Timedelta(_parse_timedelta(expected)) == delta
+
+
+@pytest.mark.parametrize(
+    "start, stop, chunk, expected",
+    [
+        (0, 100, 100, 100),  # aligned
+        (0, 101, 100, 200),  # spills into second chunk
+        (50, 150, 100, 200),  # straddles a boundary
+        (99, 100, 100, 100),  # single element, whole chunk
+        (10, 10, 100, 0),  # empty
+    ],
+)
+def test_chunk_aligned_count(start, stop, chunk, expected):
+    assert _chunk_aligned_count(start, stop, chunk) == expected
+
+
+def test_chunk_sizes_from_preferred_chunks():
+    da = xr.DataArray(np.zeros((4, 5)), dims=("y", "x"))
+    da.encoding["preferred_chunks"] = {"y": 2, "x": 3}
+    assert _chunk_sizes(da) == {"y": 2, "x": 3}
+
+
+def test_chunk_sizes_ignores_positional_encoding():
+    # positional chunks are indexed by the array's original dims, so they
+    # cannot be zipped against da.dims once a dim has been isel'd away
+    da = xr.DataArray(np.zeros((4, 5)), dims=("y", "x"))
+    da.encoding["chunks"] = (2, 3)
+    assert _chunk_sizes(da) == {}
+
+
+def test_chunk_sizes_from_zarr_array(tmp_path):
+    store = tmp_path / "s.zarr"
+    xr.Dataset(
+        {"foo": (("time", "y", "x"), np.zeros((20, 40, 60), dtype=np.float32))}
+    ).to_zarr(
+        store,
+        zarr_format=3,
+        encoding={"foo": {"chunks": (10, 10, 10), "shards": (20, 20, 30)}},
+    )
+    ds = xr.open_zarr(store, chunks=None)
+
+    # inner chunk, not the shard: the shard is the IO unit, not the
+    # decompression unit
+    assert _chunk_sizes(ds.foo) == {"time": 10, "y": 10, "x": 10}
+
+    # once indexed, zarr's positional chunks no longer line up with da.dims, so
+    # the mapping has to be captured before the collapse (ValidatedArray.chunks)
+    assert _chunk_sizes(ds.foo.isel(time=-1)) == {"time": 10, "y": 10, "x": 10}
+
+
+def test_decompressed_size_bytes():
+    ds = IFS.create()
+    grid = guess_grid_system(ds, "foo")
+    da = ds["foo"].isel(time=-1, step=-1)
+    ny, nx = da.sizes[grid.Ydim], da.sizes[grid.Xdim]
+    slicers = normalize_slicers(
+        {grid.Ydim: [slice(0, 1)], grid.Xdim: [slice(0, 1)]}, dict(da.sizes)
+    )
+
+    da.encoding.clear()
+    assert decompressed_size_bytes(slicers, da, grid) == da.dtype.itemsize
+
+    chunks = {grid.Ydim: 10, grid.Xdim: 10}
+    assert (
+        decompressed_size_bytes(slicers, da, grid, chunks=chunks)
+        == 100 * da.dtype.itemsize
+    )
+
+    # a dim already collapsed by isel still costs its full chunk extent
+    chunks = {grid.Ydim: 10, grid.Xdim: 10, "time": 648}
+    assert (
+        decompressed_size_bytes(slicers, da, grid, chunks=chunks)
+        == 648 * 100 * da.dtype.itemsize
+    )
+
+    # single chunk spanning the array: any tile costs the whole thing
+    chunks = {grid.Ydim: ny, grid.Xdim: nx}
+    assert (
+        decompressed_size_bytes(slicers, da, grid, chunks=chunks)
+        == ny * nx * da.dtype.itemsize
+    )
+
+
+def test_min_zoom_accounts_for_chunks():
+    ds = IFS.create()
+    ds.attrs["_xpublish_id"] = "chunk_minzoom"
+    grid = guess_grid_system(ds, "foo")
+    tms = morecantile.tms.get("WebMercatorQuad")
+    da = ds["foo"].isel(time=-1, step=-1)
+
+    with config.set({"max_renderable_size": 50_000 * 8}):
+        da.encoding["preferred_chunks"] = dict.fromkeys(da.dims, 1)
+        fine = get_min_zoom(grid=grid, tms=tms, da=da, style="raster")
+        da.encoding["preferred_chunks"] = dict.fromkeys(da.dims, 64)
+        coarse = get_min_zoom(grid=grid, tms=tms, da=da, style="raster")
+    assert coarse > fine

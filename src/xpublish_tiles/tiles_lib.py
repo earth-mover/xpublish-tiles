@@ -11,8 +11,10 @@ from pyproj import CRS
 from pyproj.aoi import BBox
 
 import xarray as xr
+from xpublish_tiles.config import config
 from xpublish_tiles.grids import GridSystem, GridSystem2D, Triangular
 from xpublish_tiles.lib import (
+    TileTooBigError,
     apply_default_pad,
     check_data_is_renderable_size,
     normalize_slicers,
@@ -164,7 +166,12 @@ def _compute_min_zoom(
     if all_renderable(lo):
         return lo
     if not all_renderable(hi):
-        return tms.minzoom
+        raise TileTooBigError(
+            f"No zoom level of {tms.id} is renderable for this data: even a tile at "
+            f"maxzoom ({hi}) exceeds max_renderable_size "
+            f"({config.get('max_renderable_size')} bytes). The data is most likely "
+            "chunked too coarsely to serve as tiles."
+        )
     while lo + 1 < hi:
         mid = (lo + hi) // 2
         if all_renderable(mid):

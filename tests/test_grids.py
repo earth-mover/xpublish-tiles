@@ -1418,9 +1418,10 @@ async def test_curvilinear_memory_limit_and_minzoom():
 
     # Set a tight memory limit to force higher minzoom
     # For curvilinear grids, we load 3 variables (data + lon + lat)
-    # Set limit to ~50KB * dtype_size to force minzoom up
-    # This should allow rendering 1 variable worth of ~50K elements, but 3 vars will be tight at low zoom
-    memory_limit = 50_000 * 8  # 400KB for float64
+    # Sizes are chunk-aligned, so the floor is one IFS chunk read:
+    # 240 lat x 360 lon x 4 bytes x 5 (step chunk) = 1.7MB. Pick a limit a few
+    # chunks above that so 3 vars stay tight at low zoom.
+    memory_limit = 12_800_000
 
     with config.set({"max_renderable_size": memory_limit}):
         # Calculate minzoom - should be high enough to avoid memory issues

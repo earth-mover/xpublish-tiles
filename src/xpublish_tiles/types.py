@@ -150,6 +150,7 @@ class ValidatedArray:
     da: xr.DataArray
     datatype: DataType
     grid: GridSystem
+    chunks: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
