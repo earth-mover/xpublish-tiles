@@ -190,6 +190,12 @@ def generate_flag_values_data(
     return array
 
 
+def set_chunk_encoding(var: xr.DataArray, chunks: tuple[int, ...]) -> None:
+    """Set both encoding keys the zarr backend populates on read."""
+    var.encoding["chunks"] = chunks
+    var.encoding["preferred_chunks"] = dict(zip(var.dims, chunks, strict=True))
+
+
 def uniform_grid(*, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]):
     # Check if this is categorical data with flag_values
     if "flag_values" in attrs:
@@ -212,7 +218,7 @@ def uniform_grid(*, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str
         },
         coords={d.name: (d.name, d.data, d.attrs) for d in dims if d.data is not None},
     )
-    ds.foo.encoding["chunks"] = tuple(dim.chunk_size for dim in dims)
+    set_chunk_encoding(ds.foo, tuple(dim.chunk_size for dim in dims))
     # coord vars always single chunk?
     for dim in dims:
         if dim.data is not None:
@@ -281,8 +287,8 @@ def raster_grid(
             for dimension in dims:
                 if dimension.name == dim:
                     chunks.extend([dimension.chunk_size])
-        ds[f"x_{alt}"].encoding["chunks"] = tuple(chunks)
-        ds[f"y_{alt}"].encoding["chunks"] = tuple(chunks)
+        set_chunk_encoding(ds[f"x_{alt}"], tuple(chunks))
+        set_chunk_encoding(ds[f"y_{alt}"], tuple(chunks))
         ds.coords[f"crs_{alt}"] = ((), 0, altcrs.to_cf())
         new_gm += f" crs_{alt}: x_{alt} y_{alt}"
     if new_gm:
@@ -1263,7 +1269,7 @@ def cubed_sphere_grid(
         dask.array.from_array(foo, chunks=foo_chunks),
         ds["foo"].attrs,
     )
-    ds["foo"].encoding["chunks"] = foo_chunks
+    set_chunk_encoding(ds["foo"], foo_chunks)
     ds["foo"].attrs["coordinates"] = "lons lats"
     ds["foo"].attrs["grid"] = "grid_topology"
     ds["foo"].attrs["location"] = "face"
@@ -1449,7 +1455,7 @@ def geostationary_grid(
             ),
         },
     )
-    ds.foo.encoding["chunks"] = (y_dim.chunk_size, x_dim.chunk_size)
+    set_chunk_encoding(ds.foo, (y_dim.chunk_size, x_dim.chunk_size))
     return ds
 
 
@@ -1666,7 +1672,7 @@ def create_n320(
 
     # Add coordinates attribute to foo
     ds.foo.attrs["coordinates"] = "latitude longitude pressure_level"
-    ds.foo.encoding["chunks"] = tuple(dim.chunk_size for dim in dims)
+    set_chunk_encoding(ds.foo, tuple(dim.chunk_size for dim in dims))
 
     return ds
 
@@ -2192,7 +2198,7 @@ def geozarr_multiscale_grid(
         ds.attrs["proj:wkt2"] = crs_wkt
         ds.attrs["zarr_conventions"] = [{"name": "spatial:"}]
 
-        ds["data"].encoding["chunks"] = (size, size)
+        set_chunk_encoding(ds["data"], (size, size))
 
         children[str(i)] = ds
 
@@ -2292,7 +2298,7 @@ def native_at_root_multiscale_grid(
             },
         },
     )
-    root_ds["data"].encoding["chunks"] = (native_size, native_size)
+    set_chunk_encoding(root_ds["data"], (native_size, native_size))
 
     # Create overview datasets for children - use different dimension names
     # to avoid coordinate alignment issues with the root
@@ -2335,7 +2341,7 @@ def native_at_root_multiscale_grid(
                 "zarr_conventions": [{"name": "spatial:"}],
             },
         )
-        ds["data"].encoding["chunks"] = (size, size)
+        set_chunk_encoding(ds["data"], (size, size))
         children[str(i)] = ds
 
     # Build tree: use from_dict with "/" key for root data

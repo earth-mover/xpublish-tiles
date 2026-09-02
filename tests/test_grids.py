@@ -655,9 +655,9 @@ def test_guess_grid_system_missing_variable(xpublish_id):
         pytest.param(HRRR, 0, 6, id="hrrr"),
         pytest.param(REDGAUSS_N320, 0, 24, id="redgauss_n320"),
         # data spacing: 120m; Zoom level 10: 152m spacing @ eq
-        pytest.param(EU3035_HIRES, 4, 10, id="eu3035_hires"),
+        pytest.param(EU3035_HIRES, 5, 10, id="eu3035_hires"),
         # data spacing: 30m; Zoom level 13: 38m spacing @ eq
-        pytest.param(PARA_HIRES, 7, 13, id="para_hires"),
+        pytest.param(PARA_HIRES, 8, 13, id="para_hires"),
         # data spacing: 0.5m; Zoom level 19: 0.3m spacing @ eq
         pytest.param(UTM33S_HIRES, 13, 19, id="utm33s_hires"),
         # data spacing: 1m; Zoom level 18: 0.6m spacing @ eq
@@ -1418,9 +1418,10 @@ async def test_curvilinear_memory_limit_and_minzoom():
 
     # Set a tight memory limit to force higher minzoom
     # For curvilinear grids, we load 3 variables (data + lon + lat)
-    # Set limit to ~50KB * dtype_size to force minzoom up
-    # This should allow rendering 1 variable worth of ~50K elements, but 3 vars will be tight at low zoom
-    memory_limit = 50_000 * 8  # 400KB for float64
+    # Sizes are chunk-aligned, so the floor is one IFS chunk read:
+    # 240 lat x 360 lon x 4 bytes x 5 (step chunk) = 1.7MB. Pick a limit a few
+    # chunks above that so 3 vars stay tight at low zoom.
+    memory_limit = 12_800_000
 
     with config.set({"max_renderable_size": memory_limit}):
         # Calculate minzoom - should be high enough to avoid memory issues

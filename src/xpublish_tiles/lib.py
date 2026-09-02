@@ -26,6 +26,9 @@ from pyproj.aoi import BBox
 from skimage.restoration import unwrap_phase
 
 import xarray as xr
+import zarr
+from xarray.backends.zarr import ZarrArrayWrapper
+from xarray.core.indexing import CopyOnWriteArray, MemoryCachedArray
 from xpublish_tiles.config import config
 from xpublish_tiles.projections import (
     WEB_MERCATOR,
@@ -975,25 +978,78 @@ def coarsen_mean_pad(da: xr.DataArray, factors: dict[str, int]) -> xr.DataArray:
     return xr.DataArray(out, dims=dims, name=da.name)
 
 
-def _get_indexer_size(sl: "Slicer", dim_size: int | None = None) -> int:
-    """Get the size of an indexer (slice, Fill, UgridIndexer, or ndarray)."""
+def _unwrap_to_zarr(data: Any) -> zarr.Array | None:
+    """Descend an xarray lazy-indexing chain to the zarr Array underneath.
+
+    Returns None for anything else: dask, numpy, another backend, or a chain
+    that has already been indexed (``LazilyIndexedArray``), whose axes no
+    longer line up one-to-one with the zarr array's.
+    """
+    while True:
+        match data:
+            case ZarrArrayWrapper():
+                return data._array
+            case CopyOnWriteArray() | MemoryCachedArray():
+                data = data.array
+            case _:
+                return None
+
+
+def _chunk_sizes(da: xr.DataArray) -> dict[str, int]:
+    """Inner chunk (decompression unit) extent per dim.
+
+    Reads ``zarr.Array.chunks`` rather than trusting ``encoding``: for a sharded
+    array that is the inner chunk (the shard is the IO unit — it governs request
+    count, not bytes decompressed). Falls back to dim-keyed
+    ``encoding["preferred_chunks"]`` when there is no zarr array underneath
+    (dask, in-memory fixtures).
+
+    Call this before any indexing collapses a dim: the zarr chunks are
+    positional, so they can only be zipped against ``da.dims`` while the two
+    still correspond. ``apply_query`` captures the result onto
+    ``ValidatedArray.chunks`` for exactly that reason.
+    """
+    zarray = _unwrap_to_zarr(da.variable._data)
+    if zarray is not None and len(zarray.chunks) == len(da.dims):
+        return {str(d): int(c) for d, c in zip(da.dims, zarray.chunks, strict=True)}
+
+    pc = da.encoding.get("preferred_chunks")
+    if isinstance(pc, Mapping) and all(d in pc for d in da.dims):
+        return {str(d): int(c) for d, c in pc.items()}
+    return {}
+
+
+def _chunk_aligned_count(start: int, stop: int, chunk: int | None = None) -> int:
+    """Elements read from ``[start, stop)``, rounded out to chunk boundaries."""
+    if stop <= start:
+        return 0
+    if chunk is None:
+        return stop - start
+    return ((stop - 1) // chunk - start // chunk + 1) * chunk
+
+
+def _get_indexer_size(
+    sl: "Slicer", dim_size: int | None = None, chunk: int | None = None
+) -> int:
+    """Elements an indexer selects, or with ``chunk`` the elements it decompresses."""
     from xpublish_tiles.grids import HealpixIndexer, UgridIndexer
 
     if isinstance(sl, Fill | UgridIndexer):
+        # padding / an explicit vertex list: nothing to round out to
         return sl.size
-    elif isinstance(sl, HealpixIndexer):
-        return sl.size(dim_size)
-    elif isinstance(sl, slice):
-        start = sl.start if sl.start is not None else 0
-        if sl.stop is not None:
-            stop = sl.stop
-        elif dim_size is not None:
-            stop = dim_size
-        else:
-            raise ValueError("dim_size is required for open-ended slices")
-        return stop - start
-    else:
+    if isinstance(sl, HealpixIndexer):
+        if isinstance(sl.indices, np.ndarray):
+            if chunk is None:
+                return int(sl.indices.size)
+            return int(np.unique(sl.indices // chunk).size) * chunk
+        sl = sl.indices
+    if not isinstance(sl, slice):
         raise TypeError(f"Unknown indexer type: {type(sl)!r}")
+
+    stop = sl.stop if sl.stop is not None else dim_size
+    if stop is None:
+        raise ValueError("dim_size is required for open-ended slices")
+    return _chunk_aligned_count(sl.start or 0, stop, chunk)
 
 
 def _iter_subset_shapes(
@@ -1002,13 +1058,18 @@ def _iter_subset_shapes(
     grid: "GridSystem",
     *,
     style: str = "raster",
+    chunks: Mapping[str, int] | None = None,
 ):
     """Iterate over individual subset shapes from slicers.
 
     Yields tuple shapes for each subset that will be created.
     For GridSystem2D, yields (x_size, y_size) for each X slice.
     For Triangular, yields (size,) for the single slice.
+
+    With ``chunks``, sizes are rounded out to inner-chunk boundaries, so the
+    shapes describe what gets decompressed rather than what gets rendered.
     """
+    chunks = chunks or {}
     from xpublish_tiles.grids import (
         FacetedGridSystem,
         FacetedIndexer,
@@ -1029,9 +1090,18 @@ def _iter_subset_shapes(
             face_slice = face_slicers[grid.face_dim][0]
             assert isinstance(face_slice, slice)
             face = grid.faces[face_slice.start]
-            y_size = _get_indexer_size(face_slicers[face.Ydim][0], da.sizes[face.Ydim])
+            y_size = _get_indexer_size(
+                face_slicers[face.Ydim][0],
+                da.sizes[face.Ydim],
+                chunks.get(str(face.Ydim)),
+            )
             for sl in face_slicers[face.Xdim]:
-                yield (_get_indexer_size(sl, da.sizes[face.Xdim]), y_size)
+                yield (
+                    _get_indexer_size(
+                        sl, da.sizes[face.Xdim], chunks.get(str(face.Xdim))
+                    ),
+                    y_size,
+                )
         return
 
     yslice = None
@@ -1043,10 +1113,10 @@ def _iter_subset_shapes(
     if yslice is None:
         yslice = slicers[grid.Ydim][0]
 
-    y_size = _get_indexer_size(yslice, da.sizes[grid.Ydim])
+    y_size = _get_indexer_size(yslice, da.sizes[grid.Ydim], chunks.get(str(grid.Ydim)))
 
     for sl in slicers[grid.Xdim]:
-        x_size = _get_indexer_size(sl, da.sizes[grid.Xdim])
+        x_size = _get_indexer_size(sl, da.sizes[grid.Xdim], chunks.get(str(grid.Xdim)))
         yield (x_size, y_size)
 
 
@@ -1079,12 +1149,56 @@ def check_data_is_renderable_size(
     has_alternate = alternate.crs != grid.crs
     factor = 3 if has_alternate else 1
 
-    total_size = sum(
-        math.prod(shape) for shape in _iter_subset_shapes(slicers, da, grid, style=style)
-    )
+    # rendered-size estimate, superseded by the decompressed-bytes estimate below
+    # total_size = sum(
+    #     math.prod(shape)
+    #     for shape in _iter_subset_shapes(slicers, da, grid, style=style)
+    # )
+    # if style == "polygons":
+    #     total_size *= grid.npoints_per_geometry
+    # return total_size * da.dtype.itemsize <= factor * config.get("max_renderable_size")
+
+    total_bytes = decompressed_size_bytes(slicers, da, grid, style=style)
     if style == "polygons":
-        total_size *= grid.npoints_per_geometry
-    return total_size * da.dtype.itemsize <= factor * config.get("max_renderable_size")
+        total_bytes *= grid.npoints_per_geometry
+    return total_bytes <= factor * config.get("max_renderable_size")
+
+
+def decompressed_size_bytes(
+    slicers: "Slicers",
+    da: xr.DataArray,
+    grid: "GridSystem",
+    *,
+    style: str = "raster",
+    chunks: Mapping[str, int] | None = None,
+) -> int:
+    """Bytes that must be decompressed to satisfy ``slicers``.
+
+    Rounds the selection out to inner-chunk boundaries on every dim, including
+    dims already dropped by ``isel`` — reading one timestep out of a
+    ``(648, 100, 100)`` chunk still decompresses all 648. ``chunks`` must
+    therefore be captured before those dims are dropped (see
+    ``ValidatedArray.chunks``); without it we fall back to reading whatever the
+    array can still tell us, which is exact only while its dims are intact.
+    """
+    from xpublish_tiles.grids import FacetedGridSystem
+
+    if chunks is None:
+        chunks = _chunk_sizes(da)
+    total = sum(
+        math.prod(shape)
+        for shape in _iter_subset_shapes(slicers, da, grid, style=style, chunks=chunks)
+    )
+    covered = set(slicers)
+    if isinstance(grid, FacetedGridSystem):
+        covered |= {str(d) for f in grid.faces for d in (f.Xdim, f.Ydim)}
+    for dim, chunk in chunks.items():
+        if dim in covered:
+            continue
+        # a dim already collapsed by isel is gone from da.sizes, but reading one
+        # element of it still decompresses its whole chunk
+        total *= min(chunk, da.sizes[dim]) if dim in da.dims else chunk
+    return total * da.dtype.itemsize
 
 
 def max_render_shape(

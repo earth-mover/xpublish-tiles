@@ -2,7 +2,7 @@ import asyncio
 import contextlib
 import datetime
 import io
-from collections.abc import Hashable, Iterable
+from collections.abc import Hashable, Iterable, Mapping
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, cast
@@ -40,10 +40,12 @@ from xpublish_tiles.lib import (
     PadDimension,
     TileTooBigError,
     VariableNotFoundError,
+    _chunk_sizes,
     _iter_subset_shapes,
     apply_default_pad,
     async_run,
     coarsen_mean_pad,
+    decompressed_size_bytes,
     get_data_load_semaphore,
     max_render_shape,
     normalize_slicers,
@@ -311,6 +313,8 @@ def apply_slicers(
     slicers: Slicers,
     datatype: DataType,
     min_dim_size: int = 2,
+    style: str = "raster",
+    chunks: Mapping[str, int] | None = None,
 ) -> SubsetPlan:
     has_alternate = alternate.crs != grid.crs
     pick = [alternate.X, alternate.Y]
@@ -377,9 +381,11 @@ def apply_slicers(
             for subset in subsets
         )
     )
-    total_size = sum(
-        sum([var.size for var in subset.data_vars.values()]) for subset in subsets
-    )
+    # rendered-size estimate, superseded by the decompressed-bytes estimate
+    # total_size = sum(
+    #     sum([var.size for var in subset.data_vars.values()]) for subset in subsets
+    # )
+    total_bytes = decompressed_size_bytes(slicers, da, grid, style=style, chunks=chunks)
 
     nvars = sum(len(subset.data_vars) for subset in subsets)
     if any(dim_total < min_dim_size * nvars for dim_total in total_shape):
@@ -394,7 +400,7 @@ def apply_slicers(
         concat_dim=concat_dim,
         pick=pick,
         total_shape=total_shape,
-        size_bytes=total_size * da.dtype.itemsize * factor,
+        size_bytes=total_bytes * factor,
     )
 
 
@@ -1023,6 +1029,9 @@ def apply_query(
     This method does all automagic detection necessary for the rest of the pipeline to work.
     """
     validated: dict[str, ValidatedArray] = {}
+    # Capture chunking up front: zarr chunks are positional, so they can only be
+    # mapped to dim names while the array still has all its dims.
+    chunks = {name: _chunk_sizes(ds[name]) for name in variables if name in ds}
     if selectors:
         # Apply selections serially to meet xarray limitations
         for name, value_str in selectors.items():
@@ -1082,6 +1091,7 @@ def apply_query(
             da=array,
             grid=grid,
             datatype=_infer_datatype(array),
+            chunks=chunks[name],
         )
     return validated
 
@@ -1220,6 +1230,8 @@ async def subset_to_bbox(
                 slicers=patch.slicers,
                 datatype=array.datatype,
                 min_dim_size=1 if style == "polygons" else 2,
+                style=style,
+                chunks=array.chunks,
             )
             for patch in patches
         )
