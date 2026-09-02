@@ -28,7 +28,11 @@ from skimage.restoration import unwrap_phase
 import xarray as xr
 import zarr
 from xarray.backends.zarr import ZarrArrayWrapper
-from xarray.core.indexing import CopyOnWriteArray, MemoryCachedArray
+from xarray.core.indexing import (
+    CopyOnWriteArray,
+    LazilyIndexedArray,
+    MemoryCachedArray,
+)
 from xpublish_tiles.config import config
 from xpublish_tiles.projections import (
     WEB_MERCATOR,
@@ -982,13 +986,17 @@ def _unwrap_to_zarr(data: Any) -> zarr.Array | None:
     """Descend an xarray lazy-indexing chain to the zarr Array underneath.
 
     Returns None for anything else: dask, numpy, another backend, or a chain
-    that has already been indexed (``LazilyIndexedArray``), whose axes no
-    longer line up one-to-one with the zarr array's.
+    carrying a non-trivial indexer, whose axes no longer line up one-to-one with
+    the zarr array's. Note the backend wraps even an unindexed array in a
+    ``LazilyIndexedArray`` holding all-full slices, so that case must be walked
+    through rather than rejected.
     """
     while True:
         match data:
             case ZarrArrayWrapper():
                 return data._array
+            case LazilyIndexedArray() if all(k == slice(None) for k in data.key.tuple):
+                data = data.array
             case CopyOnWriteArray() | MemoryCachedArray():
                 data = data.array
             case _:

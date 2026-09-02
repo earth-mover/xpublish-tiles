@@ -452,13 +452,17 @@ def test_chunk_sizes_from_zarr_array(tmp_path):
     )
     ds = xr.open_zarr(store, chunks=None)
 
+    # poison the encoding so only the zarr array can give the right answer
+    ds.foo.encoding["preferred_chunks"] = {"time": 1, "y": 1, "x": 1}
+
     # inner chunk, not the shard: the shard is the IO unit, not the
     # decompression unit
     assert _chunk_sizes(ds.foo) == {"time": 10, "y": 10, "x": 10}
 
     # once indexed, zarr's positional chunks no longer line up with da.dims, so
-    # the mapping has to be captured before the collapse (ValidatedArray.chunks)
-    assert _chunk_sizes(ds.foo.isel(time=-1)) == {"time": 10, "y": 10, "x": 10}
+    # we refuse the array and fall back (hence capture before the collapse, in
+    # ValidatedArray.chunks)
+    assert _chunk_sizes(ds.foo.isel(time=-1)) == {"time": 1, "y": 1, "x": 1}
 
 
 def test_decompressed_size_bytes():
