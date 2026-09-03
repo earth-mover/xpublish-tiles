@@ -37,7 +37,7 @@ from xpublish_tiles.projections import (
     transformer_from_crs,
 )
 from xpublish_tiles.testing.datasets import IFS, PARA
-from xpublish_tiles.tiles_lib import get_min_zoom, grid_overlaps_tms
+from xpublish_tiles.tiles_lib import axes_are_separable, get_min_zoom, grid_overlaps_tms
 
 
 @given(
@@ -617,3 +617,29 @@ def test_min_zoom_covers_interior_tiles():
         assert num_over_limit(minzoom) == 0
         # and no higher than it has to be
         assert num_over_limit(minzoom - 1) > 0
+
+
+@pytest.mark.parametrize(
+    "tms_id, expected",
+    [
+        ("WebMercatorQuad", True),
+        ("WorldCRS84Quad", True),
+        ("WorldMercatorWGS84Quad", True),
+        ("NZTM2000Quad", False),  # transverse
+        ("UTM31WGS84Quad", False),  # transverse
+        ("EuropeanETRS89_LAEAQuad", False),  # azimuthal
+        ("CanadianNAD83_LCC", False),  # conic
+        ("UPSArcticWGS84Quad", False),  # polar
+    ],
+)
+def test_axes_are_separable(tms_id, expected):
+    """A lon/lat grid's axes stay independent only under a cylindrical TMS."""
+    tms_crs = pyproj.CRS.from_wkt(morecantile.tms.get(tms_id).crs.to_wkt())
+    assert axes_are_separable(pyproj.CRS.from_epsg(4326), tms_crs) is expected
+
+
+def test_axes_are_separable_identity():
+    """A grid already in the TMS CRS needs no transform at all."""
+    tms_crs = pyproj.CRS.from_wkt(morecantile.tms.get("WebMercatorQuad").crs.to_wkt())
+    assert axes_are_separable(tms_crs, tms_crs)
+    assert not axes_are_separable(pyproj.CRS.from_epsg(32633), tms_crs)
