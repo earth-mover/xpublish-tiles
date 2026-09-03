@@ -969,3 +969,31 @@ def test_multiscale_uses_coarsest_level_for_minzoom():
     # Coarsest level (128x256 at 4 degrees/pixel) should give minzoom ~0
     # If we incorrectly used finest level (512x1024), minzoom would be ~2-3
     assert min_zoom <= 1, f"minzoom {min_zoom} too high - should use coarsest level"
+
+
+def test_multiscale_variable_missing_from_overviews_is_still_served():
+    """A variable that only the finest level carries must list and serve, and its
+    minzoom must come from the coarsest level that has it."""
+    tree = GEOZARR_MULTISCALE.create()
+    finest = tree["0"].to_dataset()
+    finest["extra"] = finest["data"].copy()
+    tree["0"] = finest
+
+    rest = xpublish.Rest({"pyramid": tree}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    response = client.get("/datasets/pyramid/tiles/")
+    assert response.status_code == 200
+    tileset = next(
+        ts
+        for ts in response.json()["tilesets"]
+        if "WebMercatorQuad" in ts.get("tileMatrixSetURI", "")
+    )
+    assert {layer["id"] for layer in tileset["layers"]} == {"data", "extra"}
+
+    response = client.get(
+        "/datasets/pyramid/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=extra&style=raster/viridis&width=256&height=256&colorscalerange=-1,1"
+    )
+    assert response.status_code == 200
+    assert response.json()["minzoom"] >= 0

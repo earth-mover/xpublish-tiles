@@ -35,7 +35,7 @@ from xpublish_tiles.logger import (
     with_accumulated_logs,
 )
 from xpublish_tiles.multiscale import (
-    get_coarsest_level,
+    get_coarsest_level_for,
     get_dataset,
     get_resolution_level,
 )
@@ -138,10 +138,6 @@ class TilesPlugin(Plugin):
             # If multiscale, returns finest (highest resolution) level available
             dataset = get_dataset(datatree)
 
-            # For multiscale datasets, get coarsest level for minzoom calculation
-            # Coarsest level determines the minimum zoom since it has fewer pixels
-            coarsest_level = get_coarsest_level(datatree)
-            minzoom_dataset = coarsest_level.dataset if coarsest_level else dataset
             # Get dataset metadata
             dataset_attrs = dataset.attrs
             title = dataset_attrs.get("title", "Dataset")
@@ -188,6 +184,12 @@ class TilesPlugin(Plugin):
                     detail="No renderable variables found in dataset.",
                 )
 
+            # For multiscale datasets, get coarsest level for minzoom calculation
+            # Coarsest level determines the minimum zoom since it has fewer pixels
+            representative_var = next(iter(var_grids))
+            coarsest_level = get_coarsest_level_for(datatree, representative_var)
+            minzoom_dataset = coarsest_level.dataset if coarsest_level else dataset
+
             # Create one tileset entry per supported tile matrix set
             supported_tms = get_all_tile_matrix_set_ids()
 
@@ -195,7 +197,7 @@ class TilesPlugin(Plugin):
             tileset_results = await asyncio.gather(
                 *[
                     create_tileset_for_tms(
-                        minzoom_dataset,
+                        dataset,
                         tms_id,
                         layer_extents,
                         title,
@@ -205,6 +207,8 @@ class TilesPlugin(Plugin):
                         styles,
                         var_grids,
                         cf_coords=cf_coords,
+                        minzoom_dataset=minzoom_dataset,
+                        representative_var=representative_var,
                     )
                     for tms_id in supported_tms
                 ]
@@ -478,7 +482,7 @@ class TilesPlugin(Plugin):
             # minzoom would be calculated from the finest level, preventing
             # low-zoom rendering even when overviews exist.
             var_name = query.variables[0]
-            coarsest_level = get_coarsest_level(datatree)
+            coarsest_level = get_coarsest_level_for(datatree, var_name)
             if coarsest_level is not None:
                 minzoom_dataset = coarsest_level.dataset
             else:

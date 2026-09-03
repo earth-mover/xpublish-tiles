@@ -1,5 +1,6 @@
 import functools
 import re
+from collections.abc import Hashable
 from typing import Any
 
 import morecantile.models
@@ -291,11 +292,13 @@ async def create_tileset_for_tms(
     var_grids: dict[str, GridSystem],
     *,
     cf_coords: dict | None = None,
+    minzoom_dataset: Dataset | None = None,
+    representative_var: Hashable | None = None,
 ) -> TilesetSummary | None:
     """Create a tileset summary for a specific tile matrix set
 
     Args:
-        dataset: xarray Dataset (coarsest level for multiscale datasets)
+        dataset: Finest-level xarray Dataset; it holds every variable in ``var_grids``
         tms_id: Tile matrix set identifier
         layer_extents: Pre-computed layer extents for all variables
         title: Dataset title
@@ -304,6 +307,10 @@ async def create_tileset_for_tms(
         dataset_attrs: Dataset attributes
         styles: Available styles
         var_grids: Renderable variable -> grid mapping (from ``detect_grids``)
+        minzoom_dataset: Coarsest level that holds ``representative_var``; drives the
+            tile matrix limits. Defaults to ``dataset``.
+        representative_var: Renderable variable present in ``minzoom_dataset``.
+            Defaults to the first key of ``var_grids``.
 
     Returns:
         TilesetSummary object if tile matrix set exists, None otherwise
@@ -357,8 +364,12 @@ async def create_tileset_for_tms(
     # ancillary variable whose grid can't be detected.
     tileMatrixSetLimits = await get_tile_matrix_limits(
         tms_id,
-        dataset,
-        representative_var=next(iter(var_grids)),
+        minzoom_dataset if minzoom_dataset is not None else dataset,
+        representative_var=(
+            representative_var
+            if representative_var is not None
+            else next(iter(var_grids))
+        ),
         cf_coords=cf_coords,
     )
 

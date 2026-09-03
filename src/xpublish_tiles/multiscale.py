@@ -1,4 +1,5 @@
 import math
+from collections.abc import Hashable
 from dataclasses import dataclass
 
 import morecantile
@@ -128,6 +129,14 @@ def get_coarsest_level(tree: DataTree) -> ResolutionLevel | None:
         return None
     # levels are sorted finest to coarsest, so last is coarsest
     return levels[-1]
+
+
+def get_coarsest_level_for(tree: DataTree, name: Hashable) -> ResolutionLevel | None:
+    """Coarsest level that holds ``name``. Overview levels may carry fewer variables than the finest."""
+    for level in reversed(scan_resolution_levels(tree)):
+        if name in level.dataset.data_vars:
+            return level
+    return None
 
 
 def get_resolution_level(
