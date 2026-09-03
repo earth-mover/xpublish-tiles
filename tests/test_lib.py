@@ -31,8 +31,8 @@ from xpublish_tiles.pipeline import _parse_timedelta
 from xpublish_tiles.projections import (
     epsg4326to3857,
 )
-from xpublish_tiles.testing.datasets import IFS
-from xpublish_tiles.tiles_lib import get_min_zoom
+from xpublish_tiles.testing.datasets import IFS, PARA
+from xpublish_tiles.tiles_lib import get_min_zoom, grid_overlaps_tms
 
 
 @given(
@@ -496,6 +496,27 @@ def test_decompressed_size_bytes():
         decompressed_size_bytes(slicers, da, grid, chunks=chunks)
         == ny * nx * da.dtype.itemsize
     )
+
+
+@pytest.mark.parametrize(
+    "tms_id, tropical",
+    [
+        # a conic or polar TMS reports a near-global tms.bbox, so only its CRS's
+        # area of use rules it out over the tropics
+        ("WebMercatorQuad", True),
+        ("WorldCRS84Quad", True),
+        ("CanadianNAD83_LCC", False),
+        ("UPSArcticWGS84Quad", False),
+        ("LINZAntarticaMapTilegrid", False),
+        ("UTM31WGS84Quad", False),
+    ],
+)
+def test_grid_overlaps_tms(tms_id, tropical):
+    """A TMS whose projection isn't defined over the data cannot tile it."""
+    tms = morecantile.tms.get(tms_id)
+    assert grid_overlaps_tms(guess_grid_system(PARA.create(), "foo"), tms) is tropical
+    # a global grid reaches into every TMS's area of use
+    assert grid_overlaps_tms(guess_grid_system(IFS.create(), "foo"), tms)
 
 
 def test_min_zoom_accounts_for_chunks():
