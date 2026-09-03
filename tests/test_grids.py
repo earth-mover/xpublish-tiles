@@ -87,6 +87,7 @@ from xpublish_tiles.testing.datasets import (
     UTM33S_HIRES,
     UTM50S_HIRES,
     Dataset,
+    create_rotated_pole_dataset,
 )
 from xpublish_tiles.testing.lib import as_pytestparams
 from xpublish_tiles.testing.tiles import TILES
@@ -1745,7 +1746,7 @@ class TestUgridDetection:
                 attrs={"mesh": "mesh", "location": "edge"},
             )
         )
-        with pytest.raises(NotImplementedError, match="edge-located"):
+        with pytest.raises(GridDetectionError, match="edge-located"):
             guess_grid_system(ds, "tau")
 
     def test_global_explicit_mesh_raises(self) -> None:
@@ -1778,7 +1779,7 @@ class TestUgridDetection:
                 "lat": ("node", lat, {"standard_name": "latitude"}),
             },
         )
-        with pytest.raises(NotImplementedError, match="Global UGRID"):
+        with pytest.raises(GridDetectionError, match="Global UGRID"):
             _guess_grid_for_dataset(ds)
 
     def test_load_connectivity_rebases_fvcom(self, fvcom_ds: xr.Dataset) -> None:
@@ -1857,3 +1858,10 @@ class TestUgridDetection:
             grid = _guess_grid_for_dataset(fvcom_ds)
         assert isinstance(grid, Triangular)
         assert grid.face_dim == "nele"
+
+
+def test_guess_grid_system_rotated_pole_is_a_detection_error():
+    """An unsupported grid must surface as GridDetectionError so the routes can map it
+    to a client error instead of a 500."""
+    with pytest.raises(GridDetectionError, match="Rotated pole grids are not supported"):
+        guess_grid_system(create_rotated_pole_dataset(), "temp")

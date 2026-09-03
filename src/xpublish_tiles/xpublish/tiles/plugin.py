@@ -380,13 +380,13 @@ class TilesPlugin(Plugin):
                     guess_grid_system, dataset, query.variables[0]
                 )
             except VariableNotFoundError as e:
-                logger.error("VariableNotFoundError", str(e))
+                logger.error("VariableNotFoundError: %s", e)
                 raise HTTPException(
                     status_code=404,
                     detail=f"Invalid variable name(s): {query.variables!r}.",
                 ) from None
             except GridDetectionError as e:
-                logger.error("GridDetectionError", str(e))
+                logger.error("GridDetectionError: %s", e)
                 raise HTTPException(
                     status_code=422,
                     detail=f"Variable {query.variables[0]!r} cannot be tiled: {e}",

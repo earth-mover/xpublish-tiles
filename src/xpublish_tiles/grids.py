@@ -2230,7 +2230,7 @@ class Curvilinear(GridSystem):
                 # The 2D `unwrap_phase` path degenerates into a non-terminating
                 # traversal when the array contains NaNs: NaN poisons its
                 # per-pixel reliability ordering. We have no NaN-safe unwrap yet.
-                raise NotImplementedError(
+                raise GridDetectionError(
                     "Cannot unwrap longitudes for a curvilinear grid that crosses "
                     "the ±180°/360° seam and contains NaNs (e.g. a masked grid)."
                 )
@@ -2538,7 +2538,7 @@ class Triangular(GridSystem):
         # but that's basically impossible if all you have are vertices.
         self.lon_spans_globe = crs.is_geographic and ((xmax - xmin) > 350)
         if self.lon_spans_globe and mesh is not None:
-            raise NotImplementedError(
+            raise GridDetectionError(
                 "Global UGRID meshes with explicit connectivity are not yet "
                 "supported (would discard provided face_node_connectivity)."
             )
@@ -3608,7 +3608,7 @@ def _detect_grid_metadata(
         grid_cls = Polar
     elif X.ndim == 1 and Y.ndim == 1:
         if is_rotated_pole(mapping.crs):
-            raise NotImplementedError("Rotated pole grids are not supported yet.")
+            raise GridDetectionError("Rotated pole grids are not supported yet.")
         if X.dims == Y.dims:
             grid_cls = Triangular
         elif mapping.grid_mapping.get(
@@ -3746,7 +3746,7 @@ def _validate_grid_dims(grid: GridSystem, var: xr.DataArray) -> None:
         and grid.mesh is not None
         and var.attrs.get("location") == "edge"
     ):
-        raise NotImplementedError(
+        raise GridDetectionError(
             f"Variable {var.name!r} is edge-located on a UGRID mesh; "
             "edge-located rendering is not yet supported."
         )

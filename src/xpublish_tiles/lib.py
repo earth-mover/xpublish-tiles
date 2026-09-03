@@ -206,7 +206,8 @@ class VariableNotFoundError(Exception):
 
 
 class GridDetectionError(Exception):
-    """Raised when no tileable grid system can be detected for a variable."""
+    """Raised when no tileable grid system can be detected for a variable, or the
+    detected grid is not supported."""
 
     pass
 
