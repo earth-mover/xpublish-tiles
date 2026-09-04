@@ -55,6 +55,11 @@ if TYPE_CHECKING:
 from xpublish_tiles.logger import logger
 
 
+def anynotfinite(data: np.ndarray) -> bool:
+    """True if ``data`` holds any NaN or ±inf."""
+    return data.dtype.kind == "f" and not bool(np.isfinite(data).all())
+
+
 def unwrap(data: np.ndarray, *, width: float, axis: int | None = None) -> np.ndarray:
     """Remove ±width discontinuities from ``data``.
 
@@ -209,6 +214,12 @@ class VariableNotFoundError(Exception):
 class UnsupportedGridError(Exception):
     """Raised when no tileable grid system can be detected for a variable, or the
     detected grid is not supported."""
+
+    pass
+
+
+class InvalidCoordinateValues(Exception):
+    """Non-finite (NaN/inf) coordinates reached ``unwrap_phase``, which never terminates on them."""
 
     pass
 

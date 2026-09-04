@@ -19,9 +19,11 @@ from tests import NUMERIC_DTYPES
 from xpublish_tiles.config import config
 from xpublish_tiles.grids import guess_grid_system
 from xpublish_tiles.lib import (
+    InvalidCoordinateValues,
     _chunk_aligned_count,
     _chunk_sizes,
     adversarial_slicers,
+    anynotfinite,
     apply_default_pad,
     apply_range_colors,
     check_data_is_renderable_size,
@@ -32,7 +34,7 @@ from xpublish_tiles.lib import (
     transform_chunk,
     transform_coordinates,
 )
-from xpublish_tiles.pipeline import _parse_timedelta
+from xpublish_tiles.pipeline import _parse_timedelta, fix_coordinate_discontinuities
 from xpublish_tiles.projections import (
     epsg4326to3857,
     transformer_from_crs,
@@ -618,3 +620,56 @@ def test_min_zoom_covers_interior_tiles():
         assert num_over_limit(minzoom) == 0
         # and no higher than it has to be
         assert num_over_limit(minzoom - 1) > 0
+
+
+@pytest.mark.parametrize(
+    "array, expected",
+    [
+        (np.linspace(-180.0, 180.0, 32).reshape(4, 8), False),
+        (np.array([[1.0, np.nan], [3.0, 4.0]]), True),
+        (np.array([[1.0, np.inf], [3.0, 4.0]]), True),
+        (np.array([[1.0, -np.inf], [3.0, 4.0]]), True),
+        # Last element: the short-circuit must not stop early and miss it.
+        (np.array([[1.0, 2.0], [3.0, np.nan]]), True),
+        (np.array([], dtype=np.float64), False),
+        (np.zeros((3, 3), dtype=np.float32), False),
+        # Integers cannot hold NaN/inf — must not be rejected.
+        (np.arange(12).reshape(3, 4), False),
+    ],
+)
+def test_anynotfinite(array, expected):
+    assert anynotfinite(array) is expected
+
+
+@pytest.fixture
+def webmerc_transformer() -> pyproj.Transformer:
+    return pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+
+
+@pytest.mark.parametrize("axis", [None, 1])
+@pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf])
+def test_fix_coordinate_discontinuities_rejects_nonfinite(webmerc_transformer, axis, bad):
+    """``axis=None`` hangs in ``unwrap_phase``; with an axis ``round(nan)`` raises.
+
+    Reached by HYCOM/RTOFS: fold-row lons past 360° map to ``inf`` in Web Mercator.
+    """
+    bbox = BBox(west=-180, south=-85, east=180, north=85)
+    poisoned = np.array([[0.0, 1.0e7], [2.0e7, bad]])
+
+    with pytest.raises(InvalidCoordinateValues, match="NaN/inf"):
+        fix_coordinate_discontinuities(
+            poisoned, webmerc_transformer, bbox=bbox, axis=axis
+        )
+
+
+@pytest.mark.parametrize("axis", [None, 1])
+def test_fix_coordinate_discontinuities_allows_finite(webmerc_transformer, axis):
+    """The guard must not reject ordinary all-finite coordinates."""
+    bbox = BBox(west=-180, south=-85, east=180, north=85)
+    coords = np.array([[0.0, 1.0e7], [2.0e7, -1.0e7]])
+
+    result = fix_coordinate_discontinuities(
+        coords, webmerc_transformer, bbox=bbox, axis=axis
+    )
+    assert np.isfinite(result).all()
+    assert result.shape == coords.shape
