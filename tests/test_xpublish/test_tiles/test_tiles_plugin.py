@@ -19,6 +19,7 @@ from xpublish_tiles.testing.datasets import (
     IFS,
     NATIVE_AT_ROOT_MULTISCALE,
     REDGAUSS_N320,
+    create_rotated_pole_dataset,
 )
 from xpublish_tiles.tiles_lib import _MIN_ZOOM_CACHE
 from xpublish_tiles.xpublish.tiles import TilesPlugin
@@ -1415,3 +1416,22 @@ def test_native_at_root_multiscale_snapshot(
     assert response.status_code == 200
     assert response.headers["X-Multiscale-Level"] == expected_level
     assert response.content == png_snapshot
+
+
+def test_rotated_pole_dataset_is_reported_as_not_tileable():
+    rest = xpublish.Rest(
+        {"rotated": create_rotated_pole_dataset()},
+        plugins={"tiles": TilesPlugin()},
+    )
+    client = TestClient(rest.app)
+
+    response = client.get(
+        "/datasets/rotated/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=temp&style=raster/viridis&width=256&height=256&colorscalerange=0,1"
+    )
+    assert response.status_code == 422
+    assert "Rotated pole grids are not supported" in response.json()["detail"]
+
+    response = client.get("/datasets/rotated/tiles/")
+    assert response.status_code == 422
+    assert "No renderable variables" in response.json()["detail"]

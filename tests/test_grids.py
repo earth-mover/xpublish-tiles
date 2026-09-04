@@ -46,8 +46,8 @@ from xpublish_tiles.grids import (
     match_coord_dim,
 )
 from xpublish_tiles.lib import (
-    GridDetectionError,
     TileTooBigError,
+    UnsupportedGridError,
     VariableNotFoundError,
     _iter_subset_shapes,
     _prevent_slice_overlap,
@@ -88,6 +88,7 @@ from xpublish_tiles.testing.datasets import (
     UTM33S_HIRES,
     UTM50S_HIRES,
     Dataset,
+    create_rotated_pole_dataset,
 )
 from xpublish_tiles.testing.lib import as_pytestparams
 from xpublish_tiles.testing.tiles import TILES
@@ -594,7 +595,7 @@ def test_polar_grid_from_dataset_missing_location():
             ),
         },
     )
-    with pytest.raises(GridDetectionError, match="Center location not found"):
+    with pytest.raises(UnsupportedGridError, match="Center location not found"):
         Polar.from_dataset(ds, CRS.from_epsg(4326), "azimuth", "range")
 
 
@@ -618,7 +619,7 @@ def test_guess_coordinate_vars_filters_scalars():
 
 
 def test_detect_grid_metadata_unsupported_ndim():
-    """Coordinates with unsupported dimensionality should raise GridDetectionError."""
+    """Coordinates with unsupported dimensionality should raise UnsupportedGridError."""
     ds = xr.Dataset(
         {"temp": (("a", "b", "c"), np.ones((2, 3, 4)))},
         coords={
@@ -626,7 +627,9 @@ def test_detect_grid_metadata_unsupported_ndim():
             "lon": (("a", "b", "c"), np.ones((2, 3, 4)), {"standard_name": "longitude"}),
         },
     )
-    with pytest.raises(GridDetectionError, match="Unsupported coordinate dimensionality"):
+    with pytest.raises(
+        UnsupportedGridError, match="Unsupported coordinate dimensionality"
+    ):
         guess_grid_system(ds, "temp")
 
 
@@ -1686,7 +1689,7 @@ def test_ugrid_dispatch_when_meta_none_from_cf_sub():
     """guess_grid_system re-runs guess_grid_metadata on full ds when cf_sub gives no grid."""
     ds = FVCOM_MACHIAS_BAY.create()
     ds.attrs["_xpublish_id"] = "ugrid_meta_none_test"
-    # Force meta=None from cf_sub by raising GridDetectionError on the first call,
+    # Force meta=None from cf_sub by raising UnsupportedGridError on the first call,
     # letting the second call (on full ds) succeed normally.
     original = guess_grid_metadata
 
@@ -1695,7 +1698,7 @@ def test_ugrid_dispatch_when_meta_none_from_cf_sub():
     def patched(d, **kw):
         call_count["n"] += 1
         if call_count["n"] == 1:
-            raise GridDetectionError("forced miss")
+            raise UnsupportedGridError("forced miss")
         return original(d, **kw)
 
     with patch("xpublish_tiles.grids.guess_grid_metadata", side_effect=patched):
@@ -1793,7 +1796,7 @@ class TestUgridDetection:
                 attrs={"mesh": "mesh", "location": "edge"},
             )
         )
-        with pytest.raises(NotImplementedError, match="edge-located"):
+        with pytest.raises(UnsupportedGridError, match="edge-located"):
             guess_grid_system(ds, "tau")
 
     def test_global_explicit_mesh_raises(self) -> None:
@@ -1826,7 +1829,7 @@ class TestUgridDetection:
                 "lat": ("node", lat, {"standard_name": "latitude"}),
             },
         )
-        with pytest.raises(NotImplementedError, match="Global UGRID"):
+        with pytest.raises(UnsupportedGridError, match="Global UGRID"):
             _guess_grid_for_dataset(ds)
 
     def test_load_connectivity_rebases_fvcom(self, fvcom_ds: xr.Dataset) -> None:
@@ -1905,3 +1908,12 @@ class TestUgridDetection:
             grid = _guess_grid_for_dataset(fvcom_ds)
         assert isinstance(grid, Triangular)
         assert grid.face_dim == "nele"
+
+
+def test_guess_grid_system_rotated_pole_is_a_detection_error():
+    """An unsupported grid must surface as UnsupportedGridError so the routes can map it
+    to a client error instead of a 500."""
+    with pytest.raises(
+        UnsupportedGridError, match="Rotated pole grids are not supported"
+    ):
+        guess_grid_system(create_rotated_pole_dataset(), "temp")
