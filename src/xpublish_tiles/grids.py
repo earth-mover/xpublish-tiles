@@ -3567,9 +3567,20 @@ def _detect_grid_metadata(
         assert Xname is not None and Yname is not None
         return GridMetadata(X=Xname, Y=Yname, grid_cls=Healpix, crs=mapping.crs)
 
-    # GeoZarr with spatial:transform uses RasterAffine
-    spatial_transform = mapping.grid_mapping.get("spatial:transform")
-    if spatial_transform is not None and Xname is not None and Yname is not None:
+    # An affine transform (GeoZarr spatial:transform or GDAL GeoTransform) beats
+    # 1D coordinate values: the two can disagree by a fraction of a pixel.
+    has_transform = (
+        mapping.grid_mapping.get("spatial:transform") is not None
+        or mapping.grid_mapping.get("GeoTransform") is not None
+    )
+    if (
+        has_transform
+        and Xname is not None
+        and Yname is not None
+        and ds[Xname].ndim == 1
+        and ds[Yname].ndim == 1
+        and ds[Xname].dims != ds[Yname].dims
+    ):
         return GridMetadata(
             X=Xname,
             Y=Yname,
