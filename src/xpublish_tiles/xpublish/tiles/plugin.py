@@ -21,10 +21,10 @@ from xpublish_tiles.grids import (
 from xpublish_tiles.lib import (
     AsyncLoadTimeoutError,
     ColormapError,
-    GridDetectionError,
     IndexingError,
     MissingParameterError,
     TileTooBigError,
+    UnsupportedGridError,
     VariableNotFoundError,
     async_run,
     cf_get,
@@ -403,13 +403,13 @@ class TilesPlugin(Plugin):
                     guess_grid_system, dataset, query.variables[0]
                 )
             except VariableNotFoundError as e:
-                logger.error("VariableNotFoundError", str(e))
+                logger.error("VariableNotFoundError: %s", e)
                 raise HTTPException(
                     status_code=404,
                     detail=f"Invalid variable name(s): {query.variables!r}.",
                 ) from None
-            except GridDetectionError as e:
-                logger.error("GridDetectionError", str(e))
+            except UnsupportedGridError as e:
+                logger.error("UnsupportedGridError: %s", e)
                 raise HTTPException(
                     status_code=422,
                     detail=f"Variable {query.variables[0]!r} cannot be tiled: {e}",

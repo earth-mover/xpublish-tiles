@@ -2394,3 +2394,40 @@ DATASET_LOOKUP = {
     "geozarr_multiscale": GEOZARR_MULTISCALE,
     "native_at_root_multiscale": NATIVE_AT_ROOT_MULTISCALE,
 }
+
+
+def create_rotated_pole_dataset() -> xr.Dataset:
+    """A small CF rotated-pole grid. Grid detection does not support it yet."""
+    rlon = np.linspace(17.935, 18.155, 5, dtype=np.float64)
+    rlat = np.linspace(21.615, 21.835, 4, dtype=np.float64)
+    return xr.Dataset(
+        {
+            "temp": (
+                ("rlat", "rlon"),
+                np.ones((rlat.size, rlon.size), dtype=np.float32),
+                {"grid_mapping": "rotated_pole", "units": "K"},
+            ),
+        },
+        coords={
+            "rlon": (
+                "rlon",
+                rlon,
+                {"standard_name": "grid_longitude", "units": "degrees"},
+            ),
+            "rlat": (
+                "rlat",
+                rlat,
+                {"standard_name": "grid_latitude", "units": "degrees"},
+            ),
+            "rotated_pole": (
+                (),
+                np.int8(0),
+                {
+                    "grid_mapping_name": "rotated_latitude_longitude",
+                    "grid_north_pole_latitude": 39.25,
+                    "grid_north_pole_longitude": -162.0,
+                },
+            ),
+        },
+        attrs={"_xpublish_id": "rotated_pole"},
+    )
