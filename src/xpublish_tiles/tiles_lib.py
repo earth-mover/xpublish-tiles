@@ -3,7 +3,6 @@
 import itertools
 import threading
 import warnings
-from functools import lru_cache
 
 import cachetools
 import morecantile
@@ -17,18 +16,15 @@ from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
     GridSystem,
     GridSystem2D,
-    Slicers,
     Triangular,
 )
 from xpublish_tiles.lib import (
     TileTooBigError,
     apply_default_pad,
     check_data_is_renderable_size,
-    chunk_aligned_extent,
     normalize_slicers,
 )
 from xpublish_tiles.projections import (
-    is_degree_geographic,
     transformer_from_crs,
 )
 from xpublish_tiles.utils import time_debug, xarray_object_key
@@ -73,35 +69,6 @@ def grid_overlaps_tms(grid: GridSystem, tms: morecantile.TileMatrixSet) -> bool:
         lo < area_hi and area_lo < hi
         for lo, hi in _lon_ranges(west, east)
         for area_lo, area_hi in _lon_ranges(area.west, area.east)
-    )
-
-
-@lru_cache
-def axes_are_separable(grid_crs: CRS, tms_crs: CRS) -> bool:
-    """True when a tile's X extent in grid coordinates depends only on its
-    column, and its Y extent only on its row.
-
-    Holds when the grid is already in the TMS CRS, and for a lon/lat grid under
-    a cylindrical TMS: X is a function of longitude alone and Y of latitude
-    alone, so the tile lattice stays a product lattice in grid coordinates. It
-    fails for anything conic, azimuthal or transverse, where a tile's longitude
-    range varies with latitude.
-    """
-    if grid_crs == tms_crs:
-        return True
-    if not is_degree_geographic(grid_crs):
-        return False
-    if is_degree_geographic(tms_crs):
-        return True
-    operation = tms_crs.coordinate_operation
-    if operation is None:
-        return False
-    method = operation.method_name.lower()
-    if "transverse" in method:
-        return False
-    return any(
-        name in method
-        for name in ("mercator", "equidistant cylindrical", "equirectangular")
     )
 
 
@@ -212,7 +179,6 @@ def _compute_min_zoom(
 
     alternate = grid.pick_alternate_grid(tms_crs, coarsen_factors={})
     transformer = transformer_from_crs(tms_crs, grid.crs)
-    separable = isinstance(grid, GridSystem2D) and axes_are_separable(grid.crs, tms_crs)
 
     def tile_renderable(tile: morecantile.Tile, *, worst_case: bool) -> bool:
         bounds = tms.xy_bounds(tile)
@@ -240,89 +206,11 @@ def _compute_min_zoom(
             warnings.simplefilter("ignore", PointOutsideTMSBounds)
             return {tms.tile(lon, lat, zoom) for lon, lat in test_points}
 
-    def worst_tile_slicers(zoom: int) -> Slicers | None:
-        """Slicers of the costliest tile at ``zoom``, or None if not derivable.
-
-        Under a separable transform the two axes are independent: a tile's X
-        indices depend only on its column, its Y indices only on its row. So
-        the costliest tile is (costliest column, costliest row) — found by
-        scanning each axis once, rather than by visiting every tile.
-        """
-        cols, rows = axis_ranges(zoom)
-        if cols is None or rows is None:
-            return None
-
-        # one vectorized transform per axis instead of one per tile: with the
-        # axes independent, the other coordinate can be held anywhere inside
-        # the grid
-        x_edges = np.array(
-            [tms.xy_bounds(morecantile.Tile(x=c, y=rows[0], z=zoom)).left for c in cols]
-            + [tms.xy_bounds(morecantile.Tile(x=cols[-1], y=rows[0], z=zoom)).right]
-        )
-        y_edges = np.array(
-            [tms.xy_bounds(morecantile.Tile(x=cols[0], y=r, z=zoom)).top for r in rows]
-            + [tms.xy_bounds(morecantile.Tile(x=cols[0], y=rows[-1], z=zoom)).bottom]
-        )
-        x_ref = np.full(y_edges.shape, x_edges[len(x_edges) // 2])
-        y_ref = np.full(x_edges.shape, y_edges[len(y_edges) // 2])
-        edge_lons, _ = transformer.transform(x_edges, y_ref)
-        _, edge_lats = transformer.transform(x_ref, y_edges)
-
-        def worst(dim: str, spans, other: BBox) -> Slicers | None:
-            best: Slicers | None = None
-            best_extent = -1
-            for lo_edge, hi_edge in itertools.pairwise(spans):
-                if dim == grid.Xdim:
-                    west, east = lo_edge, hi_edge
-                    south, north = other.south, other.north
-                else:
-                    west, east = other.west, other.east
-                    south, north = min(lo_edge, hi_edge), max(lo_edge, hi_edge)
-                if grid.crs.is_geographic and west > east:
-                    east += 360
-                slicers = grid.sel(
-                    bbox=BBox(west=west, south=south, east=east, north=north)
-                )
-                slicers = normalize_slicers(
-                    apply_default_pad(slicers, da, grid), dict(da.sizes)
-                )
-                extent = chunk_aligned_extent(slicers, da, dim)
-                if extent > best_extent:
-                    best, best_extent = slicers, extent
-            return best
-
-        worst_x = worst(grid.Xdim, edge_lons, grid.bbox)
-        worst_y = worst(grid.Ydim, edge_lats, grid.bbox)
-        if worst_x is None or worst_y is None:
-            return None
-        return {grid.Xdim: worst_x[grid.Xdim], grid.Ydim: worst_y[grid.Ydim]}
-
-    def axis_ranges(zoom: int) -> tuple[range | None, range | None]:
-        """Tile columns and rows overlapping the grid, or None if too many."""
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", PointOutsideTMSBounds)
-            west, south, east, north = sample_bounds
-            upper_left = tms.tile(west, north, zoom)
-            lower_right = tms.tile(east, south, zoom)
-        cols = range(upper_left.x, lower_right.x + 1)
-        rows = range(upper_left.y, lower_right.y + 1)
-        return (
-            cols if len(cols) <= MAX_TILES_TO_CHECK else None,
-            rows if len(rows) <= MAX_TILES_TO_CHECK else None,
-        )
-
     def all_renderable(zoom: int) -> bool:
         # Chunk-aligned cost depends on where a tile falls, and the sampled
         # boundary tiles are the cheap ones: their slicers are clipped by the
         # grid edge. Interior tiles straddle more chunks, so the costliest tile
         # at this zoom is what decides renderability.
-        if separable:
-            slicers = worst_tile_slicers(zoom)
-            if slicers is not None:
-                return check_data_is_renderable_size(
-                    slicers, da, grid, alternate, style=style
-                )
-
         tiles = list(
             itertools.islice(tms.tiles(*sample_bounds, [zoom]), MAX_TILES_TO_CHECK + 1)
         )

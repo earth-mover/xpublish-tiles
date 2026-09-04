@@ -1184,23 +1184,6 @@ def _iter_subset_shapes(
         yield (x_size, y_size)
 
 
-def chunk_aligned_extent(
-    slicers: "Slicers",
-    da: xr.DataArray,
-    dim: str,
-    chunks: Mapping[str, int] | None = None,
-) -> int:
-    """Elements ``slicers`` decompresses along ``dim`` alone.
-
-    Lets a caller rank one axis of a selection independently of the other,
-    which is only meaningful when the two axes are independent.
-    """
-    if chunks is None:
-        chunks = _chunk_sizes(da)
-    chunk = chunks.get(str(dim))
-    return sum(_get_indexer_size(sl, da.sizes[dim], chunk) for sl in slicers[dim])
-
-
 def check_data_is_renderable_size(
     slicers: "Slicers",
     da: xr.DataArray,
