@@ -14,7 +14,7 @@ import pyproj.aoi
 
 import xarray as xr
 from xpublish_tiles.grids import GridSystem, guess_grid_system
-from xpublish_tiles.lib import async_run, timedelta_to_iso8601
+from xpublish_tiles.lib import async_run, cf_get, timedelta_to_iso8601
 from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import OutputBBox, OutputCRS
 from xpublish_tiles.xpublish.tiles.types import (
@@ -250,7 +250,8 @@ async def extract_dimension_extents(
     dimensions = []
 
     grid = await async_run(guess_grid_system, ds, name, cf_coords=cf_coords)
-    data_array = ds[name]
+    # Read as detection did, so a Z that only `cf_get` promotes reports as VERTICAL.
+    data_array = cf_get(ds, name)
 
     # Grid-owned dims (X, Y, and faceted ``face_dim``) are skipped for
     # custom dimension extents — they're an implementation detail of the grid.

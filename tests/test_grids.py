@@ -1,3 +1,4 @@
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Literal, cast
 from unittest.mock import patch
@@ -38,6 +39,7 @@ from xpublish_tiles.grids import (
     Triangular,
     UgridIndexer,
     _guess_grid_for_dataset,
+    _guess_z_dimension,
     _resolve_corner_name,
     find_cubed_sphere_face_dim,
     guess_coordinate_vars,
@@ -58,6 +60,7 @@ from xpublish_tiles.lib import (
     normalize_slicers,
 )
 from xpublish_tiles.pipeline import (
+    apply_query,
     apply_slicers,
     fix_coordinate_discontinuities,
     load_plans,
@@ -96,6 +99,8 @@ from xpublish_tiles.testing.tiles import TILES
 from xpublish_tiles.tiles_lib import get_max_zoom, get_min_zoom
 from xpublish_tiles.types import ContinuousData
 from xpublish_tiles.ugrid import detect_mesh, load_connectivity
+from xpublish_tiles.xpublish.tiles.tile_matrix import extract_dimension_extents
+from xpublish_tiles.xpublish.tiles.types import DimensionType
 
 TRIANGULAR_SENTINEL = 1
 HEALPIX_SENTINEL = 2
@@ -443,11 +448,6 @@ def test_z_coord_with_mismatched_dim_name():
     should assign a default index and select on it, and the dimension extent
     metadata should report ``deptht`` (not the bare dim ``k``).
     """
-    import asyncio
-
-    from xpublish_tiles.pipeline import apply_query
-    from xpublish_tiles.xpublish.tiles.tile_matrix import extract_dimension_extents
-
     nz, ny, nx = 5, 3, 4
     ds = xr.Dataset(
         {
@@ -541,18 +541,24 @@ def test_grid_detection_duplicate_standard_name():
 
 def test_cf_get_attaches_aux_vertical_coordinate():
     """cf_get must promote an auxiliary Z coordinate referenced only via the
-    variable's ``coordinates`` attribute, mirroring scalar ``ds.cf[name]``."""
+    variable's ``coordinates`` attribute, mirroring scalar ``ds.cf[name]``.
+
+    ``apply_query`` and the dimension-extent metadata must read the variable
+    back the same way, otherwise that Z is invisible to them: selection falls
+    through to ``isel(-1)`` on the level dim, and the extent reports the bare
+    dim as CUSTOM instead of the coord as VERTICAL.
+    """
     nz, ny, nx = 4, 3, 5
     ds = xr.Dataset(
         {
             "foo": (
                 ("k", "lat", "lon"),
-                np.zeros((nz, ny, nx)),
+                np.arange(nz * ny * nx, dtype="float64").reshape(nz, ny, nx),
                 {"coordinates": "depth_aux"},
             ),
             "depth_aux": (
                 ("k",),
-                np.arange(nz, dtype="float64"),
+                np.arange(nz, dtype="float64") * 10.0,
                 {"standard_name": "depth", "positive": "down", "units": "m"},
             ),
         },
@@ -573,10 +579,84 @@ def test_cf_get_attaches_aux_vertical_coordinate():
 
     da = cf_get(ds, "foo")
     assert "depth_aux" in da.coords
-    npt.assert_allclose(da["depth_aux"].values, np.arange(nz, dtype="float64"))
+    npt.assert_allclose(da["depth_aux"].values, np.arange(nz, dtype="float64") * 10.0)
 
     grid = guess_grid_system(ds, "foo")
     assert grid.Z == "depth_aux"
+
+    selected = apply_query(ds, variables=["foo"], selectors={})["foo"].da
+    assert "k" not in selected.dims
+    npt.assert_allclose(selected["depth_aux"].values, 0.0)
+    npt.assert_allclose(selected.values, ds["foo"].isel(k=0).values)
+
+    extents = asyncio.run(extract_dimension_extents(ds, "foo"))
+    assert [(e.name, e.type) for e in extents] == [("depth_aux", DimensionType.VERTICAL)]
+
+
+@pytest.mark.parametrize(
+    "h_attrs",
+    [
+        pytest.param(
+            {
+                "standard_name": "sea_floor_depth_below_geoid",
+                "positive": "down",
+                "units": "m",
+                "long_name": "Bathymetry",
+            },
+            id="standard_name",
+        ),
+        pytest.param(
+            {"positive": "down", "units": "m", "long_name": "Bathymetry"},
+            id="no_standard_name",
+        ),
+    ],
+)
+def test_bathymetry_is_not_a_z_coordinate(h_attrs):
+    """Bathymetry is a field over the grid, not a vertical coordinate.
+
+    FVCOM datasets (e.g. NGOFS2) carry ``h`` as a 1D coordinate on the mesh
+    ``node`` dim. cf-xarray reports it as ``vertical`` because of its
+    ``positive`` attr, but nothing is a function of bathymetry — and its values
+    aren't unique, so ``sel(h=0, method='nearest')`` raises.
+
+    Excluded by ``standard_name`` when it has one, and by the horizontal-dim
+    check when it doesn't.
+    """
+    n = 8
+    rng = np.random.default_rng(0)
+    ds = xr.Dataset(
+        {"salinity_surface": (("time", "node"), np.zeros((2, n)))},
+        coords={
+            "h": (("node",), np.repeat([1.0, 2.0, 3.0, 4.0], 2), h_attrs),
+            "lon": (
+                ("node",),
+                rng.uniform(-97, -85, n),
+                {"standard_name": "longitude", "units": "degrees_east"},
+            ),
+            "lat": (
+                ("node",),
+                rng.uniform(22, 30, n),
+                {"standard_name": "latitude", "units": "degrees_north"},
+            ),
+            "time": (("time",), pd.date_range("2024-01-01", periods=2)),
+        },
+    )
+
+    assert "h" in ds["salinity_surface"].cf.coordinates["vertical"]
+
+    grid = guess_grid_system(ds, "salinity_surface")
+    assert grid.Z is None
+
+    validated = apply_query(ds, variables=["salinity_surface"], selectors={})
+    da = validated["salinity_surface"].da
+    assert da.sizes["node"] == n
+
+    # Which mechanism caught it: standard_name on its own, else the
+    # horizontal-dim check.
+    caught_by_standard_name = "standard_name" in h_attrs
+    assert _guess_z_dimension(ds["salinity_surface"], exclude_dims=set()) == (
+        None if caught_by_standard_name else "h"
+    )
 
 
 def test_polar_grid_from_dataset_missing_location():

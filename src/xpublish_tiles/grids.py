@@ -3764,17 +3764,38 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
     return primary_grid
 
 
-def _guess_z_dimension(da: xr.DataArray) -> str | None:
+#: Domain geometry, not vertical coordinates. cf-xarray flags them ``vertical``
+#: because a ``positive`` attr alone meets its criteria (FVCOM/ROMS ``h``).
+NOT_VERTICAL_COORDINATE_STANDARD_NAMES = frozenset(
+    {
+        "sea_floor_depth_below_geoid",
+        "sea_floor_depth_below_mean_sea_level",
+        "sea_floor_depth_below_reference_ellipsoid",
+        "sea_floor_depth_below_sea_surface",
+        "sea_surface_height_above_geoid",
+        "sea_surface_height_above_mean_sea_level",
+        "sea_surface_height_above_reference_ellipsoid",
+        "surface_altitude",
+        "water_surface_height_above_reference_datum",
+    }
+)
+
+
+def _guess_z_dimension(da: xr.DataArray, *, exclude_dims: set[str]) -> str | None:
     # Returns the name of a Z coordinate variable on ``da`` whose underlying
     # dimension is in ``da.dims``. The coordinate may itself be a dim coord
     # (e.g. ``depth`` on dim ``depth``) or a 1D non-dim coord (e.g. ``deptht``
     # on dim ``k``).
+    # ``exclude_dims``: the horizontal grid dims. A Z coord never lives on one;
+    # this rejects bathymetry that has no standard_name.
     possible = set(da.cf.coordinates.get("vertical", {})) | set(da.cf.axes.get("Z", {}))
     for z in sorted(possible):
         if z not in da.coords:
             continue
         zda = da.coords[z]
-        if zda.ndim == 1 and zda.dims[0] in da.dims:
+        if zda.attrs.get("standard_name") in NOT_VERTICAL_COORDINATE_STANDARD_NAMES:
+            continue
+        if zda.ndim == 1 and zda.dims[0] in da.dims and zda.dims[0] not in exclude_dims:
             return z
     return None
 
@@ -3939,8 +3960,9 @@ def _detect_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
         grid = CubedSphere.from_dataset(
             ds, meta.crs, meta.X, meta.Y, face_dim=meta.face_dim
         )
-        grid.Z = _guess_z_dimension(ds[name])
-        _validate_grid_dims(grid, ds[name])
+        var = cf_get(ds, name)
+        grid.Z = _guess_z_dimension(var, exclude_dims=grid.dims_for(var))
+        _validate_grid_dims(grid, var)
         return grid
 
     try:
@@ -3963,8 +3985,9 @@ def _detect_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
     # actually apply to ``name`` (e.g. an auxiliary var like ``contacts``
     # on a cubed-sphere dataset shares the ``face_dim`` but lacks the
     # 2D lat/lon dims). Reject these so per-variable callers can skip them.
-    grid.Z = _guess_z_dimension(cf_get(ds, name))
-    _validate_grid_dims(grid, ds[name])
+    var = cf_get(ds, name)
+    grid.Z = _guess_z_dimension(var, exclude_dims=grid.dims_for(var))
+    _validate_grid_dims(grid, var)
     return grid
 
 
