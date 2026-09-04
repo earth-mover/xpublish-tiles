@@ -21,6 +21,7 @@ from xpublish_tiles.grids import guess_grid_system
 from xpublish_tiles.lib import (
     _chunk_aligned_count,
     _chunk_sizes,
+    adversarial_slicers,
     apply_default_pad,
     apply_range_colors,
     check_data_is_renderable_size,
@@ -524,7 +525,7 @@ def test_grid_overlaps_tms(tms_id, tropical):
     assert grid_overlaps_tms(guess_grid_system(IFS.create(), "foo"), tms)
 
 
-def test_decompressed_size_bytes_worst_case():
+def test_adversarial_slicers():
     ds = IFS.create()
     grid = guess_grid_system(ds, "foo")
     da = ds["foo"].isel(time=-1, step=-1)
@@ -534,9 +535,9 @@ def test_decompressed_size_bytes_worst_case():
 
     def bytes_for(y, x, *, worst_case):
         slicers = normalize_slicers({grid.Ydim: [y], grid.Xdim: [x]}, dict(da.sizes))
-        return decompressed_size_bytes(
-            slicers, da, grid, chunks=chunks, worst_case=worst_case
-        )
+        if worst_case:
+            slicers = adversarial_slicers(slicers, da, grid, chunks=chunks)
+        return decompressed_size_bytes(slicers, da, grid, chunks=chunks)
 
     # a chunk-aligned span costs 1 chunk where it sits, but 2 at the worst offset
     assert (

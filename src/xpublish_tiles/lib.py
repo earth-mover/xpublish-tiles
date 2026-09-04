@@ -45,6 +45,7 @@ from xpublish_tiles.utils import NUMBA_PARALLEL
 
 if TYPE_CHECKING:
     from xpublish_tiles.grids import (
+        DimSlicers,
         GridMetadata,
         GridSystem,
         Slicer,
@@ -1036,24 +1037,6 @@ def _chunk_aligned_count(start: int, stop: int, chunk: int | None = None) -> int
     return ((stop - 1) // chunk - start // chunk + 1) * chunk
 
 
-def _worst_case_chunk_count(span: int, chunk: int | None, dim_size: int) -> int:
-    """Elements a span of ``span`` decompresses at its most adversarial offset.
-
-    Chunk-aligned cost depends on where a selection falls, so the cost of one
-    tile says nothing about its neighbours: a 5629-wide span against 4000-wide
-    chunks reads 2 chunks when aligned and 3 when not. A span of ``s`` touches
-    at most ``1 + ceil((s - 1) / chunk)`` chunks wherever it sits, bounded by
-    reading the whole dim. Used for minzoom, which must hold for every tile at
-    a zoom, not just the ones that land favourably.
-    """
-    if chunk is None:
-        return span
-    return min(
-        (1 + math.ceil((span - 1) / chunk)) * chunk,
-        math.ceil(dim_size / chunk) * chunk,
-    )
-
-
 def _get_indexer_size(
     sl: "Slicer", dim_size: int | None = None, chunk: int | None = None
 ) -> int:
@@ -1078,33 +1061,6 @@ def _get_indexer_size(
     return _chunk_aligned_count(sl.start or 0, stop, chunk)
 
 
-def _worst_case_shape(
-    slicers: "Slicers",
-    da: xr.DataArray,
-    Xdim: str,
-    Ydim: str,
-    chunks: Mapping[str, int],
-) -> tuple[int, int]:
-    """Chunk-aligned (x, y) extent of a selection this size at any offset.
-
-    The straddle penalty applies once per axis, not once per slicer: an
-    antimeridian-split selection is one tile's worth of columns that happens to
-    wrap, not two independent spans. ``Fill`` is padding, so it reads nothing.
-    """
-
-    def worst(dim: str) -> int:
-        span = sum(
-            _get_indexer_size(sl, da.sizes[dim])
-            for sl in slicers[dim]
-            if not isinstance(sl, Fill)
-        )
-        if span <= 0:
-            return 0
-        return _worst_case_chunk_count(span, chunks.get(str(dim)), da.sizes[dim])
-
-    return (worst(Xdim), worst(Ydim))
-
-
 def _iter_subset_shapes(
     slicers: "Slicers",
     da: xr.DataArray,
@@ -1112,7 +1068,6 @@ def _iter_subset_shapes(
     *,
     style: str = "raster",
     chunks: Mapping[str, int] | None = None,
-    worst_case: bool = False,
 ):
     """Iterate over individual subset shapes from slicers.
 
@@ -1122,9 +1077,6 @@ def _iter_subset_shapes(
 
     With ``chunks``, sizes are rounded out to inner-chunk boundaries, so the
     shapes describe what gets decompressed rather than what gets rendered.
-    ``worst_case`` instead yields one shape per (face of the) grid, bounding
-    the cost of a same-sized selection at any offset; see
-    ``_worst_case_chunk_count``.
     """
     chunks = chunks or {}
     from xpublish_tiles.grids import (
@@ -1147,9 +1099,6 @@ def _iter_subset_shapes(
             face_slice = face_slicers[grid.face_dim][0]
             assert isinstance(face_slice, slice)
             face = grid.faces[face_slice.start]
-            if worst_case:
-                yield _worst_case_shape(face_slicers, da, face.Xdim, face.Ydim, chunks)
-                continue
             y_size = _get_indexer_size(
                 face_slicers[face.Ydim][0],
                 da.sizes[face.Ydim],
@@ -1162,10 +1111,6 @@ def _iter_subset_shapes(
                     ),
                     y_size,
                 )
-        return
-
-    if worst_case:
-        yield _worst_case_shape(slicers, da, grid.Xdim, grid.Ydim, chunks)
         return
 
     yslice = None
@@ -1184,6 +1129,59 @@ def _iter_subset_shapes(
         yield (x_size, y_size)
 
 
+def adversarial_slicers(
+    slicers: "Slicers",
+    da: xr.DataArray,
+    grid: "GridSystem",
+    chunks: Mapping[str, int] | None = None,
+) -> "Slicers":
+    """Shift each dim's slices to the offset that straddles the most chunks.
+
+    Chunk-aligned cost depends on where a selection falls: a 5629-wide span
+    against 4000-wide chunks reads 2 chunks when aligned and 3 when not. A span
+    of ``s`` starting one cell before a chunk boundary touches
+    ``1 + ceil((s - 1) / chunk)`` chunks, the most it can anywhere. Sizing the
+    result bounds the cost of a same-sized selection at any offset, which is
+    what minzoom needs: it must hold for every tile at a zoom, not just the
+    ones that land favourably.
+
+    The slices along a dim are merged into one span first: an antimeridian-split
+    tile is one run of columns that happens to wrap, not two independent spans.
+    Non-slice indexers pass through unchanged.
+    """
+    from xpublish_tiles.grids import FacetedGridSystem, FacetedIndexer
+
+    if chunks is None:
+        chunks = _chunk_sizes(da)
+
+    def shift(sls: "DimSlicers", dim: str) -> "DimSlicers":
+        chunk = chunks.get(dim)
+        slices = [sl for sl in sls if isinstance(sl, slice)]
+        if chunk is None or not slices:
+            return sls
+        n = da.sizes[dim]
+        span = sum(
+            (sl.stop if sl.stop is not None else n) - (sl.start or 0) for sl in slices
+        )
+        start = min(chunk - 1, max(0, n - span))
+        merged = slice(start, min(start + span, n))
+        return [merged, *(sl for sl in sls if not isinstance(sl, slice))]
+
+    if isinstance(grid, FacetedGridSystem):
+        indexer = slicers[grid.face_dim][0]
+        assert isinstance(indexer, FacetedIndexer)
+        selections = [
+            {
+                dim: sls if dim == grid.face_dim else shift(sls, dim)
+                for dim, sls in face_slicers.items()
+            }
+            for face_slicers in indexer.selections
+        ]
+        return {**slicers, grid.face_dim: [FacetedIndexer(selections=selections)]}
+
+    return {dim: shift(sls, dim) for dim, sls in slicers.items()}
+
+
 def check_data_is_renderable_size(
     slicers: "Slicers",
     da: xr.DataArray,
@@ -1191,7 +1189,6 @@ def check_data_is_renderable_size(
     alternate: "GridMetadata",
     *,
     style: str = "raster",
-    worst_case: bool = False,
 ) -> bool:
     """Check if given slicers produce data of renderable size without loading data.
 
@@ -1205,10 +1202,6 @@ def check_data_is_renderable_size(
         Grid system information
     alternate : GridMetadata
         Alternate grid metadata
-    worst_case : bool
-        Bound the cost over every chunk alignment instead of using the one
-        ``slicers`` happens to have. Required for minzoom, which must hold for
-        every tile at a zoom.
 
     Returns
     -------
@@ -1228,9 +1221,7 @@ def check_data_is_renderable_size(
     # return total_size * da.dtype.itemsize <= factor * config.get("max_renderable_size")
 
     # factor inflates the estimate, as in apply_slicers; the budget is fixed
-    total_bytes = factor * decompressed_size_bytes(
-        slicers, da, grid, style=style, worst_case=worst_case
-    )
+    total_bytes = factor * decompressed_size_bytes(slicers, da, grid, style=style)
     if style == "polygons":
         total_bytes *= grid.npoints_per_geometry
     return total_bytes <= config.get("max_renderable_size")
@@ -1243,13 +1234,8 @@ def decompressed_size_bytes(
     *,
     style: str = "raster",
     chunks: Mapping[str, int] | None = None,
-    worst_case: bool = False,
 ) -> int:
     """Bytes that must be decompressed to satisfy ``slicers``.
-
-    With ``worst_case``, the spatial dims are instead bounded over every chunk
-    alignment a selection this size could have (see ``_worst_case_shape``) —
-    what minzoom needs, since it answers for every tile at a zoom.
 
     Rounds the selection out to inner-chunk boundaries on every dim, including
     dims already dropped by ``isel`` — reading one timestep out of a
@@ -1266,18 +1252,6 @@ def decompressed_size_bytes(
         math.prod(shape)
         for shape in _iter_subset_shapes(slicers, da, grid, style=style, chunks=chunks)
     )
-    if worst_case:
-        # never report less than this selection actually costs: the alignment
-        # model drops Fill padding, which the per-slice shapes count
-        total = max(
-            total,
-            sum(
-                math.prod(shape)
-                for shape in _iter_subset_shapes(
-                    slicers, da, grid, style=style, chunks=chunks, worst_case=True
-                )
-            ),
-        )
     covered = set(slicers)
     if isinstance(grid, FacetedGridSystem):
         covered |= {str(d) for f in grid.faces for d in (f.Xdim, f.Ydim)}

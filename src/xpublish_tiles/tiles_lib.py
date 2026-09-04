@@ -20,6 +20,7 @@ from xpublish_tiles.grids import (
 )
 from xpublish_tiles.lib import (
     TileTooBigError,
+    adversarial_slicers,
     apply_default_pad,
     check_data_is_renderable_size,
     normalize_slicers,
@@ -181,6 +182,7 @@ def _compute_min_zoom(
     transformer = transformer_from_crs(tms_crs, grid.crs)
 
     def tile_renderable(tile: morecantile.Tile, *, worst_case: bool) -> bool:
+        """With ``worst_case``, bound the cost of a same-sized tile at any chunk offset."""
         bounds = tms.xy_bounds(tile)
         left, bottom, right, top = transformer.transform_bounds(
             bounds.left, bounds.bottom, bounds.right, bounds.top
@@ -194,9 +196,9 @@ def _compute_min_zoom(
         if isinstance(grid, GridSystem2D):
             slicers = apply_default_pad(slicers, da, grid)
             slicers = normalize_slicers(slicers, dict(da.sizes))
-        return check_data_is_renderable_size(
-            slicers, da, grid, alternate, style=style, worst_case=worst_case
-        )
+        if worst_case:
+            slicers = adversarial_slicers(slicers, da, grid)
+        return check_data_is_renderable_size(slicers, da, grid, alternate, style=style)
 
     def sampled_tiles(zoom: int) -> set[morecantile.Tile]:
         with warnings.catch_warnings():
