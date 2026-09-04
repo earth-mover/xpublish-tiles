@@ -9,6 +9,7 @@ from syrupy.extensions.json import JSONSnapshotExtension
 
 import xarray as xr
 from xarray.tests import raise_if_dask_computes
+from xpublish_tiles.config import config
 from xpublish_tiles.lib import VariableNotFoundError
 from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
@@ -24,6 +25,7 @@ from xpublish_tiles.testing.datasets import (
     REGIONAL_HEALPIX_NA,
     UTM50S_HIRES,
 )
+from xpublish_tiles.tiles_lib import _MIN_ZOOM_CACHE
 from xpublish_tiles.xpublish.tiles import TilesPlugin
 from xpublish_tiles.xpublish.tiles.metadata import (
     _calculate_temporal_resolution,
@@ -969,3 +971,44 @@ def test_multiscale_uses_coarsest_level_for_minzoom():
     # Coarsest level (128x256 at 4 degrees/pixel) should give minzoom ~0
     # If we incorrectly used finest level (512x1024), minzoom would be ~2-3
     assert min_zoom <= 1, f"minzoom {min_zoom} too high - should use coarsest level"
+
+
+def test_multiscale_variable_missing_from_overviews():
+    """A finest-only variable lists and serves. Its minzoom comes from the finest
+    level; the tileset limits start at the largest per-layer minzoom."""
+    tree = GEOZARR_MULTISCALE.create()
+    finest = tree["0"].to_dataset()
+    finest["extra"] = finest["data"].copy()
+    finest["extra"].encoding["preferred_chunks"] = {"Y": 8, "X": 8}
+    tree["0"] = finest
+
+    rest = xpublish.Rest({"pyramid": tree}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    # Budget holds the whole coarsest level (16x16 float32) but only part of the finest
+    _MIN_ZOOM_CACHE.clear()
+    with config.set(max_renderable_size=4 * 1024):
+        response = client.get("/datasets/pyramid/tiles/")
+        assert response.status_code == 200
+        tileset = next(
+            ts
+            for ts in response.json()["tilesets"]
+            if "WebMercatorQuad" in ts.get("tileMatrixSetURI", "")
+        )
+        layer_minzoom = {
+            layer["id"]: int(layer["minTileMatrix"]) for layer in tileset["layers"]
+        }
+        assert set(layer_minzoom) == {"data", "extra"}
+        assert layer_minzoom["extra"] > layer_minzoom["data"]
+        assert (
+            int(tileset["tileMatrixSetLimits"][0]["tileMatrix"]) == layer_minzoom["extra"]
+        )
+
+        for var, expected in layer_minzoom.items():
+            response = client.get(
+                "/datasets/pyramid/tiles/WebMercatorQuad/tilejson.json"
+                f"?variables={var}&style=raster/viridis&width=256&height=256&colorscalerange=-1,1"
+            )
+            assert response.status_code == 200
+            assert response.json()["minzoom"] == expected
+    _MIN_ZOOM_CACHE.clear()

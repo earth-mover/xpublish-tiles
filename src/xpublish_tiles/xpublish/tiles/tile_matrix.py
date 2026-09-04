@@ -1,6 +1,7 @@
 """Tile matrix set definitions for OGC Tiles API"""
 
 from collections.abc import Hashable
+from dataclasses import dataclass
 from typing import cast
 
 import cf_xarray as cfxr  # noqa: F401 - needed to enable .cf accessor
@@ -12,7 +13,7 @@ import pyproj
 import pyproj.aoi
 
 import xarray as xr
-from xpublish_tiles.grids import guess_grid_system
+from xpublish_tiles.grids import GridSystem, guess_grid_system
 from xpublish_tiles.lib import async_run, timedelta_to_iso8601
 from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import OutputBBox, OutputCRS
@@ -164,43 +165,44 @@ def extract_tile_bbox_and_crs(
     return output_bbox, OutputCRS(crs)
 
 
-async def get_tile_matrix_limits(
-    tms_id: str,
-    dataset: xr.Dataset,
-    zoom_levels: range | None = None,
-    *,
-    representative_var: Hashable,
-    cf_coords: dict | None = None,
-) -> list[TileMatrixSetLimit]:
-    """Generate tile matrix limits for the specified zoom levels based on dataset bounds.
+@dataclass
+class MinZoomSource:
+    """What minzoom needs from a variable: its grid, and an array for dims,
+    dtype and chunk layout. No data is read."""
 
-    Args:
-        tms_id: Tile matrix set identifier
-        dataset: xarray Dataset to extract bounds from
-        representative_var: A renderable variable to detect the grid from.
-        zoom_levels: Range of zoom levels to generate limits for. If None, will be calculated
-                    from the Grid's min/max zoom levels.
+    grid: GridSystem
+    da: xr.DataArray
+    # ``xarray_object_key(da)``, computed once by the caller (needs cf_coords)
+    signature: tuple
+    # the owning dataset's ``_xpublish_id``; the minzoom cache is keyed on it
+    xpublish_id: str | None
 
-    Returns:
-        List of TileMatrixSetLimit objects
-    """
-    grid = await async_run(
-        guess_grid_system, dataset, representative_var, cf_coords=cf_coords
-    )
+
+async def get_min_zooms(tms_id: str, sources: dict[str, MinZoomSource]) -> dict[str, int]:
+    """Minimum zoom per variable. Variables sharing a grid and spatial dims compute once."""
     tms = morecantile.tms.get(tms_id)
+    groups: dict[tuple, list[str]] = {}
+    for var_name, source in sources.items():
+        groups.setdefault((id(source.grid), source.signature), []).append(var_name)
 
-    if zoom_levels is None:
-        xpublish_id = dataset.attrs.get("_xpublish_id")
-        min_zoom = await async_run(
+    min_zooms: dict[str, int] = {}
+    for names in groups.values():
+        source = sources[names[0]]
+        zoom = await async_run(
             get_min_zoom,
-            grid=grid,
+            grid=source.grid,
             tms=tms,
-            da=dataset[representative_var],
+            da=source.da,
             style="raster",
-            xpublish_id=xpublish_id,
+            xpublish_id=source.xpublish_id,
         )
-        zoom_levels = range(min_zoom, tms.maxzoom)
+        min_zooms.update(dict.fromkeys(names, zoom))
+    return min_zooms
 
+
+def get_tile_matrix_limits(tms_id: str, zoom_levels: range) -> list[TileMatrixSetLimit]:
+    """Full-extent tile matrix limits for each zoom level in ``zoom_levels``."""
+    tms = morecantile.tms.get(tms_id)
     limits = []
     for z in zoom_levels:
         minmax = tms.minmax(z)
@@ -213,7 +215,6 @@ async def get_tile_matrix_limits(
                 maxTileCol=minmax["y"]["max"],
             )
         )
-
     return limits
 
 

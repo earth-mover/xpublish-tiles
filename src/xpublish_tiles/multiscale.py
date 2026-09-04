@@ -1,4 +1,5 @@
 import math
+from collections.abc import Hashable
 from dataclasses import dataclass
 
 import morecantile
@@ -117,17 +118,27 @@ def scan_resolution_levels(tree: DataTree) -> list[ResolutionLevel]:
     return levels
 
 
-def get_coarsest_level(tree: DataTree) -> ResolutionLevel | None:
+def coarsest_level_holding(
+    levels: list[ResolutionLevel], name: Hashable | None = None
+) -> ResolutionLevel | None:
+    """Coarsest of ``levels`` (finest-first) that holds ``name``; any level if None."""
+    for level in reversed(levels):
+        if name is None or name in level.dataset.data_vars:
+            return level
+    return None
+
+
+def get_coarsest_level(
+    tree: DataTree, name: Hashable | None = None
+) -> ResolutionLevel | None:
     """Get the coarsest (lowest resolution) level from a DataTree.
 
-    Used for calculating minzoom in tilejson - the coarsest overview
-    determines the lowest zoom level that can be rendered.
+    Used for calculating minzoom - the coarsest overview determines the
+    lowest zoom level that can be rendered. With ``name``, return the coarsest
+    level that holds that variable: overviews may carry fewer variables than
+    the finest level.
     """
-    levels = scan_resolution_levels(tree)
-    if not levels:
-        return None
-    # levels are sorted finest to coarsest, so last is coarsest
-    return levels[-1]
+    return coarsest_level_holding(scan_resolution_levels(tree), name)
 
 
 def get_resolution_level(

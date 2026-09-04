@@ -27,6 +27,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "-10",
           "title": "eastward velocity"
         },
         {
@@ -51,6 +52,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "-10",
           "title": "free surface"
         }
       ],
@@ -1243,6 +1245,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "eastward velocity"
         },
         {
@@ -1267,6 +1270,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "free surface"
         }
       ],
@@ -2417,6 +2421,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "eastward velocity"
         },
         {
@@ -2441,6 +2446,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "free surface"
         }
       ],
@@ -3612,6 +3618,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "eastward velocity"
         },
         {
@@ -3636,6 +3643,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "free surface"
         }
       ],
@@ -4772,6 +4780,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "eastward velocity"
         },
         {
@@ -4796,6 +4805,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "free surface"
         }
       ],
@@ -5939,6 +5949,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "eastward velocity"
         },
         {
@@ -5963,6 +5974,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "free surface"
         }
       ],
@@ -7099,6 +7111,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "eastward velocity"
         },
         {
@@ -7123,6 +7136,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "free surface"
         }
       ],
