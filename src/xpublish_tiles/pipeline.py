@@ -46,6 +46,7 @@ from xpublish_tiles.lib import (
     anynotfinite,
     apply_default_pad,
     async_run,
+    cf_get,
     coarsen_mean_pad,
     decompressed_size_bytes,
     get_data_load_semaphore,
@@ -1080,7 +1081,8 @@ def apply_query(
             ) from None
 
         grid = guess_grid_system(ds, name)
-        array = ds[name]
+        # Read as detection did, so a Z that only `cf_get` promotes is selectable.
+        array = cf_get(ds, name)
         if grid.Z is not None and grid.Z in array.coords:
             # This code assumes all datasets are ocean datasets :/
             if grid.Z not in array.xindexes:
