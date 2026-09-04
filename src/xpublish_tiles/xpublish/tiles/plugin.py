@@ -36,9 +36,11 @@ from xpublish_tiles.logger import (
     with_accumulated_logs,
 )
 from xpublish_tiles.multiscale import (
+    coarsest_level_holding,
     get_coarsest_level,
     get_dataset,
     get_resolution_level,
+    scan_resolution_levels,
 )
 from xpublish_tiles.pipeline import _infer_datatype, pipeline
 from xpublish_tiles.tiles_lib import get_min_zoom, grid_overlaps_tms
@@ -192,23 +194,29 @@ class TilesPlugin(Plugin):
 
             # Overviews may carry fewer variables than the finest level, so each
             # variable's minzoom comes from the coarsest level that holds it.
-            finest = get_resolution_level(datatree)
+            levels = scan_resolution_levels(datatree)
+            finest = levels[0] if levels else None
             minzoom_sources: dict[str, MinZoomSource] = {}
             coarse_grids: dict[tuple, GridSystem] = {}
             for var_name in layer_extents:
-                level = get_coarsest_level(datatree, var_name)
+                level = coarsest_level_holding(levels, var_name)
                 if level is None or (finest is not None and level.path == finest.path):
-                    minzoom_sources[var_name] = MinZoomSource(
-                        var_grids[var_name], dataset[var_name]
-                    )
-                    continue
-                da = level.dataset[var_name]
-                key = (level.path, xarray_object_key(da, cf_coords=cf_coords))
-                if key not in coarse_grids:
-                    coarse_grids[key] = await async_run(
-                        guess_grid_system, level.dataset, var_name, cf_coords=cf_coords
-                    )
-                minzoom_sources[var_name] = MinZoomSource(coarse_grids[key], da)
+                    level = None
+                source_ds = dataset if level is None else level.dataset
+                da = source_ds[var_name]
+                signature = xarray_object_key(da, cf_coords=cf_coords)
+                if level is None:
+                    grid = var_grids[var_name]
+                else:
+                    key = (level.path, signature)
+                    if key not in coarse_grids:
+                        coarse_grids[key] = await async_run(
+                            guess_grid_system, source_ds, var_name, cf_coords=cf_coords
+                        )
+                    grid = coarse_grids[key]
+                minzoom_sources[var_name] = MinZoomSource(
+                    grid, da, signature, source_ds.attrs.get("_xpublish_id")
+                )
 
             # Create one tileset entry per supported tile matrix set
             supported_tms = get_all_tile_matrix_set_ids()

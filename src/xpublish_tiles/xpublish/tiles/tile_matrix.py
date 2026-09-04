@@ -17,7 +17,6 @@ from xpublish_tiles.grids import GridSystem, guess_grid_system
 from xpublish_tiles.lib import async_run, timedelta_to_iso8601
 from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import OutputBBox, OutputCRS
-from xpublish_tiles.utils import xarray_object_key
 from xpublish_tiles.xpublish.tiles.types import (
     DimensionExtent,
     DimensionType,
@@ -173,6 +172,10 @@ class MinZoomSource:
 
     grid: GridSystem
     da: xr.DataArray
+    # ``xarray_object_key(da)``, computed once by the caller (needs cf_coords)
+    signature: tuple
+    # the owning dataset's ``_xpublish_id``; the minzoom cache is keyed on it
+    xpublish_id: str | None
 
 
 async def get_min_zooms(tms_id: str, sources: dict[str, MinZoomSource]) -> dict[str, int]:
@@ -180,8 +183,7 @@ async def get_min_zooms(tms_id: str, sources: dict[str, MinZoomSource]) -> dict[
     tms = morecantile.tms.get(tms_id)
     groups: dict[tuple, list[str]] = {}
     for var_name, source in sources.items():
-        key = (id(source.grid), xarray_object_key(source.da))
-        groups.setdefault(key, []).append(var_name)
+        groups.setdefault((id(source.grid), source.signature), []).append(var_name)
 
     min_zooms: dict[str, int] = {}
     for names in groups.values():
@@ -192,7 +194,7 @@ async def get_min_zooms(tms_id: str, sources: dict[str, MinZoomSource]) -> dict[
             tms=tms,
             da=source.da,
             style="raster",
-            xpublish_id=source.da.attrs.get("_xpublish_id"),
+            xpublish_id=source.xpublish_id,
         )
         min_zooms.update(dict.fromkeys(names, zoom))
     return min_zooms

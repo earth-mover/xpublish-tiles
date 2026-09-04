@@ -118,6 +118,16 @@ def scan_resolution_levels(tree: DataTree) -> list[ResolutionLevel]:
     return levels
 
 
+def coarsest_level_holding(
+    levels: list[ResolutionLevel], name: Hashable | None = None
+) -> ResolutionLevel | None:
+    """Coarsest of ``levels`` (finest-first) that holds ``name``; any level if None."""
+    for level in reversed(levels):
+        if name is None or name in level.dataset.data_vars:
+            return level
+    return None
+
+
 def get_coarsest_level(
     tree: DataTree, name: Hashable | None = None
 ) -> ResolutionLevel | None:
@@ -128,10 +138,7 @@ def get_coarsest_level(
     level that holds that variable: overviews may carry fewer variables than
     the finest level.
     """
-    for level in reversed(scan_resolution_levels(tree)):
-        if name is None or name in level.dataset.data_vars:
-            return level
-    return None
+    return coarsest_level_holding(scan_resolution_levels(tree), name)
 
 
 def get_resolution_level(
