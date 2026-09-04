@@ -21,6 +21,7 @@ from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     TILE_MATRIX_SETS,
     extract_dimension_extents,
+    get_min_zooms,
     get_tile_matrix_limits,
 )
 from xpublish_tiles.xpublish.tiles.types import (
@@ -291,12 +292,14 @@ async def create_tileset_for_tms(
     styles: list[Style],
     var_grids: dict[str, GridSystem],
     *,
+    minzoom_datasets: dict[str, Dataset],
     cf_coords: dict | None = None,
 ) -> TilesetSummary | None:
     """Create a tileset summary for a specific tile matrix set
 
     Args:
-        dataset: xarray Dataset (coarsest level for multiscale datasets)
+        dataset: xarray Dataset holding every variable in ``var_grids`` (finest level
+            for multiscale datasets)
         tms_id: Tile matrix set identifier
         layer_extents: Pre-computed layer extents for all variables
         title: Dataset title
@@ -305,6 +308,8 @@ async def create_tileset_for_tms(
         dataset_attrs: Dataset attributes
         styles: Available styles
         var_grids: Renderable variable -> grid mapping (from ``detect_grids``)
+        minzoom_datasets: Variable -> dataset whose shape sets that variable's
+            minzoom (its coarsest overview for multiscale datasets)
 
     Returns:
         TilesetSummary object if tile matrix set exists, None otherwise
@@ -320,6 +325,10 @@ async def create_tileset_for_tms(
         return None
 
     tms_summary = TILE_MATRIX_SET_SUMMARIES[tms_id]()
+
+    # Each variable's minzoom comes from its own coarsest level; the tileset
+    # limits must hold for every layer, so they start at the largest one.
+    min_zooms = await get_min_zooms(tms_id, minzoom_datasets, cf_coords=cf_coords)
 
     # Create layers for each renderable data variable
     layers = []
@@ -358,16 +367,12 @@ async def create_tileset_for_tms(
                 ),
             ],
             extents=extents,
+            minTileMatrix=str(min_zooms[var_name]),
         )
         layers.append(layer)
 
-    # Pass a known-renderable variable so limits aren't computed from an
-    # ancillary variable whose grid can't be detected.
-    tileMatrixSetLimits = await get_tile_matrix_limits(
-        tms_id,
-        dataset,
-        representative_var=next(iter(var_grids)),
-        cf_coords=cf_coords,
+    tileMatrixSetLimits = get_tile_matrix_limits(
+        tms_id, range(max(min_zooms.values()), tms.maxzoom)
     )
 
     tileset = TilesetSummary(

@@ -16,6 +16,7 @@ from xpublish_tiles.grids import guess_grid_system
 from xpublish_tiles.lib import async_run, timedelta_to_iso8601
 from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import OutputBBox, OutputCRS
+from xpublish_tiles.utils import xarray_object_key
 from xpublish_tiles.xpublish.tiles.types import (
     DimensionExtent,
     DimensionType,
@@ -164,43 +165,45 @@ def extract_tile_bbox_and_crs(
     return output_bbox, OutputCRS(crs)
 
 
-async def get_tile_matrix_limits(
+async def get_min_zooms(
     tms_id: str,
-    dataset: xr.Dataset,
-    zoom_levels: range | None = None,
+    minzoom_datasets: dict[str, xr.Dataset],
     *,
-    representative_var: Hashable,
     cf_coords: dict | None = None,
-) -> list[TileMatrixSetLimit]:
-    """Generate tile matrix limits for the specified zoom levels based on dataset bounds.
+) -> dict[str, int]:
+    """Minimum zoom per variable, each computed on the dataset that variable maps to.
 
-    Args:
-        tms_id: Tile matrix set identifier
-        dataset: xarray Dataset to extract bounds from
-        representative_var: A renderable variable to detect the grid from.
-        zoom_levels: Range of zoom levels to generate limits for. If None, will be calculated
-                    from the Grid's min/max zoom levels.
-
-    Returns:
-        List of TileMatrixSetLimit objects
+    Variables on the same dataset with the same spatial dims share one grid
+    detection and one min-zoom computation.
     """
-    grid = await async_run(
-        guess_grid_system, dataset, representative_var, cf_coords=cf_coords
-    )
     tms = morecantile.tms.get(tms_id)
+    groups: dict[tuple, list[str]] = {}
+    for var_name, ds in minzoom_datasets.items():
+        key = (id(ds), xarray_object_key(ds[var_name], cf_coords=cf_coords))
+        groups.setdefault(key, []).append(var_name)
 
-    if zoom_levels is None:
-        xpublish_id = dataset.attrs.get("_xpublish_id")
-        min_zoom = await async_run(
+    async def _min_zoom(var_name: str) -> int:
+        ds = minzoom_datasets[var_name]
+        grid = await async_run(guess_grid_system, ds, var_name, cf_coords=cf_coords)
+        return await async_run(
             get_min_zoom,
             grid=grid,
             tms=tms,
-            da=dataset[representative_var],
+            da=ds[var_name],
             style="raster",
-            xpublish_id=xpublish_id,
+            xpublish_id=ds.attrs.get("_xpublish_id"),
         )
-        zoom_levels = range(min_zoom, tms.maxzoom)
 
+    min_zooms: dict[str, int] = {}
+    for names in groups.values():
+        zoom = await _min_zoom(names[0])
+        min_zooms.update(dict.fromkeys(names, zoom))
+    return min_zooms
+
+
+def get_tile_matrix_limits(tms_id: str, zoom_levels: range) -> list[TileMatrixSetLimit]:
+    """Full-extent tile matrix limits for each zoom level in ``zoom_levels``."""
+    tms = morecantile.tms.get(tms_id)
     limits = []
     for z in zoom_levels:
         minmax = tms.minmax(z)
@@ -213,7 +216,6 @@ async def get_tile_matrix_limits(
                 maxTileCol=minmax["y"]["max"],
             )
         )
-
     return limits
 
 

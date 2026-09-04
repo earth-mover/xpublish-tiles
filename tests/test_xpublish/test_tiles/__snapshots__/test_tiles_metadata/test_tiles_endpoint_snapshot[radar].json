@@ -27,6 +27,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "-10",
           "title": "Equivalent reflectivity factor H"
         }
       ],
@@ -759,6 +760,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "Equivalent reflectivity factor H"
         }
       ],
@@ -1449,6 +1451,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "Equivalent reflectivity factor H"
         }
       ],
@@ -2160,6 +2163,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "Equivalent reflectivity factor H"
         }
       ],
@@ -2836,6 +2840,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "Equivalent reflectivity factor H"
         }
       ],
@@ -3519,6 +3524,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "Equivalent reflectivity factor H"
         }
       ],
@@ -4195,6 +4201,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "Equivalent reflectivity factor H"
         }
       ],

@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from xpublish import Dependencies, Plugin, hookimpl
 
-from xarray import DataTree
+from xarray import Dataset, DataTree
 from xpublish_tiles.grids import (
     detect_grids,
     guess_grid_system,
@@ -138,10 +138,6 @@ class TilesPlugin(Plugin):
             # If multiscale, returns finest (highest resolution) level available
             dataset = get_dataset(datatree)
 
-            # For multiscale datasets, get coarsest level for minzoom calculation
-            # Coarsest level determines the minimum zoom since it has fewer pixels
-            coarsest_level = get_coarsest_level(datatree)
-            minzoom_dataset = coarsest_level.dataset if coarsest_level else dataset
             # Get dataset metadata
             dataset_attrs = dataset.attrs
             title = dataset_attrs.get("title", "Dataset")
@@ -188,6 +184,13 @@ class TilesPlugin(Plugin):
                     detail="No renderable variables found in dataset.",
                 )
 
+            # Overviews may carry fewer variables than the finest level, so each
+            # variable's minzoom comes from the coarsest level that holds it.
+            minzoom_datasets: dict[str, Dataset] = {}
+            for var_name in layer_extents:
+                level = get_coarsest_level(datatree, var_name)
+                minzoom_datasets[var_name] = level.dataset if level else dataset
+
             # Create one tileset entry per supported tile matrix set
             supported_tms = get_all_tile_matrix_set_ids()
 
@@ -195,7 +198,7 @@ class TilesPlugin(Plugin):
             tileset_results = await asyncio.gather(
                 *[
                     create_tileset_for_tms(
-                        minzoom_dataset,
+                        dataset,
                         tms_id,
                         layer_extents,
                         title,
@@ -204,6 +207,7 @@ class TilesPlugin(Plugin):
                         dataset_attrs,
                         styles,
                         var_grids,
+                        minzoom_datasets=minzoom_datasets,
                         cf_coords=cf_coords,
                     )
                     for tms_id in supported_tms
@@ -478,7 +482,7 @@ class TilesPlugin(Plugin):
             # minzoom would be calculated from the finest level, preventing
             # low-zoom rendering even when overviews exist.
             var_name = query.variables[0]
-            coarsest_level = get_coarsest_level(datatree)
+            coarsest_level = get_coarsest_level(datatree, var_name)
             if coarsest_level is not None:
                 minzoom_dataset = coarsest_level.dataset
             else:
@@ -500,8 +504,8 @@ class TilesPlugin(Plugin):
                     ),
                 )
 
-            # Calculate min/max zoom based on data characteristics
-            xpublish_id = dataset.attrs.get("_xpublish_id")
+            # Cache under the level that was measured; levels share dim names.
+            xpublish_id = minzoom_dataset.attrs.get("_xpublish_id")
             minzoom = await async_run(
                 get_min_zoom,
                 grid=grid,

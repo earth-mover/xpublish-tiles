@@ -27,6 +27,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "-10",
           "title": "data"
         }
       ],
@@ -1219,6 +1220,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "data"
         }
       ],
@@ -2299,6 +2301,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "data"
         }
       ],
@@ -3470,6 +3473,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "data"
         }
       ],
@@ -4606,6 +4610,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "data"
         }
       ],
@@ -5749,6 +5754,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "data"
         }
       ],
@@ -6885,6 +6891,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "data"
         }
       ],

@@ -559,10 +559,7 @@ async def test_helper_functions(air_dataset):
     assert "WebMercatorQuad" in tms_ids
     assert len(tms_ids) >= 1
 
-    # Test tile matrix limits generation with dataset
-    limits = await get_tile_matrix_limits(
-        "WebMercatorQuad", air_dataset, range(3), representative_var="air"
-    )  # Just 0-2
+    limits = get_tile_matrix_limits("WebMercatorQuad", range(3))
     assert len(limits) == 3
     assert limits[0].tileMatrix == "0"
     assert limits[1].tileMatrix == "1"

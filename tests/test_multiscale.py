@@ -6,6 +6,7 @@ import xarray as xr
 from xarray import DataTree
 from xpublish_tiles.config import config
 from xpublish_tiles.multiscale import (
+    get_coarsest_level,
     get_crs,
     get_dataset,
     get_resolution_level,
@@ -358,3 +359,19 @@ def test_get_crs_falls_back_to_wkt2():
     result = get_crs(ds)
     assert result is not None
     assert result.to_epsg() == 4326
+
+
+def test_get_coarsest_level_for_variable():
+    tree = GEOZARR_MULTISCALE.create()
+    finest = tree["0"].to_dataset()
+    finest["extra"] = finest["data"].copy()
+    tree["0"] = finest
+
+    def path(name=None):
+        level = get_coarsest_level(tree, name)
+        return None if level is None else level.path
+
+    assert path() == "2"
+    assert path("data") == "2"
+    assert path("extra") == "0"
+    assert path("missing") is None

@@ -43,6 +43,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "-10",
           "title": "foo"
         }
       ],
@@ -1251,6 +1252,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "foo"
         }
       ],
@@ -2417,6 +2419,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "foo"
         }
       ],
@@ -3513,6 +3516,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "foo"
         }
       ],
@@ -4700,6 +4704,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "foo"
         }
       ],
@@ -5781,6 +5786,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "foo"
         }
       ],
@@ -6918,6 +6924,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "foo"
         }
       ],
@@ -8077,6 +8084,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "foo"
         }
       ],
@@ -9236,6 +9244,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "1",
           "title": "foo"
         }
       ],
@@ -10388,6 +10397,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "foo"
         }
       ],
@@ -11540,6 +11550,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "foo"
         }
       ],
@@ -12699,6 +12710,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "foo"
         }
       ],
@@ -13851,6 +13863,7 @@
               "type": "image/png"
             }
           ],
+          "minTileMatrix": "0",
           "title": "foo"
         }
       ],
