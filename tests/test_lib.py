@@ -1,4 +1,5 @@
 import asyncio
+import math
 from typing import cast
 from unittest.mock import patch
 
@@ -11,6 +12,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.extra import numpy as npst
+from pyproj.aoi import BBox
 
 import xarray as xr
 from tests import NUMERIC_DTYPES
@@ -19,7 +21,10 @@ from xpublish_tiles.grids import guess_grid_system
 from xpublish_tiles.lib import (
     _chunk_aligned_count,
     _chunk_sizes,
+    adversarial_slicers,
+    apply_default_pad,
     apply_range_colors,
+    check_data_is_renderable_size,
     coarsen_mean_pad,
     decompressed_size_bytes,
     normalize_slicers,
@@ -30,9 +35,10 @@ from xpublish_tiles.lib import (
 from xpublish_tiles.pipeline import _parse_timedelta
 from xpublish_tiles.projections import (
     epsg4326to3857,
+    transformer_from_crs,
 )
-from xpublish_tiles.testing.datasets import IFS
-from xpublish_tiles.tiles_lib import get_min_zoom
+from xpublish_tiles.testing.datasets import IFS, PARA
+from xpublish_tiles.tiles_lib import get_min_zoom, grid_overlaps_tms
 
 
 @given(
@@ -498,6 +504,65 @@ def test_decompressed_size_bytes():
     )
 
 
+@pytest.mark.parametrize(
+    "tms_id, tropical",
+    [
+        # a conic or polar TMS reports a near-global tms.bbox, so only its CRS's
+        # area of use rules it out over the tropics
+        ("WebMercatorQuad", True),
+        ("WorldCRS84Quad", True),
+        ("CanadianNAD83_LCC", False),
+        ("UPSArcticWGS84Quad", False),
+        ("LINZAntarticaMapTilegrid", False),
+        ("UTM31WGS84Quad", False),
+    ],
+)
+def test_grid_overlaps_tms(tms_id, tropical):
+    """A TMS whose projection isn't defined over the data cannot tile it."""
+    tms = morecantile.tms.get(tms_id)
+    assert grid_overlaps_tms(guess_grid_system(PARA.create(), "foo"), tms) is tropical
+    # a global grid reaches into every TMS's area of use
+    assert grid_overlaps_tms(guess_grid_system(IFS.create(), "foo"), tms)
+
+
+def test_adversarial_slicers():
+    ds = IFS.create()
+    grid = guess_grid_system(ds, "foo")
+    da = ds["foo"].isel(time=-1, step=-1)
+    ny, nx = da.sizes[grid.Ydim], da.sizes[grid.Xdim]
+    da.encoding.clear()
+    chunks = {grid.Ydim: 10, grid.Xdim: 10}
+
+    def bytes_for(y, x, *, worst_case):
+        slicers = normalize_slicers({grid.Ydim: [y], grid.Xdim: [x]}, dict(da.sizes))
+        if worst_case:
+            slicers = adversarial_slicers(slicers, da, grid, chunks=chunks)
+        return decompressed_size_bytes(slicers, da, grid, chunks=chunks)
+
+    # a chunk-aligned span costs 1 chunk where it sits, but 2 at the worst offset
+    assert (
+        bytes_for(slice(0, 10), slice(0, 10), worst_case=False) == 100 * da.dtype.itemsize
+    )
+    assert (
+        bytes_for(slice(0, 10), slice(0, 10), worst_case=True) == 400 * da.dtype.itemsize
+    )
+    # the same span shifted off the boundary already pays that cost
+    assert (
+        bytes_for(slice(5, 15), slice(5, 15), worst_case=False) == 400 * da.dtype.itemsize
+    )
+    assert (
+        bytes_for(slice(5, 15), slice(5, 15), worst_case=True) == 400 * da.dtype.itemsize
+    )
+    # never more than reading the whole dim
+    assert (
+        bytes_for(slice(0, ny), slice(0, nx), worst_case=True)
+        == math.ceil(ny / 10) * 10 * math.ceil(nx / 10) * 10 * da.dtype.itemsize
+    )
+    # worst case is never below what the selection actually costs
+    for y, x in [(slice(0, 3), slice(7, 44)), (slice(19, 20), slice(0, 100))]:
+        assert bytes_for(y, x, worst_case=True) >= bytes_for(y, x, worst_case=False)
+
+
 def test_min_zoom_accounts_for_chunks():
     ds = IFS.create()
     ds.attrs["_xpublish_id"] = "chunk_minzoom"
@@ -511,3 +576,45 @@ def test_min_zoom_accounts_for_chunks():
         da.encoding["preferred_chunks"] = dict.fromkeys(da.dims, 64)
         coarse = get_min_zoom(grid=grid, tms=tms, da=da, style="raster")
     assert coarse > fine
+
+
+def test_min_zoom_covers_interior_tiles():
+    """minzoom must hold for every tile at that zoom.
+
+    Chunk-aligned cost depends on where a tile falls, and the tiles the search
+    samples sit on the grid boundary, where slicers get clipped. Interior tiles
+    straddle more chunks and cost up to 4x more.
+    """
+    ds = PARA.create()
+    grid = guess_grid_system(ds, "foo")
+    da = ds["foo"]
+    da.encoding["preferred_chunks"] = {"x": 250, "y": 250, "time": 1}
+    tms = morecantile.tms.get("WebMercatorQuad")
+    tms_crs = pyproj.CRS.from_wkt(tms.crs.to_wkt())
+    alternate = grid.pick_alternate_grid(tms_crs, coarsen_factors={})
+    transformer = transformer_from_crs(tms_crs, grid.crs)
+
+    def num_over_limit(zoom: int) -> int:
+        tiles = tms.tiles(
+            grid.bbox.west, grid.bbox.south, grid.bbox.east, grid.bbox.north, [zoom]
+        )
+        over = 0
+        for tile in tiles:
+            bounds = tms.xy_bounds(tile)
+            west, south, east, north = transformer.transform_bounds(
+                bounds.left, bounds.bottom, bounds.right, bounds.top
+            )
+            slicers = grid.sel(bbox=BBox(west=west, south=south, east=east, north=north))
+            slicers = normalize_slicers(
+                apply_default_pad(slicers, da, grid), dict(da.sizes)
+            )
+            over += not check_data_is_renderable_size(
+                slicers, da, grid, alternate, style="raster"
+            )
+        return over
+
+    with config.set({"max_renderable_size": 2_000_000}):
+        minzoom = get_min_zoom(grid=grid, tms=tms, da=da, style="raster")
+        assert num_over_limit(minzoom) == 0
+        # and no higher than it has to be
+        assert num_over_limit(minzoom - 1) > 0

@@ -40,7 +40,7 @@ from xpublish_tiles.multiscale import (
     get_resolution_level,
 )
 from xpublish_tiles.pipeline import _infer_datatype, pipeline
-from xpublish_tiles.tiles_lib import get_min_zoom
+from xpublish_tiles.tiles_lib import get_min_zoom, grid_overlaps_tms
 from xpublish_tiles.types import ImageFormat, LegendFormat, QueryParams
 from xpublish_tiles.utils import format_number_for_url, normalize_tilejson_bounds
 from xpublish_tiles.xpublish.tiles.metadata import (
@@ -490,6 +490,15 @@ class TilesPlugin(Plugin):
             bound_logger = get_context_logger()
             bound_logger = bound_logger.bind(tms=tms.id)
             set_context_logger(bound_logger)
+
+            if not grid_overlaps_tms(grid, tms):
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"Tile matrix set {tileMatrixSetId} does not cover this "
+                        "dataset: its projection is not defined where the data lies."
+                    ),
+                )
 
             # Calculate min/max zoom based on data characteristics
             xpublish_id = dataset.attrs.get("_xpublish_id")
