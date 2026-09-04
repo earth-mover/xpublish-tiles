@@ -24,7 +24,7 @@ from xarray.core.indexing import IndexSelResult
 from xpublish_tiles.config import config
 from xpublish_tiles.lib import (
     Fill,
-    GridDetectionError,
+    UnsupportedGridError,
     VariableNotFoundError,
     _coarsen_indices_impl,
     _prevent_slice_overlap,
@@ -1958,7 +1958,7 @@ class Geostationary(Rectilinear):
             None,
         )
         if gm_name is None:
-            raise GridDetectionError(
+            raise UnsupportedGridError(
                 "Geostationary grid mapping has no 'perspective_point_height' "
                 "attribute; cannot convert scan-angle (radian) coordinates to "
                 "projection metres."
@@ -1970,7 +1970,7 @@ class Geostationary(Rectilinear):
         base = Rectilinear.from_dataset(scaled, crs, Xname, Yname)
         ellipsoid = base.crs.ellipsoid
         if ellipsoid is None:
-            raise GridDetectionError(
+            raise UnsupportedGridError(
                 "Geostationary CRS has no ellipsoid; cannot determine the visible-disk extent."
             )
         return cls(
@@ -2166,7 +2166,7 @@ class Curvilinear(GridSystem):
 
             # If we still can't identify, raise an error
             if not Xdim or not Ydim:
-                raise GridDetectionError(
+                raise UnsupportedGridError(
                     f"Could not identify X and Y dimensions for curvilinear grid. "
                     f"Coordinate dimensions are {list(X.dims)}, but could not determine "
                     f"which corresponds to X and which to Y axes. "
@@ -2230,7 +2230,7 @@ class Curvilinear(GridSystem):
                 # The 2D `unwrap_phase` path degenerates into a non-terminating
                 # traversal when the array contains NaNs: NaN poisons its
                 # per-pixel reliability ordering. We have no NaN-safe unwrap yet.
-                raise GridDetectionError(
+                raise UnsupportedGridError(
                     "Cannot unwrap longitudes for a curvilinear grid that crosses "
                     "the ±180°/360° seam and contains NaNs (e.g. a masked grid)."
                 )
@@ -2388,7 +2388,7 @@ class Polar(GridSystem):
         center_lat = _find_scalar_coord(ds, "latitude")
         center_lon = _find_scalar_coord(ds, "longitude")
         if center_lat is None or center_lon is None:
-            raise GridDetectionError(
+            raise UnsupportedGridError(
                 "Center location not found. Expected scalar 'latitude'/'longitude' "
                 "coordinates (WMO FM-301) or dataset attributes."
             )
@@ -2538,7 +2538,7 @@ class Triangular(GridSystem):
         # but that's basically impossible if all you have are vertices.
         self.lon_spans_globe = crs.is_geographic and ((xmax - xmin) > 350)
         if self.lon_spans_globe and mesh is not None:
-            raise GridDetectionError(
+            raise UnsupportedGridError(
                 "Global UGRID meshes with explicit connectivity are not yet "
                 "supported (would discard provided face_node_connectivity)."
             )
@@ -3463,7 +3463,7 @@ def _guess_coordinates_for_mapping(
         return None, None
 
     if len(Xname) > 1 or len(Yname) > 1:
-        raise GridDetectionError(
+        raise UnsupportedGridError(
             f"Multiple coordinate options found for grid mapping: {Xname=!r}, {Yname=!r}."
         )
 
@@ -3561,7 +3561,7 @@ def _detect_grid_metadata(
             )
 
         if not mapping.grid_mapping:
-            raise GridDetectionError(
+            raise UnsupportedGridError(
                 "Creating raster affine grid system failed. "
                 "No explicit coordinate variables were detected and "
                 "no grid_mapping variable was detected."
@@ -3572,7 +3572,7 @@ def _detect_grid_metadata(
         geo_transform = mapping.grid_mapping.get("GeoTransform")
 
         if spatial_transform is None and geo_transform is None:
-            raise GridDetectionError(
+            raise UnsupportedGridError(
                 "Creating raster affine grid system failed. "
                 "No explicit coordinate variables were detected and "
                 "no spatial:transform or GeoTransform attribute is present on "
@@ -3588,7 +3588,7 @@ def _detect_grid_metadata(
             if y_dim is None and Y_COORD_PATTERN.match(dim):
                 y_dim = dim
         if not (x_dim and y_dim):
-            raise GridDetectionError(
+            raise UnsupportedGridError(
                 "Creating raster affine grid system failed. "
                 "No explicit coordinate variables were detected and "
                 "no x or y dimensions could be inferred. "
@@ -3608,7 +3608,7 @@ def _detect_grid_metadata(
         grid_cls = Polar
     elif X.ndim == 1 and Y.ndim == 1:
         if is_rotated_pole(mapping.crs):
-            raise GridDetectionError("Rotated pole grids are not supported yet.")
+            raise UnsupportedGridError("Rotated pole grids are not supported yet.")
         if X.dims == Y.dims:
             grid_cls = Triangular
         elif mapping.grid_mapping.get(
@@ -3620,7 +3620,7 @@ def _detect_grid_metadata(
     elif X.ndim == 2 and Y.ndim == 2:
         grid_cls = Curvilinear
     else:
-        raise GridDetectionError(
+        raise UnsupportedGridError(
             f"Unsupported coordinate dimensionality: {Xname} has ndim={X.ndim}, "
             f"{Yname} has ndim={Y.ndim}. Expected 1D or 2D coordinate arrays."
         )
@@ -3683,7 +3683,7 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
     all_mappings = _guess_grid_mappings_and_crs(ds)
     primary_grid_metadata = guess_grid_metadata(ds, all_mappings=all_mappings)
     if primary_grid_metadata is None:
-        raise GridDetectionError("CRS/grid system not detected")
+        raise UnsupportedGridError("CRS/grid system not detected")
     extra: dict[str, Any] = {}
     if primary_grid_metadata.face_dim is not None:
         extra["face_dim"] = primary_grid_metadata.face_dim
@@ -3707,8 +3707,8 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
             if alternate_grid is not None:
                 alternates.append(alternate_grid)
             else:
-                raise GridDetectionError("Could not detect grid metadata")
-        except GridDetectionError as e:
+                raise UnsupportedGridError("Could not detect grid metadata")
+        except UnsupportedGridError as e:
             # Skip grid systems that can't be created but warn about it
             gm_name = mapping.grid_mapping_var_name or "unknown"
             warnings.warn(
@@ -3746,13 +3746,13 @@ def _validate_grid_dims(grid: GridSystem, var: xr.DataArray) -> None:
         and grid.mesh is not None
         and var.attrs.get("location") == "edge"
     ):
-        raise GridDetectionError(
+        raise UnsupportedGridError(
             f"Variable {var.name!r} is edge-located on a UGRID mesh; "
             "edge-located rendering is not yet supported."
         )
     spatial = grid.dims_for(var)
     if not spatial:
-        raise GridDetectionError(
+        raise UnsupportedGridError(
             f"Variable {var.name!r} has no dim matching detected grid "
             f"{type(grid).__name__} (grid dims: {sorted(grid.dims)}, "
             f"var dims: {var.dims!r})"
@@ -3760,7 +3760,7 @@ def _validate_grid_dims(grid: GridSystem, var: xr.DataArray) -> None:
     if not isinstance(grid, Triangular):
         missing = grid.dims - spatial
         if missing:
-            raise GridDetectionError(
+            raise UnsupportedGridError(
                 f"Variable {var.name!r} is missing spatial dim(s) "
                 f"{sorted(missing)} required by detected grid "
                 f"{type(grid).__name__}"
@@ -3770,13 +3770,13 @@ def _validate_grid_dims(grid: GridSystem, var: xr.DataArray) -> None:
 def _lookup_cached_grid(cache_key: tuple | None, name: Hashable) -> GridSystem | None:
     """Return a cached grid for ``cache_key``, or ``None`` if absent.
 
-    Raises ``GridDetectionError`` if a previous detection failure was cached for
+    Raises ``UnsupportedGridError`` if a previous detection failure was cached for
     this key (see ``_GRID_DETECTION_FAILED``).
     """
     if cache_key is None or cache_key not in _GRID_CACHE:
         return None
     if (cached := _GRID_CACHE[cache_key]) is _GRID_DETECTION_FAILED:
-        raise GridDetectionError(
+        raise UnsupportedGridError(
             f"No grid system detected for {name!r} (cached failure)."
         )
     return cached
@@ -3827,7 +3827,7 @@ def guess_grid_system(
 
         try:
             grid = _detect_grid_system(ds, name)
-        except GridDetectionError:
+        except UnsupportedGridError:
             # Cache the failure so callers sharing this dim-signature don't
             # repeat the (sometimes multi-second) fallback chain.
             if cache_key is not None:
@@ -3843,7 +3843,7 @@ def guess_grid_system(
 def _detect_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
     """Run grid detection for ``name`` without any caching.
 
-    Raises ``GridDetectionError`` if no grid applies to ``name`` and
+    Raises ``UnsupportedGridError`` if no grid applies to ``name`` and
     ``VariableNotFoundError`` if ``name`` isn't in ``ds``.
     """
     try:
@@ -3867,7 +3867,7 @@ def _detect_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
 
     try:
         meta = guess_grid_metadata(cf_sub)
-    except GridDetectionError:
+    except UnsupportedGridError:
         meta = None
 
     # Preload the primary mapping's X/Y on the *outer* ds.
@@ -3898,7 +3898,7 @@ def _detect_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
 
     try:
         grid = _guess_grid_for_dataset(cf_sub)
-    except GridDetectionError:
+    except UnsupportedGridError:
         # Check for polar radar grid (needs full ds for scalar lat/lon)
         az_coord, rng_coord = _find_polar_coords(ds)
         if az_coord is not None and rng_coord is not None:
@@ -3906,7 +3906,7 @@ def _detect_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
         else:
             try:
                 grid = _guess_grid_for_dataset(ds)
-            except GridDetectionError:
+            except UnsupportedGridError:
                 ds = ds.cf.guess_coord_axis()
                 grid = _guess_grid_for_dataset(ds)
     except KeyError:
@@ -3953,7 +3953,7 @@ def detect_grids(
     for names in groups.values():
         try:
             grid = guess_grid_system(ds, names[0], cf_coords=cf_coords)
-        except (GridDetectionError, VariableNotFoundError):
+        except (UnsupportedGridError, VariableNotFoundError):
             continue
         for name in names:
             # Skip the grid's coordinate vars and UGRID structural vars (e.g.
