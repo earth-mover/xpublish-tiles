@@ -3778,7 +3778,9 @@ def _guess_z_dimension(da: xr.DataArray) -> str | None:
     return None
 
 
-def _validate_grid_dims(grid: GridSystem, var: xr.DataArray) -> None:
+def _check_edge_located(grid: GridSystem, var: xr.DataArray) -> None:
+    """Per-variable check: depends on ``location`` attrs, not dims, so it must
+    run outside the dim-keyed grid cache or it poisons siblings on the same dims."""
     if (
         isinstance(grid, Triangular)
         and grid.mesh is not None
@@ -3788,6 +3790,9 @@ def _validate_grid_dims(grid: GridSystem, var: xr.DataArray) -> None:
             f"Variable {var.name!r} is edge-located on a UGRID mesh; "
             "edge-located rendering is not yet supported."
         )
+
+
+def _validate_grid_dims(grid: GridSystem, var: xr.DataArray) -> None:
     spatial = grid.dims_for(var)
     if not spatial:
         raise UnsupportedGridError(
@@ -3855,12 +3860,14 @@ def guess_grid_system(
 
     if (cached := _lookup_cached_grid(cache_key, name)) is not None:
         _validate_grid_dims(cached, ds[name])
+        _check_edge_located(cached, ds[name])
         return cached
 
     with GRID_DETECTION_LOCK, suppress_cf_dangling_ref_warnings():
         # Double-check in case another thread populated cache while we waited
         if (cached := _lookup_cached_grid(cache_key, name)) is not None:
             _validate_grid_dims(cached, ds[name])
+            _check_edge_located(cached, ds[name])
             return cached
 
         try:
@@ -3875,7 +3882,8 @@ def guess_grid_system(
         if cache_key is not None:
             _GRID_CACHE[cache_key] = grid
 
-        return grid
+    _check_edge_located(grid, ds[name])
+    return grid
 
 
 def _detect_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
