@@ -5,7 +5,6 @@ from typing import cast
 import datashader as dsh
 import datashader.reductions
 import matplotlib.colors as mcolors
-import numba
 import numbagg
 import numpy as np
 import pandas as pd
@@ -19,44 +18,14 @@ from xpublish_tiles.lib import (
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import DatashaderRenderer, register_renderer
+from xpublish_tiles.render.kernels import offdisk_quad_mask
 from xpublish_tiles.types import (
     ContinuousData,
     DiscreteData,
     ImageFormat,
     RenderContext,
 )
-from xpublish_tiles.utils import NUMBA_PARALLEL, NUMBA_THREADING_LOCK
-
-
-@numba.njit(parallel=NUMBA_PARALLEL, nogil=True, cache=True, boundscheck=False)
-def _offdisk_quad_mask(xc, yc):
-    """Mark cells whose quadmesh quad touches a non-finite (off-disk) vertex.
-
-    A cell participates in a quad with a non-finite corner iff any cell in its
-    3x3 neighbourhood has a non-finite transformed coordinate. Marked cells are
-    set to NaN before rasterization so datashader's reductions drop them,
-    rendering the geostationary limb transparent instead of smearing.
-    """
-    ny, nx = xc.shape
-    bad = np.zeros((ny, nx), dtype=np.bool_)
-    for j in numba.prange(ny):  # ty: ignore[not-iterable]
-        for i in range(nx):
-            found = False
-            for dj in range(-1, 2):
-                jj = j + dj
-                if jj < 0 or jj >= ny:
-                    continue
-                for di in range(-1, 2):
-                    ii = i + di
-                    if ii < 0 or ii >= nx:
-                        continue
-                    if not (np.isfinite(xc[jj, ii]) and np.isfinite(yc[jj, ii])):
-                        found = True
-                        break
-                if found:
-                    break
-            bad[j, i] = found
-    return bad
+from xpublish_tiles.utils import NUMBA_THREADING_LOCK
 
 
 def nearest_on_uniform_grid_scipy(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.DataArray:
@@ -245,7 +214,7 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                     # Transformation of points near the edge of the disk is undefined
                     # and corrupts the rendering. Mask them out but only for
                     # Geostationary to avoid the perf hit.
-                    bad = _offdisk_quad_mask(
+                    bad = offdisk_quad_mask(
                         np.asarray(xcoord.data), np.asarray(ycoord.data)
                     )
                     data = data.where(xr.DataArray(~bad, dims=xcoord.dims))
