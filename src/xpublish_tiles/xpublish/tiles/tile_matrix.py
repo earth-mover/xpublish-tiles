@@ -1,6 +1,7 @@
 """Tile matrix set definitions for OGC Tiles API"""
 
 from collections.abc import Hashable
+from dataclasses import dataclass
 from typing import cast
 
 import cf_xarray as cfxr  # noqa: F401 - needed to enable .cf accessor
@@ -12,7 +13,7 @@ import pyproj
 import pyproj.aoi
 
 import xarray as xr
-from xpublish_tiles.grids import guess_grid_system
+from xpublish_tiles.grids import GridSystem, guess_grid_system
 from xpublish_tiles.lib import async_run, timedelta_to_iso8601
 from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import OutputBBox, OutputCRS
@@ -165,38 +166,34 @@ def extract_tile_bbox_and_crs(
     return output_bbox, OutputCRS(crs)
 
 
-async def get_min_zooms(
-    tms_id: str,
-    minzoom_datasets: dict[str, xr.Dataset],
-    *,
-    cf_coords: dict | None = None,
-) -> dict[str, int]:
-    """Minimum zoom per variable, each computed on the dataset that variable maps to.
+@dataclass
+class MinZoomSource:
+    """What minzoom needs from a variable: its grid, and an array for dims,
+    dtype and chunk layout. No data is read."""
 
-    Variables on the same dataset with the same spatial dims share one grid
-    detection and one min-zoom computation.
-    """
+    grid: GridSystem
+    da: xr.DataArray
+
+
+async def get_min_zooms(tms_id: str, sources: dict[str, MinZoomSource]) -> dict[str, int]:
+    """Minimum zoom per variable. Variables sharing a grid and spatial dims compute once."""
     tms = morecantile.tms.get(tms_id)
     groups: dict[tuple, list[str]] = {}
-    for var_name, ds in minzoom_datasets.items():
-        key = (id(ds), xarray_object_key(ds[var_name], cf_coords=cf_coords))
+    for var_name, source in sources.items():
+        key = (id(source.grid), xarray_object_key(source.da))
         groups.setdefault(key, []).append(var_name)
-
-    async def _min_zoom(var_name: str) -> int:
-        ds = minzoom_datasets[var_name]
-        grid = await async_run(guess_grid_system, ds, var_name, cf_coords=cf_coords)
-        return await async_run(
-            get_min_zoom,
-            grid=grid,
-            tms=tms,
-            da=ds[var_name],
-            style="raster",
-            xpublish_id=ds.attrs.get("_xpublish_id"),
-        )
 
     min_zooms: dict[str, int] = {}
     for names in groups.values():
-        zoom = await _min_zoom(names[0])
+        source = sources[names[0]]
+        zoom = await async_run(
+            get_min_zoom,
+            grid=source.grid,
+            tms=tms,
+            da=source.da,
+            style="raster",
+            xpublish_id=source.da.attrs.get("_xpublish_id"),
+        )
         min_zooms.update(dict.fromkeys(names, zoom))
     return min_zooms
 

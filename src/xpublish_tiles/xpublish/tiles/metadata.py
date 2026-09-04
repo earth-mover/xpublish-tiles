@@ -20,6 +20,7 @@ from xpublish_tiles.tiles_lib import grid_overlaps_tms
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     TILE_MATRIX_SETS,
+    MinZoomSource,
     extract_dimension_extents,
     get_min_zooms,
     get_tile_matrix_limits,
@@ -292,7 +293,7 @@ async def create_tileset_for_tms(
     styles: list[Style],
     var_grids: dict[str, GridSystem],
     *,
-    minzoom_datasets: dict[str, Dataset],
+    minzoom_sources: dict[str, MinZoomSource],
     cf_coords: dict | None = None,
 ) -> TilesetSummary | None:
     """Create a tileset summary for a specific tile matrix set
@@ -308,8 +309,8 @@ async def create_tileset_for_tms(
         dataset_attrs: Dataset attributes
         styles: Available styles
         var_grids: Renderable variable -> grid mapping (from ``detect_grids``)
-        minzoom_datasets: Variable -> dataset whose shape sets that variable's
-            minzoom (its coarsest overview for multiscale datasets)
+        minzoom_sources: Variable -> grid and array that set its minzoom (from
+            its coarsest overview for multiscale datasets)
 
     Returns:
         TilesetSummary object if tile matrix set exists, None otherwise
@@ -328,7 +329,7 @@ async def create_tileset_for_tms(
 
     # Each variable's minzoom comes from its own coarsest level; the tileset
     # limits must hold for every layer, so they start at the largest one.
-    min_zooms = await get_min_zooms(tms_id, minzoom_datasets, cf_coords=cf_coords)
+    min_zooms = await get_min_zooms(tms_id, minzoom_sources)
 
     # Create layers for each renderable data variable
     layers = []
