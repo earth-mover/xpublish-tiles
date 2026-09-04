@@ -28,6 +28,41 @@ _MIN_ZOOM_CACHE = cachetools.LRUCache(maxsize=8192)
 _MIN_ZOOM_LOCK = threading.Lock()
 
 
+def _lon_ranges(west: float, east: float) -> list[tuple[float, float]]:
+    """``[west, east]`` as one or two ranges inside [-180, 180]."""
+    if east - west >= 360 - 1e-9:
+        return [(-180.0, 180.0)]
+    west = ((west + 180) % 360) - 180
+    east = ((east + 180) % 360) - 180
+    if west <= east:
+        return [(west, east)]
+    return [(west, 180.0), (-180.0, east)]
+
+
+def grid_overlaps_tms(grid: GridSystem, tms: morecantile.TileMatrixSet) -> bool:
+    """Whether the grid lies where the TMS's projection is defined.
+
+    A TMS whose CRS is not valid over the data cannot tile it, and asking is
+    worse than useless: the sampling in :func:`_compute_min_zoom` clips the grid
+    into the TMS bounds, so no overlap becomes a nonsense selection that then
+    looks too big to render. ``tms.bbox`` cannot answer this — a conic TMS's
+    projected plane spans nearly the whole globe, so CanadianNAD83_LCC reports
+    -180..180 — hence the CRS's declared area of use.
+    """
+    tms_crs = CRS.from_wkt(tms.crs.to_wkt())
+    area = tms_crs.area_of_use
+    if area is None:
+        return True
+    west, south, east, north = grid.transform_bbox("EPSG:4326")
+    if north <= area.south or south >= area.north:
+        return False
+    return any(
+        lo < area_hi and area_lo < hi
+        for lo, hi in _lon_ranges(west, east)
+        for area_lo, area_hi in _lon_ranges(area.west, area.east)
+    )
+
+
 @time_debug
 def get_max_zoom(grid: GridSystem, tms: morecantile.TileMatrixSet) -> int:
     """Calculate maximum zoom level based on grid spacing and TMS.

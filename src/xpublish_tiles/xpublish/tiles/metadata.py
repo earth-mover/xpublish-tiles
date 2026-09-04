@@ -16,6 +16,7 @@ from xpublish_tiles.grids import (
 )
 from xpublish_tiles.logger import logger
 from xpublish_tiles.render import RenderRegistry
+from xpublish_tiles.tiles_lib import grid_overlaps_tms
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     TILE_MATRIX_SETS,
@@ -309,6 +310,13 @@ async def create_tileset_for_tms(
         TilesetSummary object if tile matrix set exists, None otherwise
     """
     if tms_id not in TILE_MATRIX_SETS:
+        return None
+
+    # A projection that isn't defined over the data can't tile it, so the
+    # tileset is not advertised at all.
+    tms = morecantile.tms.get(tms_id)
+    if not any(grid_overlaps_tms(grid, tms) for grid in var_grids.values()):
+        logger.debug(f"skipping {tms_id}: does not cover the data")
         return None
 
     tms_summary = TILE_MATRIX_SET_SUMMARIES[tms_id]()
