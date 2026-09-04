@@ -21,6 +21,7 @@ from xpublish_tiles.lib import (
     AsyncLoadTimeoutError,
     ColormapError,
     IndexingError,
+    InvalidCoordinateValues,
     MissingParameterError,
     TileTooBigError,
     UnsupportedGridError,
@@ -634,6 +635,11 @@ class TilesPlugin(Plugin):
                 bound_logger.error("MissingParameterError", exc_info=e)
                 status_code = 422
                 detail = f"Missing parameter: {e!s}."
+            except InvalidCoordinateValues as e:
+                bound_logger = get_context_logger()
+                bound_logger.error("InvalidCoordinateValues", exc_info=e)
+                status_code = 422
+                detail = f"Cannot render this grid: {e!s}"
             except ColormapError as e:
                 bound_logger = get_context_logger()
                 bound_logger.error("ColormapError", exc_info=e)

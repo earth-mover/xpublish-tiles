@@ -24,10 +24,12 @@ from xarray.core.indexing import IndexSelResult
 from xpublish_tiles.config import config
 from xpublish_tiles.lib import (
     Fill,
+    InvalidCoordinateValues,
     UnsupportedGridError,
     VariableNotFoundError,
     _coarsen_indices_impl,
     _prevent_slice_overlap,
+    anynotfinite,
     cf_get,
     crs_repr,
     fill_rings_from_corners,
@@ -2252,13 +2254,12 @@ class Curvilinear(GridSystem):
             # `CurvilinearCellIndex.sel` handles wrap with a 2-convention test.
             # Also skipped for regional grids with no seam — see
             # `_has_longitude_seam`.
-            if numbagg.anynan(X.data):
-                # The 2D `unwrap_phase` path degenerates into a non-terminating
-                # traversal when the array contains NaNs: NaN poisons its
-                # per-pixel reliability ordering. We have no NaN-safe unwrap yet.
-                raise UnsupportedGridError(
+            if anynotfinite(X.data):
+                # The 2D `unwrap_phase` path never terminates on NaN or inf: they
+                # poison its per-pixel reliability ordering. Masking does not help.
+                raise InvalidCoordinateValues(
                     "Cannot unwrap longitudes for a curvilinear grid that crosses "
-                    "the ±180°/360° seam and contains NaNs (e.g. a masked grid)."
+                    "the ±180°/360° seam and contains NaN/inf (e.g. a masked grid)."
                 )
             X = X.copy(data=unwrap(X.data, width=360))
             if corner_x is not None:

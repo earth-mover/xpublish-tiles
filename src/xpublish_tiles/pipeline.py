@@ -36,12 +36,14 @@ from xpublish_tiles.lib import (
     AsyncLoadTimeoutError,
     CoarsenedCoordinateIndices,
     IndexingError,
+    InvalidCoordinateValues,
     MissingParameterError,
     PadDimension,
     TileTooBigError,
     VariableNotFoundError,
     _chunk_sizes,
     _iter_subset_shapes,
+    anynotfinite,
     apply_default_pad,
     async_run,
     coarsen_mean_pad,
@@ -691,6 +693,14 @@ def fix_coordinate_discontinuities(
         # it's area of use is (-35.58, 24.6, 44.83, 84.73)
         # we ignore such things for now
         return coordinates
+
+    if anynotfinite(coordinates):
+        # `unwrap_phase` (axis=None) hangs on NaN/inf, e.g. HYCOM/RTOFS fold-row
+        # longitudes past 360° that Web Mercator maps to inf.
+        raise InvalidCoordinateValues(
+            "Cannot fix coordinate discontinuities for a coordinate array "
+            "containing NaN/inf after projection."
+        )
 
     # Step 1: Use unwrap to fix discontinuities
     unwrapped_coords = unwrap(coordinates, width=coordinate_space_width, axis=axis)
