@@ -1,5 +1,6 @@
 """Tile-related utility functions for grids."""
 
+import itertools
 import threading
 import warnings
 
@@ -12,9 +13,14 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from xpublish_tiles.config import config
-from xpublish_tiles.grids import GridSystem, GridSystem2D, Triangular
+from xpublish_tiles.grids import (
+    GridSystem,
+    GridSystem2D,
+    Triangular,
+)
 from xpublish_tiles.lib import (
     TileTooBigError,
+    adversarial_slicers,
     apply_default_pad,
     check_data_is_renderable_size,
     normalize_slicers,
@@ -26,6 +32,10 @@ from xpublish_tiles.utils import time_debug, xarray_object_key
 
 _MIN_ZOOM_CACHE = cachetools.LRUCache(maxsize=8192)
 _MIN_ZOOM_LOCK = threading.Lock()
+
+#: Above this, enumerating a zoom's tiles costs more than the tighter answer is
+#: worth, and the position-independent bound is used instead.
+MAX_TILES_TO_CHECK = 512
 
 
 def _lon_ranges(west: float, east: float) -> list[tuple[float, float]]:
@@ -161,39 +171,58 @@ def _compute_min_zoom(
     wgs84_lons = np.clip(wgs84_lons, tms_geo_bounds.left, tms_geo_bounds.right)
     wgs84_lats = np.clip(wgs84_lats, tms_geo_bounds.bottom, tms_geo_bounds.top)
     test_points = list(zip(wgs84_lons.tolist(), wgs84_lats.tolist(), strict=True))
+    sample_bounds = (
+        float(wgs84_lons.min()),
+        float(wgs84_lats.min()),
+        float(wgs84_lons.max()),
+        float(wgs84_lats.max()),
+    )
 
     alternate = grid.pick_alternate_grid(tms_crs, coarsen_factors={})
     transformer = transformer_from_crs(tms_crs, grid.crs)
 
-    def all_renderable(zoom: int) -> bool:
+    def tile_renderable(tile: morecantile.Tile, *, worst_case: bool) -> bool:
+        """With ``worst_case``, bound the cost of a same-sized tile at any chunk offset."""
+        bounds = tms.xy_bounds(tile)
+        left, bottom, right, top = transformer.transform_bounds(
+            bounds.left, bounds.bottom, bounds.right, bounds.top
+        )
+        # Handle antimeridian-crossing tiles where left > right after transform
+        if grid.crs.is_geographic and left > right:
+            right += 360
+
+        tile_bbox = BBox(west=left, south=bottom, east=right, north=top)
+        slicers = grid.sel(bbox=tile_bbox)
+        if isinstance(grid, GridSystem2D):
+            slicers = apply_default_pad(slicers, da, grid)
+            slicers = normalize_slicers(slicers, dict(da.sizes))
+        if worst_case:
+            slicers = adversarial_slicers(slicers, da, grid)
+        return check_data_is_renderable_size(slicers, da, grid, alternate, style=style)
+
+    def sampled_tiles(zoom: int) -> set[morecantile.Tile]:
         with warnings.catch_warnings():
             # antimeridian-crossing TMS bounds (left > right) defeat the np.clip
             # above, so test points may end up just outside the strict W<=lon<=E
             # check inside morecantile.tile()
             warnings.simplefilter("ignore", PointOutsideTMSBounds)
-            unique_tiles = {
-                (tile.x, tile.y)
-                for tile in (tms.tile(lon, lat, zoom) for lon, lat in test_points)
-            }
-        for x, y in unique_tiles:
-            bounds = tms.xy_bounds(morecantile.Tile(x=x, y=y, z=zoom))
-            left, bottom, right, top = transformer.transform_bounds(
-                bounds.left, bounds.bottom, bounds.right, bounds.top
-            )
-            # Handle antimeridian-crossing tiles where left > right after transform
-            if grid.crs.is_geographic and left > right:
-                right += 360
+            return {tms.tile(lon, lat, zoom) for lon, lat in test_points}
 
-            tile_bbox = BBox(west=left, south=bottom, east=right, north=top)
-            slicers = grid.sel(bbox=tile_bbox)
-            if isinstance(grid, GridSystem2D):
-                slicers = apply_default_pad(slicers, da, grid)
-                slicers = normalize_slicers(slicers, dict(da.sizes))
-            if not check_data_is_renderable_size(
-                slicers, da, grid, alternate, style=style
-            ):
-                return False
-        return True
+    def all_renderable(zoom: int) -> bool:
+        # Chunk-aligned cost depends on where a tile falls, and the sampled
+        # boundary tiles are the cheap ones: their slicers are clipped by the
+        # grid edge. Interior tiles straddle more chunks, so the costliest tile
+        # at this zoom is what decides renderability.
+        tiles = list(
+            itertools.islice(tms.tiles(*sample_bounds, [zoom]), MAX_TILES_TO_CHECK + 1)
+        )
+        if len(tiles) > MAX_TILES_TO_CHECK:
+            # Too many to enumerate: bound the sampled tiles over every chunk
+            # alignment instead. That is tight at these zooms — with this many
+            # tiles per chunk, some tile does sit on every alignment — and
+            # conservative if not.
+            return all(tile_renderable(t, worst_case=True) for t in sampled_tiles(zoom))
+        return all(tile_renderable(t, worst_case=False) for t in tiles)
 
     # Renderability is monotonic in zoom (higher zoom → smaller tiles → fewer
     # cells). Binary-search for the smallest zoom that is fully renderable.

@@ -45,6 +45,7 @@ from xpublish_tiles.utils import NUMBA_PARALLEL
 
 if TYPE_CHECKING:
     from xpublish_tiles.grids import (
+        DimSlicers,
         GridMetadata,
         GridSystem,
         Slicer,
@@ -1128,6 +1129,59 @@ def _iter_subset_shapes(
         yield (x_size, y_size)
 
 
+def adversarial_slicers(
+    slicers: "Slicers",
+    da: xr.DataArray,
+    grid: "GridSystem",
+    chunks: Mapping[str, int] | None = None,
+) -> "Slicers":
+    """Shift each dim's slices to the offset that straddles the most chunks.
+
+    Chunk-aligned cost depends on where a selection falls: a 5629-wide span
+    against 4000-wide chunks reads 2 chunks when aligned and 3 when not. A span
+    of ``s`` starting one cell before a chunk boundary touches
+    ``1 + ceil((s - 1) / chunk)`` chunks, the most it can anywhere. Sizing the
+    result bounds the cost of a same-sized selection at any offset, which is
+    what minzoom needs: it must hold for every tile at a zoom, not just the
+    ones that land favourably.
+
+    The slices along a dim are merged into one span first: an antimeridian-split
+    tile is one run of columns that happens to wrap, not two independent spans.
+    Non-slice indexers pass through unchanged.
+    """
+    from xpublish_tiles.grids import FacetedGridSystem, FacetedIndexer
+
+    if chunks is None:
+        chunks = _chunk_sizes(da)
+
+    def shift(sls: "DimSlicers", dim: str) -> "DimSlicers":
+        chunk = chunks.get(dim)
+        slices = [sl for sl in sls if isinstance(sl, slice)]
+        if chunk is None or not slices:
+            return sls
+        n = da.sizes[dim]
+        span = sum(
+            (sl.stop if sl.stop is not None else n) - (sl.start or 0) for sl in slices
+        )
+        start = min(chunk - 1, max(0, n - span))
+        merged = slice(start, min(start + span, n))
+        return [merged, *(sl for sl in sls if not isinstance(sl, slice))]
+
+    if isinstance(grid, FacetedGridSystem):
+        indexer = slicers[grid.face_dim][0]
+        assert isinstance(indexer, FacetedIndexer)
+        selections = [
+            {
+                dim: sls if dim == grid.face_dim else shift(sls, dim)
+                for dim, sls in face_slicers.items()
+            }
+            for face_slicers in indexer.selections
+        ]
+        return {**slicers, grid.face_dim: [FacetedIndexer(selections=selections)]}
+
+    return {dim: shift(sls, dim) for dim, sls in slicers.items()}
+
+
 def check_data_is_renderable_size(
     slicers: "Slicers",
     da: xr.DataArray,
@@ -1166,10 +1220,11 @@ def check_data_is_renderable_size(
     #     total_size *= grid.npoints_per_geometry
     # return total_size * da.dtype.itemsize <= factor * config.get("max_renderable_size")
 
-    total_bytes = decompressed_size_bytes(slicers, da, grid, style=style)
+    # factor inflates the estimate, as in apply_slicers; the budget is fixed
+    total_bytes = factor * decompressed_size_bytes(slicers, da, grid, style=style)
     if style == "polygons":
         total_bytes *= grid.npoints_per_geometry
-    return total_bytes <= factor * config.get("max_renderable_size")
+    return total_bytes <= config.get("max_renderable_size")
 
 
 def decompressed_size_bytes(
