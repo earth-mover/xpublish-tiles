@@ -24,6 +24,7 @@ from xpublish_tiles import config
 from xpublish_tiles.lib import (
     AsyncLoadTimeoutError,
     IndexingError,
+    InvalidCoordinateValues,
     MissingParameterError,
     VariableNotFoundError,
     check_transparent_pixels,
@@ -49,6 +50,7 @@ from xpublish_tiles.testing.datasets import (
     REDGAUSS_N320,
     REGIONAL_HEALPIX_NA,
     TRIPOLE_ANTIMERIDIAN,
+    TRIPOLE_GLOBAL_UNWRAPPED,
     UGRID_TRIANGLES,
     _create_global_healpix,
     create_global_dataset,
@@ -1150,3 +1152,12 @@ async def test_pipeline_raster_style_not_supported():
     query_params = create_query_params(tile, tms, style="raster")
     with pytest.raises(ValueError, match="polygons"):
         await pipeline(ds, query_params)
+
+
+@pytest.mark.asyncio
+async def test_tripole_global_unwrapped_does_not_hang():
+    """RTOFS/HYCOM fold-row lons past 360° map to inf in Web Mercator; this used
+    to hang forever in ``unwrap_phase``."""
+    ds = TRIPOLE_GLOBAL_UNWRAPPED.create()
+    with pytest.raises(InvalidCoordinateValues):
+        await pipeline(ds, create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS))

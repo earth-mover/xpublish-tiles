@@ -1133,6 +1133,72 @@ TRIPOLE_ANTIMERIDIAN = Dataset(
 )
 
 
+def tripolar_global_unwrapped_grid(
+    *,
+    dims: tuple[Dim, ...],
+    dtype: npt.DTypeLike,
+    attrs: dict[str, Any],
+) -> xr.Dataset:
+    """Global tripolar grid with unwrapped lons, modelled on RTOFS/HYCOM GLBb.
+
+    Lons run continuously from 74°E past 360°; the fold row carries the
+    whole-wrap offsets HYCOM ships, so Web Mercator maps part of it to inf.
+    """
+    ds = uniform_grid(dims=dims, dtype=dtype, attrs=attrs)
+
+    y_dim, x_dim = dims[0], dims[1]
+    ny, nx = y_dim.size, x_dim.size
+
+    # Real RTOFS is Mercator-like up to ~47°N (row 2172 of 3298) and a
+    # curvilinear bipolar cap above it; `cap` ramps 0→1 across that boundary.
+    x_frac = np.linspace(0.0, 1.0, nx)
+    y_frac = np.linspace(0.0, 1.0, ny)
+    cap_start = 2172 / 3298
+    cap = np.clip((y_frac - cap_start) / (1.0 - cap_start), 0.0, 1.0) ** 2
+
+    # --- Longitude: exactly one wrap, left unwrapped, starting at 74.12°E ---
+    # `sin(2 pi x)` puts the cap's two lobes interior and pins x=0 and x=1, so
+    # every row spans precisely 360°. Amplitude 87° matches the peak deviation
+    # from linear measured on the real top row.
+    lobes = np.sin(2.0 * np.pi * x_frac)
+    lons = (74.12 + x_frac * 360.0)[None, :] + 87.0 * cap[:, None] * lobes[None, :]
+    lons = lons.astype(np.float32)
+
+    # --- Latitude: Southern Ocean to 47°N, then two poles in the cap ---
+    # Below the cap latitude is X-independent; inside it the lobes rise to
+    # 89.98°N while the X edges stay pinned at the cap-start latitude, as in
+    # RTOFS (``lat[3296]`` is 47.042 at columns 0, mid and -1, 89.978 at peak).
+    lat_col = np.linspace(-78.64, 47.04, ny)
+    lats = np.broadcast_to(lat_col[:, None], (ny, nx)).astype(np.float64).copy()
+    lats += (89.98 - 47.04) * cap[:, None] * np.abs(lobes)[None, :]
+    lats = lats.astype(np.float32)
+
+    # --- Tripolar fold seam: top row is the row below it, reversed, carrying
+    # the whole-wrap offsets HYCOM ships (measured on real RTOFS as
+    # {-360, 0, +360, +720}).
+    lons[-1] = (
+        np.flip(lons[-2]) + np.resize(np.array([-360.0, 0.0, 360.0, 720.0]), nx)
+    ).astype(np.float32)
+    lats[-1] = np.flip(lats[-2])
+
+    ds.coords["lat"] = ((y_dim.name, x_dim.name), lats, {"standard_name": "latitude"})
+    ds.coords["lon"] = ((y_dim.name, x_dim.name), lons, {"standard_name": "longitude"})
+    ds["foo"].attrs["coordinates"] = "lat lon"
+
+    return ds
+
+
+TRIPOLE_GLOBAL_UNWRAPPED = Dataset(
+    name="tripole_global_unwrapped",
+    dims=(
+        Dim(name="Y", size=400, chunk_size=200, data=None),
+        Dim(name="X", size=800, chunk_size=400, data=None),
+    ),
+    dtype=np.float32,
+    setup=tripolar_global_unwrapped_grid,
+)
+
+
 def cubed_sphere_grid(
     *,
     dims: tuple[Dim, ...],
@@ -2386,6 +2452,7 @@ DATASET_LOOKUP = {
     "fvcom_machias_bay": FVCOM_MACHIAS_BAY,
     "ugrid_triangles": UGRID_TRIANGLES,
     "tripole_antimeridian": TRIPOLE_ANTIMERIDIAN,
+    "tripole_global_unwrapped": TRIPOLE_GLOBAL_UNWRAPPED,
     "cubed_sphere": CUBED_SPHERE,
     "geostationary": GEOSTATIONARY,
     "global_healpix_l3": GLOBAL_HEALPIX_L3,

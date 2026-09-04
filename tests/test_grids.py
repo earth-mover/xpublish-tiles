@@ -46,6 +46,7 @@ from xpublish_tiles.grids import (
     match_coord_dim,
 )
 from xpublish_tiles.lib import (
+    InvalidCoordinateValues,
     TileTooBigError,
     UnsupportedGridError,
     VariableNotFoundError,
@@ -1582,6 +1583,30 @@ def test_detect_orca_tripole_fold_row() -> None:
     (index,) = grid.indexes
     assert isinstance(index, CurvilinearCellIndex)
     assert index.tripolar_fold_row == ny - 1
+
+
+@pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf])
+def test_curvilinear_seam_rejects_nonfinite_lons(bad) -> None:
+    """Seam-crossing curvilinear grids hit the 2D ``unwrap_phase``, which hangs on NaN or inf."""
+    ny, nx = 8, 8
+    # Lons 100°E -> 100°W across the antimeridian so `_has_longitude_seam` fires.
+    row = (((np.linspace(100.0, 260.0, nx) + 180.0) % 360.0) - 180.0).astype(np.float32)
+    lons2d = np.broadcast_to(row[None, :], (ny, nx)).astype(np.float32).copy()
+    lons2d[0, 0] = bad
+    lats2d = np.broadcast_to(
+        np.linspace(-80.0, 80.0, ny, dtype=np.float32)[:, None], (ny, nx)
+    ).astype(np.float32)
+
+    ds = xr.Dataset(
+        {"foo": (("j", "i"), np.zeros((ny, nx), dtype=np.float32))},
+        coords={
+            "lon": (("j", "i"), lons2d, {"standard_name": "longitude"}),
+            "lat": (("j", "i"), lats2d, {"standard_name": "latitude"}),
+        },
+    )
+
+    with pytest.raises(InvalidCoordinateValues, match="NaN/inf"):
+        Curvilinear.from_dataset(ds, CRS.from_epsg(4326), "lon", "lat")
 
 
 def test_detect_mesh_ugrid():
