@@ -43,6 +43,7 @@ from xpublish_tiles.grids import (
     guess_coordinate_vars,
     guess_grid_metadata,
     guess_grid_system,
+    match_coord_dim,
 )
 from xpublish_tiles.lib import (
     GridDetectionError,
@@ -836,6 +837,53 @@ def test_y_coordinate_regex_patterns():
 
     for name in y_invalid_names:
         assert not Y_COORD_PATTERN.match(name), f"Y pattern should not match '{name}'"
+
+
+def test_match_coord_dim_vetoes_time_and_prefers_exact():
+    """``year`` matches Y_COORD_PATTERN; the helper must not pick it over ``y``."""
+    # The bare pattern is ambiguous by design (``y`` + ``[a-z0-9_]*``)...
+    assert Y_COORD_PATTERN.match("year")
+
+    # ...so the helper vetoes time-like names, regardless of dim order.
+    dims = ("year", "y", "x")
+    assert match_coord_dim(X_COORD_PATTERN, dims) == "x"
+    assert match_coord_dim(Y_COORD_PATTERN, dims) == "y"
+    assert match_coord_dim(Y_COORD_PATTERN, ("year", "x")) is None
+
+    # An exact token beats a prefix match even when the prefix comes first.
+    assert match_coord_dim(Y_COORD_PATTERN, ("yc", "y")) == "y"
+    assert match_coord_dim(X_COORD_PATTERN, ("xc", "x")) == "x"
+
+
+def test_guess_grid_system_geographic_bare_xy_coords():
+    """Geographic CRS with attr-less x/y coords must pick ``y``, not ``year``, as Y.
+
+    Regression: ``ds.cf.coordinates`` finds no lat/lon (no CF attrs), so detection
+    dropped into the coordinate-less RasterAffine path and matched the leading
+    ``year`` dim as Y, leaving the real ``y`` to be squeezed away by selection.
+    The GeoTransform still wins over the coordinate values, so the grid is affine.
+    """
+    ds = xr.Dataset(
+        {"land_cover": (("year", "y", "x"), np.zeros((1, 10, 20), dtype="uint8"))},
+        coords={
+            "year": ("year", np.array([2024], dtype="int16")),
+            "y": ("y", 80 - 14 * (np.arange(10) + 0.5)),
+            "x": ("x", -180 + 18 * (np.arange(20) + 0.5)),
+            "spatial_ref": (
+                (),
+                0,
+                {
+                    "crs_wkt": CRS.from_epsg(4326).to_wkt(),
+                    "GeoTransform": "-180.0 18.0 0.0 80.0 0.0 -14.0",
+                },
+            ),
+        },
+    )
+
+    grid = guess_grid_system(ds, "land_cover")
+
+    assert isinstance(grid, RasterAffine)
+    assert (grid.X, grid.Y) == ("x", "y")
 
 
 class TestLongitudeCellIndex:

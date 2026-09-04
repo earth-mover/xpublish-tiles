@@ -3,7 +3,7 @@ import re
 import threading
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Hashable
+from collections.abc import Hashable, Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self, cast
 
@@ -201,6 +201,34 @@ Y_COORD_PATTERN = re.compile(
     r"^(y|j|eta|nlat|rlat|nj)[a-z0-9_]*$|^y?(nav_lat|lat|gphi)[a-z0-9_]*$",
     re.IGNORECASE,
 )
+# Time-like names must never be taken as spatial dims: ``year`` matches
+# Y_COORD_PATTERN (``y`` plus suffix), ``interval`` matches X_COORD_PATTERN.
+TIME_COORD_PATTERN = re.compile(
+    r"^(t|time|min|minute|hour|day|week|month|year|season|step|"
+    r"valid_time|forecast_reference_time|forecast_period)[a-z0-9_]*$",
+    re.IGNORECASE,
+)
+# Base tokens that name an axis exactly, rather than by prefix.
+_EXACT_COORD_TOKENS = frozenset(
+    {"x", "i", "xi", "nlon", "rlon", "ni", "y", "j", "eta", "nlat", "rlat", "nj"}
+)
+
+
+def match_coord_dim(pattern: re.Pattern, dims: Iterable[Hashable]) -> str | None:
+    """Pick the dim best matching an axis pattern, vetoing time-like names.
+
+    Prefers an exact token (``y``) over a prefix match (``yc``) so that dim
+    ordering does not decide the axis.
+    """
+    candidates = [
+        d
+        for dim in dims
+        if pattern.match(d := str(dim)) and not TIME_COORD_PATTERN.match(d)
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda d: (d.lower() not in _EXACT_COORD_TOKENS, len(d)))
+
 
 _GRID_CACHE = cachetools.LRUCache(maxsize=config["grid_cache_max_size"])
 
@@ -2157,12 +2185,10 @@ class Curvilinear(GridSystem):
 
             # Final fallback: try pattern matching on dimension names
             if not Xdim or not Ydim:
-                for dim in X.dims:
-                    dim_str = str(dim)
-                    if X_COORD_PATTERN.match(dim_str) and not Xdim:
-                        Xdim = dim_str
-                    elif Y_COORD_PATTERN.match(dim_str) and not Ydim:
-                        Ydim = dim_str
+                Xdim = Xdim or match_coord_dim(X_COORD_PATTERN, X.dims)
+                Ydim = Ydim or match_coord_dim(
+                    Y_COORD_PATTERN, [d for d in X.dims if str(d) != Xdim]
+                )
 
             # If we still can't identify, raise an error
             if not Xdim or not Ydim:
@@ -3375,6 +3401,12 @@ def guess_coordinate_vars(
     elif crs.is_geographic:
         coords = ds.cf.coordinates
         Xname, Yname = coords.get("longitude", None), coords.get("latitude", None)
+        # Fall back to X/Y axes: a geographic CRS can still be labelled with
+        # axis attrs only (or guessed by ``guess_coord_axis``) and no lat/lon names.
+        if Xname is None or Yname is None:
+            axes = ds.cf.axes
+            Xname = Xname or axes.get("X", None)
+            Yname = Yname or axes.get("Y", None)
     else:
         axes = ds.cf.axes
         Xname, Yname = axes.get("X", None), axes.get("Y", None)
@@ -3535,9 +3567,20 @@ def _detect_grid_metadata(
         assert Xname is not None and Yname is not None
         return GridMetadata(X=Xname, Y=Yname, grid_cls=Healpix, crs=mapping.crs)
 
-    # GeoZarr with spatial:transform uses RasterAffine
-    spatial_transform = mapping.grid_mapping.get("spatial:transform")
-    if spatial_transform is not None and Xname is not None and Yname is not None:
+    # An affine transform (GeoZarr spatial:transform or GDAL GeoTransform) beats
+    # 1D coordinate values: the two can disagree by a fraction of a pixel.
+    has_transform = (
+        mapping.grid_mapping.get("spatial:transform") is not None
+        or mapping.grid_mapping.get("GeoTransform") is not None
+    )
+    if (
+        has_transform
+        and Xname is not None
+        and Yname is not None
+        and ds[Xname].ndim == 1
+        and ds[Yname].ndim == 1
+        and ds[Xname].dims != ds[Yname].dims
+    ):
         return GridMetadata(
             X=Xname,
             Y=Yname,
@@ -3580,13 +3623,8 @@ def _detect_grid_metadata(
             )
 
         # Use regex patterns to find coordinate dimensions
-        x_dim, y_dim = None, None
-        for dim in ds.dims:
-            dim = cast(str, dim)
-            if x_dim is None and X_COORD_PATTERN.match(dim):
-                x_dim = dim
-            if y_dim is None and Y_COORD_PATTERN.match(dim):
-                y_dim = dim
+        x_dim = match_coord_dim(X_COORD_PATTERN, ds.dims)
+        y_dim = match_coord_dim(Y_COORD_PATTERN, [d for d in ds.dims if str(d) != x_dim])
         if not (x_dim and y_dim):
             raise GridDetectionError(
                 "Creating raster affine grid system failed. "
