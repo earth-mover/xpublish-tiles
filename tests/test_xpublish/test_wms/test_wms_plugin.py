@@ -4,6 +4,7 @@ import xml.etree.ElementTree as ET
 import morecantile
 import pytest
 import xpublish
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
 
@@ -80,6 +81,33 @@ def test_get_capabilities_json(xpublish_client):
     capability = data["capability"]
     assert "request" in capability
     assert "layer" in capability
+
+
+def test_capabilities_urls_respect_submount(xpublish_app):
+    app = FastAPI()
+    app.mount("/v1", xpublish_app)
+    client = TestClient(app)
+
+    response = client.get(
+        "/v1/datasets/air/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetCapabilities",
+            "format": "json",
+        },
+    )
+
+    assert response.status_code == 200
+    capabilities = response.json()
+    expected_url = "http://testserver/v1/datasets/air/wms"
+    assert capabilities["service"]["online_resource"]["href"] == expected_url
+
+    operations = capabilities["capability"]["request"]
+    assert (
+        operations["get_capabilities"]["dcp_type"]["http"]["get"]["href"] == expected_url
+    )
+    assert operations["get_map"]["dcp_type"]["http"]["get"]["href"] == expected_url
 
 
 def test_get_capabilities_content_negotiation(xpublish_client):
