@@ -1433,8 +1433,8 @@ async def _transform_polygon_patch(
     bbox: OutputBBox,
     output_crs: OutputCRS,
     out_width: float | None = None,
-) -> tuple[np.ndarray, np.ndarray, xr.DataArray]:
-    """Transform one patch into ``(rings, values_1d, da)`` for the polygons style.
+) -> tuple[np.ndarray, np.ndarray]:
+    """Transform one patch into ``(rings, values_1d)`` for the polygons style.
 
     Dispatches by patch grid type: GridSystem2D goes through the shared
     cell-corners → transform → corners-to-rings core; Triangular/Healpix share
@@ -1461,7 +1461,7 @@ async def _transform_polygon_patch(
             is_polar_cap=is_polar_cap,
             out_width=out_width,
         )
-        return rings, values, xr.DataArray(values, dims=["cell"])
+        return rings, values
 
     # Triangular / Healpix polygon path. Corners come from the grid, not the
     # DataArray: face-located UGRID variables carry no node coords.
@@ -1501,22 +1501,17 @@ async def _transform_polygon_patch(
     )
 
     if isinstance(grid, Healpix):
-        da = subset.isel({subset.dims[0]: healpix_cell_indexer})
+        values = subset.isel({subset.dims[0]: healpix_cell_indexer}).values
     else:
         assert isinstance(grid, Triangular) and ugrid_indexer is not None
         if grid.face_dim in subset.dims:
-            da = subset
+            values = subset.values
         else:
             # Node-located: one value per face for the polygons.
-            da = xr.DataArray(
-                grid.nodes_to_faces(subset.values, ugrid_indexer), dims=["cell"]
-            )
+            values = grid.nodes_to_faces(subset.values, ugrid_indexer)
 
     cell_rings = grid.corners_to_rings(newX.data, newY.data, ugrid_indexer=ugrid_indexer)
-    values = (
-        np.asarray(da.values).ravel() if da.values.ndim > 1 else np.asarray(da.values)
-    )
-    return cell_rings, values, da
+    return cell_rings, np.asarray(values).ravel()
 
 
 async def _transform_raster_patch(
@@ -1634,7 +1629,7 @@ async def transform_for_render(
             rings_list: list[np.ndarray] = []
             values_list: list[np.ndarray] = []
             for patch in context.patches:
-                rings, values, _ = await _transform_polygon_patch(
+                rings, values = await _transform_polygon_patch(
                     patch, bbox=bbox, output_crs=crs, out_width=out_width
                 )
                 rings_list.append(rings)
