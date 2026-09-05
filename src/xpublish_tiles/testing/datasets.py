@@ -1761,10 +1761,12 @@ REDGAUSS_N320 = Dataset(
 def create_fvcom_ugrid(
     *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
 ) -> xr.Dataset:
-    """Load the Machias Bay FVCOM UGRID fixture and expose ``h`` as ``foo``."""
+    """Load the Machias Bay FVCOM UGRID fixture: ``h`` as ``foo`` (node) plus ``ua`` (face)."""
     nc = Path(__file__).parent / "grids" / "machias_bay_fvcom.nc"
     ds: xr.Dataset = xr.open_dataset(nc, chunks={})
-    ds = ds[["h", "mesh_topology", "nv"]].rename({"h": "foo"})  # ty: ignore[invalid-assignment]
+    ds = ds[["h", "ua", "mesh_topology", "nv"]].rename({"h": "foo"})  # ty: ignore[invalid-assignment]
+    ds["ua"].attrs["valid_min"] = -1.0
+    ds["ua"].attrs["valid_max"] = 1.0
     # CF disambiguation: two longitude coords (lon, lonc) exist; declare which
     # belongs to foo so _guess_coordinates_for_mapping picks lon/lat over lonc/latc.
     ds["foo"].attrs["coordinates"] = "lon lat"
@@ -1838,6 +1840,8 @@ def ugrid_triangles_grid(
     one face-located data variable over a small regional domain."""
     side = _ugrid_dim_side(dims)
     lon_node, lat_node, lon_face, lat_face, conn = _ugrid_triangle_geometry(side)
+    # zeta varies along X, u along Y, so their renders differ.
+    zeta = 40.0 + (lon_node - lon_node.min()) / np.ptp(lon_node) * 2.0
     return xr.Dataset(
         data_vars={
             "mesh": xr.DataArray(
@@ -1856,7 +1860,7 @@ def ugrid_triangles_grid(
                 attrs={"cf_role": "face_node_connectivity", "start_index": 0},
             ),
             "zeta": xr.DataArray(
-                lat_node.astype(dtype),
+                zeta.astype(dtype),
                 dims=("node",),
                 attrs={
                     **attrs,

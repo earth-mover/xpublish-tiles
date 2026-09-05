@@ -2638,6 +2638,36 @@ class Triangular(GridSystem):
             )
         return cast(xr.Dataset, da.to_dataset().reset_coords()[[da.name, self.X, self.Y]])
 
+    def cell_corners(
+        self,
+        *,
+        slicers: dict[str, list],
+        coarsen_factors: dict[str, int],
+    ) -> xr.DataArray:
+        """Triangle corners are the mesh nodes; ``corners_to_rings`` groups them by connectivity."""
+        indexer = slicers[self.dim][0]
+        assert isinstance(indexer, UgridIndexer)
+        return self.node_coords(indexer, self.X, self.Y)
+
+    def node_coords(
+        self, indexer: "UgridIndexer", Xname: str, Yname: str
+    ) -> xr.DataArray:
+        """Source-CRS X/Y of the selected nodes, read from the CellTree vertices.
+
+        Face-located variables carry no node coords, so ``subset[X]`` is unavailable.
+        """
+        cell_index = self.indexes[0]
+        assert isinstance(cell_index, CellTreeIndex)
+        verts = cell_index.tree.vertices[indexer.vertices]
+        return xr.DataArray(
+            np.empty(verts.shape[0]),
+            dims=(self.dim,),
+            coords={
+                Xname: ((self.dim,), verts[:, 0]),
+                Yname: ((self.dim,), verts[:, 1]),
+            },
+        )
+
     def average_faces_to_nodes(
         self,
         subset: xr.DataArray,
@@ -2650,28 +2680,27 @@ class Triangular(GridSystem):
         Returns a node DataArray with source-CRS X/Y coords taken from the
         stored CellTreeIndex vertices, ready for coordinate transformation.
         """
-        cell_index = self.indexes[0]
-        assert isinstance(cell_index, CellTreeIndex)
-        selected = indexer.vertices
-        node_coords = cell_index.tree.vertices[selected]
+        coords = self.node_coords(indexer, Xname, Yname)
         conn = indexer.connectivity
         face_vals = np.asarray(subset.values, dtype=np.float64)
         with NUMBA_THREADING_LOCK:
             node_vals = numbagg.group_nanmean(
                 np.repeat(face_vals, 3),
                 conn.ravel(),
-                num_labels=len(selected),
+                num_labels=indexer.vertices.size,
             )
         return xr.DataArray(
             node_vals,
             dims=[self.dim],
-            coords={
-                Xname: (self.dim, node_coords[:, 0]),
-                Yname: (self.dim, node_coords[:, 1]),
-            },
+            coords=coords.coords,
             name=subset.name,
             attrs=subset.attrs,
         )
+
+    def nodes_to_faces(self, values: np.ndarray, indexer: "UgridIndexer") -> np.ndarray:
+        """Mean of the three corner nodes per face."""
+        with NUMBA_THREADING_LOCK:
+            return numbagg.nanmean(values[indexer.connectivity], axis=1)
 
     def isel_indexer(self, ds: xr.Dataset, indexer: "UgridIndexer") -> xr.Dataset:
         """Apply a UgridIndexer to ``ds``.
