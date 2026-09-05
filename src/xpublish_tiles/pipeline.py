@@ -1508,7 +1508,7 @@ async def _transform_polygon_patch(
             values = subset.values
         else:
             # Node-located: one value per face for the polygons.
-            values = grid.nodes_to_faces(subset.values, ugrid_indexer)
+            values = await async_run(grid.nodes_to_faces, subset.values, ugrid_indexer)
 
     cell_rings = grid.corners_to_rings(newX.data, newY.data, ugrid_indexer=ugrid_indexer)
     return cell_rings, np.asarray(values).ravel()
@@ -1559,8 +1559,12 @@ async def _transform_raster_patch(
     if isinstance(grid, Triangular) and isinstance(patch.indexer, UgridIndexer):
         face_dim = grid.face_dim
         if face_dim is not None and face_dim in subset.dims:
-            subset = grid.average_faces_to_nodes(
-                subset, patch.indexer, alternate.X, alternate.Y
+            subset = await async_run(
+                grid.average_faces_to_nodes,
+                subset,
+                patch.indexer,
+                alternate.X,
+                alternate.Y,
             )
 
     with log_duration("transform_coordinates", "🔄"):
