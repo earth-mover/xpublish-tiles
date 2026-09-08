@@ -881,18 +881,15 @@ class CurvilinearCellIndex(xr.Index):
     right_break: float
     Xdim: str
     Ydim: str
-    X: xr.DataArray
-    Y: xr.DataArray
     xaxis: int
     yaxis: int
     y_is_increasing: bool
+    # Corner mesh (ny+1, nx+1): the only full-grid arrays kept on the index.
     corner_x: np.ndarray
     corner_y: np.ndarray
-    cell_x_min: np.ndarray
-    cell_x_max: np.ndarray
-    cell_y_min: np.ndarray
-    cell_y_max: np.ndarray
-    cell_crosses_seam: np.ndarray
+    # 1D per-cell-row lat bounds, used by `sel` to find the row band.
+    row_y_min: np.ndarray
+    row_y_max: np.ndarray
     _dXmin: float
     _dYmin: float
     tripolar_fold_row: int | None
@@ -914,14 +911,14 @@ class CurvilinearCellIndex(xr.Index):
             raise ValueError(
                 f"Coordinate variables {X.name!r} and {Y.name!r} are too big to load in to memory!"
             )
-        self.X, self.Y = X.reset_coords(drop=True), Y.reset_coords(drop=True)
         self.Xdim, self.Ydim = Xdim, Ydim
         self.tripolar_fold_row = tripolar_fold_row
 
-        # derived quantities
-        X, Y = self.X.data, self.Y.data
-        xaxis = self.X.get_axis_num(self.Xdim)
-        yaxis = self.Y.get_axis_num(self.Ydim)
+        # Cell centers are only needed to build the corner mesh; the index
+        # does not keep them. Callers read centers from the dataset.
+        xaxis = X.get_axis_num(Xdim)
+        yaxis = Y.get_axis_num(Ydim)
+        X, Y = X.data, Y.data
 
         # Polar-cap faces wind around the pole; `_convert_longitude_slice`'s
         # 1D-monotonic window-shift logic does not apply. Callers that know
@@ -978,41 +975,26 @@ class CurvilinearCellIndex(xr.Index):
         self._dXmin = _min_nonzero_diff(xhi, xlo)
         self._dYmin = _min_nonzero_diff(yhi, ylo)
 
-        # Per-cell (min, max) over the 4 corners. The corner mesh is immutable
-        # on this index, so cache once at construction and reuse on every
-        # `.sel` call.
-        self.cell_y_min, self.cell_y_max = _cell_min_max(
-            self.corner_y, xaxis=xaxis, yaxis=yaxis
-        )
-        self.cell_x_min, self.cell_x_max = _cell_min_max(
-            self.corner_x, xaxis=xaxis, yaxis=yaxis
-        )
-        # Cells whose 4 corners straddle the 0/360 (or ±180) longitude seam have
-        # a naive (min, max) AABB spanning the *complementary* arc, so the
-        # standard interval-overlap test wrongly excludes them. Flag them so
-        # polar-cap `.sel` can treat them as matching any longitude: they wind
-        # around the pole and genuinely span a wide lon range, and the
-        # over-selection is clipped to the canvas at render time. Non-polar-cap
-        # grids have unwrapped, monotonic lons (see `Curvilinear.from_dataset`),
-        # so the span never exceeds 180° and this mask is all-False there.
-        self.cell_crosses_seam = (self.cell_x_max - self.cell_x_min) > 180.0
-        # 1D per-row lat aggregates used by `.sel` to find the row-bbox of a
-        # query without materializing the full 2D ``lat_mask``: for a small
-        # bbox this collapses ~15M-element work into a 1D scan of ~Ylen
-        # elements.
-        self.row_y_min = self.cell_y_min.min(axis=xaxis)
-        self.row_y_max = self.cell_y_max.max(axis=xaxis)
+        # 1D per-cell-row lat bounds, used by `.sel` to find the row band of a
+        # query without touching the full 2D grid. A cell row spans two corner
+        # rows, so combine adjacent corner-row reductions. This avoids holding
+        # full-grid per-cell (min, max) arrays: on a 3298x4500 grid those cost
+        # ~0.7 GB and are only ever read for a narrow row band.
+        corner_row_min = self.corner_y.min(axis=xaxis)
+        corner_row_max = self.corner_y.max(axis=xaxis)
+        self.row_y_min = np.minimum(corner_row_min[:-1], corner_row_min[1:])
+        self.row_y_max = np.maximum(corner_row_max[:-1], corner_row_max[1:])
 
     def get_min_spacing(self) -> tuple[float, float]:
         """Get minimum spacing in X and Y directions."""
         return self._dXmin, self._dYmin
 
     def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
-        X, Y = self.X.data, self.Y.data
         xaxis, yaxis = self.xaxis, self.yaxis
-        Xlen = X.shape[xaxis]
+        # The corner mesh has one more row and column than the cell grid.
+        Xlen = self.corner_x.shape[xaxis] - 1
         # For tripolar grids, exclude the fold row from consideration
-        Ylen = self.tripolar_fold_row or Y.shape[yaxis]
+        Ylen = self.tripolar_fold_row or self.corner_y.shape[yaxis] - 1
 
         assert len(labels) == 1
         bbox = next(iter(labels.values()))
@@ -1127,29 +1109,41 @@ class CurvilinearCellIndex(xr.Index):
     def _lat_mask_for_rows(
         self, y_slice: slice, *, bbox: BBox
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Slice the cached cell bounds to ``y_slice`` rows and build the per-
-        cell lat-overlap mask for ``bbox``. Returns
-        ``(lat_mask, x_min, x_max, seam_mask)`` over those rows for downstream
-        lon-mask combines.
+        """Build per-cell bounds for the ``y_slice`` rows and the lat-overlap
+        mask for ``bbox``. Returns ``(lat_mask, x_min, x_max, seam_mask)`` over
+        those rows for downstream lon-mask combines.
+
+        Per-cell bounds are derived here from the corner mesh, not cached on the
+        index: a tile touches a narrow row band, so this is cheap, and it keeps
+        the index footprint to the corner mesh alone.
         """
+        xaxis, yaxis = self.xaxis, self.yaxis
+        # ``y_slice`` addresses cell rows; the corner band needs one extra row.
         sl: list[slice] = [slice(None), slice(None)]
-        sl[self.yaxis] = y_slice
+        sl[yaxis] = slice(y_slice.start, y_slice.stop + 1)
         idx = tuple(sl)
-        lat_mask = self.cell_y_min[idx] <= bbox.north
-        lat_mask &= self.cell_y_max[idx] >= bbox.south
-        return (
-            lat_mask,
-            self.cell_x_min[idx],
-            self.cell_x_max[idx],
-            self.cell_crosses_seam[idx],
-        )
+        y_min, y_max = _cell_min_max(self.corner_y[idx], xaxis=xaxis, yaxis=yaxis)
+        x_min, x_max = _cell_min_max(self.corner_x[idx], xaxis=xaxis, yaxis=yaxis)
+        lat_mask = y_min <= bbox.north
+        lat_mask &= y_max >= bbox.south
+        # Cells whose 4 corners straddle the 0/360 (or ±180) longitude seam have
+        # a naive (min, max) AABB spanning the *complementary* arc, so the
+        # standard interval-overlap test wrongly excludes them. Flag them so
+        # polar-cap `.sel` can treat them as matching any longitude: they wind
+        # around the pole and genuinely span a wide lon range, and the
+        # over-selection is clipped to the canvas at render time. Non-polar-cap
+        # grids have unwrapped, monotonic lons (see `Curvilinear.from_dataset`),
+        # so the span never exceeds 180° and this mask is all-False there.
+        seam_mask = (x_max - x_min) > 180.0
+        return lat_mask, x_min, x_max, seam_mask
 
     def equals(self, other: xr.Index, **kwargs: Any) -> bool:
         if not isinstance(other, CurvilinearCellIndex):
             return False
         return (
-            np.allclose(self.X.data, other.X.data)
-            and np.allclose(self.Y.data, other.Y.data)
+            self.corner_x.shape == other.corner_x.shape
+            and np.allclose(self.corner_x, other.corner_x, equal_nan=True)
+            and np.allclose(self.corner_y, other.corner_y, equal_nan=True)
             and self.Xdim == other.Xdim
             and self.Ydim == other.Ydim
         )
