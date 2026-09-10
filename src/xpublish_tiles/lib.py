@@ -963,7 +963,10 @@ def _coarsen_nanmean_3d(arr, fy, fx, out):
     H, W = arr.shape[1:]
 
     for r in numba.prange(nb * ny_out):  # ty: ignore[not-iterable]
-        b, i = divmod(r, ny_out)
+        # prange index is unsigned; divmod with int64 unifies to float64
+        rr = np.int64(r)
+        b = rr // ny_out
+        i = rr - b * ny_out
         y_start = i * fy
         y_end = min((i + 1) * fy, H)
 
