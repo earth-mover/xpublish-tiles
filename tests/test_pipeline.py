@@ -49,6 +49,8 @@ from xpublish_tiles.testing.datasets import (
     PARA,
     REDGAUSS_N320,
     REGIONAL_HEALPIX_NA,
+    RGB,
+    RGB_UINT8,
     TRIPOLE_ANTIMERIDIAN,
     TRIPOLE_GLOBAL_UNWRAPPED,
     UGRID_TRIANGLES,
@@ -66,12 +68,13 @@ from xpublish_tiles.testing.tiles import (
     CURVILINEAR_TILES,
     GEOSTATIONARY_TILES,
     PARA_TILES,
+    RGB_TILES,
     TILES,
     WEBMERC_TMS,
     WGS84_TMS,
     TileTestParam,
 )
-from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
+from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams, RGBData
 
 
 @st.composite
@@ -217,7 +220,9 @@ async def test_pipeline_tiles_polygons(
     ],
 )
 async def test_global_6km_regression(ds, tile, png_snapshot, pytestconfig):
+    # GLOBAL_6KM carries R/G/B bands; colormap variants must pick one.
     query_params = create_query_params(tile, WEBMERC_TMS)
+    query_params.selectors = {"band": "B"}
     query_params.width = 512
     query_params.height = 512
     result = await pipeline(ds, query_params)
@@ -941,6 +946,7 @@ async def test_async_load_timeout():
     tile = Tile(x=0, y=0, z=1)
     tms = morecantile.tms.get("WebMercatorQuad")
     query_params = create_query_params(tile, tms)
+    query_params.selectors = {"band": "B"}
 
     original_load_async = xr.Dataset.load_async
 
@@ -1196,3 +1202,106 @@ async def test_tripole_global_unwrapped_does_not_hang():
     ds = TRIPOLE_GLOBAL_UNWRAPPED.create()
     with pytest.raises(InvalidCoordinateValues):
         await pipeline(ds, create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("style", ["raster", "polygons"])
+@pytest.mark.parametrize("tile,tms", as_pytestparams(RGB_TILES))
+async def test_rgb_data(tile, tms, style, png_snapshot, pytestconfig):
+    """``{style}/rgb`` on a variable with an ``rgb`` band dim: red must ramp
+    east, green north."""
+    ds = RGB.create()
+    query_params = create_query_params(tile, tms, style=style, variant="rgb")
+    result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(result, png_snapshot, tile=tile, tms=tms)
+
+
+@pytest.mark.asyncio
+async def test_rgb_uint8_positional_bands():
+    """uint8 bands along a ``band`` dim default to a 0..255 stretch; result
+    matches the float 0..1 encoding to rounding."""
+    tile = Tile(x=0, y=0, z=0)
+    query_params = create_query_params(tile, WEBMERC_TMS, variant="rgb")
+    float_result = await pipeline(RGB.create(), query_params)
+    uint8_result = await pipeline(RGB_UINT8.create(), query_params)
+    a = np.asarray(Image.open(float_result)).astype(int)
+    b = np.asarray(Image.open(uint8_result)).astype(int)
+    assert np.abs(a - b).max() <= 1
+
+
+@pytest.mark.asyncio
+async def test_rgb_colorscalerange_stretch():
+    """A saturating colorscalerange applies to every band."""
+    ds = RGB.create()
+    tile = Tile(x=0, y=0, z=0)
+    base = create_query_params(tile, WEBMERC_TMS, variant="rgb")
+    stretched = replace(base, colorscalerange=(-1.0, 0.0))
+    a = np.asarray(Image.open(await pipeline(ds, base)))
+    b = np.asarray(Image.open(await pipeline(ds, stretched)))
+    assert (b[..., :3] == 255).all()
+    np.testing.assert_array_equal(a[..., 3], b[..., 3])
+
+
+def test_apply_query_rgb_keeps_band_dim():
+    ds = RGB.create()
+    validated = apply_query(ds, variables=["foo"], selectors={}, rgb=True)
+    array = validated["foo"]
+    assert isinstance(array.datatype, RGBData)
+    assert array.datatype.band_dim == "rgb"
+    assert array.da.dims[0] == "rgb"
+
+    # without the rgb variant the band dim is squeezed like any extra dim
+    validated = apply_query(ds, variables=["foo"], selectors={"rgb": "red"})
+    assert validated["foo"].da.dims == ("latitude", "longitude")
+
+
+@pytest.mark.asyncio
+async def test_rgb_band_selector_renders_single_band(png_snapshot):
+    """Colormap variants pick one band with a selector."""
+    ds = RGB.create()
+    query_params = replace(
+        create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, colorscalerange=(0, 1)),
+        selectors={"rgb": "red"},
+    )
+    result = await pipeline(ds, query_params)
+    assert_render_matches_snapshot(result, png_snapshot)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "overrides,match",
+    [
+        pytest.param(
+            {"variant": "rgb", "selectors": {"rgb": "red"}},
+            "needs a dimension named",
+            id="rgb-on-2d-var",
+        ),
+        pytest.param(
+            {"variant": "rgb", "abovemaxcolor": "red"},
+            "does not accept abovemaxcolor",
+            id="rgb-abovemaxcolor",
+        ),
+    ],
+)
+async def test_rgb_error_paths(overrides, match):
+    ds = RGB.create()
+    query_params = replace(
+        create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, variant="rgb"), **overrides
+    )
+    with pytest.raises(MissingParameterError, match=match):
+        await pipeline(ds, query_params)
+
+
+@pytest.mark.asyncio
+async def test_rgb_colormap_rejected():
+    from xpublish_tiles.lib import ColormapError
+
+    ds = RGB.create()
+    query_params = replace(
+        create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, variant="rgb"),
+        colormap={"0": "#000000", "255": "#ffffff"},
+    )
+    with pytest.raises(ColormapError, match="does not accept a colormap"):
+        await pipeline(ds, query_params)

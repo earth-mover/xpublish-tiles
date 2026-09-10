@@ -14,6 +14,7 @@ from scipy.interpolate import NearestNDInterpolator
 import xarray as xr
 from xpublish_tiles.grids import Curvilinear, Geostationary, GridSystem2D, Triangular
 from xpublish_tiles.lib import (
+    MissingParameterError,
     maybe_cast_data,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
@@ -24,6 +25,7 @@ from xpublish_tiles.types import (
     DiscreteData,
     ImageFormat,
     RenderContext,
+    RGBData,
 )
 from xpublish_tiles.utils import NUMBA_THREADING_LOCK
 
@@ -316,11 +318,22 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                     # errstate: off-disk NaN coords (geostationary) cast to garbage
                     # ints inside datashader's quad scaling; those quads no-op via
                     # the NaN data mask above, so the warning is expected noise.
+                    # A leading RGB band dim rides along: datashader aggregates
+                    # each band as an independent 2D quadmesh.
+                    dims: tuple[str, ...] = (grid.Ydim, grid.Xdim)
+                    if isinstance(context.datatype, RGBData):
+                        band_dim = context.datatype.band_dim
+                        dims = (band_dim, *dims)
+                        # datashader rejects string coords; the labels aren't needed.
+                        data = data.drop_vars(band_dim, errors="ignore")
                     with NUMBA_THREADING_LOCK, np.errstate(invalid="ignore"):
-                        mesh = cvs.quadmesh(
-                            data.transpose(grid.Ydim, grid.Xdim), x=grid.X, y=grid.Y
-                        )
+                        mesh = cvs.quadmesh(data.transpose(*dims), x=grid.X, y=grid.Y)
         elif isinstance(context.grid, Triangular):
+            if isinstance(context.datatype, RGBData):
+                raise MissingParameterError(
+                    "The 'rgb' variant is not supported with style 'raster' on "
+                    "triangular grids; use 'polygons/rgb'."
+                )
             with log_duration(f"render (continuous) {data.shape} trimesh", "🔺", logger):
                 assert context.ugrid_indexer is not None
                 if context.grid.dim in data.coords:
@@ -339,19 +352,30 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                 f"Grid type {type(context.grid)} not supported by DatashaderRasterRenderer"
             )
 
-        im = self.shade_mesh(
-            mesh,
-            context.datatype,
-            variant=variant,
-            colorscalerange=colorscalerange,
-            colormap=colormap,
-            abovemaxcolor=abovemaxcolor,
-            belowmincolor=belowmincolor,
-        )
-        if isinstance(context.datatype, ContinuousData):
-            im = _apply_out_of_range_colors(
-                im, mesh, colorscalerange, abovemaxcolor, belowmincolor
+        if isinstance(context.datatype, RGBData):
+            im = self.shade_rgb(
+                mesh,
+                context.datatype,
+                colorscalerange=colorscalerange,
             )
+        else:
+            im = self.shade_mesh(
+                mesh,
+                context.datatype,
+                variant=variant,
+                colorscalerange=colorscalerange,
+                colormap=colormap,
+                abovemaxcolor=abovemaxcolor,
+                belowmincolor=belowmincolor,
+            )
+            if isinstance(context.datatype, ContinuousData):
+                im = _apply_out_of_range_colors(
+                    im,
+                    mesh,
+                    colorscalerange,
+                    abovemaxcolor,
+                    belowmincolor,
+                )
 
         im.save(buffer, format=str(format))
 

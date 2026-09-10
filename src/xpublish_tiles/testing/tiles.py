@@ -125,6 +125,17 @@ WEBMERC_TILES_EDGE_CASES = [
 # WebMercator tiles (supported TMS) - combined
 WEBMERC_TILES = WEBMERC_TILES_REGULAR + WEBMERC_TILES_EDGE_CASES
 
+# RGB synthetic dataset: whole globe at z=0/1 plus one zoomed tile that needs
+# upsampling and one antimeridian tile.
+RGB_TILES = [
+    TileTestParam(tile=Tile(x=0, y=0, z=0), tms=WEBMERC_TMS, name="rgb_world"),
+    TileTestParam(tile=Tile(x=1, y=0, z=1), tms=WEBMERC_TMS, name="rgb_ne_quadrant"),
+    TileTestParam(tile=Tile(x=8, y=5, z=4), tms=WEBMERC_TMS, name="rgb_europe_zoom4"),
+    TileTestParam(
+        tile=Tile(x=0, y=1, z=2), tms=WEBMERC_TMS, name="rgb_antimeridian_west"
+    ),
+]
+
 # ETRS89 tiles - regular cases
 ETRS89_TILES_REGULAR = [
     # ETRS89 LAEA tiles - European region specific

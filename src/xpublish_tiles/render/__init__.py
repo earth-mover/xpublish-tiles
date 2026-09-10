@@ -2,7 +2,7 @@ import io
 from abc import ABC, abstractmethod
 from importlib.metadata import entry_points
 from numbers import Number
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 import datashader as dsh
 import datashader.transfer_functions as tf
@@ -16,6 +16,7 @@ from PIL import Image, ImageDraw
 
 import xarray as xr
 from xpublish_tiles.lib import (
+    ColormapError,
     MissingParameterError,
     apply_range_colors,
     create_colormap_from_dict,
@@ -29,7 +30,11 @@ from xpublish_tiles.types import (
     ImageFormat,
     NullRenderContext,
     PopulatedRenderContext,
+    RGBData,
 )
+
+RGB_VARIANT = "rgb"
+
 
 if TYPE_CHECKING:
     from xpublish_tiles.types import RenderContext
@@ -175,9 +180,13 @@ class Renderer(ABC):
         """Return the style identifier for this renderer."""
         raise NotImplementedError
 
+    # Whether ``{style}/rgb`` is accepted. Not a colormap variant: it is only
+    # advertised for datasets that carry RGB bands.
+    supports_rgb: ClassVar[bool] = False
+
     @staticmethod
     def supported_variants() -> list[str]:
-        """Return supported variants for this renderer."""
+        """Return supported colormap variants for this renderer."""
         raise NotImplementedError
 
     @staticmethod
@@ -196,6 +205,7 @@ class Renderer(ABC):
 
 
 class DatashaderRenderer(Renderer):
+    supports_rgb: ClassVar[bool] = True
     """Base class for datashader-based renderers with common colormap handling."""
 
     def _prepare_render(
@@ -304,6 +314,40 @@ class DatashaderRenderer(Renderer):
         else:
             raise NotImplementedError(f"Unsupported datatype: {type(datatype)}")
 
+    @staticmethod
+    def shade_rgb(
+        mesh: "xr.DataArray",
+        datatype: RGBData,
+        *,
+        colorscalerange: tuple[Number, Number] | None = None,
+    ) -> Image.Image:
+        """Stretch a ``(band, y, x)`` aggregate to bytes and pack it as RGBA.
+
+        - Bands are scaled linearly by the range and clipped;
+        - pixels with a NaN in any band are transparent;
+        - No colormap is involved: the bands already are colour.
+        """
+        band_dim = datatype.band_dim
+        ydim = next(d for d in mesh.dims if d != band_dim)
+        mesh = mesh.transpose(band_dim, ...)
+        values = np.asarray(mesh.data, dtype=np.float64)
+        lo, hi = colorscalerange or datatype.valid_range
+        vmin, vmax = float(lo), float(hi)  # ty: ignore[invalid-argument-type]
+
+        _, height, width = values.shape
+        rgba = np.full((height, width, 4), 255, dtype=np.uint8)
+        valid = np.isfinite(values).all(axis=0)
+        with np.errstate(invalid="ignore"):
+            scaled = np.clip((values - vmin) / (vmax - vmin), 0, 1)
+            rgba[..., :3] = np.rint(np.nan_to_num(scaled) * 255).transpose(1, 2, 0)
+        rgba[~valid] = 0
+
+        yvals = np.asarray(mesh.coords[ydim])
+        if yvals.size >= 2 and yvals[0] < yvals[-1]:
+            # Aggregates are y-up; images are top-down.
+            rgba = rgba[::-1]
+        return Image.fromarray(rgba, mode="RGBA")
+
     def render_error(
         self,
         *,
@@ -342,6 +386,10 @@ class DatashaderRenderer(Renderer):
     ):
         if variant == "default":
             variant = self.default_variant()
+        if variant == RGB_VARIANT or isinstance(datatype, RGBData):
+            raise ColormapError(
+                "The 'rgb' variant draws the bands as colour directly and has no legend."
+            )
 
         orientation = "vertical" if vertical else "horizontal"
         dpi = 100
@@ -467,6 +515,10 @@ class DatashaderRenderer(Renderer):
     ) -> dict:
         if variant == "default":
             variant = self.default_variant()
+        if variant == RGB_VARIANT or isinstance(datatype, RGBData):
+            raise ColormapError(
+                "The 'rgb' variant draws the bands as colour directly and has no legend."
+            )
 
         if isinstance(datatype, ContinuousData):
             if colorscalerange is None:
@@ -548,6 +600,15 @@ class DatashaderRenderer(Renderer):
                 "id": f"{cls.style_id()}/{variant}",
                 "title": f"{style_name} - Custom",
                 "description": f"{style_name} rendering with a custom colormap provided via the 'colormap' parameter",
+            }
+        if variant == RGB_VARIANT:
+            return {
+                "id": f"{cls.style_id()}/{variant}",
+                "title": f"{style_name} - RGB",
+                "description": (
+                    f"{style_name} true-colour rendering of a variable with a "
+                    "`band` or `rgb` dimension of size 3 (R, G, B); no colormap"
+                ),
             }
         return {
             "id": f"{cls.style_id()}/{variant}",

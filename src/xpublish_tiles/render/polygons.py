@@ -13,6 +13,7 @@ from xpublish_tiles.types import (
     ContinuousData,
     ImageFormat,
     RenderContext,
+    RGBData,
 )
 
 
@@ -63,13 +64,35 @@ class PolygonsRenderer(DatashaderRenderer):
         data = context.da
 
         with log_duration(f"render (polygons) {data.shape}", "⬡", logger):
-            values = data.values
-            gdf = spatialpandas.GeoDataFrame(
-                {"geometry": polygons_from_rings(context.cell_rings), "data": values}
-            )
-
+            geometry = polygons_from_rings(context.cell_rings)
             try:
-                mesh = cvs.polygons(gdf, "geometry", agg=dsh.mean("data"))
+                if isinstance(context.datatype, RGBData):
+                    # One pass over the geometry: `summary` aggregates all bands together.
+                    band_dim = context.datatype.band_dim
+                    bands = [f"band{k}" for k in range(data.sizes[band_dim])]
+                    gdf = spatialpandas.GeoDataFrame(
+                        {
+                            "geometry": geometry,
+                            **dict(
+                                zip(
+                                    bands,
+                                    data.transpose(band_dim, ...).values,
+                                    strict=True,
+                                )
+                            ),
+                        }
+                    )
+                    agg = cvs.polygons(
+                        gdf,
+                        "geometry",
+                        agg=dsh.summary(**{b: dsh.mean(b) for b in bands}),
+                    )
+                    mesh = agg[bands].to_dataarray(dim=band_dim)
+                else:
+                    gdf = spatialpandas.GeoDataFrame(
+                        {"geometry": geometry, "data": data.values}
+                    )
+                    mesh = cvs.polygons(gdf, "geometry", agg=dsh.mean("data"))
             except ValueError as e:
                 if "Geometry type combination is not supported" not in str(e):
                     raise
@@ -78,19 +101,30 @@ class PolygonsRenderer(DatashaderRenderer):
                 im.save(buffer, format=str(format))
                 return
 
-        im = self.shade_mesh(
-            mesh,
-            context.datatype,
-            variant=variant,
-            colorscalerange=colorscalerange,
-            colormap=colormap,
-            abovemaxcolor=abovemaxcolor,
-            belowmincolor=belowmincolor,
-        )
-        if isinstance(context.datatype, ContinuousData):
-            im = _apply_out_of_range_colors(
-                im, mesh, colorscalerange, abovemaxcolor, belowmincolor
+        if isinstance(context.datatype, RGBData):
+            im = self.shade_rgb(
+                mesh,
+                context.datatype,
+                colorscalerange=colorscalerange,
             )
+        else:
+            im = self.shade_mesh(
+                mesh,
+                context.datatype,
+                variant=variant,
+                colorscalerange=colorscalerange,
+                colormap=colormap,
+                abovemaxcolor=abovemaxcolor,
+                belowmincolor=belowmincolor,
+            )
+            if isinstance(context.datatype, ContinuousData):
+                im = _apply_out_of_range_colors(
+                    im,
+                    mesh,
+                    colorscalerange,
+                    abovemaxcolor,
+                    belowmincolor,
+                )
         im.save(buffer, format=str(format))
 
     @staticmethod

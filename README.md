@@ -93,6 +93,22 @@ land_cover:flag_colors = "#FF0000 #006600 #732600 #00FF00 #FAAA00 #7FE57F" ;
 
 See the [ncWMS convention docs on Categorical Data](https://web.archive.org/web/20240729161558/https://reading-escience-centre.gitbooks.io/ncwms-user-guide/content/05-data_formats.html#vector) for more.
 
+### RGB support
+
+Use `style=raster/rgb` or `style=polygons/rgb` to render a variable that already holds colour.
+The variable must have a dimension named `band` or `rgb` with size 3. The bands are read in the order R, G, B. No attribute confirms this order, so the server logs a warning for each request.
+
+- No colormap is applied. `colormap`, `abovemaxcolor`, and `belowmincolor` are rejected. There is no legend.
+- One `colorscalerange` stretches all three bands to 0–255. Without it, `valid_min`/`valid_max` attributes are used. Without those, `uint8` data maps 0–255 and float data maps 0–1.
+- A pixel is transparent when any band is NaN.
+- The `rgb` variants are advertised only for datasets that have such a dimension, and are listed first.
+- To draw one band with a colormap, select it: `?rgb=red&style=raster/viridis`.
+
+**Example:**
+```
+http://localhost:8080/tiles/WebMercatorQuad/4/5/8?variables=true_color&style=raster/rgb
+```
+
 ### Out-of-Range Colors
 
 For continuous data, you can control how values outside the `colorscalerange` are rendered using the `abovemaxcolor` and `belowmincolor` parameters.

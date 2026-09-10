@@ -1244,7 +1244,7 @@ class TileQuery(BaseModel):
         Field(
             default="raster/default",
             json_schema_extra={
-                "description": "Style and colormap to use for the tile, in the format of `{style}/{colormap}`",
+                "description": "Style and variant to use for the tile, in the format `{style}/{variant}`. The variant is a matplotlib colormap name, `custom` (with the `colormap` parameter), or `rgb` for true-colour rendering of a variable with a `band` or `rgb` dimension of size 3 (R, G, B).",
             },
         ),
     ]

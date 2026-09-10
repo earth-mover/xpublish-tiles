@@ -400,6 +400,17 @@ def test_coarsen_mean_pad_dtypes(dtype):
     assert result.dtype == np.float64
 
 
+def test_coarsen_mean_pad_leading_band_dim():
+    """A leading (RGB band) dim is looped over; each band coarsens independently."""
+    arr = np.arange(12, dtype=np.float32).reshape(4, 3)
+    da = xr.DataArray(np.stack([arr, 10 * arr]), dims=["band", "y", "x"])
+    result = coarsen_mean_pad(da, {"y": 2, "x": 2})
+    expected = np.array([[2.0, 3.5], [8.0, 9.5]])
+    np.testing.assert_allclose(result.values[0], expected)
+    np.testing.assert_allclose(result.values[1], 10 * expected)
+    assert result.dims == ("band", "y", "x")
+
+
 @pytest.mark.parametrize(
     "value, expected",
     [

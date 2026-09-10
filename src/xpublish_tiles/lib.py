@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import contextvars
 import io
 import itertools
 import math
@@ -311,13 +312,18 @@ def get_data_load_semaphore() -> asyncio.Semaphore:
 
 
 async def async_run(func, *args, **kwargs):
-    """Run a function in the thread pool executor with semaphore limiting."""
+    """Run a function in the thread pool executor with semaphore limiting.
+
+    The caller's contextvars are copied into the worker (as ``asyncio.to_thread``
+    does) so the per-request log accumulator sees logs from the thread.
+    """
     loop = asyncio.get_running_loop()
     semaphore = _get_semaphore(loop)
+    ctx = contextvars.copy_context()
     async with semaphore:
-        if kwargs:
-            return await loop.run_in_executor(EXECUTOR, partial(func, *args, **kwargs))
-        return await loop.run_in_executor(EXECUTOR, func, *args)
+        return await loop.run_in_executor(
+            EXECUTOR, partial(ctx.run, func, *args, **kwargs)
+        )
 
 
 def sync_load_async(obj: xr.DataArray | xr.Dataset) -> None:
@@ -875,10 +881,12 @@ def validate_colormap_for_datatype(
     For continuous data, keys must include both 0 and 255.
     """
     # avoid circular import: types -> grids -> lib
-    from xpublish_tiles.types import DiscreteData
+    from xpublish_tiles.types import DiscreteData, RGBData
 
     if colormap_dict is None:
         return
+    if isinstance(datatype, RGBData):
+        raise ColormapError("The 'rgb' variant does not accept a colormap.")
     if isinstance(datatype, DiscreteData):
         create_listed_colormap_from_dict(colormap_dict, datatype.values)
     else:
@@ -948,12 +956,17 @@ def create_listed_colormap_from_dict(
 
 
 @numba.jit(nopython=True, parallel=NUMBA_PARALLEL, nogil=True, cache=True)
-def _coarsen_nanmean_2d(arr, fy, fx, out):
-    """Coarsen with nanmean, handling incomplete edge windows."""
-    ny_out, nx_out = out.shape
-    H, W = arr.shape
+def _coarsen_nanmean_3d(arr, fy, fx, out):
+    """Coarsen ``(band, y, x)`` with nanmean, handling incomplete edge windows.
+    One prange over ``band * y_out`` rows so a lone band still parallelises."""
+    nb, ny_out, nx_out = out.shape
+    H, W = arr.shape[1:]
 
-    for i in numba.prange(ny_out):  # ty: ignore[not-iterable]
+    for r in numba.prange(nb * ny_out):  # ty: ignore[not-iterable]
+        # prange index is unsigned; divmod with int64 unifies to float64
+        rr = np.int64(r)
+        b = rr // ny_out
+        i = rr - b * ny_out
         y_start = i * fy
         y_end = min((i + 1) * fy, H)
 
@@ -965,12 +978,12 @@ def _coarsen_nanmean_2d(arr, fy, fx, out):
             count = 0
             for y in range(y_start, y_end):
                 for x in range(x_start, x_end):
-                    val = arr[y, x]
+                    val = arr[b, y, x]
                     if not np.isnan(val):
                         total += val
                         count += 1
 
-            out[i, j] = total / count if count > 0 else np.nan
+            out[b, i, j] = total / count if count > 0 else np.nan
 
 
 def maybe_cast_data(data: xr.DataArray) -> xr.DataArray:
@@ -983,15 +996,20 @@ def maybe_cast_data(data: xr.DataArray) -> xr.DataArray:
 
 
 def coarsen_mean_pad(da: xr.DataArray, factors: dict[str, int]) -> xr.DataArray:
-    """Memory-efficient coarsen with boundary='pad' and nanmean."""
+    """Memory-efficient coarsen with boundary='pad' and nanmean.
+
+    The two trailing dims are spatial; an optional leading dim (RGB bands) is
+    looped over.
+    """
     da = maybe_cast_data(da)
     dims = da.dims
     arr = da.data
-    H, W = arr.shape
+    *lead, H, W = arr.shape
+    assert len(lead) <= 1, f"expected at most one leading dim, got {dims!r}"
 
-    fy, fx = tuple(factors.get(str(dim), 1) for dim in dims)
-    out = np.empty((math.ceil(H / fy), math.ceil(W / fx)), dtype=np.float64)
-    _coarsen_nanmean_2d(arr, fy, fx, out)
+    fy, fx = tuple(factors.get(str(dim), 1) for dim in dims[-2:])
+    out = np.empty((*lead, math.ceil(H / fy), math.ceil(W / fx)), dtype=np.float64)
+    _coarsen_nanmean_3d(arr.reshape(-1, H, W), fy, fx, out.reshape(-1, *out.shape[-2:]))
     return xr.DataArray(out, dims=dims, name=da.name)
 
 

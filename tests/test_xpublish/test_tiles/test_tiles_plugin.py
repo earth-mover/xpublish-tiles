@@ -19,6 +19,7 @@ from xpublish_tiles.testing.datasets import (
     IFS,
     NATIVE_AT_ROOT_MULTISCALE,
     REDGAUSS_N320,
+    RGB,
     create_rotated_pole_dataset,
 )
 from xpublish_tiles.tiles_lib import _MIN_ZOOM_CACHE
@@ -1432,3 +1433,63 @@ def test_rotated_pole_dataset_is_reported_as_not_tileable():
     response = client.get("/datasets/rotated/tiles/")
     assert response.status_code == 422
     assert "No renderable variables" in response.json()["detail"]
+
+
+@pytest.fixture(scope="module")
+def rgb_client():
+    rest = xpublish.Rest({"rgb": RGB.create()}, plugins={"tiles": TilesPlugin()})
+    return TestClient(rest.app)
+
+
+def test_rgb_tile_endpoint(rgb_client):
+    """``raster/rgb`` over HTTP; the tile carries real colour."""
+    r = rgb_client.get(
+        "/datasets/rgb/tiles/WebMercatorQuad/0/0/0"
+        "?variables=foo&style=raster/rgb&width=256&height=256"
+    )
+    assert r.status_code == 200, r.text
+    arr = np.asarray(Image.open(io.BytesIO(r.content)))
+    assert arr.shape == (256, 256, 4)
+    assert (arr[..., 3] == 255).all()
+    # red ramps west -> east
+    assert arr[128, 250, 0] > arr[128, 5, 0]
+
+
+def test_rgb_variant_error_responses(rgb_client):
+    # rgb variant on a variable without a band dim
+    r = rgb_client.get(
+        "/datasets/rgb/tiles/WebMercatorQuad/0/0/0"
+        "?variables=foo&style=raster/rgb&width=256&height=256&rgb=red"
+    )
+    assert r.status_code == 422
+    assert "needs a dimension named" in r.json()["detail"]
+
+    # colormap variant with a band selector works
+    r = rgb_client.get(
+        "/datasets/rgb/tiles/WebMercatorQuad/0/0/0"
+        "?variables=foo&style=raster/viridis&width=256&height=256&colorscalerange=0,1&rgb=red"
+    )
+    assert r.status_code == 200, r.text
+
+    # no legend for true colour
+    r = rgb_client.get("/datasets/rgb/tiles/legend?variables=foo&style=raster/rgb")
+    assert r.status_code == 422
+    assert "has no legend" in r.json()["detail"]
+    r = rgb_client.get("/datasets/rgb/tiles/legend?variables=foo&style=raster/rgb&f=json")
+    assert r.status_code == 422
+
+
+def test_rgb_style_advertised(rgb_client):
+    """``rgb`` is listed first among each renderer's variants, right after default."""
+    styles = rgb_client.get("/datasets/rgb/tiles/WebMercatorQuad").json()["styles"]
+    ids = [s["id"] for s in styles]
+    for style in ("raster", "polygons"):
+        assert ids.index(f"{style}/rgb") == ids.index(f"{style}/default") + 1
+
+
+def test_rgb_style_not_advertised_without_band_dim():
+    """A dataset with no ``band``/``rgb`` dim of size 3 leaves ``rgb`` out."""
+    rest = xpublish.Rest({"ifs": IFS.create()}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+    styles = client.get("/datasets/ifs/tiles/WebMercatorQuad").json()["styles"]
+    assert not any(s["id"].endswith("/rgb") for s in styles)
