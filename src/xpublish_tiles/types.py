@@ -2,7 +2,7 @@ import enum
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, NewType, Self
+from typing import Any, ClassVar, NewType, Self
 
 import numba
 import numpy as np
@@ -81,7 +81,15 @@ class SelectionMethod(str, enum.Enum):
 
 @dataclass
 class DataType:
-    pass
+    # Most dims an array may carry into the renderer: 2 spatial, plus any the
+    # renderer consumes itself (e.g. an RGB band dim). 1D grids carry fewer.
+    max_ndim: ClassVar[int] = 2
+
+    def validate_ndim(self, da: xr.DataArray) -> None:
+        if da.ndim > self.max_ndim:
+            raise ValueError(
+                f"{type(self).__name__} renders at most {self.max_ndim} dims; got {da.dims!r}."
+            )
 
 
 @dataclass
@@ -116,6 +124,19 @@ class ContinuousData(DataType):
                 f"Either both `valid_max` and `valid_min` must be set or unset. "
                 f"Received {valid_max=!r}, {valid_min=!r}."
             )
+
+
+@dataclass
+class RGBData(DataType):
+    """Bands already are colour: R, G, B along ``band_dim`` in that order.
+
+    ``valid_range`` is the byte-stretch ``(vmin, vmax)`` from attrs or the
+    dtype convention; a query ``colorscalerange`` overrides it.
+    """
+
+    max_ndim: ClassVar[int] = 3
+    band_dim: str
+    valid_range: tuple[float, float]
 
 
 @dataclass

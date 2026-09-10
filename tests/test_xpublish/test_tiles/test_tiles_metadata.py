@@ -23,6 +23,7 @@ from xpublish_tiles.testing.datasets import (
     NATIVE_AT_ROOT_MULTISCALE,
     RADAR,
     REGIONAL_HEALPIX_NA,
+    RGB,
     UTM50S_HIRES,
 )
 from xpublish_tiles.tiles_lib import _MIN_ZOOM_CACHE
@@ -814,6 +815,7 @@ def _normalize_for_snapshot(obj):
         pytest.param(NATIVE_AT_ROOT_MULTISCALE, id="native_at_root_multiscale"),
         pytest.param(FVCOM, id="fvcom"),
         pytest.param(RADAR, id="radar"),
+        pytest.param(RGB, id="rgb"),
     ],
 )
 def test_tiles_endpoint_snapshot(fixture, snapshot):
@@ -845,6 +847,7 @@ def test_tiles_endpoint_snapshot(fixture, snapshot):
         pytest.param(NATIVE_AT_ROOT_MULTISCALE, id="native_at_root_multiscale"),
         pytest.param(FVCOM, id="fvcom"),
         pytest.param(RADAR, id="radar"),
+        pytest.param(RGB, id="rgb"),
     ],
 )
 def test_tilejson_endpoint_snapshot(fixture, snapshot):

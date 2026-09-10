@@ -2468,6 +2468,8 @@ class Polar(GridSystem):
         Appends a wrap-around row so datashader's quadmesh closes the
         gap between the last and first azimuth.
         """
+        # Spatial dims trail so an RGB band dim (if any) rides along untouched.
+        da = da.transpose(..., self.Xdim, self.Ydim)
         az_vals = da[self.Xdim].values
         rng_vals = da[self.Ydim].values
         data = da.values
@@ -2481,7 +2483,8 @@ class Polar(GridSystem):
         if covers_full_sweep:
             # Append wrap-around: first azimuth + 360° and first data row
             az_extended = np.append(az_vals, az_vals[0] + 360.0)
-            data_extended = np.concatenate([data, data[0:1]], axis=0)
+            # TODO: This hasn't been validated. The slicers were edited for RGBData.
+            data_extended = np.concatenate([data, data[..., 0:1, :]], axis=-2)
         else:
             az_extended = az_vals
             data_extended = data
@@ -2508,7 +2511,7 @@ class Polar(GridSystem):
 
         return xr.DataArray(
             data_extended,
-            dims=(self.Xdim, self.Ydim),
+            dims=da.dims,
             coords=coords,
             name=da.name,
             attrs=da.attrs,
@@ -2698,9 +2701,9 @@ class Triangular(GridSystem):
         )
 
     def nodes_to_faces(self, values: np.ndarray, indexer: "UgridIndexer") -> np.ndarray:
-        """Mean of the three corner nodes per face."""
+        """Mean of the three corner nodes per face; nodes are the last axis."""
         with NUMBA_THREADING_LOCK:
-            return numbagg.nanmean(values[indexer.connectivity], axis=1)
+            return numbagg.nanmean(values[..., indexer.connectivity], axis=-1)
 
     def isel_indexer(self, ds: xr.Dataset, indexer: "UgridIndexer") -> xr.Dataset:
         """Apply a UgridIndexer to ``ds``.

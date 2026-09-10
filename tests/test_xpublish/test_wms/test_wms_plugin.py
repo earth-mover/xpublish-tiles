@@ -2,13 +2,14 @@ import io
 import xml.etree.ElementTree as ET
 
 import morecantile
+import numpy as np
 import pytest
 import xpublish
 from fastapi.testclient import TestClient
 from PIL import Image
 
 import xarray as xr
-from xpublish_tiles.testing.datasets import EU3035, GEOZARR_MULTISCALE
+from xpublish_tiles.testing.datasets import EU3035, GEOZARR_MULTISCALE, RGB
 from xpublish_tiles.xpublish.wms import WMSPlugin
 
 
@@ -565,3 +566,42 @@ def test_wms_openapi_schema_generation(xpublish_client):
 
     assert schema["components"]["schemas"]["CRSParam"]["type"] == "string"
     assert schema["components"]["schemas"]["BBoxParam"]["type"] == "string"
+
+
+def test_wms_getmap_rgb_variant():
+    """WMS GetMap with ``styles=raster/rgb``."""
+    rest = xpublish.Rest({"rgb": RGB.create()}, plugins={"wms": WMSPlugin()})
+    client = TestClient(rest.app)
+    response = client.get(
+        "/datasets/rgb/wms",
+        params=[
+            ("service", "WMS"),
+            ("version", "1.3.0"),
+            ("request", "GetMap"),
+            ("layers", "foo"),
+            ("styles", "raster/rgb"),
+            ("crs", "EPSG:4326"),
+            ("bbox", "-90,-180,90,180"),
+            ("width", 256),
+            ("height", 256),
+        ],
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "image/png"
+    arr = np.asarray(Image.open(io.BytesIO(response.content)))
+    assert arr[128, 250, 0] > arr[128, 5, 0]
+
+    legend = client.get(
+        "/datasets/rgb/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetLegendGraphic",
+            "layer": "foo",
+            "styles": "raster/rgb",
+            "width": 100,
+            "height": 300,
+        },
+    )
+    assert legend.status_code == 422
+    assert "has no legend" in legend.text

@@ -23,6 +23,7 @@ from xpublish_tiles.testing.tiles import (
     HRRR_TILES_EDGE_CASES,
     PARA_TILES,
     PARA_TILES_EDGE_CASES,
+    RGB_TILES,
     SOUTH_AMERICA_BENCHMARK_TILES,
     UTM33S_TILES,
     UTM33S_TILES_EDGE_CASES,
@@ -363,6 +364,95 @@ def curvilinear_grid(
     ds["foo"].attrs["coordinates"] = "lat lon"
 
     return ds
+
+
+def rgb_grid(
+    *,
+    dims: tuple[Dim, ...],
+    dtype: npt.DTypeLike,
+    attrs: dict[str, Any],
+) -> xr.Dataset:
+    """Lat/lon grid with a trailing ``rgb`` band dim holding R, G, B in order.
+
+    Red ramps west→east, green south→north, blue is a tanh wave. ``dtype``
+    picks the encoding: floats span 0..1, uint8 0..255.
+    """
+    lat_dim, lon_dim, band_dim = dims
+    lat = np.asarray(lat_dim.data)
+    lon = np.asarray(lon_dim.data)
+    lat_norm = (lat - lat.min()) / (lat.max() - lat.min())
+    lon_norm = (lon - lon.min()) / (lon.max() - lon.min())
+    green2d, red2d = np.meshgrid(lat_norm, lon_norm, indexing="ij")
+    blue2d = 0.5 * (
+        1
+        + np.tanh(
+            0.8
+            * (
+                np.sin(6 * np.pi * lon_norm)[None, :]
+                + np.sin(6 * np.pi * lat_norm)[:, None]
+            )
+        )
+    )
+    dtype = np.dtype(dtype)
+    stacked = np.stack([red2d, green2d, blue2d], axis=-1)
+    if dtype.kind == "u":
+        stacked = np.rint(stacked * 255)
+    ds = xr.Dataset(
+        {
+            "foo": (
+                (lat_dim.name, lon_dim.name, band_dim.name),
+                stacked.astype(dtype),
+                {"long_name": "true colour composite", **attrs},
+            ),
+        },
+        coords={
+            lat_dim.name: (lat_dim.name, lat, {"standard_name": "latitude"}),
+            lon_dim.name: (lon_dim.name, lon, {"standard_name": "longitude"}),
+            band_dim.name: (band_dim.name, np.asarray(band_dim.data)),
+        },
+    )
+    set_chunk_encoding(ds.foo, tuple(dim.chunk_size for dim in dims))
+    return ds
+
+
+RGB_DIMS = (
+    Dim(
+        name="latitude",
+        size=360,
+        chunk_size=180,
+        data=np.linspace(-89.75, 89.75, 360),
+    ),
+    Dim(
+        name="longitude",
+        size=720,
+        chunk_size=360,
+        data=np.linspace(-179.75, 179.75, 720),
+    ),
+    Dim(name="rgb", size=3, chunk_size=3, data=np.array(["red", "green", "blue"])),
+)
+
+RGB = Dataset(
+    name="rgb",
+    dims=RGB_DIMS,
+    dtype=np.float32,
+    setup=rgb_grid,
+    edge_case_tiles=WEBMERC_TILES_EDGE_CASES,
+    tiles=RGB_TILES,
+)
+
+# Same picture as RGB, but uint8 with a positional (rioxarray-style) ``band``
+# coord: exercises the dtype default stretch and the other dim name.
+RGB_UINT8 = Dataset(
+    name="rgb_uint8",
+    dims=(
+        *RGB_DIMS[:2],
+        Dim(name="band", size=3, chunk_size=3, data=np.array([1, 2, 3])),
+    ),
+    dtype=np.uint8,
+    setup=rgb_grid,
+    edge_case_tiles=WEBMERC_TILES_EDGE_CASES,
+    tiles=RGB_TILES,
+)
 
 
 def create_global_dataset(
@@ -2459,6 +2549,8 @@ DATASET_LOOKUP = {
     "tripole_global_unwrapped": TRIPOLE_GLOBAL_UNWRAPPED,
     "cubed_sphere": CUBED_SPHERE,
     "geostationary": GEOSTATIONARY,
+    "rgb": RGB,
+    "rgb_uint8": RGB_UINT8,
     "global_healpix_l3": GLOBAL_HEALPIX_L3,
     "global_healpix_l5": GLOBAL_HEALPIX_L5,
     "regional_healpix_na": REGIONAL_HEALPIX_NA,

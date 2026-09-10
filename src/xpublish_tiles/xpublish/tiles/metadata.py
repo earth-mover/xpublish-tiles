@@ -15,7 +15,8 @@ from xpublish_tiles.grids import (
     detect_grids,
 )
 from xpublish_tiles.logger import logger
-from xpublish_tiles.render import RenderRegistry
+from xpublish_tiles.pipeline import has_rgb_bands
+from xpublish_tiles.render import RGB_VARIANT, RenderRegistry
 from xpublish_tiles.tiles_lib import grid_overlaps_tms
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
@@ -79,16 +80,25 @@ def get_styles(
 ) -> list[Style]:
     """Return supported styles for ``dataset``'s grid."""
     allowed = set(allowed_styles(dataset, var_grids=var_grids))
+    include_rgb = dataset is not None and has_rgb_bands(dataset)
     styles: list[Style] = []
     for style_id in RenderRegistry.all():
         if style_id not in allowed:
             continue
-        styles.extend(_styles_for_renderer(style_id))
+        styles.extend(_styles_for_renderer(style_id, include_rgb))
     return styles
 
 
+def style_variants(renderer_cls, *, include_rgb: bool) -> list[str]:
+    """Advertised variants; ``rgb`` leads when the dataset has colour bands."""
+    variants = renderer_cls.supported_variants()
+    if include_rgb and renderer_cls.supports_rgb:
+        return [RGB_VARIANT, *variants]
+    return variants
+
+
 @functools.cache
-def _styles_for_renderer(style_id: str) -> tuple[Style, ...]:
+def _styles_for_renderer(style_id: str, include_rgb: bool) -> tuple[Style, ...]:
     renderer_cls = RenderRegistry.all()[style_id]
     default_variant = renderer_cls.default_variant()
     default_style_info = renderer_cls.describe_style("default")
@@ -105,7 +115,7 @@ def _styles_for_renderer(style_id: str) -> tuple[Style, ...]:
             description=default_style_info["description"],
         )
     ]
-    for variant in renderer_cls.supported_variants():
+    for variant in style_variants(renderer_cls, include_rgb=include_rgb):
         style_info = renderer_cls.describe_style(variant)
         styles.append(
             Style(

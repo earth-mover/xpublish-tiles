@@ -231,10 +231,12 @@ def get_available_wms_styles(
     When ``base_url`` and ``layer_name`` are given, each style carries a
     LegendURL pointing at GetLegendGraphic for that layer.
     """
+    from xpublish_tiles.pipeline import has_rgb_bands
     from xpublish_tiles.render import RenderRegistry
-    from xpublish_tiles.xpublish.tiles.metadata import allowed_styles
+    from xpublish_tiles.xpublish.tiles.metadata import allowed_styles, style_variants
 
     allowed = set(allowed_styles(dataset))
+    include_rgb = dataset is not None and has_rgb_bands(dataset)
     styles = []
 
     for renderer_cls in RenderRegistry.all().values():
@@ -252,7 +254,7 @@ def get_available_wms_styles(
         styles.append(_style_response(default_style_info, base_url, layer_name))
 
         # Add all actual variants
-        for variant in renderer_cls.supported_variants():
+        for variant in style_variants(renderer_cls, include_rgb=include_rgb):
             style_info = renderer_cls.describe_style(variant)
             styles.append(_style_response(style_info, base_url, layer_name))
 

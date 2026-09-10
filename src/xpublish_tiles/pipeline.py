@@ -74,9 +74,13 @@ from xpublish_tiles.types import (
     Patch,
     PopulatedRenderContext,
     QueryParams,
+    RGBData,
     SelectionMethod,
     ValidatedArray,
 )
+
+# A dim with one of these names and size 3 holds R, G, B in that order.
+RGB_BAND_DIMS = ("band", "rgb")
 
 
 def _apply_polar_pole_split(
@@ -498,7 +502,11 @@ def coarsen(
         coord_names = list(da.coords)
         da_no_coords = da.drop_vars(coord_names)
 
-        coarsened = coarsen_mean_pad(da_no_coords, coarsen_factors)
+        # coarsen_mean_pad wants the spatial dims trailing (RGB band dim leads).
+        extra = [d for d in da.dims if d not in (grid.Xdim, grid.Ydim)]
+        coarsened = coarsen_mean_pad(
+            da_no_coords.transpose(*extra, ...), coarsen_factors
+        ).transpose(*da.dims)
 
         # Subselect coordinates at window centers
         indexers = {}
@@ -803,11 +811,22 @@ def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool
 
 
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
+    rgb = query.variant == "rgb"
     validated = await async_run(
-        partial(apply_query, ds, variables=query.variables, selectors=query.selectors)
+        partial(
+            apply_query,
+            ds,
+            variables=query.variables,
+            selectors=query.selectors,
+            rgb=rgb,
+        )
     )
     for array in validated.values():
         validate_colormap_for_datatype(query.colormap, array.datatype)
+    if rgb and (query.abovemaxcolor is not None or query.belowmincolor is not None):
+        raise MissingParameterError(
+            "The 'rgb' variant does not accept abovemaxcolor or belowmincolor."
+        )
     max_shape = max_render_shape(
         style=query.style, width=query.width, height=query.height
     )
@@ -861,6 +880,33 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     )
     buffer.seek(0)
     return buffer
+
+
+def _rgb_valid_range(array: xr.DataArray) -> tuple[float, float]:
+    """Byte-stretch range: ``valid_min/max`` attrs, else the dtype convention
+    (uint8 → 0..255, floats → 0..1). Other dtypes need the attrs."""
+    vmin, vmax = array.attrs.get("valid_min"), array.attrs.get("valid_max")
+    if vmin is not None and vmax is not None:
+        return (float(vmin), float(vmax))
+    if array.dtype == np.uint8:
+        return (0.0, 255.0)
+    if array.dtype.kind == "f":
+        return (0.0, 1.0)
+    raise MissingParameterError(
+        f"RGB data of dtype {array.dtype} needs valid_min and valid_max attributes."
+    )
+
+
+def find_rgb_band_dim(array: xr.DataArray) -> str | None:
+    """The dim named ``band`` or ``rgb`` with size 3, if any."""
+    for dim in array.dims:
+        if dim in RGB_BAND_DIMS and array.sizes[dim] == 3:
+            return str(dim)
+    return None
+
+
+def has_rgb_bands(dataset: xr.Dataset) -> bool:
+    return any(find_rgb_band_dim(a) is not None for a in dataset.data_vars.values())
 
 
 def _infer_datatype(array: xr.DataArray) -> DataType:
@@ -1034,10 +1080,17 @@ def _describe_missing_label(
 
 
 def apply_query(
-    ds: xr.Dataset, *, variables: list[str], selectors: dict[str, Any]
+    ds: xr.Dataset,
+    *,
+    variables: list[str],
+    selectors: dict[str, Any],
+    rgb: bool = False,
 ) -> dict[str, ValidatedArray]:
     """
     This method does all automagic detection necessary for the rest of the pipeline to work.
+
+    With ``rgb``, the ``band``/``rgb`` dim of size 3 is kept and moved to the
+    front instead of being squeezed like other extra dims.
     """
     validated: dict[str, ValidatedArray] = {}
     # Capture chunking up front: zarr chunks are positional, so they can only be
@@ -1095,14 +1148,39 @@ def apply_query(
                     f"Automatic selection failed with error: {str(e)!r}."
                 ) from None
 
-        if extra_dims := (set(array.dims) - grid.dims_for(array)):
+        extra_dims = set(map(str, array.dims)) - grid.dims_for(array)
+        datatype: DataType
+        if rgb:
+            band_dim = find_rgb_band_dim(array)
+            if band_dim is None:
+                raise MissingParameterError(
+                    f"The 'rgb' variant needs a dimension named {RGB_BAND_DIMS!r} "
+                    f"of size 3 on {name!r}."
+                )
+            # No attribute convention records band order; assume the GDAL/satpy
+            # positional R, G, B and say so.
+            get_context_logger().warning(
+                "Treating dimension as RGB bands in positional R, G, B order; "
+                "no attributes confirm this.",
+                variable=name,
+                band_dim=band_dim,
+                labels=array[band_dim].values.tolist()
+                if band_dim in array.coords
+                else None,
+            )
+            array = array.transpose(band_dim, ...)
+            datatype = RGBData(band_dim=band_dim, valid_range=_rgb_valid_range(array))
+            extra_dims.discard(band_dim)
+        else:
+            datatype = _infer_datatype(array)
+        if extra_dims:
             # Note: this will handle squeezing of label-based selection
             # along datetime coordinates
             array = array.isel(dict.fromkeys(extra_dims, -1))
         validated[name] = ValidatedArray(
             da=array,
             grid=grid,
-            datatype=_infer_datatype(array),
+            datatype=datatype,
             chunks=chunks[name],
         )
     return validated
@@ -1171,8 +1249,7 @@ async def subset_to_bbox(
                     )
                 )
         else:
-            if (ndim := array.da.ndim) > 2:
-                raise ValueError(f"Attempting to visualize array with {ndim=!r} > 2.")
+            array.datatype.validate_ndim(array.da)
             if min(array.da.shape) < 2:
                 raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
 
@@ -1386,11 +1463,14 @@ async def _transform_one_grid_polygons(
     )
 
     if newX.ndim == 2:
-        newX = newX.transpose(*subset.dims)
-        newY = newY.transpose(*subset.dims)
+        spatial_dims = [d for d in subset.dims if d in newX.dims]
+        newX = newX.transpose(*spatial_dims)
+        newY = newY.transpose(*spatial_dims)
 
     rings = grid.corners_to_rings(newX.data, newY.data)
-    values = np.asarray(subset.values).ravel()
+    # (N,) or (band, N) — an RGB band dim leads the two spatial dims.
+    values = np.asarray(subset.values)
+    values = values.reshape(*values.shape[:-2], -1)
 
     if out_width is not None:
         if is_polar_cap:
@@ -1414,15 +1494,15 @@ async def _transform_one_grid_polygons(
                 seam = rings[seam_mask]
                 shift = np.array([out_width, 0.0])
                 rings = np.concatenate([rings, seam - shift, seam + shift], axis=0)
-                seam_values = values[seam_mask]
-                values = np.concatenate([values, seam_values, seam_values])
+                seam_values = values[..., seam_mask]
+                values = np.concatenate([values, seam_values, seam_values], axis=-1)
         elif has_discontinuity:
             # The face straddles the antimeridian. fix_coordinate_discontinuities
             # unwraps to one side of the output CRS, so append ±width-shifted copies
             # to cover the wrapped side; off-canvas copies clip naturally.
             shift = np.array([out_width, 0.0])
             rings = np.concatenate([rings, rings - shift, rings + shift], axis=0)
-            values = np.concatenate([values, values, values])
+            values = np.concatenate([values, values, values], axis=-1)
 
     return rings, values
 
@@ -1501,7 +1581,7 @@ async def _transform_polygon_patch(
     )
 
     if isinstance(grid, Healpix):
-        values = subset.isel({subset.dims[0]: healpix_cell_indexer}).values
+        values = subset.isel({grid.dim: healpix_cell_indexer}).values
     else:
         assert isinstance(grid, Triangular) and ugrid_indexer is not None
         if grid.face_dim in subset.dims:
@@ -1511,7 +1591,9 @@ async def _transform_polygon_patch(
             values = await async_run(grid.nodes_to_faces, subset.values, ugrid_indexer)
 
     cell_rings = grid.corners_to_rings(newX.data, newY.data, ugrid_indexer=ugrid_indexer)
-    return cell_rings, np.asarray(values).ravel()
+    # (N,) or (band, N): the cell dim trails an RGB band dim.
+    values = np.asarray(values)
+    return cell_rings, values.reshape(*values.shape[:-1], -1)
 
 
 async def _transform_raster_patch(
@@ -1653,7 +1735,11 @@ async def transform_for_render(
                     rings_list[i] = np.concatenate([r, pad], axis=1)
             cell_rings = np.concatenate(rings_list, axis=0)
 
-            da_out = xr.DataArray(np.concatenate(values_list, axis=0), dims=["cell"])
+            values_out = np.concatenate(values_list, axis=-1)
+            dims = ["cell"]
+            if isinstance(context.datatype, RGBData):
+                dims = [context.datatype.band_dim, "cell"]
+            da_out = xr.DataArray(values_out, dims=dims)
 
             result[var_name] = PopulatedRenderContext(
                 grid=grid,

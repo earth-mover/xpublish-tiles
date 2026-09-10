@@ -90,7 +90,10 @@ def validate_style(v: str | list[str] | None) -> tuple[str, str] | None:
         ) from e
 
     # Validate that the variant is supported (or is "default")
-    if variant != "default":
+    if variant == "rgb":
+        if not renderer_cls.supports_rgb:
+            raise ValueError(f"style '{style_name}' does not support the 'rgb' variant.")
+    elif variant != "default":
         supported_variants = renderer_cls.supported_variants()
         if variant not in supported_variants:
             raise ValueError(
