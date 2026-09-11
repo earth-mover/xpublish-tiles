@@ -3,6 +3,7 @@
 
 import io
 from dataclasses import replace
+from typing import Any
 
 import cf_xarray  # noqa: F401 - Enable cf accessor
 import morecantile
@@ -28,11 +29,13 @@ from xpublish_tiles.lib import (
     MissingParameterError,
     VariableNotFoundError,
     check_transparent_pixels,
+    max_render_shape,
 )
 from xpublish_tiles.pipeline import (
     apply_query,
     bbox_overlap,
     pipeline,
+    subset_to_bbox,
 )
 from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
@@ -74,7 +77,14 @@ from xpublish_tiles.testing.tiles import (
     WGS84_TMS,
     TileTestParam,
 )
-from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams, RGBData
+from xpublish_tiles.types import (
+    ImageFormat,
+    OutputBBox,
+    OutputCRS,
+    PopulatedRenderContext,
+    QueryParams,
+    RGBData,
+)
 
 
 @st.composite
@@ -1250,11 +1260,48 @@ def test_apply_query_rgb_keeps_band_dim():
     array = validated["foo"]
     assert isinstance(array.datatype, RGBData)
     assert array.datatype.band_dim == "rgb"
-    assert array.da.dims[0] == "rgb"
+    assert "rgb" in array.da.dims
 
     # without the rgb variant the band dim is squeezed like any extra dim
     validated = apply_query(ds, variables=["foo"], selectors={"rgb": "red"})
     assert validated["foo"].da.dims == ("latitude", "longitude")
+
+
+@pytest.mark.asyncio
+async def test_rgb_lazy_array_stays_sliceable(tmp_path):
+    """The rgb variant must not transpose the lazy array: xarray rewrites a
+    lazy transpose as a vectorized indexer over every element, and zarr then
+    gathers pointwise with full-size int64 index arrays. The band dim is moved
+    first only once the subset is in memory."""
+    from xarray.core.indexing import LazilyIndexedArray, LazilyVectorizedIndexedArray
+
+    RGB.create().to_zarr(
+        tmp_path / "rgb.zarr", mode="w", zarr_format=3, consolidated=False
+    )
+    ds = xr.open_zarr(
+        tmp_path / "rgb.zarr", chunks=None, consolidated=False, zarr_format=3
+    )
+
+    validated = apply_query(ds, variables=["foo"], selectors={}, rgb=True)
+    data: Any = validated["foo"].da.variable._data
+    chain: list[Any] = [data]
+    while hasattr(data, "array"):
+        data = data.array
+        chain.append(data)
+    assert any(isinstance(a, LazilyIndexedArray) for a in chain), chain
+    assert not any(isinstance(a, LazilyVectorizedIndexedArray) for a in chain), chain
+
+    query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, variant="rgb")
+    contexts = await subset_to_bbox(
+        validated,
+        bbox=query.bbox,
+        crs=query.crs,
+        max_shape=max_render_shape(style="raster", width=256, height=256),
+    )
+    context = contexts["foo"]
+    assert isinstance(context, PopulatedRenderContext)
+    (patch,) = context.patches
+    assert patch.da.dims[0] == "rgb"
 
 
 @pytest.mark.asyncio
