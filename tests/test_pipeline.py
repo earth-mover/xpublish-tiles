@@ -3,6 +3,7 @@
 
 import io
 from dataclasses import replace
+from typing import Any
 
 import cf_xarray  # noqa: F401 - Enable cf accessor
 import morecantile
@@ -76,7 +77,14 @@ from xpublish_tiles.testing.tiles import (
     WGS84_TMS,
     TileTestParam,
 )
-from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams, RGBData
+from xpublish_tiles.types import (
+    ImageFormat,
+    OutputBBox,
+    OutputCRS,
+    PopulatedRenderContext,
+    QueryParams,
+    RGBData,
+)
 
 
 @st.composite
@@ -1275,8 +1283,8 @@ async def test_rgb_lazy_array_stays_sliceable(tmp_path):
     )
 
     validated = apply_query(ds, variables=["foo"], selectors={}, rgb=True)
-    data = validated["foo"].da.variable._data
-    chain = [data]
+    data: Any = validated["foo"].da.variable._data
+    chain: list[Any] = [data]
     while hasattr(data, "array"):
         data = data.array
         chain.append(data)
@@ -1290,7 +1298,9 @@ async def test_rgb_lazy_array_stays_sliceable(tmp_path):
         crs=query.crs,
         max_shape=max_render_shape(style="raster", width=256, height=256),
     )
-    (patch,) = contexts["foo"].patches
+    context = contexts["foo"]
+    assert isinstance(context, PopulatedRenderContext)
+    (patch,) = context.patches
     assert patch.da.dims[0] == "rgb"
 
 
