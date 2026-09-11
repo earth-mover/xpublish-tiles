@@ -1168,7 +1168,9 @@ def apply_query(
                 if band_dim in array.coords
                 else None,
             )
-            array = array.transpose(band_dim, ...)
+            # Do not transpose here: xarray turns a lazy transpose into a
+            # vectorized indexer over every element, and zarr then gathers
+            # pointwise. ``subset_to_bbox`` moves the band dim first after load.
             datatype = RGBData(band_dim=band_dim, valid_range=_rgb_valid_range(array))
             extra_dims.discard(band_dim)
         else:
@@ -1201,6 +1203,7 @@ async def subset_to_bbox(
     # returns. ``pending`` carries the per-var bookkeeping needed to build
     # the ``PopulatedRenderContext`` once data has loaded.
     plan_patches: list[Patch] = []
+    plan_datatypes: list[DataType] = []
     pending: list[tuple[str, GridSystem, DataType, list[Patch]]] = []
 
     for var_name, array in validated.items():
@@ -1325,11 +1328,15 @@ async def subset_to_bbox(
             for patch in patches
         )
         plan_patches.extend(patches)
+        plan_datatypes.extend([array.datatype] * len(patches))
         pending.append((var_name, grid, array.datatype, patches))
 
     loaded = await load_plans(plans) if plans else []
 
-    async def _post_load(patch: Patch, ld: xr.DataArray) -> None:
+    async def _post_load(patch: Patch, datatype: DataType, ld: xr.DataArray) -> None:
+        if isinstance(datatype, RGBData):
+            # Downstream expects the band dim to lead; cheap on loaded data.
+            ld = ld.transpose(datatype.band_dim, ...)
         if isinstance(patch.grid, Polar):
             ld = patch.grid.assign_index(ld)
         if patch.coarsen_factors:
@@ -1339,7 +1346,10 @@ async def subset_to_bbox(
         patch.da = ld
 
     await asyncio.gather(
-        *(_post_load(p, ld) for p, ld in zip(plan_patches, loaded, strict=True))
+        *(
+            _post_load(p, dt, ld)
+            for p, dt, ld in zip(plan_patches, plan_datatypes, loaded, strict=True)
+        )
     )
 
     for var_name, grid, datatype, patches in pending:
