@@ -989,6 +989,34 @@ def test_tilejson_invalid_tile_matrix_set():
     assert "Tile matrix set not found" in response.json()["detail"]
 
 
+def test_tilejson_zoom_range_within_spec_for_negative_zoom_tms():
+    """CDB1GlobalGrid defines tile matrices from -10 upward, but TileJSON 3.0
+    bounds minzoom and maxzoom to 0..30, so the advertised range is clamped."""
+    ds = xr.Dataset(
+        {
+            "data": xr.DataArray(
+                np.zeros((18, 36), dtype=np.float32),
+                dims=["lat", "lon"],
+                coords={
+                    "lat": (["lat"], np.linspace(-85, 85, 18), {"axis": "Y"}),
+                    "lon": (["lon"], np.linspace(-175, 175, 36), {"axis": "X"}),
+                },
+                attrs={"valid_min": 0, "valid_max": 1},
+            ),
+        }
+    )
+    rest = xpublish.Rest({"d": ds}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    response = client.get(
+        "/datasets/d/tiles/CDB1GlobalGrid/tilejson.json"
+        "?variables=data&width=256&height=256"
+    )
+    assert response.status_code == 200
+    tilejson = response.json()
+    assert 0 <= tilejson["minzoom"] <= tilejson["maxzoom"] <= 30
+
+
 def test_tilejson_missing_variables():
     """Test TileJSON endpoint handles validation errors for missing required fields"""
     rest = xpublish.Rest({"air": xr.Dataset()}, plugins={"tiles": TilesPlugin()})

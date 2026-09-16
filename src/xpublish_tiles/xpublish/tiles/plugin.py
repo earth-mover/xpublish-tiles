@@ -542,7 +542,9 @@ class TilesPlugin(Plugin):
                 style=style,
                 xpublish_id=xpublish_id,
             )
-            maxzoom = tms.maxzoom
+            # TileJSON 3.0 bounds zoom to 0..30; CDB1GlobalGrid starts at -10.
+            minzoom = max(minzoom, 0)
+            maxzoom = min(tms.maxzoom, 30)
 
             # Compose TileJSON
             return TileJSON(
