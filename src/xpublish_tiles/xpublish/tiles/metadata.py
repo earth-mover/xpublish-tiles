@@ -383,7 +383,7 @@ async def create_tileset_for_tms(
         layers.append(layer)
 
     tileMatrixSetLimits = get_tile_matrix_limits(
-        tms_id, range(max(min_zooms.values()), tms.maxzoom)
+        tms_id, range(max(min_zooms.values()), tms.maxzoom + 1)
     )
 
     tileset = TilesetSummary(
