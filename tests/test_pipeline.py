@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 
+import asyncio
 import io
 from dataclasses import replace
 from typing import Any
@@ -24,11 +25,13 @@ from tests import NUMERIC_DTYPES, create_query_params
 from xarray.testing import assert_equal
 from xpublish_tiles import config
 from xpublish_tiles.lib import (
+    THREAD_POOL_NUM_THREADS,
     AsyncLoadTimeoutError,
     IndexingError,
     InvalidCoordinateValues,
     MissingParameterError,
     VariableNotFoundError,
+    async_run,
     check_transparent_pixels,
     max_render_shape,
 )
@@ -38,6 +41,7 @@ from xpublish_tiles.pipeline import (
     pipeline,
     subset_to_bbox,
 )
+from xpublish_tiles.render.raster import fill_nonfinite_nearest
 from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
     CURVILINEAR,
@@ -362,6 +366,27 @@ async def test_geostationary_quadmesh_coords_finite(tile, tms, monkeypatch):
     await pipeline(ds, create_query_params(tile, tms, colorscalerange=(-1.0, 1.0)))
     for xs, ys in seen:
         assert np.isfinite(xs).all() and np.isfinite(ys).all()
+
+
+def _offdisk_coords(seed: int) -> tuple[np.ndarray, np.ndarray]:
+    rng = np.random.default_rng(seed)
+    x, y = rng.uniform(-1, 1, (2, 40, 30))
+    x[rng.uniform(size=x.shape) < 0.3] = np.nan
+    y[rng.uniform(size=y.shape) < 0.1] = np.inf
+    x[5], y[:, 7], x[:3, :] = np.nan, -np.inf, np.nan  # fully off-disk row/col/edge
+    return x, y
+
+
+async def test_fill_nonfinite_nearest_concurrent_in_executor():
+    # numbagg's workqueue guard keys on "ThreadPoolExecutor" thread names, so it
+    # went parallel in the "xpublish-tiles-pool" threads and numba aborted.
+    x, y = _offdisk_coords(0)
+    await asyncio.gather(
+        *(
+            async_run(fill_nonfinite_nearest, x, y)
+            for _ in range(4 * THREAD_POOL_NUM_THREADS)
+        )
+    )
 
 
 @pytest.mark.asyncio

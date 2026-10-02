@@ -69,11 +69,14 @@ def fill_nonfinite_nearest(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np
     if not bad.any():
         return x, y
     filled = []
-    for a in (x, y):
-        a = np.where(bad, np.nan, a)
-        for axis in (-1, 0):
-            a = numbagg.bfill(numbagg.ffill(a, axis=axis), axis=axis)
-        filled.append(a)
+    # numbagg goes parallel in our pool threads (its workqueue guard keys on
+    # "ThreadPoolExecutor" names), so serialize it like the datashader calls.
+    with NUMBA_THREADING_LOCK:
+        for a in (x, y):
+            a = np.where(bad, np.nan, a)
+            for axis in (-1, 0):
+                a = numbagg.bfill(numbagg.ffill(a, axis=axis), axis=axis)
+            filled.append(a)
     return filled[0], filled[1]
 
 
