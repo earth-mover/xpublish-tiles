@@ -59,6 +59,24 @@ def nearest_on_uniform_grid_scipy(da: xr.DataArray, Xdim: str, Ydim: str) -> xr.
     return new
 
 
+def fill_nonfinite_nearest(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Fill non-finite 2D coord centers from the nearest finite one, along each axis.
+
+    Off-disk quads then collapse to zero width. Datashader casts NaN vertices to
+    int, so otherwise each one scans a canvas-wide bounding box.
+    """
+    bad = ~(np.isfinite(x) & np.isfinite(y))
+    if not bad.any():
+        return x, y
+    filled = []
+    for a in (x, y):
+        a = np.where(bad, np.nan, a)
+        for axis in (-1, 0):
+            a = numbagg.bfill(numbagg.ffill(a, axis=axis), axis=axis)
+        filled.append(a)
+    return filled[0], filled[1]
+
+
 def _range_color_to_rgba(color: str) -> tuple[int, int, int, int]:
     if color == "transparent":
         return (0, 0, 0, 0)
@@ -310,6 +328,12 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                         np.asarray(xcoord.data), np.asarray(ycoord.data)
                     )
                     data = data.where(xr.DataArray(~bad, dims=xcoord.dims))
+                    fx, fy = fill_nonfinite_nearest(
+                        np.asarray(xcoord.data), np.asarray(ycoord.data)
+                    )
+                    data = data.assign_coords(
+                        {grid.X: xcoord.copy(data=fx), grid.Y: ycoord.copy(data=fy)}
+                    )
                 with log_duration(
                     f"render (continuous) {data.shape} quadmesh", "🎨", logger
                 ):

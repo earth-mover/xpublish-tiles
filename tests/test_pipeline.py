@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import Any
 
 import cf_xarray  # noqa: F401 - Enable cf accessor
+import datashader as dsh
 import morecantile
 import numpy as np
 import pandas as pd
@@ -342,6 +343,25 @@ async def test_geostationary_data(tile, tms, png_snapshot, pytestconfig):
     assert_render_matches_snapshot(
         result, png_snapshot, tile=tile, tms=tms, skip_transparency_check=True
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tile,tms", as_pytestparams(GEOSTATIONARY_TILES))
+async def test_geostationary_quadmesh_coords_finite(tile, tms, monkeypatch):
+    # datashader casts NaN vertices to int, so each off-disk quad scans a
+    # canvas-wide bounding box: 5-10x slower renders near the limb.
+    seen = []
+    original = dsh.Canvas.quadmesh
+
+    def spy(self, source, x=None, y=None, agg=None):
+        seen.append((np.asarray(source[x]), np.asarray(source[y])))
+        return original(self, source, x=x, y=y, agg=agg)
+
+    monkeypatch.setattr(dsh.Canvas, "quadmesh", spy)
+    ds = GEOSTATIONARY.create()
+    await pipeline(ds, create_query_params(tile, tms, colorscalerange=(-1.0, 1.0)))
+    for xs, ys in seen:
+        assert np.isfinite(xs).all() and np.isfinite(ys).all()
 
 
 @pytest.mark.asyncio
