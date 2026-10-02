@@ -477,7 +477,7 @@ def check_transparent_pixels(image_bytes):
     return (transparent_count / total_pixels) * 100
 
 
-async def transform_coordinates(
+def transform_coordinates(
     subset: xr.DataArray,
     grid_x_name: str,
     grid_y_name: str,
@@ -487,7 +487,7 @@ async def transform_coordinates(
     Transform coordinates from input CRS to output CRS.
 
     This function broadcasts the X and Y coordinates and then transforms them
-    using either chunked or direct transformation based on the data size.
+    with one pyproj call.
 
     It attempts to preserve rectilinear-ness when possible: 4326 -> 3857
 
@@ -501,8 +501,6 @@ async def transform_coordinates(
         Name of the Y coordinate dimension
     transformer : pyproj.Transformer
         The coordinate transformer
-    chunk_size : tuple[int, int], optional
-        Chunk size for blocked transformation, by default from config
 
     Returns
     -------
@@ -556,7 +554,7 @@ async def transform_coordinates(
     if factored is not None:
         rectilinear = inx.ndim == 1 and iny.ndim == 1
         convert = factored.transform_grid if rectilinear else factored.transform
-        result = await async_run(convert, inx.data, iny.data)
+        result = convert(inx.data, iny.data)
         if result is not None:
             dims = inx.dims + iny.dims if rectilinear else inx.dims
             coords = {inx.name: inx.variable, iny.name: iny.variable}
@@ -574,22 +572,9 @@ async def transform_coordinates(
     )
     assert bx.dims == by.dims
 
-    chunk_size = get_transform_chunk_size(bx)
-    if bx.size > math.prod(chunk_size):
-        # Ensure we have C-contiguous float64 arrays (required by pyproj).
-        # np.asarray avoids copying if already float64 and C-contiguous.
-        # This is numpy 2.X behaviour
-        newX = np.asarray(bx.data, order="C", dtype=np.float64)
-        newY = np.asarray(by.data, order="C", dtype=np.float64)
-        await transform_blocked(
-            newX,
-            newY,
-            transformer,
-            chunk_size,
-            inplace=True,
-        )
-    else:
-        newX, newY = await async_run(transformer.transform, bx.data, by.data)
+    # One pyproj call: this runs inside the request's single compute submission,
+    # so splitting into blocks (transform_blocked) would only add overhead.
+    newX, newY = transformer.transform(bx.data, by.data)
 
     if not transformer.target_crs.is_geographic:
         # A point undefined in the source projection (e.g. off the geostationary

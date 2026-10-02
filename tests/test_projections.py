@@ -1,5 +1,3 @@
-import asyncio
-
 import numpy as np
 import pyproj
 import pytest
@@ -139,7 +137,7 @@ def test_transform_coordinates_conic(curvilinear):
         names = ("x", "y")
 
     transformer = transformer_from_crs(crs, 3857)
-    out_x, out_y = asyncio.run(transform_coordinates(subset, *names, transformer))
+    out_x, out_y = transform_coordinates(subset, *names, transformer)
 
     src_x, src_y = xr.broadcast(subset[names[0]], subset[names[1]])
     expected_x, expected_y = transformer.transform(src_x.data, src_y.data)

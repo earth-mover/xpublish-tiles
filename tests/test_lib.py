@@ -1,7 +1,5 @@
-import asyncio
 import math
 from typing import cast
-from unittest.mock import patch
 
 import matplotlib as mpl
 import morecantile
@@ -186,8 +184,7 @@ def test_transform_chunk_inplace():
 def test_transform_coordinates_with_dtypes(dtype):
     """Test transform_coordinates with different coordinate dtypes.
 
-    This tests the full pipeline which converts coordinates to float64 for
-    efficient transformations with pyproj's inplace optimization.
+    pyproj returns float64 regardless of the input coordinate dtype.
     """
     # Use EPSG:4326 to EPSG:3857 transformation
     transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
@@ -220,18 +217,9 @@ def test_transform_coordinates_with_dtypes(dtype):
         assert da.coords["lon"].dtype == dtype
         assert da.coords["lat"].dtype == dtype
 
-        # Transform coordinates
-        with patch(
-            "xpublish_tiles.lib.transform_chunk", wraps=transform_chunk
-        ) as mock_transform_chunk:
-            x_transformed, y_transformed = asyncio.run(
-                transform_coordinates(da, "lon", "lat", transformer)
-            )
-
-            # Verify blocked transformation was used
-            assert mock_transform_chunk.call_count > 0, (
-                "transform_chunk should be called for large 2D grids"
-            )
+        x_transformed, y_transformed = transform_coordinates(
+            da, "lon", "lat", transformer
+        )
 
         # Verify output shape
         assert x_transformed.shape == (ny, nx)
@@ -242,19 +230,16 @@ def test_transform_coordinates_with_dtypes(dtype):
         assert np.abs(x_transformed.data).max() > 1e6, "Should be transformed to meters"
         assert np.abs(y_transformed.data).max() > 4e6, "Should be transformed to meters"
 
-        # transform_coordinates converts to float64 via np.asarray for efficient transforms
         assert x_transformed.data.dtype == np.float64
         assert y_transformed.data.dtype == np.float64
 
 
 def test_transform_coordinates_large_broadcast():
-    """Test transform_coordinates with 1D inputs that trigger blocked transformation."""
+    """Test transform_coordinates broadcasting large 1D inputs to 2D."""
     # Use EPSG:3035 (ETRS89-extended / LAEA Europe) to EPSG:4326
     # This avoids the fast path for 4326->3857 with 1D coords
     transformer = pyproj.Transformer.from_crs("EPSG:3035", "EPSG:4326", always_xy=True)
 
-    # Create 1D coordinates large enough to trigger blocked transformation
-    # Using 2000x2000 = 4,000,000 elements which is larger than chunk_size product
     # EPSG:3035 uses meters, typical European extent
     x_values = np.linspace(2635840.0, 3874240.0, 500)
     y_values = np.linspace(5415940.0, 2042740.0, 500)
@@ -269,15 +254,8 @@ def test_transform_coordinates_large_broadcast():
         dims=["y", "x"],
     )
 
-    with patch(
-        "xpublish_tiles.lib.transform_chunk", wraps=transform_chunk
-    ) as mock_transform_chunk:
-        with config.set(transform_chunk_size=50):
-            x_transformed, y_transformed = asyncio.run(
-                transform_coordinates(da, "x", "y", transformer)
-            )
-
-        assert mock_transform_chunk.call_count > 0
+    with config.set(transform_chunk_size=50):
+        x_transformed, y_transformed = transform_coordinates(da, "x", "y", transformer)
 
     assert x_transformed.shape == da.shape
     assert y_transformed.shape == da.shape

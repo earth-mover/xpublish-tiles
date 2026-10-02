@@ -2,7 +2,7 @@ import asyncio
 import contextlib
 import datetime
 import io
-from collections.abc import Hashable, Iterable, Mapping
+from collections.abc import Callable, Hashable, Iterable, Mapping
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, cast
@@ -834,49 +834,50 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     # Capture the context logger before entering thread pool
     context_logger = get_context_logger()
 
-    subsets = await subset_to_bbox(
+    finish_subsets = await _load_subsets(
         validated,
         bbox=query.bbox,
         crs=query.crs,
         max_shape=max_shape,
         style=query.style,
     )
+    # One executor submission for all post-load compute: per-step submissions
+    # requeue behind other requests and make every in-flight tile finish late.
+    return await async_run(_render_subsets, finish_subsets, query, context_logger)
+
+
+def _render_subsets(
+    finish_subsets: Callable[[], dict[str, PopulatedRenderContext | NullRenderContext]],
+    query: QueryParams,
+    context_logger,
+) -> io.BytesIO:
+    subsets = finish_subsets()
 
     # Transform coordinates to output CRS
     renderer = query.get_renderer()
-    subsets = await transform_for_render(
+    subsets = transform_for_render(
         subsets, bbox=query.bbox, crs=query.crs, style=renderer.style_id()
     )
-
-    tasks = [
-        async_run(
-            lambda s=subset: asyncio.run(
-                s.maybe_rewrite_to_rectilinear(
-                    width=query.width, height=query.height, logger=context_logger
-                )
-            )
+    subsets = {
+        name: subset.maybe_rewrite_to_rectilinear(
+            width=query.width, height=query.height, logger=context_logger
         )
-        for subset in subsets.values()
-    ]
-    results = await asyncio.gather(*tasks)
-    new_subsets = dict(zip(subsets.keys(), results, strict=False))
+        for name, subset in subsets.items()
+    }
 
     buffer = io.BytesIO()
-
-    await async_run(
-        lambda: renderer.render(
-            contexts=new_subsets,
-            buffer=buffer,
-            width=query.width,
-            height=query.height,
-            variant=query.variant,
-            colorscalerange=query.colorscalerange,
-            format=query.format,
-            context_logger=context_logger,
-            colormap=query.colormap,
-            abovemaxcolor=query.abovemaxcolor,
-            belowmincolor=query.belowmincolor,
-        ),
+    renderer.render(
+        contexts=subsets,
+        buffer=buffer,
+        width=query.width,
+        height=query.height,
+        variant=query.variant,
+        colorscalerange=query.colorscalerange,
+        format=query.format,
+        context_logger=context_logger,
+        colormap=query.colormap,
+        abovemaxcolor=query.abovemaxcolor,
+        belowmincolor=query.belowmincolor,
     )
     buffer.seek(0)
     return buffer
@@ -1196,6 +1197,25 @@ async def subset_to_bbox(
     max_shape: tuple[int, int],
     style: str = "raster",
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:
+    finish = await _load_subsets(
+        validated, bbox=bbox, crs=crs, max_shape=max_shape, style=style
+    )
+    return await async_run(finish)
+
+
+async def _load_subsets(
+    validated: dict[str, ValidatedArray],
+    *,
+    bbox: OutputBBox,
+    crs: OutputCRS,
+    max_shape: tuple[int, int],
+    style: str = "raster",
+) -> Callable[[], dict[str, PopulatedRenderContext | NullRenderContext]]:
+    """Plan and load each variable's subset.
+
+    Returns the sync post-load step, so callers can run it in the same
+    executor submission as the transform and render.
+    """
     result: dict[str, PopulatedRenderContext | NullRenderContext] = {}
     plans: list[SubsetPlan] = []
     # ``plan_patches`` is aligned with ``plans``: each entry's loaded
@@ -1332,25 +1352,30 @@ async def subset_to_bbox(
         pending.append((var_name, grid, array.datatype, patches))
 
     loaded = await load_plans(plans) if plans else []
+    return partial(
+        _finish_subsets,
+        result,
+        pending,
+        list(zip(plan_patches, plan_datatypes, loaded, strict=True)),
+        bbox,
+    )
 
-    async def _post_load(patch: Patch, datatype: DataType, ld: xr.DataArray) -> None:
+
+def _finish_subsets(
+    result: dict[str, PopulatedRenderContext | NullRenderContext],
+    pending: list[tuple[str, GridSystem, DataType, list[Patch]]],
+    loaded: list[tuple[Patch, DataType, xr.DataArray]],
+    bbox: OutputBBox,
+) -> dict[str, PopulatedRenderContext | NullRenderContext]:
+    for patch, datatype, ld in loaded:
         if isinstance(datatype, RGBData):
             # Downstream expects the band dim to lead; cheap on loaded data.
             ld = ld.transpose(datatype.band_dim, ...)
         if isinstance(patch.grid, Polar):
             ld = patch.grid.assign_index(ld)
         if patch.coarsen_factors:
-            ld = await async_run(
-                partial(coarsen, ld, patch.coarsen_factors, grid=patch.grid)
-            )
+            ld = coarsen(ld, patch.coarsen_factors, grid=cast(GridSystem2D, patch.grid))
         patch.da = ld
-
-    await asyncio.gather(
-        *(
-            _post_load(p, dt, ld)
-            for p, dt, ld in zip(plan_patches, plan_datatypes, loaded, strict=True)
-        )
-    )
 
     for var_name, grid, datatype, patches in pending:
         result[var_name] = PopulatedRenderContext(
@@ -1421,7 +1446,7 @@ def _fix_discontinuity(
     return newX, newY, slice(None)
 
 
-async def _transform_one_grid_polygons(
+def _transform_one_grid_polygons(
     grid: GridSystem2D,
     subset: xr.DataArray,
     *,
@@ -1457,12 +1482,9 @@ async def _transform_one_grid_polygons(
 
     input_to_output = transformer_from_crs(source_crs, output_crs)
     with log_duration("transform_coordinates", "🔄"):
-        newX, newY = await transform_coordinates(
-            to_transform, grid.X, grid.Y, input_to_output
-        )
+        newX, newY = transform_coordinates(to_transform, grid.X, grid.Y, input_to_output)
 
-    newX, newY, _ = await async_run(
-        _fix_discontinuity,
+    newX, newY, _ = _fix_discontinuity(
         grid,
         newX,
         newY,
@@ -1517,7 +1539,7 @@ async def _transform_one_grid_polygons(
     return rings, values
 
 
-async def _transform_polygon_patch(
+def _transform_polygon_patch(
     patch: Patch,
     *,
     bbox: OutputBBox,
@@ -1540,7 +1562,7 @@ async def _transform_polygon_patch(
 
     if isinstance(grid, GridSystem2D):
         is_polar_cap = isinstance(grid, Curvilinear) and grid.is_polar_cap
-        rings, values = await _transform_one_grid_polygons(
+        rings, values = _transform_one_grid_polygons(
             grid,
             subset,
             slicers=patch.slicers,
@@ -1572,7 +1594,7 @@ async def _transform_polygon_patch(
 
     input_to_output = transformer_from_crs(source_crs, output_crs)
     with log_duration("transform_coordinates", "🔄"):
-        newX, newY = await transform_coordinates(
+        newX, newY = transform_coordinates(
             to_transform, alternate.X, alternate.Y, input_to_output
         )
 
@@ -1598,7 +1620,7 @@ async def _transform_polygon_patch(
             values = subset.values
         else:
             # Node-located: one value per face for the polygons.
-            values = await async_run(grid.nodes_to_faces, subset.values, ugrid_indexer)
+            values = grid.nodes_to_faces(subset.values, ugrid_indexer)
 
     cell_rings = grid.corners_to_rings(newX.data, newY.data, ugrid_indexer=ugrid_indexer)
     # (N,) or (band, N): the cell dim trails an RGB band dim.
@@ -1606,7 +1628,7 @@ async def _transform_polygon_patch(
     return cell_rings, values.reshape(*values.shape[:-1], -1)
 
 
-async def _transform_raster_patch(
+def _transform_raster_patch(
     patch: Patch,
     *,
     bbox: OutputBBox,
@@ -1651,8 +1673,7 @@ async def _transform_raster_patch(
     if isinstance(grid, Triangular) and isinstance(patch.indexer, UgridIndexer):
         face_dim = grid.face_dim
         if face_dim is not None and face_dim in subset.dims:
-            subset = await async_run(
-                grid.average_faces_to_nodes,
+            subset = grid.average_faces_to_nodes(
                 subset,
                 patch.indexer,
                 alternate.X,
@@ -1660,14 +1681,13 @@ async def _transform_raster_patch(
             )
 
     with log_duration("transform_coordinates", "🔄"):
-        newX, newY = await transform_coordinates(
+        newX, newY = transform_coordinates(
             subset, alternate.X, alternate.Y, input_to_output
         )
 
     ugrid_indexer = patch.indexer if isinstance(patch.indexer, UgridIndexer) else None
     hp_indexer = patch.indexer if isinstance(patch.indexer, HealpixIndexer) else None
-    newX, newY, _ = await async_run(
-        _fix_discontinuity,
+    newX, newY, _ = _fix_discontinuity(
         grid,
         newX,
         newY,
@@ -1682,7 +1702,7 @@ async def _transform_raster_patch(
     return subset.assign_coords({grid.X: newX, grid.Y: newY})
 
 
-async def transform_for_render(
+def transform_for_render(
     contexts: dict[str, PopulatedRenderContext | NullRenderContext],
     *,
     bbox: OutputBBox,
@@ -1725,7 +1745,7 @@ async def transform_for_render(
             rings_list: list[np.ndarray] = []
             values_list: list[np.ndarray] = []
             for patch in context.patches:
-                rings, values = await _transform_polygon_patch(
+                rings, values = _transform_polygon_patch(
                     patch, bbox=bbox, output_crs=crs, out_width=out_width
                 )
                 rings_list.append(rings)
@@ -1766,7 +1786,7 @@ async def transform_for_render(
             f"raster style requires a single patch; got {len(context.patches)}"
         )
         (patch,) = context.patches
-        da = await _transform_raster_patch(patch, bbox=bbox, output_crs=crs)
+        da = _transform_raster_patch(patch, bbox=bbox, output_crs=crs)
         result[var_name] = PopulatedRenderContext(
             grid=grid,
             datatype=context.datatype,
