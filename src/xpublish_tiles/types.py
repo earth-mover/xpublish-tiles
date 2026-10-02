@@ -177,7 +177,7 @@ class ValidatedArray:
 @dataclass
 class RenderContext(ABC):
     @abstractmethod
-    async def maybe_rewrite_to_rectilinear(self, *, width: int, height: int) -> Self:
+    def maybe_rewrite_to_rectilinear(self, *, width: int, height: int) -> Self:
         pass
 
 
@@ -185,7 +185,7 @@ class RenderContext(ABC):
 class NullRenderContext(RenderContext):
     cell_rings: None = None
 
-    async def maybe_rewrite_to_rectilinear(
+    def maybe_rewrite_to_rectilinear(
         self, *, width: int, height: int, logger=None
     ) -> Self:
         return self
@@ -233,7 +233,7 @@ class PopulatedRenderContext(RenderContext):
         ix = self.patches[0].indexer
         return ix if isinstance(ix, HealpixIndexer) else None
 
-    async def maybe_rewrite_to_rectilinear(
+    def maybe_rewrite_to_rectilinear(
         self, *, width: int, height: int, logger=None
     ) -> Self:
         data = self.da
