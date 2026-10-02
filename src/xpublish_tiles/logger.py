@@ -20,6 +20,8 @@ class LogAccumulator:
 
     def __init__(self):
         self.logs = []
+        # (message, ms) per log_duration block, kept at any log level for the summary
+        self.timings: list[tuple[str, float]] = []
 
     def __call__(self, logger, method_name, event_dict):
         # Store the log entry
@@ -180,13 +182,18 @@ def log_duration(message: str, emoji: str = "⏱️", logger=None):
     """
     if logger is None:
         logger = get_context_logger()
+    accumulator = _context_accumulator.get()
     start_time = time.perf_counter()
     try:
         yield
         duration_ms = (time.perf_counter() - start_time) * 1000
+        if accumulator is not None:
+            accumulator.timings.append((message, duration_ms))
         logger.debug(f"{emoji} ({duration_ms:.0f}ms) {message}")
     except Exception as e:
         duration_ms = (time.perf_counter() - start_time) * 1000
+        if accumulator is not None:
+            accumulator.timings.append((f"{message} (failed)", duration_ms))
         logger.error(f"{emoji} ({duration_ms:.0f}ms) {message} (failed)", error=str(e))
         raise
 
@@ -243,9 +250,12 @@ def with_accumulated_logs(
                 raise
             finally:
                 try:
-                    # Always flush accumulated logs when non-empty. The entries
-                    # stored here already passed structlog's level filter.
-                    if accumulator.logs:
+                    # Flush accumulated logs when non-empty; the entries stored here
+                    # already passed structlog's level filter. At INFO the debug
+                    # timers are filtered out, so emit their summary line alone.
+                    if accumulator.logs or (
+                        accumulator.timings and logger.isEnabledFor(logging.INFO)
+                    ):
                         console_renderer = CleanConsoleRenderer()
 
                         if log_message_fn is not None:
@@ -253,7 +263,12 @@ def with_accumulated_logs(
                         else:
                             log_msg = func.__name__
 
-                        lines = [f"🔧 {log_msg} (total: {total_ms:.0f}ms)"]
+                        header = f"🔧 {log_msg} (total: {total_ms:.0f}ms)"
+                        if accumulator.timings:
+                            header += " | " + "; ".join(
+                                f"{ms:.0f}ms {msg}" for msg, ms in accumulator.timings
+                            )
+                        lines = [header]
                         for log_entry in accumulator.logs:
                             rendered = console_renderer(None, None, log_entry)
                             lines.append(f"   {rendered}")
