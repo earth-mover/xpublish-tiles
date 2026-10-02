@@ -1,5 +1,6 @@
 """Tests for tiles metadata functionality"""
 
+import morecantile
 import numpy as np
 import pandas as pd
 import pytest
@@ -974,6 +975,53 @@ def test_multiscale_uses_coarsest_level_for_minzoom():
     # Coarsest level (128x256 at 4 degrees/pixel) should give minzoom ~0
     # If we incorrectly used finest level (512x1024), minzoom would be ~2-3
     assert min_zoom <= 1, f"minzoom {min_zoom} too high - should use coarsest level"
+
+
+@pytest.mark.parametrize(
+    "tms_id, first",
+    [
+        pytest.param("WebMercatorQuad", "0", id="webmercator"),
+        # CDB1GlobalGrid defines matrices "-10" to "21"; all of them serve tiles.
+        pytest.param("CDB1GlobalGrid", "-10", id="cdb1_negative_ids"),
+    ],
+)
+def test_tile_matrix_set_limits_span_every_tms_level(tms_id, first):
+    ds = xr.Dataset(
+        {
+            "data": xr.DataArray(
+                np.zeros((18, 36), dtype=np.float32),
+                dims=["lat", "lon"],
+                coords={
+                    "lat": (
+                        ["lat"],
+                        np.linspace(-85, 85, 18),
+                        {"axis": "Y", "standard_name": "latitude"},
+                    ),
+                    "lon": (
+                        ["lon"],
+                        np.linspace(-175, 175, 36),
+                        {"axis": "X", "standard_name": "longitude"},
+                    ),
+                },
+                attrs={"valid_min": 0, "valid_max": 1},
+            ),
+        }
+    )
+    rest = xpublish.Rest({"d": ds}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+    response = client.get("/datasets/d/tiles/")
+    assert response.status_code == 200
+
+    tileset = next(
+        ts
+        for ts in response.json()["tilesets"]
+        if ts.get("tileMatrixSetURI", "").endswith(f"/{tms_id}")
+    )
+    tms = morecantile.tms.get(tms_id)
+    matrix_ids = [limit["tileMatrix"] for limit in tileset["tileMatrixSetLimits"]]
+    assert matrix_ids[0] == first
+    assert matrix_ids[-1] == str(tms.maxzoom)
+    assert matrix_ids == [str(z) for z in range(int(first), tms.maxzoom + 1)]
 
 
 def test_multiscale_variable_missing_from_overviews():

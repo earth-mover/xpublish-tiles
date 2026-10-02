@@ -1188,6 +1188,13 @@
           "minTileCol": 0,
           "minTileRow": 0,
           "tileMatrix": "20"
+        },
+        {
+          "maxTileCol": 377487359,
+          "maxTileRow": 754974719,
+          "minTileCol": 0,
+          "minTileRow": 0,
+          "tileMatrix": "21"
         }
       ],
       "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/CDB1GlobalGrid",
@@ -2269,6 +2276,13 @@
           "minTileCol": 0,
           "minTileRow": 0,
           "tileMatrix": "14"
+        },
+        {
+          "maxTileCol": 32767,
+          "maxTileRow": 32767,
+          "minTileCol": 0,
+          "minTileRow": 0,
+          "tileMatrix": "15"
         }
       ],
       "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/EuropeanETRS89_LAEAQuad",
@@ -3441,6 +3455,13 @@
           "minTileCol": 0,
           "minTileRow": 0,
           "tileMatrix": "27"
+        },
+        {
+          "maxTileCol": 536870911,
+          "maxTileRow": 1073741823,
+          "minTileCol": 0,
+          "minTileRow": 0,
+          "tileMatrix": "28"
         }
       ],
       "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/GNOSISGlobalGrid",
@@ -4578,6 +4599,13 @@
           "minTileCol": 0,
           "minTileRow": 0,
           "tileMatrix": "22"
+        },
+        {
+          "maxTileCol": 8388607,
+          "maxTileRow": 16777215,
+          "minTileCol": 0,
+          "minTileRow": 0,
+          "tileMatrix": "23"
         }
       ],
       "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WorldCRS84Quad",
@@ -5722,6 +5750,13 @@
           "minTileCol": 0,
           "minTileRow": 0,
           "tileMatrix": "23"
+        },
+        {
+          "maxTileCol": 16777215,
+          "maxTileRow": 16777215,
+          "minTileCol": 0,
+          "minTileRow": 0,
+          "tileMatrix": "24"
         }
       ],
       "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
@@ -6859,6 +6894,13 @@
           "minTileCol": 0,
           "minTileRow": 0,
           "tileMatrix": "22"
+        },
+        {
+          "maxTileCol": 8388607,
+          "maxTileRow": 16777215,
+          "minTileCol": 0,
+          "minTileRow": 0,
+          "tileMatrix": "23"
         }
       ],
       "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WorldCRS84Quad",
@@ -8003,6 +8045,13 @@
           "minTileCol": 0,
           "minTileRow": 0,
           "tileMatrix": "23"
+        },
+        {
+          "maxTileCol": 16777215,
+          "maxTileRow": 16777215,
+          "minTileCol": 0,
+          "minTileRow": 0,
+          "tileMatrix": "24"
         }
       ],
       "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WorldMercatorWGS84Quad",
