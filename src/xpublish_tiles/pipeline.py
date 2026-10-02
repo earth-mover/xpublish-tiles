@@ -850,11 +850,10 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
 
     tasks = [
         async_run(
-            lambda s=subset: asyncio.run(
-                s.maybe_rewrite_to_rectilinear(
-                    width=query.width, height=query.height, logger=context_logger
-                )
-            )
+            subset.maybe_rewrite_to_rectilinear,
+            width=query.width,
+            height=query.height,
+            logger=context_logger,
         )
         for subset in subsets.values()
     ]
