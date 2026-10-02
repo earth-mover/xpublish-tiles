@@ -127,7 +127,12 @@ def _styles_for_renderer(style_id: str, include_rgb: bool) -> tuple[Style, ...]:
     return tuple(styles)
 
 
-def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSetMetadata:
+def create_tileset_metadata(
+    dataset: Dataset,
+    tile_matrix_set_id: str,
+    *,
+    tile_matrix_set_href: str | None = None,
+) -> TileSetMetadata:
     """Create tileset metadata for a dataset and tile matrix set"""
     # Get tile matrix set summary
     if tile_matrix_set_id not in TILE_MATRIX_SET_SUMMARIES:
@@ -154,7 +159,8 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
                 templated=True,
             ),
             Link(
-                href=f"/tileMatrixSets/{tile_matrix_set_id}",
+                href=tile_matrix_set_href
+                or f"/tiles/tileMatrixSets/{tile_matrix_set_id}",
                 rel="http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
                 type="application/json",
                 title=f"Definition of {tile_matrix_set_id}",
@@ -305,6 +311,7 @@ async def create_tileset_for_tms(
     *,
     minzoom_sources: dict[str, MinZoomSource],
     cf_coords: dict | None = None,
+    tile_matrix_set_href: str | None = None,
 ) -> TilesetSummary | None:
     """Create a tileset summary for a specific tile matrix set
 
@@ -400,7 +407,7 @@ async def create_tileset_for_tms(
                 title=f"Tileset metadata for {tms_id}",
             ),
             Link(
-                href=f"/tileMatrixSets/{tms_id}",
+                href=tile_matrix_set_href or f"/tiles/tileMatrixSets/{tms_id}",
                 rel="http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
                 type="application/json",
                 title=f"Definition of {tms_id}",
