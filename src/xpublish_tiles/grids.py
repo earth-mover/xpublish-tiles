@@ -2827,6 +2827,11 @@ class Triangular(GridSystem):
         )
 
 
+def _healpix_ellipsoid(info) -> Any:
+    # xdggs has no public ellipsoid serializer; HealpixInfo._format_ellipsoid is gone in 0.7.
+    return info.to_dict().get("ellipsoid", "sphere")
+
+
 @dataclass(init=False, kw_only=True, eq=False)
 class Healpix(GridSystem):
     """Grid system for HealPix discrete global grid."""
@@ -2974,7 +2979,7 @@ class Healpix(GridSystem):
         subset_cell_ids = parts[0] if len(parts) == 1 else np.concatenate(parts)
         info = self.index.grid_info
         lon, lat = healpix_geo.nested.vertices(
-            subset_cell_ids, depth=info.level, ellipsoid=info._format_ellipsoid()
+            subset_cell_ids, depth=info.level, ellipsoid=_healpix_ellipsoid(info)
         )
         lon = np.asarray(lon).ravel()
         lat = np.asarray(lat).ravel()
@@ -3041,11 +3046,7 @@ class Healpix(GridSystem):
         if cell_ids.size == 12 * 4**info.level:
             bbox = BBox(west=-180, south=-90, east=180, north=90)
         else:
-            import healpix_geo.nested as hpn
-
-            lon, lat = hpn.healpix_to_lonlat(
-                np.asarray(cell_ids), depth=info.level, ellipsoid=info._format_ellipsoid()
-            )
+            lon, lat = info.cell_ids2geographic(np.asarray(cell_ids))
             lon = ((np.asarray(lon) + 180) % 360) - 180
             lat = np.asarray(lat)
             bbox = BBox(
