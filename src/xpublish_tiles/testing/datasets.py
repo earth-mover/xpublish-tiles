@@ -2101,14 +2101,12 @@ def _create_global_healpix(*, level: int, dtype: npt.DTypeLike) -> xr.Dataset:
     n_cells = 12 * 4**level. Values are a smooth lon/lat function so visual
     checks can verify antimeridian handling.
     """
-    import healpix_geo.nested as hpn
     import xdggs
 
     info = xdggs.HealpixInfo(level=level, indexing_scheme="nested")
-    ellipsoid = info._format_ellipsoid()
     n_cells = 12 * 4**level
     cell_ids = np.arange(n_cells, dtype=np.int64)
-    lon, lat = hpn.healpix_to_lonlat(cell_ids, depth=level, ellipsoid=ellipsoid)
+    lon, lat = info.cell_ids2geographic(cell_ids)
     lon = ((lon + 180) % 360) - 180
 
     data = (np.cos(np.deg2rad(lat)) * np.sin(np.deg2rad(lon))).astype(dtype)
@@ -2175,14 +2173,12 @@ def _create_regional_healpix(
     bbox = (west, south, east, north). Cell indices remain the global ``nested``
     ones at the given level, so downstream HEALPix math stays valid.
     """
-    import healpix_geo.nested as hpn
     import xdggs
 
     info = xdggs.HealpixInfo(level=level, indexing_scheme="nested")
-    ellipsoid = info._format_ellipsoid()
     n_cells = 12 * 4**level
     all_ids = np.arange(n_cells, dtype=np.int64)
-    lon, lat = hpn.healpix_to_lonlat(all_ids, depth=level, ellipsoid=ellipsoid)
+    lon, lat = info.cell_ids2geographic(all_ids)
     lon = ((lon + 180) % 360) - 180
     west, south, east, north = bbox
     mask = (lon >= west) & (lon <= east) & (lat >= south) & (lat <= north)
