@@ -3184,11 +3184,21 @@ class HealpixCube(Healpix):
         return {self.face_dim, self._Ydim, self._Xdim}
 
     @classmethod
-    def from_dataset(  # ty: ignore[invalid-method-override]
-        cls, ds: xr.Dataset, *, face_dim: str, Ydim: str, Xdim: str
+    def from_dataset(
+        cls,
+        ds: xr.Dataset,
+        crs: CRS,
+        Xname: str,
+        Yname: str,
+        *,
+        face_dim: str = "face",
     ) -> Self:
-        n = ds.sizes[Xdim]
-        return cls(face_dim=face_dim, Ydim=Ydim, Xdim=Xdim, level=n.bit_length() - 1)
+        return cls(
+            face_dim=face_dim, Ydim="y", Xdim="x", level=ds.sizes["x"].bit_length() - 1
+        )
+
+    def __repr__(self) -> str:
+        return f"HealpixCube(face_dim={self.face_dim!r}, level={self.level}, crs={crs_repr(self.crs)})"
 
     def select(
         self, bbox: BBox, *, allow_coarsen: bool = True
@@ -4120,8 +4130,7 @@ def _detect_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
     if meta is not None and meta.grid_cls is HealpixCube:
         dims = find_healpix_cube_dims(ds)
         assert dims is not None
-        face_dim, Ydim, Xdim = dims
-        grid = HealpixCube.from_dataset(ds, face_dim=face_dim, Ydim=Ydim, Xdim=Xdim)
+        grid = HealpixCube.from_dataset(ds, meta.crs, meta.X, meta.Y, face_dim=dims[0])
         var = cf_get(ds, name)
         grid.Z = _guess_z_dimension(var, exclude_dims=grid.dims_for(var))
         _validate_grid_dims(grid, var)

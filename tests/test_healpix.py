@@ -173,3 +173,40 @@ def test_cube_select_discrete_not_coarsened():
     with config.set({"max_num_geometries": 10}):
         indexers = grid.select(globe, allow_coarsen=False)
     assert {ix.level for ix in indexers} == {5}
+
+
+def test_cube_aux_var_is_rejected_like_cubed_sphere():
+    ds = GLOBAL_HEALPIX_CUBE_L3.create()
+    ds["bar"] = ("time", np.arange(2.0))
+    grid = guess_grid_system(ds, "foo")
+    assert isinstance(grid, HealpixCube)
+    assert "HealpixCube" in repr(grid)
+    with pytest.raises(UnsupportedGridError):
+        guess_grid_system(ds, "bar")
+
+
+@pytest.mark.parametrize(
+    "bbox, max_cells, coarsened",
+    [
+        (BBox(west=170, south=-30, east=190, north=30), 10**9, False),
+        (BBox(west=-30, south=10, east=60, north=70), 10**9, False),
+        (BBox(west=170, south=-60, east=260, north=60), 12 * 4**3, True),
+    ],
+)
+def test_cube_partial_bbox_gather(bbox, max_cells, coarsened):
+    ds = _create_global_healpix_cube(level=5, dtype=np.float64)
+    grid = guess_grid_system(ds, "foo")
+    assert isinstance(grid, HealpixCube)
+    with config.set({"max_num_geometries": max_cells}):
+        indexers = grid.select(bbox)
+    (factor,) = {ix.factor for ix in indexers}
+    assert (factor > 1) == coarsened
+    assert any(ix.y.start > 0 or ix.x.start > 0 for ix in indexers)
+    flat = _create_global_healpix(level=5, dtype=np.float64)["foo"].values
+    expected = flat.reshape(-1, factor**2).mean(axis=1)
+    for ix in indexers:
+        rect = ds["foo"].isel(time=0, face=ix.face, y=ix.y, x=ix.x).load()
+        got = grid.gather(rect, ix)
+        np.testing.assert_allclose(
+            got.values, expected[ix.cell_ids.astype(np.int64)], atol=1e-12
+        )
