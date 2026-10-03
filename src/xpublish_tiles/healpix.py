@@ -114,7 +114,9 @@ def bbox_cell_ids(bbox: BBox, depth: int) -> np.ndarray:
     # included. This pads the selection in the same spirit as
     # ``apply_default_pad`` for 2D grids.
     neighbors = kth_neighbourhood(cell_ids.astype(np.uint64), depth, ring=1)
-    return np.unique(neighbors.ravel()).astype(cell_ids.dtype)
+    neighbors = neighbors.ravel()
+    # base-cell corners have 7 neighbours; the missing slot is -1
+    return np.unique(neighbors[neighbors >= 0]).astype(cell_ids.dtype)
 
 
 @functools.cache

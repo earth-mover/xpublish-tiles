@@ -32,6 +32,7 @@ from xpublish_tiles.grids import (
     GridSystem,
     GridSystem2D,
     Healpix,
+    HealpixCube,
     LongitudeCellIndex,
     Polar,
     RasterAffine,
@@ -78,6 +79,7 @@ from xpublish_tiles.testing.datasets import (
     FORECAST,
     FVCOM,
     FVCOM_MACHIAS_BAY,
+    GLOBAL_HEALPIX_CUBE_L3,
     GLOBAL_HEALPIX_L3,
     HRRR,
     HRRR_CRS_WKT,
@@ -104,6 +106,7 @@ from xpublish_tiles.xpublish.tiles.types import DimensionType
 
 TRIANGULAR_SENTINEL = 1
 HEALPIX_SENTINEL = 2
+HEALPIX_CUBE_SENTINEL = 3
 
 
 @pytest.mark.parametrize(
@@ -331,6 +334,12 @@ HEALPIX_SENTINEL = 2
             HEALPIX_SENTINEL,
             id="regional_healpix_na",
         ),
+        pytest.param(
+            GLOBAL_HEALPIX_CUBE_L3.create(),
+            "foo",
+            HEALPIX_CUBE_SENTINEL,
+            id="global_healpix_cube_l3",
+        ),
     ],
 )
 def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> None:
@@ -356,6 +365,11 @@ def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> Non
         assert actual.crs.is_geographic
         assert actual.X == "lon"
         assert actual.Y == "lat"
+    elif expected is HEALPIX_CUBE_SENTINEL:
+        assert isinstance(actual, HealpixCube)
+        assert actual.level == 3
+        assert actual.dims == {"face", "y", "x"}
+        assert actual.bbox == BBox(west=-180, south=-90, east=180, north=90)
     else:
         assert expected == actual
 

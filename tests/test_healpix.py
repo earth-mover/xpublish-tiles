@@ -3,12 +3,26 @@ import numpy as np
 import pytest
 from pyproj.aoi import BBox
 
+from xpublish_tiles.config import config
+from xpublish_tiles.grids import (
+    HealpixCube,
+    HealpixCubeIndexer,
+    UnsupportedGridError,
+    find_healpix_cube_dims,
+    guess_grid_metadata,
+    guess_grid_system,
+)
 from xpublish_tiles.healpix import (
     antimeridian_cells,
     bbox_cell_ids,
     coarse_level,
     fyx_to_nested,
     nested_to_fyx,
+)
+from xpublish_tiles.testing.datasets import (
+    GLOBAL_HEALPIX_CUBE_L3,
+    _create_global_healpix,
+    _create_global_healpix_cube,
 )
 
 
@@ -73,3 +87,89 @@ def test_bbox_cell_ids_sorted_unique_and_dilated():
 def test_antimeridian_cells_cached():
     assert antimeridian_cells(3) is antimeridian_cells(3)
     assert antimeridian_cells(3).size > 0
+
+
+def test_cube_fixture_matches_1d():
+    cube = _create_global_healpix_cube(level=3, dtype=np.float64)
+    flat = _create_global_healpix(level=3, dtype=np.float64)
+    f, y, x = nested_to_fyx(np.arange(12 * 4**3), 3)
+    got = cube["foo"].isel(time=0).values[f, y, x]
+    np.testing.assert_array_equal(got, flat["foo"].values)
+
+
+def test_detect_cube():
+    ds = GLOBAL_HEALPIX_CUBE_L3.create()
+    assert find_healpix_cube_dims(ds) == ("face", "y", "x")
+    meta = guess_grid_metadata(ds)
+    assert meta is not None and meta.grid_cls is HealpixCube
+    grid = guess_grid_system(ds, "foo")
+    assert isinstance(grid, HealpixCube)
+    assert grid.dims == {"face", "y", "x"}
+    assert grid.level == 3
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(lambda ds: ds.attrs.pop("healpix_nside"), id="no-attr"),
+        pytest.param(lambda ds: ds.attrs.update(healpix_nside=4), id="attr-mismatch"),
+    ],
+)
+def test_detect_cube_negative(mutate):
+    ds = GLOBAL_HEALPIX_CUBE_L3.create()
+    mutate(ds)
+    assert find_healpix_cube_dims(ds) is None
+
+
+def test_detect_cube_not_power_of_two():
+    ds = GLOBAL_HEALPIX_CUBE_L3.create().isel(y=slice(0, 6), x=slice(0, 6))
+    ds.attrs["healpix_nside"] = 6
+    assert find_healpix_cube_dims(ds) is None
+
+
+def test_detect_cube_bad_face_ordering():
+    ds = GLOBAL_HEALPIX_CUBE_L3.create()
+    ds.attrs["face_ordering"] = "other"
+    with pytest.raises(UnsupportedGridError):
+        find_healpix_cube_dims(ds)
+
+
+def test_cube_select_no_coarsen_matches_1d_ids():
+    grid = guess_grid_system(GLOBAL_HEALPIX_CUBE_L3.create(), "foo")
+    assert isinstance(grid, HealpixCube)
+    bbox = BBox(west=-30, south=-20, east=40, north=50)
+    indexers = grid.select(bbox)
+    assert all(isinstance(ix, HealpixCubeIndexer) for ix in indexers)
+    assert all(ix.level == 3 and ix.factor == 1 for ix in indexers)
+    got = np.concatenate([ix.cell_ids for ix in indexers])
+    np.testing.assert_array_equal(np.sort(got), bbox_cell_ids(bbox, 3))
+
+
+def test_cube_select_coarsen_and_gather():
+    ds = _create_global_healpix_cube(level=5, dtype=np.float64)
+    grid = guess_grid_system(ds, "foo")
+    assert isinstance(grid, HealpixCube)
+    globe = BBox(west=-180, south=-90, east=180, north=90)
+    with config.set({"max_num_geometries": 12 * 4**3}):
+        indexers = grid.select(globe)
+    assert {ix.level for ix in indexers} == {3}
+    assert {ix.factor for ix in indexers} == {4}
+    flat = _create_global_healpix(level=5, dtype=np.float64)["foo"].values
+    expected = flat.reshape(-1, 16).mean(axis=1)  # nested children are contiguous
+    for ix in indexers:
+        rect = ds["foo"].isel(time=0, face=ix.face, y=ix.y, x=ix.x).load()
+        got = grid.gather(rect, ix)
+        assert got.dims == (grid.dim,)
+        np.testing.assert_allclose(
+            got.values, expected[ix.cell_ids.astype(np.int64)], atol=1e-12
+        )
+
+
+def test_cube_select_discrete_not_coarsened():
+    ds = _create_global_healpix_cube(level=5, dtype=np.float64)
+    grid = guess_grid_system(ds, "foo")
+    assert isinstance(grid, HealpixCube)
+    globe = BBox(west=-180, south=-90, east=180, north=90)
+    with config.set({"max_num_geometries": 10}):
+        indexers = grid.select(globe, allow_coarsen=False)
+    assert {ix.level for ix in indexers} == {5}
