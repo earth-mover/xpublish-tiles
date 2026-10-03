@@ -17,6 +17,7 @@ from xpublish_tiles.testing.datasets import (
     FVCOM,
     GEOSTATIONARY,
     GEOZARR_MULTISCALE,
+    GLOBAL_HEALPIX_CUBE_L3,
     GLOBAL_HEALPIX_L3,
     HRRR,
     IFS,
@@ -728,11 +729,28 @@ async def test_layers_use_variable_specific_bounding_boxes():
 
 def test_allowed_styles_healpix_only_polygons():
     """Healpix datasets must advertise only the polygons style."""
-    for fixture in (GLOBAL_HEALPIX_L3, REGIONAL_HEALPIX_NA):
+    for fixture in (GLOBAL_HEALPIX_L3, GLOBAL_HEALPIX_CUBE_L3, REGIONAL_HEALPIX_NA):
         ds = fixture.create()
         assert allowed_styles(ds) == ["polygons"]
         style_ids = {s.id.split("/")[0] for s in get_styles(ds)}
         assert style_ids == {"polygons"}
+
+
+def test_cube_dims_not_advertised():
+    """face/y/x belong to the grid; only time is a selectable dimension."""
+    fixture = GLOBAL_HEALPIX_CUBE_L3
+    ds = fixture.create()
+    rest = xpublish.Rest({fixture.name: ds}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+    response = client.get(f"/datasets/{fixture.name}/tiles/")
+    assert response.status_code == 200
+    names = {
+        name
+        for layer in response.json()["tilesets"][0]["layers"]
+        for name in layer["extents"]
+    }
+    assert "time" in names
+    assert not names & {"face", "y", "x"}
 
 
 async def test_cubed_sphere_metadata():
@@ -808,6 +826,7 @@ def _normalize_for_snapshot(obj):
         pytest.param(HRRR, id="hrrr"),
         pytest.param(IFS, id="ifs"),
         pytest.param(GLOBAL_HEALPIX_L3, id="global_healpix_l3"),
+        pytest.param(GLOBAL_HEALPIX_CUBE_L3, id="global_healpix_cube_l3"),
         pytest.param(REGIONAL_HEALPIX_NA, id="regional_healpix_na"),
         pytest.param(CUBED_SPHERE, id="cubed_sphere"),
         pytest.param(GEOSTATIONARY, id="geostationary"),
@@ -840,6 +859,7 @@ def test_tiles_endpoint_snapshot(fixture, snapshot):
         pytest.param(HRRR, id="hrrr"),
         pytest.param(IFS, id="ifs"),
         pytest.param(GLOBAL_HEALPIX_L3, id="global_healpix_l3"),
+        pytest.param(GLOBAL_HEALPIX_CUBE_L3, id="global_healpix_cube_l3"),
         pytest.param(REGIONAL_HEALPIX_NA, id="regional_healpix_na"),
         pytest.param(CUBED_SPHERE, id="cubed_sphere"),
         pytest.param(GEOSTATIONARY, id="geostationary"),

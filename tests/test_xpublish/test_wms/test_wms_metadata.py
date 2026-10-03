@@ -14,6 +14,7 @@ from xpublish_tiles.testing.datasets import (
     FVCOM,
     GEOSTATIONARY,
     GEOZARR_MULTISCALE,
+    GLOBAL_HEALPIX_CUBE_L3,
     GLOBAL_HEALPIX_L3,
     HRRR,
     IFS,
@@ -106,6 +107,27 @@ def test_wms_capabilities_snapshot(fixture, snapshot):
     assert _normalize_for_snapshot(json_response.json()) == snapshot.use_extension(
         JSONSnapshotExtension
     )
+
+
+def test_wms_cube_dims_not_advertised():
+    """face/y/x belong to the grid; only time is a selectable dimension."""
+    client = _make_client(GLOBAL_HEALPIX_CUBE_L3)
+    response = client.get(
+        f"/datasets/{GLOBAL_HEALPIX_CUBE_L3.name}/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetCapabilities",
+            "format": "json",
+        },
+    )
+    assert response.status_code == 200
+    root = response.json()["capability"]["layer"]
+    layers = [layer for layer in root["layers"] if layer["name"] == "foo"]
+    assert layers
+    names = {d["name"] for layer in layers for d in layer["dimensions"]}
+    assert "time" in names
+    assert not names & {"face", "y", "x"}
 
 
 @pytest.mark.parametrize(
