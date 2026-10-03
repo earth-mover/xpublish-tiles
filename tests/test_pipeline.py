@@ -1140,20 +1140,21 @@ async def test_cube_discrete_not_coarsened(monkeypatch):
 async def test_cube_raster_rejected():
     cube = GLOBAL_HEALPIX_CUBE_L3.create()
     query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style="raster")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="only supports style='polygons'"):
         await pipeline(cube, query)
 
 
-def test_cube_decompressed_size():
+@pytest.mark.parametrize("face_chunk", [1, 12])
+def test_cube_decompressed_size(face_chunk):
     cube = GLOBAL_HEALPIX_CUBE_L3.create()
     grid = guess_grid_system(cube, "foo")
     assert isinstance(grid, HealpixCube)
     (ix, *_) = grid.select(BBox(west=0, south=0, east=10, north=10))
     da = cube["foo"].isel(time=0, face=ix.face, y=ix.y, x=ix.x)
-    chunks = {"time": 1, "face": 1, "y": 8, "x": 8}
+    chunks = {"time": 1, "face": face_chunk, "y": 8, "x": 8}
     got = decompressed_size_bytes({grid.dim: [ix]}, da, grid, chunks=chunks)
-    # one 8x8 face chunk of float64; face/y/x/time chunk sizes must not multiply again
-    assert got == 8 * 8 * 8
+    # one 8x8 y/x chunk of float64, times the face and time chunks it sits in
+    assert got == face_chunk * 1 * 8 * 8 * 8
 
 
 @pytest.mark.xfail(reason="HEALPix L1 polar base cell not covering tile at z=9")

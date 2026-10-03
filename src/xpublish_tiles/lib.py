@@ -1297,7 +1297,8 @@ def decompressed_size_bytes(
     if isinstance(grid, FacetedGridSystem):
         covered |= {str(d) for f in grid.faces for d in (f.Xdim, f.Ydim)}
     if isinstance(grid, HealpixCube):
-        covered |= grid.dims
+        # face stays uncovered: each face rectangle decompresses its whole face chunk
+        covered |= {grid.Ydim, grid.Xdim}
     for dim, chunk in chunks.items():
         if dim in covered:
             continue
