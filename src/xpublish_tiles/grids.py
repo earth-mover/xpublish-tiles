@@ -22,6 +22,7 @@ from pyproj.aoi import BBox
 import xarray as xr
 from xarray.core.indexing import IndexSelResult
 from xpublish_tiles.config import config
+from xpublish_tiles.healpix import antimeridian_cells, bbox_cell_ids
 from xpublish_tiles.lib import (
     Fill,
     InvalidCoordinateValues,
@@ -2862,8 +2863,6 @@ class Healpix(GridSystem):
         cell_ids: np.ndarray,
         bbox: BBox,
     ):
-        from healpix_geo.nested import zone_coverage
-
         self.crs = crs
         self.X, self.Y = Xname, Yname
         self.dim = dim
@@ -2876,12 +2875,7 @@ class Healpix(GridSystem):
         self._bbox_xform_cache = {}
 
         depth = int(index.grid_info.level)
-        # straddle the 180° antimeridian with a hairline zone.
-        eps = 1e-6
-        am_all, _, _ = zone_coverage(
-            (180.0 - eps, -90.0, 180.0 + eps, 90.0), depth, flat=True
-        )
-        self.antimeridian_cells = np.intersect1d(am_all, cell_ids)
+        self.antimeridian_cells = np.intersect1d(antimeridian_cells(depth), cell_ids)
 
     @property
     def Xdim(self) -> str:
@@ -2901,8 +2895,6 @@ class Healpix(GridSystem):
         Uses healpix_geo to find HEALPix cells that intersect the bbox,
         then returns the indices of those cells in our dataset.
         """
-        from healpix_geo.nested import kth_neighbourhood, zone_coverage
-
         if self.index.grid_info.indexing_scheme != "nested":
             raise NotImplementedError(
                 f"Healpix sel() only supports nested indexing, got {self.index.grid_info.indexing_scheme!r}"
@@ -2919,38 +2911,10 @@ class Healpix(GridSystem):
 
         depth = int(self.index.grid_info.level)
 
-        # ``zone_coverage`` takes degrees with lon_min ∈ [0, 360),
-        # 0 < lon_max < 360 (exactly 360 panics), lat ∈ [-90, 90].
-        # Also: cells whose boundary lies exactly on the zone edge are handled
-        # inconsistently, so we nudge west/east outward by a small epsilon to
-        # guarantee boundary cells are included.
-        EPS = 1e-6
-        MAX_LON = 360.0 - 1e-9
-        west = (bbox.west - EPS) % 360.0
-        east = (bbox.east + EPS) % 360.0
-        if east == 0:
-            east = MAX_LON
-        south = max(bbox.south, -90.0)
-        north = min(bbox.north, 90.0)
-        if west < east:
-            bbox_cell_ids, _, _ = zone_coverage(
-                (west, south, east, north), depth, flat=True
-            )
-        else:
-            # spans the anti-meridian
-            # Normalize west/east into [0, 360) and split into two.
-            left, _, _ = zone_coverage((west, south, MAX_LON, north), depth, flat=True)
-            right, _, _ = zone_coverage((0.0, south, east, north), depth, flat=True)
-            bbox_cell_ids = np.concatenate([left, right])
-
-        # Dilate by one ring so neighbor cells covering tile-edge gaps are
-        # included. This pads the selection in the same spirit as
-        # ``apply_default_pad`` for 2D grids.
-        neighbors = kth_neighbourhood(bbox_cell_ids.astype(np.uint64), depth, ring=1)
-        bbox_cell_ids = np.unique(neighbors.ravel()).astype(bbox_cell_ids.dtype)
+        selected = bbox_cell_ids(bbox, depth)
 
         _, _, indices = np.intersect1d(
-            bbox_cell_ids, self.cell_ids, assume_unique=True, return_indices=True
+            selected, self.cell_ids, assume_unique=True, return_indices=True
         )
 
         if len(indices) == 0:
