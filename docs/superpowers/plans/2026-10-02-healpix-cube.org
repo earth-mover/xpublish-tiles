@@ -1,0 +1,883 @@
+#+title: HEALPix cube (face, y, x) layout — implementation plan
+
+#+begin_quote
+For agentic workers: REQUIRED SUB-SKILL: use superpowers:subagent-driven-development
+(recommended) or superpowers:executing-plans to implement this plan task by task.
+#+end_quote
+
+*Goal:* detect the Zeus HEALPix cube layout ~(…, face=12, y=n, x=n)~ and render it with the
+~polygons~ style, with exact ~2**k~ coarsening for zoomed-out tiles.
+
+*Architecture:* a new ~HealpixCube(Healpix)~ grid. ~select(bbox)~ returns one
+~HealpixCubeIndexer~ per face. The pipeline makes one ~Patch~ per face (like ~FacetedGridSystem~),
+loads one rectangle per face, and in ~_post_load~ block-means and gathers the rectangle into a
+1-D cell dim. From there the current 1-D HEALPix polygon path runs unchanged.
+Numba Morton kernels and pure HEALPix helpers live in a new ~src/xpublish_tiles/healpix.py~.
+
+*Tech stack:* numpy, numba, xarray, healpix_geo, xdggs (only ~HealpixInfo~ for the ellipsoid).
+
+*Spec:* [[file:../specs/2026-10-02-healpix-cube-design.org][docs/superpowers/specs/2026-10-02-healpix-cube-design.org]]
+
+* Global Constraints
+- Branch: ~deepak/healpix-cube~. Do not push. Do not change other branches.
+- Run tests with ~uv run pytest <path>~. Type check with ~uv run ty check src/ tests/~.
+- Run ~pre-commit run --files <changed files>~ before each commit.
+- Commit messages: terse title, 1-3 sentence body, end with
+  ~Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>~.
+- Do not build or use an index for the cube: no ~xdggs.decode~, no ~HealpixIndex~, no full ~cell_ids~ array.
+- Do not change 1-D ~Healpix~ behaviour. Allowed 1-D edits: pure extractions listed in Task 1 and Task 2.
+- Keep ~Healpix.Xdim~ / ~Healpix.Ydim~ (1-D) as they are.
+- Polygons only. A raster request on the cube raises ~ValueError~.
+- ~DiscreteData~ is never coarsened.
+- Coarsening budget: ~config.get("max_num_geometries")~ (default ~1_500_000~).
+- Detection: a data var with dims named exactly ~face~, ~y~, ~x~, sizes ~(12, n, n)~,
+  ~n~ a power of 2, and ~ds.attrs["healpix_nside"] == n~. ~face_ordering~ absent or ~"standard"~,
+  else ~UnsupportedGridError~.
+- Layout: ~nested = face * 4**level + spread(x) | (spread(y) << 1)~ (x even bits, y odd bits).
+- Imports at the top of files. No ~try/except Exception~ in tests. Comments: brief, expert reader.
+- Do not regenerate existing snapshots. Only create snapshots for new tests (~--snapshot-update~
+  on the new test ids only), then look at each new PNG.
+
+* Review Focus
+1. Antimeridian tiles (cells on lon 180°, face 6): cube render must equal the 1-D render.
+   Pinned in Task 3 (~test_cube_render_matches_1d~ includes ~2/0/3~, ~5/0/15~, ~5/31/15~).
+2. Extra dims: the cube var has a ~time~ dim; ~face~/~y~/~x~ must not be advertised or need a
+   query parameter, and ~time~ must still be selectable. Pinned in Task 4
+   (~test_cube_dims_not_advertised~) and Task 3 (fixture has ~time~).
+3. Size estimates: ~decompressed_size_bytes~ must count rectangle cells (chunk-rounded) and must
+   not multiply by the ~face~/~y~/~x~ chunk sizes. Pinned in Task 3 (~test_cube_decompressed_size~).
+4. Coarsening edge cases: ~k~ never exceeds ~level~; a whole-globe bbox at a small budget gives
+   level 0 (12 cells). Pinned in Task 1 (~test_coarse_level_clamps~) and Task 3
+   (~test_cube_coarsened_matches_parent_mean~).
+5. Categorical vars: a ~DiscreteData~ var on the cube is selected with ~allow_coarsen=False~.
+   Pinned in Task 3 (~test_cube_discrete_not_coarsened~).
+
+* Tasks
+** Task 1: healpix.py kernels and helpers
+Files:
+- Create: ~src/xpublish_tiles/healpix.py~
+- Modify: ~src/xpublish_tiles/grids.py~ (~Healpix.__init__~, ~Healpix.sel~: use the extracted helpers)
+- Test: ~tests/test_healpix.py~
+
+Interfaces produced:
+#+begin_src python
+def fyx_to_nested(f: np.ndarray, y: np.ndarray, x: np.ndarray, level: int) -> np.ndarray  # uint64
+def nested_to_fyx(ids: np.ndarray, level: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]  # int64 each
+def coarse_level(bbox: BBox, level: int, max_cells: int) -> int
+def bbox_cell_ids(bbox: BBox, depth: int) -> np.ndarray  # zone_coverage + 1-ring dilation, sorted unique
+def antimeridian_cells(depth: int) -> np.ndarray          # cached per depth
+#+end_src
+
+*** Step 1: Write the failing tests
+#+begin_src python
+# tests/test_healpix.py
+import healpix_geo.nested as hpn
+import numpy as np
+import pytest
+from pyproj.aoi import BBox
+
+from xpublish_tiles.healpix import (
+    antimeridian_cells,
+    bbox_cell_ids,
+    coarse_level,
+    fyx_to_nested,
+    nested_to_fyx,
+)
+
+
+def _reference_fyx_to_nested(f, y, x, level):
+    # zeus-healpix _fyx_to_healpix_idx, the writer's definition
+    result = np.zeros_like(y, dtype=np.int64)
+    for i in range(level):
+        shift = level - 1 - i
+        result |= ((y >> shift) & 1) << (2 * shift + 1)
+        result |= ((x >> shift) & 1) << (2 * shift)
+    return result + f * 4**level
+
+
+@pytest.mark.parametrize("level", [0, 1, 5, 9])
+def test_fyx_roundtrip(level):
+    n = 2**level
+    f, y, x = np.meshgrid(np.arange(12), np.arange(n), np.arange(n), indexing="ij")
+    ids = fyx_to_nested(f.ravel(), y.ravel(), x.ravel(), level)
+    assert ids.dtype == np.uint64
+    np.testing.assert_array_equal(ids, _reference_fyx_to_nested(f, y, x, level).ravel())
+    f2, y2, x2 = nested_to_fyx(ids, level)
+    np.testing.assert_array_equal(f2, f.ravel())
+    np.testing.assert_array_equal(y2, y.ravel())
+    np.testing.assert_array_equal(x2, x.ravel())
+
+
+def test_fyx_origin_is_south_vertex():
+    # (x, y) = (0, 0) is the southernmost cell of each base face.
+    level = 3
+    n = 2**level
+    for f in range(12):
+        y, x = np.meshgrid(np.arange(n), np.arange(n), indexing="ij")
+        ids = fyx_to_nested(np.full(n * n, f), y.ravel(), x.ravel(), level)
+        _, lat = hpn.healpix_to_lonlat(ids, depth=level, ellipsoid="sphere")
+        assert np.argmin(np.asarray(lat)) == 0
+
+
+def test_coarse_level_no_coarsening_when_small():
+    bbox = BBox(west=0, south=0, east=1, north=1)
+    assert coarse_level(bbox, 9, 1_500_000) == 9
+
+
+def test_coarse_level_reduces_for_globe():
+    globe = BBox(west=-180, south=-90, east=180, north=90)
+    # 12 * 4**9 = 3_145_728 cells > 1.5M, so one level up.
+    assert coarse_level(globe, 9, 1_500_000) == 8
+
+
+def test_coarse_level_clamps():
+    globe = BBox(west=-180, south=-90, east=180, north=90)
+    assert coarse_level(globe, 5, 1) == 0
+
+
+def test_bbox_cell_ids_sorted_unique_and_dilated():
+    bbox = BBox(west=10, south=10, east=20, north=20)
+    ids = bbox_cell_ids(bbox, 4)
+    assert np.all(np.diff(ids.astype(np.int64)) > 0)
+    core, _, _ = hpn.zone_coverage((10, 10, 20, 20), 4, flat=True)
+    assert set(core.tolist()) < set(ids.tolist())
+
+
+def test_antimeridian_cells_cached():
+    assert antimeridian_cells(3) is antimeridian_cells(3)
+    assert antimeridian_cells(3).size > 0
+#+end_src
+
+*** Step 2: Run the tests to make sure they fail
+Run: ~uv run pytest tests/test_healpix.py -v~
+Expected: FAIL with ~ModuleNotFoundError: No module named 'xpublish_tiles.healpix'~.
+
+*** Step 3: Write healpix.py
+Numba pitfall: mixing ~uint64~ with ~int~ literals promotes to ~float64~. Cast every operand to ~np.uint64~.
+#+begin_src python
+# src/xpublish_tiles/healpix.py
+"""HEALPix helpers: xyf <-> nested Morton kernels and bbox -> cell selection."""
+
+import functools
+import math
+
+import numba
+import numpy as np
+from pyproj.aoi import BBox
+
+_M1 = np.uint64(0x5555555555555555)
+_M2 = np.uint64(0x3333333333333333)
+_M4 = np.uint64(0x0F0F0F0F0F0F0F0F)
+_M8 = np.uint64(0x00FF00FF00FF00FF)
+_M16 = np.uint64(0x0000FFFF0000FFFF)
+_M32 = np.uint64(0x00000000FFFFFFFF)
+
+
+@numba.njit(nogil=True, cache=True)
+def _spread(v):
+    v = v & _M32
+    v = (v | (v << np.uint64(16))) & _M16
+    v = (v | (v << np.uint64(8))) & _M8
+    v = (v | (v << np.uint64(4))) & _M4
+    v = (v | (v << np.uint64(2))) & _M2
+    return (v | (v << np.uint64(1))) & _M1
+
+
+@numba.njit(nogil=True, cache=True)
+def _compact(v):
+    v = v & _M1
+    v = (v | (v >> np.uint64(1))) & _M2
+    v = (v | (v >> np.uint64(2))) & _M4
+    v = (v | (v >> np.uint64(4))) & _M8
+    v = (v | (v >> np.uint64(8))) & _M16
+    return (v | (v >> np.uint64(16))) & _M32
+
+
+@numba.njit(nogil=True, cache=True)
+def _fyx_to_nested(f, y, x, level, out):
+    shift = np.uint64(2 * level)
+    one = np.uint64(1)
+    for i in range(out.size):
+        out[i] = (f[i] << shift) | _spread(x[i]) | (_spread(y[i]) << one)
+
+
+@numba.njit(nogil=True, cache=True)
+def _nested_to_fyx(ids, level, f, y, x):
+    shift = np.uint64(2 * level)
+    mask = (np.uint64(1) << shift) - np.uint64(1)
+    one = np.uint64(1)
+    for i in range(ids.size):
+        local = ids[i] & mask
+        f[i] = ids[i] >> shift
+        x[i] = _compact(local)
+        y[i] = _compact(local >> one)
+
+
+def fyx_to_nested(f, y, x, level: int) -> np.ndarray:
+    """Nested ids for (face, y, x); x on even bits, y on odd bits (HEALPix xyf)."""
+    f, y, x = (np.ascontiguousarray(a, dtype=np.uint64).ravel() for a in (f, y, x))
+    out = np.empty(f.size, dtype=np.uint64)
+    _fyx_to_nested(f, y, x, level, out)
+    return out
+
+
+def nested_to_fyx(ids, level: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ids = np.ascontiguousarray(ids, dtype=np.uint64).ravel()
+    f, y, x = (np.empty(ids.size, dtype=np.uint64) for _ in range(3))
+    _nested_to_fyx(ids, level, f, y, x)
+    return f.astype(np.int64), y.astype(np.int64), x.astype(np.int64)
+
+
+def coarse_level(bbox: BBox, level: int, max_cells: int) -> int:
+    """Finest level <= ``level`` whose estimated cell count in ``bbox`` fits ``max_cells``."""
+    width = min(max(bbox.east - bbox.west, 0.0), 360.0)
+    south, north = max(bbox.south, -90.0), min(bbox.north, 90.0)
+    omega = math.radians(width) * (math.sin(math.radians(north)) - math.sin(math.radians(south)))
+    ncells = omega / (4 * math.pi / (12 * 4**level))
+    k = 0
+    while k < level and ncells / 4**k > max_cells:
+        k += 1
+    return level - k
+#+end_src
+
+Then move the body of ~Healpix.sel~ (~grids.py~, the code from ~# zone_coverage takes degrees~
+through the ~kth_neighbourhood~ dilation) into ~bbox_cell_ids~ verbatim, with ~depth~ as an argument:
+#+begin_src python
+def bbox_cell_ids(bbox: BBox, depth: int) -> np.ndarray:
+    """Nested ids at ``depth`` covering ``bbox``, dilated by one ring; sorted, unique."""
+    from healpix_geo.nested import kth_neighbourhood, zone_coverage
+
+    # <moved verbatim from Healpix.sel: EPS/MAX_LON nudge, antimeridian split,
+    #  zone_coverage, kth_neighbourhood(ring=1), np.unique>
+    return bbox_cell_ids_result
+
+
+@functools.cache
+def antimeridian_cells(depth: int) -> np.ndarray:
+    """Cells touching lon 180° at ``depth`` (hairline zone straddling the seam)."""
+    from healpix_geo.nested import zone_coverage
+
+    eps = 1e-6
+    cells, _, _ = zone_coverage((180.0 - eps, -90.0, 180.0 + eps, 90.0), depth, flat=True)
+    return cells
+#+end_src
+The comment in angle brackets above is a move instruction, not code: paste the existing lines.
+Keep ~healpix_geo~ imports local, as ~grids.py~ does today.
+
+In ~grids.py~: ~Healpix.sel~ calls ~bbox_cell_ids(bbox, depth)~ in place of the moved lines,
+and ~Healpix.__init__~ uses ~np.intersect1d(antimeridian_cells(depth), cell_ids)~.
+Import both at the top of ~grids.py~.
+
+*** Step 4: Run the tests to make sure they pass
+Run: ~uv run pytest tests/test_healpix.py -v~ → PASS.
+Run: ~uv run pytest tests/test_pipeline.py -k healpix tests/test_grids.py -k healpix~ → PASS
+(proves the 1-D extraction changed nothing).
+
+*** Step 5: Commit
+#+begin_src bash
+pre-commit run --files src/xpublish_tiles/healpix.py src/xpublish_tiles/grids.py tests/test_healpix.py
+git add src/xpublish_tiles/healpix.py src/xpublish_tiles/grids.py tests/test_healpix.py
+git commit -m "feat: HEALPix xyf<->nested numba kernels and selection helpers"
+#+end_src
+
+** Task 2: HealpixCube grid, indexer, detection and fixture
+Files:
+- Modify: ~src/xpublish_tiles/grids.py~ (new ~HealpixCubeIndexer~, ~HealpixCube~,
+  ~find_healpix_cube_dims~, dispatch in ~guess_grid_metadata~ and ~guess_grid_system~,
+  extract ~Healpix._corner_array~)
+- Modify: ~src/xpublish_tiles/testing/datasets.py~ (cube fixtures)
+- Test: ~tests/test_healpix.py~, ~tests/test_grids.py~
+
+Interfaces consumed: Task 1 functions.
+Interfaces produced:
+#+begin_src python
+@dataclass
+class HealpixCubeIndexer(HealpixIndexer):
+    # indices = np.arange(n): positions in the gathered cell dim
+    cell_ids: np.ndarray  # uint64 nested ids at ``level``, sorted
+    level: int
+    face: int
+    y: slice              # fine rows read
+    x: slice              # fine cols read
+    factor: int           # 2**k block size
+    ys: np.ndarray        # coarse row of each cell inside the rectangle
+    xs: np.ndarray        # coarse col of each cell inside the rectangle
+
+class HealpixCube(Healpix):
+    face_dim: str; level: int; dim: str = "_healpix_cell"
+    Xdim -> "x"; Ydim -> "y"; dims -> {face_dim, "y", "x"}
+    @classmethod from_dataset(cls, ds: xr.Dataset, *, face_dim: str, Ydim: str, Xdim: str) -> Self
+    def select(self, bbox: BBox, *, allow_coarsen: bool = True) -> list[HealpixCubeIndexer]
+    def sel(self, *, bbox: BBox) -> Slicers   # {self.dim: select(bbox)}
+    def gather(self, da: xr.DataArray, indexer: HealpixCubeIndexer) -> xr.DataArray  # dims (..., self.dim)
+    def cell_corners(self, *, slicers, coarsen_factors) -> xr.DataArray
+
+def find_healpix_cube_dims(ds: xr.Dataset) -> tuple[str, str, str] | None  # (face, y, x)
+
+# testing/datasets.py
+GLOBAL_HEALPIX_CUBE_L3: Dataset   # name "global_healpix_cube_l3"
+GLOBAL_HEALPIX_CUBE_L5: Dataset   # name "global_healpix_cube_l5"
+def _create_global_healpix_cube(*, level: int, dtype) -> xr.Dataset
+#+end_src
+
+*** Step 1: Write the failing tests
+#+begin_src python
+# tests/test_healpix.py (append)
+import xarray as xr
+
+from xpublish_tiles.grids import (
+    HealpixCube,
+    HealpixCubeIndexer,
+    UnsupportedGridError,
+    find_healpix_cube_dims,
+    guess_grid_metadata,
+    guess_grid_system,
+)
+from xpublish_tiles.testing.datasets import (
+    GLOBAL_HEALPIX_CUBE_L3,
+    _create_global_healpix,
+    _create_global_healpix_cube,
+)
+
+
+def test_cube_fixture_matches_1d():
+    cube = _create_global_healpix_cube(level=3, dtype=np.float64)
+    flat = _create_global_healpix(level=3, dtype=np.float64)
+    f, y, x = nested_to_fyx(np.arange(12 * 4**3), 3)
+    got = cube["foo"].isel(time=0).values[f, y, x]
+    np.testing.assert_array_equal(got, flat["foo"].values)
+
+
+def test_detect_cube():
+    ds = GLOBAL_HEALPIX_CUBE_L3.create()
+    assert find_healpix_cube_dims(ds) == ("face", "y", "x")
+    assert guess_grid_metadata(ds).grid_cls is HealpixCube
+    grid = guess_grid_system(ds, "foo")
+    assert isinstance(grid, HealpixCube)
+    assert grid.dims == {"face", "y", "x"}
+    assert grid.level == 3
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(lambda ds: ds.attrs.pop("healpix_nside"), id="no-attr"),
+        pytest.param(lambda ds: ds.attrs.update(healpix_nside=4), id="attr-mismatch"),
+    ],
+)
+def test_detect_cube_negative(mutate):
+    ds = GLOBAL_HEALPIX_CUBE_L3.create()
+    mutate(ds)
+    assert find_healpix_cube_dims(ds) is None
+
+
+def test_detect_cube_not_power_of_two():
+    ds = GLOBAL_HEALPIX_CUBE_L3.create().isel(y=slice(0, 6), x=slice(0, 6))
+    ds.attrs["healpix_nside"] = 6
+    assert find_healpix_cube_dims(ds) is None
+
+
+def test_detect_cube_bad_face_ordering():
+    ds = GLOBAL_HEALPIX_CUBE_L3.create()
+    ds.attrs["face_ordering"] = "other"
+    with pytest.raises(UnsupportedGridError):
+        find_healpix_cube_dims(ds)
+
+
+def test_cube_select_no_coarsen_matches_1d_ids():
+    grid = guess_grid_system(GLOBAL_HEALPIX_CUBE_L3.create(), "foo")
+    bbox = BBox(west=-30, south=-20, east=40, north=50)
+    indexers = grid.select(bbox)
+    assert all(isinstance(ix, HealpixCubeIndexer) for ix in indexers)
+    assert all(ix.level == 3 and ix.factor == 1 for ix in indexers)
+    got = np.concatenate([ix.cell_ids for ix in indexers])
+    np.testing.assert_array_equal(np.sort(got), bbox_cell_ids(bbox, 3))
+
+
+def test_cube_select_coarsen_and_gather():
+    ds = _create_global_healpix_cube(level=5, dtype=np.float64)
+    grid = guess_grid_system(ds, "foo")
+    globe = BBox(west=-180, south=-90, east=180, north=90)
+    with config.set({"max_num_geometries": 12 * 4**3}):
+        indexers = grid.select(globe)
+    assert {ix.level for ix in indexers} == {3}
+    assert {ix.factor for ix in indexers} == {4}
+    flat = _create_global_healpix(level=5, dtype=np.float64)["foo"].values
+    expected = flat.reshape(-1, 16).mean(axis=1)  # nested children are contiguous
+    for ix in indexers:
+        rect = ds["foo"].isel(time=0, face=ix.face, y=ix.y, x=ix.x).load()
+        got = grid.gather(rect, ix)
+        assert got.dims == (grid.dim,)
+        np.testing.assert_allclose(got.values, expected[ix.cell_ids.astype(np.int64)])
+
+
+def test_cube_select_discrete_not_coarsened():
+    ds = _create_global_healpix_cube(level=5, dtype=np.float64)
+    grid = guess_grid_system(ds, "foo")
+    globe = BBox(west=-180, south=-90, east=180, north=90)
+    with config.set({"max_num_geometries": 10}):
+        indexers = grid.select(globe, allow_coarsen=False)
+    assert {ix.level for ix in indexers} == {5}
+#+end_src
+Add ~from xpublish_tiles.config import config~ to the test imports.
+
+*** Step 2: Run the tests to make sure they fail
+Run: ~uv run pytest tests/test_healpix.py -v~
+Expected: FAIL with ~ImportError~ (~HealpixCube~ not defined).
+
+*** Step 3: Implement
+1. ~HealpixCubeIndexer~ next to ~HealpixIndexer~ in ~grids.py~ (the dataclass in "Interfaces produced").
+   Add it to nothing else: it is a ~HealpixIndexer~, so the current ~isinstance~ sites accept it.
+2. Extract the DataArray build at the end of ~Healpix.cell_corners~ into
+   ~Healpix._corner_array(self, cell_ids: np.ndarray, depth: int, ellipsoid) -> xr.DataArray~;
+   ~Healpix.cell_corners~ calls it with ~self.index.grid_info.level~ and ~_healpix_ellipsoid(...)~.
+   No behaviour change.
+3. ~HealpixCube~:
+#+begin_src python
+@dataclass(init=False, kw_only=True, eq=False)
+class HealpixCube(Healpix):
+    """HEALPix stored as (face=12, y=nside, x=nside); xyf layout, nested ordering.
+
+    Never builds an index: ids come from ``bbox_cell_ids`` and Morton bit arithmetic.
+    """
+
+    face_dim: str
+    level: int
+
+    def __init__(self, *, face_dim: str, Ydim: str, Xdim: str, level: int):
+        import xdggs
+
+        self.crs = DEFAULT_CRS
+        self.X, self.Y = "longitude", "latitude"
+        self.dim = "_healpix_cell"
+        self.face_dim, self._Ydim, self._Xdim = face_dim, Ydim, Xdim
+        self.level = level
+        self.grid_info = xdggs.HealpixInfo(level=level, indexing_scheme="nested")
+        self.indexes = ()
+        self.alternates = ()
+        self.bbox = BBox(west=-180, south=-90, east=180, north=90)
+        self._bbox_xform_cache = {}
+
+    @property
+    def Xdim(self) -> str:
+        return self._Xdim
+
+    @property
+    def Ydim(self) -> str:
+        return self._Ydim
+
+    @property
+    def dims(self) -> set[str]:
+        return {self.face_dim, self._Ydim, self._Xdim}
+
+    @classmethod
+    def from_dataset(cls, ds: xr.Dataset, *, face_dim: str, Ydim: str, Xdim: str) -> Self:
+        n = ds.sizes[Xdim]
+        return cls(face_dim=face_dim, Ydim=Ydim, Xdim=Xdim, level=n.bit_length() - 1)
+
+    def select(self, bbox: BBox, *, allow_coarsen: bool = True) -> list[HealpixCubeIndexer]:
+        level = (
+            coarse_level(bbox, self.level, config.get("max_num_geometries"))
+            if allow_coarsen
+            else self.level
+        )
+        factor = 2 ** (self.level - level)
+        # same whole-globe shortcut as Healpix.sel
+        if bbox.east - bbox.west >= 360 or bbox.north - bbox.south >= 180:
+            ids = np.arange(12 * 4**level, dtype=np.uint64)
+        else:
+            ids = bbox_cell_ids(bbox, level).astype(np.uint64)
+        am = np.isin(ids, antimeridian_cells(level))
+        f, yc, xc = nested_to_fyx(ids, level)
+        out = []
+        for face in np.unique(f):
+            m = f == face
+            y0, y1 = int(yc[m].min()), int(yc[m].max()) + 1
+            x0, x1 = int(xc[m].min()), int(xc[m].max()) + 1
+            out.append(
+                HealpixCubeIndexer(
+                    indices=np.arange(int(m.sum())),
+                    antimeridian_mask=am[m],
+                    cell_ids=ids[m],
+                    level=level,
+                    face=int(face),
+                    y=slice(y0 * factor, y1 * factor),
+                    x=slice(x0 * factor, x1 * factor),
+                    factor=factor,
+                    ys=yc[m] - y0,
+                    xs=xc[m] - x0,
+                )
+            )
+        return out
+
+    def sel(self, *, bbox: BBox) -> Slicers:
+        return {self.dim: list(self.select(bbox))}
+
+    def gather(self, da: xr.DataArray, indexer: HealpixCubeIndexer) -> xr.DataArray:
+        """Block-mean a loaded face rectangle by ``factor`` and gather the selected cells."""
+        da = da.reset_coords(drop=True)
+        if indexer.factor > 1:
+            da = coarsen_mean_pad(da, {self._Ydim: indexer.factor, self._Xdim: indexer.factor})
+        return da.isel(
+            {
+                self._Ydim: xr.Variable(self.dim, indexer.ys),
+                self._Xdim: xr.Variable(self.dim, indexer.xs),
+            }
+        )
+
+    def cell_corners(self, *, slicers: dict[str, list], coarsen_factors: dict[str, int]) -> xr.DataArray:
+        (indexer,) = slicers[self.dim]
+        assert isinstance(indexer, HealpixCubeIndexer)
+        return self._corner_array(
+            indexer.cell_ids, indexer.level, _healpix_ellipsoid(self.grid_info)
+        )
+#+end_src
+   ~coarsen_mean_pad~ and ~config~ imports go at the top of ~grids.py~ (check for an import cycle
+   with ~lib.py~; ~grids.py~ already imports from ~lib~). ~grid_info~ is set only on the cube; the
+   1-D class keeps ~index~.
+4. ~find_healpix_cube_dims~ next to ~find_cubed_sphere_face_dim~:
+#+begin_src python
+def find_healpix_cube_dims(ds: xr.Dataset) -> tuple[str, str, str] | None:
+    """Detect the HEALPix xyf cube layout (face=12, y=nside, x=nside); see zeus-healpix."""
+    nside = ds.attrs.get("healpix_nside")
+    if nside is None:
+        return None
+    ordering = ds.attrs.get("face_ordering", "standard")
+    if ordering != "standard":
+        raise UnsupportedGridError(f"HEALPix cube face_ordering={ordering!r} is not supported.")
+    for var in ds.data_vars.values():
+        if not {"face", "y", "x"} <= set(var.dims):
+            continue
+        n = ds.sizes["x"]
+        if ds.sizes["face"] == 12 and ds.sizes["y"] == n and n == nside and n & (n - 1) == 0:
+            return ("face", "y", "x")
+        logger.warning("healpix_nside=%r does not match dims %r", nside, dict(ds.sizes))
+        return None
+    return None
+#+end_src
+   Use the module's existing logger name (check the top of ~grids.py~).
+5. ~guess_grid_metadata~: before the cubed-sphere check,
+#+begin_src python
+    cube_dims = find_healpix_cube_dims(ds)
+    if cube_dims is not None:
+        return GridMetadata(
+            X="longitude", Y="latitude", crs=DEFAULT_CRS, grid_cls=HealpixCube, face_dim=cube_dims[0]
+        )
+#+end_src
+6. ~guess_grid_system~: next to the ~CubedSphere~ dispatch,
+#+begin_src python
+    if meta is not None and meta.grid_cls is HealpixCube:
+        face_dim, Ydim, Xdim = find_healpix_cube_dims(ds)
+        grid = HealpixCube.from_dataset(ds, face_dim=face_dim, Ydim=Ydim, Xdim=Xdim)
+        var = cf_get(ds, name)
+        grid.Z = _guess_z_dimension(var, exclude_dims=grid.dims_for(var))
+        _validate_grid_dims(grid, var)
+        return grid
+#+end_src
+   ~meta~ comes from ~guess_grid_metadata(cf_sub)~ with ~cf_sub = ds.cf[[name]]~; if that subset
+   drops the global attrs or the ~face~/~y~/~x~ dims, detect on ~ds~ for the cube instead.
+   Check that the "Preload the primary mapping's X/Y" block above it skips the cube
+   (~meta.X~ is not in ~ds.variables~, so it does).
+7. Fixtures in ~testing/datasets.py~, after ~REGIONAL_HEALPIX_NA~:
+#+begin_src python
+def _create_global_healpix_cube(*, level: int, dtype: npt.DTypeLike) -> xr.Dataset:
+    """``global_healpix`` values in the zeus-healpix (time, face, y, x) layout."""
+    flat = _create_global_healpix(level=level, dtype=dtype)
+    n = 2**level
+    f, y, x = np.meshgrid(np.arange(12), np.arange(n), np.arange(n), indexing="ij")
+    ids = fyx_to_nested(f, y, x, level).astype(np.int64).reshape(12, n, n)
+    cube = flat["foo"].values[ids]
+    ds = xr.Dataset(
+        {"foo": (("time", "face", "y", "x"), np.stack([cube, cube]), dict(flat["foo"].attrs))},
+        coords={
+            "time": pd.date_range("2000-01-01", periods=2),
+            "face": np.arange(12),
+            "y": np.arange(n),
+            "x": np.arange(n),
+        },
+        attrs={**flat.attrs, "healpix_nside": n, "face_ordering": "standard"},
+    )
+    del ds["foo"].attrs["grid_mapping"], ds["foo"].attrs["coordinates"]
+    return ds
+
+
+def create_healpix_cube(*, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]) -> xr.Dataset:
+    (face, y, x) = (d for d in dims if d.name != "time")
+    return _create_global_healpix_cube(level=x.size.bit_length() - 1, dtype=dtype)
+
+
+GLOBAL_HEALPIX_CUBE_L3 = Dataset(
+    name="global_healpix_cube_l3",
+    dims=(
+        Dim(name="time", size=2, chunk_size=1),
+        Dim(name="face", size=12, chunk_size=1),
+        Dim(name="y", size=8, chunk_size=8),
+        Dim(name="x", size=8, chunk_size=8),
+    ),
+    setup=create_healpix_cube,
+    dtype=np.float64,
+    benchmark_tiles=GLOBAL_BENCHMARK_TILES,
+)
+
+GLOBAL_HEALPIX_CUBE_L5 = Dataset(
+    name="global_healpix_cube_l5",
+    dims=(
+        Dim(name="time", size=2, chunk_size=1),
+        Dim(name="face", size=12, chunk_size=1),
+        Dim(name="y", size=32, chunk_size=32),
+        Dim(name="x", size=32, chunk_size=32),
+    ),
+    setup=create_healpix_cube,
+    dtype=np.float64,
+    benchmark_tiles=GLOBAL_BENCHMARK_TILES,
+)
+#+end_src
+   Check how ~Dataset.create()~ applies ~Dim.chunk_size~ (other fixtures); if it does not chunk
+   a ~setup~ result, leave chunking out. Check that ~pd~ is imported. Register both in
+   ~DATASET_LOOKUP~ next to ~"global_healpix_l5"~.
+8. ~tests/test_grids.py~: add ~GLOBAL_HEALPIX_CUBE_L3~ to the detection parametrization near
+   ~id="global_healpix_l3"~, with a new sentinel or an ~isinstance(actual, HealpixCube)~ branch,
+   in the style of ~HEALPIX_SENTINEL~. Read the test first and match it.
+
+*** Step 4: Run the tests to make sure they pass
+Run: ~uv run pytest tests/test_healpix.py tests/test_grids.py -v~ → PASS.
+Run: ~uv run pytest tests/test_pipeline.py -k healpix~ → PASS (1-D unchanged).
+Run: ~uv run ty check src/ tests/~ → no new errors.
+
+*** Step 5: Commit
+#+begin_src bash
+pre-commit run --files src/xpublish_tiles/grids.py src/xpublish_tiles/testing/datasets.py tests/test_healpix.py tests/test_grids.py
+git add src/xpublish_tiles/grids.py src/xpublish_tiles/testing/datasets.py tests/test_healpix.py tests/test_grids.py
+git commit -m "feat: HealpixCube grid for the (face, y, x) HEALPix layout"
+#+end_src
+
+** Task 3: Pipeline integration
+Files:
+- Modify: ~src/xpublish_tiles/pipeline.py~ (~apply_slicers~, ~_load_subsets~, ~_post_load~)
+- Modify: ~src/xpublish_tiles/lib.py~ (~_iter_subset_shapes~, ~decompressed_size_bytes~)
+- Modify: ~src/xpublish_tiles/testing/tiles.py~ (tile list)
+- Test: ~tests/test_pipeline.py~
+
+Interfaces consumed: ~HealpixCube.select/gather/dim/face_dim/Ydim/Xdim~, ~HealpixCubeIndexer~ (Task 2);
+fixtures ~GLOBAL_HEALPIX_CUBE_L3~, ~GLOBAL_HEALPIX_CUBE_L5~, ~_create_global_healpix~.
+Interfaces produced: ~HEALPIX_CUBE_TILES: list~ in ~testing/tiles.py~ (pytest params, ids as below).
+
+*** Step 1: Write the failing tests
+#+begin_src python
+# src/xpublish_tiles/testing/tiles.py
+HEALPIX_CUBE_TILES = [
+    pytest.param(Tile(x=0, y=0, z=0), id="0/0/0"),
+    pytest.param(Tile(x=3, y=0, z=2), id="2/0/3"),     # antimeridian, north
+    pytest.param(Tile(x=0, y=15, z=5), id="5/0/15"),   # west of antimeridian
+    pytest.param(Tile(x=31, y=15, z=5), id="5/31/15"), # east of antimeridian
+    pytest.param(Tile(x=8, y=12, z=5), id="5/8/12"),
+    pytest.param(Tile(x=148, y=134, z=9), id="9/134/148"),
+]
+#+end_src
+#+begin_src python
+# tests/test_pipeline.py
+from PIL import Image  # top of file, if not already imported
+
+
+def _pixels(buf):
+    return np.asarray(Image.open(io.BytesIO(buf.getvalue())))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tile", HEALPIX_CUBE_TILES)
+async def test_cube_render_matches_1d(tile):
+    flat = GLOBAL_HEALPIX_L3.create().compute()
+    cube = GLOBAL_HEALPIX_CUBE_L3.create()
+    query = create_query_params(tile, WEBMERC_TMS, style="polygons")
+    expected = _pixels(await pipeline(flat, query))
+    actual = _pixels(await pipeline(cube, query))
+    np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.asyncio
+async def test_cube_coarsened_matches_parent_mean():
+    # L5 cube coarsened to L3 must render like a 1-D L3 grid of child means.
+    cube = GLOBAL_HEALPIX_CUBE_L5.create()
+    parent = _create_global_healpix(level=3, dtype=np.float64)
+    child = _create_global_healpix(level=5, dtype=np.float64)["foo"].values
+    parent["foo"].values[:] = child.reshape(-1, 16).mean(axis=1)
+    parent["foo"].attrs.update(cube["foo"].attrs)
+    query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style="polygons")
+    with config.set({"max_num_geometries": 12 * 4**3}):
+        actual = _pixels(await pipeline(cube, query))
+    expected = _pixels(await pipeline(parent, query))
+    np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.asyncio
+async def test_cube_discrete_not_coarsened(monkeypatch):
+    cube = GLOBAL_HEALPIX_CUBE_L5.create()
+    cube["foo"] = (cube["foo"] > 0).astype(np.int8)
+    cube["foo"].attrs.update(flag_values=[0, 1], flag_meanings="no yes")
+    calls = []
+    original = HealpixCube.select
+
+    def spy(self, bbox, *, allow_coarsen=True):
+        calls.append(allow_coarsen)
+        return original(self, bbox, allow_coarsen=allow_coarsen)
+
+    monkeypatch.setattr(HealpixCube, "select", spy)
+    query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style="polygons")
+    await pipeline(cube, query)
+    assert calls == [False]
+
+
+@pytest.mark.asyncio
+async def test_cube_raster_rejected():
+    cube = GLOBAL_HEALPIX_CUBE_L3.create()
+    query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style="raster")
+    with pytest.raises(ValueError):
+        await pipeline(cube, query)
+
+
+def test_cube_decompressed_size():
+    cube = GLOBAL_HEALPIX_CUBE_L3.create()
+    grid = guess_grid_system(cube, "foo")
+    (ix, *_) = grid.select(BBox(west=0, south=0, east=10, north=10))
+    da = cube["foo"].isel(time=0, face=ix.face, y=ix.y, x=ix.x)
+    chunks = {"time": 1, "face": 1, "y": 8, "x": 8}
+    got = decompressed_size_bytes({grid.dim: [ix]}, da, grid, chunks=chunks)
+    # one 8x8 face chunk of float64; face/y/x/time chunk sizes must not multiply again
+    assert got == 8 * 8 * 8
+#+end_src
+Check ~create_query_params~ / ~pipeline~ / ~config~ / ~io~ / ~BBox~ / ~guess_grid_system~ /
+~decompressed_size_bytes~ imports in ~tests/test_pipeline.py~ and add the missing ones at the top.
+If the categorical fixture needs a colormap or other attrs to be classified ~DiscreteData~,
+read how ~DiscreteData~ is built in ~pipeline.py~ / ~types.py~ and set what it needs.
+
+*** Step 2: Run the tests to make sure they fail
+Run: ~uv run pytest tests/test_pipeline.py -k cube -v~
+Expected: FAIL (cube patches not built; ~KeyError~ or ~TypeError: Unknown grid system~).
+
+*** Step 3: Implement
+1. ~pipeline.apply_slicers~ — no X/Y/cell_ids coords for the cube; one subset:
+#+begin_src python
+    pick = [] if isinstance(grid, HealpixCube) else [alternate.X, alternate.Y]
+    # For Healpix, also keep the cell_ids coordinate
+    if isinstance(grid, Healpix) and not isinstance(grid, HealpixCube):
+        pick.append(grid.cell_ids_name)
+    ...
+    elif isinstance(grid, HealpixCube):
+        subsets = [ds]
+        concat_dim = grid.Ydim
+    elif isinstance(grid, Healpix):
+        ...  # unchanged
+#+end_src
+2. ~pipeline._load_subsets~ — a branch after the ~FacetedGridSystem~ branch:
+#+begin_src python
+        elif isinstance(grid, HealpixCube):
+            if style != "polygons":
+                raise ValueError(f"HealpixCube only supports style='polygons'; got {style!r}.")
+            allow_coarsen = not isinstance(array.datatype, DiscreteData)
+            indexers = await async_run(grid.select, input_bbox, allow_coarsen=allow_coarsen)
+            for ix in indexers:
+                patches.append(
+                    Patch(
+                        grid=grid,
+                        da=array.da.isel({grid.face_dim: ix.face, grid.Ydim: ix.y, grid.Xdim: ix.x}),
+                        slicers={grid.dim: [ix]},
+                        alternate=grid.to_metadata(),
+                        indexer=ix,
+                    )
+                )
+#+end_src
+3. ~_post_load~ — before the ~coarsen_factors~ check:
+#+begin_src python
+        if isinstance(patch.grid, HealpixCube):
+            assert isinstance(patch.indexer, HealpixCubeIndexer)
+            ld = await async_run(patch.grid.gather, ld, patch.indexer)
+#+end_src
+4. ~lib._iter_subset_shapes~ — before the ~Triangular~ branch:
+#+begin_src python
+    if isinstance(grid, HealpixCube):
+        for ix in slicers[grid.dim]:
+            assert isinstance(ix, HealpixCubeIndexer)
+            yield (
+                _get_indexer_size(ix.y, None, chunks.get(grid.Ydim)),
+                _get_indexer_size(ix.x, None, chunks.get(grid.Xdim)),
+            )
+        return
+#+end_src
+5. ~lib.decompressed_size_bytes~: ~if isinstance(grid, HealpixCube): covered |= grid.dims~.
+6. Import ~HealpixCube~, ~HealpixCubeIndexer~ where needed (lib imports are local in those functions; match that).
+7. Add a short ~test_healpix_cube_tile~ snapshot test parametrized by ~HEALPIX_CUBE_TILES~ on
+   ~GLOBAL_HEALPIX_CUBE_L5~, modelled on ~test_healpix_tile~ (same ~skip_transparency_check~ rule).
+
+*** Step 4: Run the tests to make sure they pass
+Run: ~uv run pytest tests/test_pipeline.py -k cube -v~. The new snapshot test fails first; create
+only its snapshots with ~uv run pytest tests/test_pipeline.py -k test_healpix_cube_tile --snapshot-update~,
+then open each new PNG (~tests/__snapshots__/test_pipeline/test_healpix_cube_tile*~) and check it shows
+a smooth global field with no gaps at lon 180°. Rerun without the flag → PASS.
+Run: ~uv run pytest tests/test_pipeline.py tests/test_lib.py tests/test_healpix.py~ → PASS.
+If ~test_cube_render_matches_1d~ fails only on a few edge pixels, stop and report the diff
+(count, location); do not loosen the assertion.
+
+*** Step 5: Commit
+#+begin_src bash
+pre-commit run --files src/xpublish_tiles/pipeline.py src/xpublish_tiles/lib.py src/xpublish_tiles/testing/tiles.py tests/test_pipeline.py
+git add src/xpublish_tiles/pipeline.py src/xpublish_tiles/lib.py src/xpublish_tiles/testing/tiles.py tests/test_pipeline.py tests/__snapshots__/test_pipeline/
+git commit -m "feat: render HEALPix cube tiles as polygons with 2^k coarsening"
+#+end_src
+
+** Task 4: Metadata endpoints
+Files:
+- Modify: ~tests/test_xpublish/test_tiles/test_tiles_metadata.py~
+- Test: ~tests/test_xpublish/test_tiles/test_tiles_metadata.py~, WMS tests (find with
+  ~grep -rln "GetCapabilities" tests/test_xpublish~)
+
+Interfaces consumed: ~GLOBAL_HEALPIX_CUBE_L3~ (Task 2); pipeline support (Task 3).
+
+*** Step 1: Write the failing tests
+- Add ~pytest.param(GLOBAL_HEALPIX_CUBE_L3, id="global_healpix_cube_l3")~ to BOTH
+  ~test_tiles_endpoint_snapshot~ and ~test_tilejson_endpoint_snapshot~ parametrizations.
+- Add ~GLOBAL_HEALPIX_CUBE_L3~ to the fixture tuple in ~test_allowed_styles_healpix_only_polygons~.
+- New test, modelled on how ~test_tiles_endpoint_snapshot~ builds its client and requests ~/tiles/~:
+#+begin_src python
+def test_cube_dims_not_advertised():
+    # face/y/x belong to the grid; only time is a selectable dimension.
+    response = <request the /tiles/ metadata for GLOBAL_HEALPIX_CUBE_L3 exactly as test_tiles_endpoint_snapshot does>
+    names = {d["name"] for layer in response.json()["layers"] for d in layer.get("dimensions", [])}
+    assert "time" in names
+    assert not names & {"face", "y", "x"}
+#+end_src
+  The angle-bracket line is an instruction: copy the client setup and request from
+  ~test_tiles_endpoint_snapshot~. Read the JSON shape of an existing snapshot under
+  ~tests/__snapshots__~ and change ~"layers"~ / ~"dimensions"~ / ~"name"~ to the real keys.
+- WMS: in the WMS capabilities test module, add the same check for the cube dataset: the layer for
+  ~foo~ has a ~time~ dimension and no ~face~ dimension. Model it on an existing capabilities test there.
+
+*** Step 2: Run the tests to make sure they fail
+Run: ~uv run pytest tests/test_xpublish -k "cube" -v~
+Expected: the snapshot tests fail with a missing snapshot; the dims tests PASS or FAIL. If a dims test
+passes at once, that is correct (Task 2 set ~dims~); keep it as a regression test.
+
+*** Step 3: Create the new snapshots
+Run: ~uv run pytest tests/test_xpublish/test_tiles/test_tiles_metadata.py -k global_healpix_cube_l3 --snapshot-update~.
+Open the new JSON snapshots. Check: global bbox, only polygon styles, a ~time~ dimension, no
+~face~/~y~/~x~ dimension, and a TileJSON ~minzoom~ in 0..30.
+
+*** Step 4: Run the tests to make sure they pass
+Run: ~uv run pytest tests/test_xpublish -v~ → PASS.
+
+*** Step 5: Commit
+#+begin_src bash
+pre-commit run --files tests/test_xpublish/test_tiles/test_tiles_metadata.py <wms test file>
+git add tests/test_xpublish tests/__snapshots__
+git commit -m "test: HEALPix cube metadata, TileJSON and dimension snapshots"
+#+end_src
+
+** Task 5: Whole-branch check, real data, PR (controller)
+*** Step 1: Full suite and types
+Run: ~uv run pytest tests~, ~uv run ty check src/ tests/~, ~pre-commit run --all-files~. All pass.
+*** Step 2: Real data
+Open ~zeus-ai/ascat-healpix~ group ~ascat/metopb/nside512/2014~ with arraylake, take ~.isel(time=slice(0, 24))~,
+and render tiles z0, z2 and z6 for ~u10~ with ~pipeline(...)~. Check the PNGs look right and record z0 latency.
+Check whether ~wvc_quality_flag~ is classified ~DiscreteData~ (spec open item); report the answer.
+*** Step 3: PR
+Push ~deepak/healpix-cube~ and open a PR against ~main~ that references #197. Body ends with
+~🤖 Generated with [Claude Code](https://claude.com/claude-code)~.

@@ -22,6 +22,12 @@ from pyproj.aoi import BBox
 import xarray as xr
 from xarray.core.indexing import IndexSelResult
 from xpublish_tiles.config import config
+from xpublish_tiles.healpix import (
+    antimeridian_cells,
+    bbox_cell_ids,
+    coarse_level,
+    nested_to_fyx,
+)
 from xpublish_tiles.lib import (
     Fill,
     InvalidCoordinateValues,
@@ -31,6 +37,7 @@ from xpublish_tiles.lib import (
     _prevent_slice_overlap,
     anynotfinite,
     cf_get,
+    coarsen_mean_pad,
     crs_repr,
     fill_rings_from_corners,
     round_bbox,
@@ -103,6 +110,20 @@ class HealpixIndexer:
         else:
             raise ValueError("dim_size is required for open-ended slices")
         return stop - start
+
+
+@dataclass
+class HealpixCubeIndexer(HealpixIndexer):
+    """One face rectangle of a (face, y, x) HEALPix cube; ``indices`` are positions in the gathered cell dim."""
+
+    cell_ids: np.ndarray  # sorted uint64 nested ids at ``level``
+    level: int
+    face: int
+    y: slice  # fine rows read
+    x: slice  # fine cols read
+    factor: int  # 2**k block size
+    ys: np.ndarray  # coarse row of each cell inside the rectangle
+    xs: np.ndarray  # coarse col of each cell inside the rectangle
 
 
 @dataclass
@@ -2862,8 +2883,6 @@ class Healpix(GridSystem):
         cell_ids: np.ndarray,
         bbox: BBox,
     ):
-        from healpix_geo.nested import zone_coverage
-
         self.crs = crs
         self.X, self.Y = Xname, Yname
         self.dim = dim
@@ -2876,12 +2895,7 @@ class Healpix(GridSystem):
         self._bbox_xform_cache = {}
 
         depth = int(index.grid_info.level)
-        # straddle the 180° antimeridian with a hairline zone.
-        eps = 1e-6
-        am_all, _, _ = zone_coverage(
-            (180.0 - eps, -90.0, 180.0 + eps, 90.0), depth, flat=True
-        )
-        self.antimeridian_cells = np.intersect1d(am_all, cell_ids)
+        self.antimeridian_cells = np.intersect1d(antimeridian_cells(depth), cell_ids)
 
     @property
     def Xdim(self) -> str:
@@ -2901,8 +2915,6 @@ class Healpix(GridSystem):
         Uses healpix_geo to find HEALPix cells that intersect the bbox,
         then returns the indices of those cells in our dataset.
         """
-        from healpix_geo.nested import kth_neighbourhood, zone_coverage
-
         if self.index.grid_info.indexing_scheme != "nested":
             raise NotImplementedError(
                 f"Healpix sel() only supports nested indexing, got {self.index.grid_info.indexing_scheme!r}"
@@ -2919,38 +2931,10 @@ class Healpix(GridSystem):
 
         depth = int(self.index.grid_info.level)
 
-        # ``zone_coverage`` takes degrees with lon_min ∈ [0, 360),
-        # 0 < lon_max < 360 (exactly 360 panics), lat ∈ [-90, 90].
-        # Also: cells whose boundary lies exactly on the zone edge are handled
-        # inconsistently, so we nudge west/east outward by a small epsilon to
-        # guarantee boundary cells are included.
-        EPS = 1e-6
-        MAX_LON = 360.0 - 1e-9
-        west = (bbox.west - EPS) % 360.0
-        east = (bbox.east + EPS) % 360.0
-        if east == 0:
-            east = MAX_LON
-        south = max(bbox.south, -90.0)
-        north = min(bbox.north, 90.0)
-        if west < east:
-            bbox_cell_ids, _, _ = zone_coverage(
-                (west, south, east, north), depth, flat=True
-            )
-        else:
-            # spans the anti-meridian
-            # Normalize west/east into [0, 360) and split into two.
-            left, _, _ = zone_coverage((west, south, MAX_LON, north), depth, flat=True)
-            right, _, _ = zone_coverage((0.0, south, east, north), depth, flat=True)
-            bbox_cell_ids = np.concatenate([left, right])
-
-        # Dilate by one ring so neighbor cells covering tile-edge gaps are
-        # included. This pads the selection in the same spirit as
-        # ``apply_default_pad`` for 2D grids.
-        neighbors = kth_neighbourhood(bbox_cell_ids.astype(np.uint64), depth, ring=1)
-        bbox_cell_ids = np.unique(neighbors.ravel()).astype(bbox_cell_ids.dtype)
+        selected = bbox_cell_ids(bbox, depth)
 
         _, _, indices = np.intersect1d(
-            bbox_cell_ids, self.cell_ids, assume_unique=True, return_indices=True
+            selected, self.cell_ids, assume_unique=True, return_indices=True
         )
 
         if len(indices) == 0:
@@ -2973,14 +2957,19 @@ class Healpix(GridSystem):
         coarsen_factors: dict[str, int],
     ) -> xr.DataArray:
         """Return a 1D DataArray with flattened (n_cells * 4,) corner lon/lat coords."""
-        import healpix_geo
-
         parts = [np.asarray(self.cell_ids[sl.indices]) for sl in slicers[self.dim]]
         subset_cell_ids = parts[0] if len(parts) == 1 else np.concatenate(parts)
         info = self.index.grid_info
-        lon, lat = healpix_geo.nested.vertices(
-            subset_cell_ids, depth=info.level, ellipsoid=_healpix_ellipsoid(info)
+        return self._corner_array(
+            subset_cell_ids, int(info.level), _healpix_ellipsoid(info)
         )
+
+    def _corner_array(
+        self, cell_ids: np.ndarray, depth: int, ellipsoid: Any
+    ) -> xr.DataArray:
+        import healpix_geo
+
+        lon, lat = healpix_geo.nested.vertices(cell_ids, depth=depth, ellipsoid=ellipsoid)
         lon = np.asarray(lon).ravel()
         lat = np.asarray(lat).ravel()
         corner_dim = "_corner"
@@ -3158,6 +3147,153 @@ class FacetedGridSystem(GridSystem, ABC):
         return {self.face_dim: [FacetedIndexer(selections=selections)]}
 
 
+@dataclass(init=False, kw_only=True, eq=False)
+class HealpixCube(Healpix):
+    """HEALPix stored as (face=12, y=nside, x=nside); xyf layout, nested ordering.
+
+    Never builds an index: ids come from ``bbox_cell_ids`` and Morton bit arithmetic.
+    """
+
+    face_dim: str
+    level: int
+
+    def __init__(self, *, face_dim: str, Ydim: str, Xdim: str, level: int):
+        import xdggs
+
+        self.crs = DEFAULT_CRS
+        self.X, self.Y = "longitude", "latitude"
+        self.dim = "_healpix_cell"
+        self.face_dim, self._Ydim, self._Xdim = face_dim, Ydim, Xdim
+        self.level = level
+        self.grid_info = xdggs.HealpixInfo(level=level, indexing_scheme="nested")
+        self.indexes = ()
+        self.alternates = ()
+        self.bbox = BBox(west=-180, south=-90, east=180, north=90)
+        self._bbox_xform_cache = {}
+
+    @property
+    def Xdim(self) -> str:
+        return self._Xdim
+
+    @property
+    def Ydim(self) -> str:
+        return self._Ydim
+
+    @property
+    def dims(self) -> set[str]:
+        return {self.face_dim, self._Ydim, self._Xdim}
+
+    @classmethod
+    def from_dataset(
+        cls,
+        ds: xr.Dataset,
+        crs: CRS,
+        Xname: str,
+        Yname: str,
+        *,
+        face_dim: str = "face",
+    ) -> Self:
+        return cls(
+            face_dim=face_dim, Ydim="y", Xdim="x", level=ds.sizes["x"].bit_length() - 1
+        )
+
+    def __repr__(self) -> str:
+        return f"HealpixCube(face_dim={self.face_dim!r}, level={self.level}, crs={crs_repr(self.crs)})"
+
+    def select(
+        self, bbox: BBox, *, allow_coarsen: bool = True
+    ) -> list[HealpixCubeIndexer]:
+        level = (
+            coarse_level(bbox, self.level, config.get("max_num_geometries"))
+            if allow_coarsen
+            else self.level
+        )
+        factor = 2 ** (self.level - level)
+        # `and`, not `or`: a full-width polar strip must still go through the budget
+        if bbox.east - bbox.west >= 360 and bbox.north - bbox.south >= 180:
+            return self._select_globe(level, factor)
+        ids = bbox_cell_ids(bbox, level).astype(np.uint64)
+        am = np.isin(ids, antimeridian_cells(level))
+        f, yc, xc = nested_to_fyx(ids, level)
+        out = []
+        for face in np.unique(f):
+            m = f == face
+            y0, y1 = int(yc[m].min()), int(yc[m].max()) + 1
+            x0, x1 = int(xc[m].min()), int(xc[m].max()) + 1
+            out.append(
+                HealpixCubeIndexer(
+                    indices=np.arange(int(m.sum())),
+                    antimeridian_mask=am[m],
+                    cell_ids=ids[m],
+                    level=level,
+                    face=int(face),
+                    y=slice(y0 * factor, y1 * factor),
+                    x=slice(x0 * factor, x1 * factor),
+                    factor=factor,
+                    ys=yc[m] - y0,
+                    xs=xc[m] - x0,
+                )
+            )
+        return out
+
+    def _select_globe(self, level: int, factor: int) -> list[HealpixCubeIndexer]:
+        """Whole faces: ids are the contiguous range ``face*4**level ..``; no masking."""
+        n = 4**level
+        side = 2**self.level
+        _, ys, xs = nested_to_fyx(np.arange(n, dtype=np.uint64), level)
+        am = np.zeros(12 * n, dtype=bool)
+        am[antimeridian_cells(level)] = True
+        return [
+            HealpixCubeIndexer(
+                indices=np.arange(n),
+                antimeridian_mask=am[face * n : (face + 1) * n],
+                cell_ids=np.arange(face * n, (face + 1) * n, dtype=np.uint64),
+                level=level,
+                face=face,
+                y=slice(0, side),
+                x=slice(0, side),
+                factor=factor,
+                ys=ys,
+                xs=xs,
+            )
+            for face in range(12)
+        ]
+
+    def equals(self, other: object) -> bool:
+        return (
+            type(self) is type(other)
+            and isinstance(other, HealpixCube)
+            and self.level == other.level
+            and self.face_dim == other.face_dim
+        )
+
+    def sel(self, *, bbox: BBox) -> Slicers:
+        return {self.dim: list(self.select(bbox))}
+
+    def gather(self, da: xr.DataArray, indexer: HealpixCubeIndexer) -> xr.DataArray:
+        """Block-mean a loaded face rectangle by ``factor`` and gather the selected cells."""
+        da = da.reset_coords(drop=True)
+        if indexer.factor > 1:
+            da = coarsen_mean_pad(
+                da, {self._Ydim: indexer.factor, self._Xdim: indexer.factor}
+            )
+        return da.isel(
+            {
+                self._Ydim: xr.Variable(self.dim, indexer.ys),
+                self._Xdim: xr.Variable(self.dim, indexer.xs),
+            }
+        )
+
+    def cell_corners(
+        self, *, slicers: dict[str, list], coarsen_factors: dict[str, int]
+    ) -> xr.DataArray:
+        (indexer,) = slicers[self.dim]
+        assert isinstance(indexer, HealpixCubeIndexer)
+        return self._corner_array(
+            indexer.cell_ids, indexer.level, _healpix_ellipsoid(self.grid_info)
+        )
+
+
 @dataclass(kw_only=True, eq=False)
 class CubedSphere(FacetedGridSystem):
     """Six-face cubed-sphere grid (GFDL/GMAO Mosaic Gridspec layout).
@@ -3247,6 +3383,32 @@ class CubedSphere(FacetedGridSystem):
 
 
 _CUBED_SPHERE_PATTERN = re.compile(r"cubed?[-_ ]sphere", re.IGNORECASE)
+
+
+def find_healpix_cube_dims(ds: xr.Dataset) -> tuple[str, str, str] | None:
+    """Detect the HEALPix xyf cube layout (face=12, y=nside, x=nside); see zeus-healpix."""
+    nside = ds.attrs.get("healpix_nside")
+    if nside is None:
+        return None
+    ordering = ds.attrs.get("face_ordering", "standard")
+    if ordering != "standard":
+        raise UnsupportedGridError(
+            f"HEALPix cube face_ordering={ordering!r} is not supported."
+        )
+    for var in ds.data_vars.values():
+        if not {"face", "y", "x"} <= set(var.dims):
+            continue
+        n = ds.sizes["x"]
+        if (
+            ds.sizes["face"] == 12
+            and ds.sizes["y"] == n
+            and n == nside
+            and n & (n - 1) == 0
+        ):
+            return ("face", "y", "x")
+        logger.warning("healpix_nside=%r does not match dims %r", nside, dict(ds.sizes))
+        return None
+    return None
 
 
 def find_cubed_sphere_face_dim(
@@ -3715,6 +3877,16 @@ def guess_grid_metadata(
     Pass ``all_mappings`` to reuse a previously computed
     ``_guess_grid_mappings_and_crs(ds)`` result and avoid recomputing it.
     """
+    cube_dims = find_healpix_cube_dims(ds)
+    if cube_dims is not None:
+        return GridMetadata(
+            X="longitude",
+            Y="latitude",
+            crs=DEFAULT_CRS,
+            grid_cls=HealpixCube,
+            face_dim=cube_dims[0],
+        )
+
     face_dim = find_cubed_sphere_face_dim(ds)
     if face_dim is not None:
         cf_coords = ds.cf.coordinates
@@ -3984,6 +4156,15 @@ def _detect_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
         sync_load_async(ds[[meta.X, meta.Y]])
         # Refresh cf_sub — for UGRID stay on the full ds to keep mesh+connectivity.
         cf_sub = ds if is_ugrid_var else ds.cf[[name]]
+
+    if meta is not None and meta.grid_cls is HealpixCube:
+        dims = find_healpix_cube_dims(ds)
+        assert dims is not None
+        grid = HealpixCube.from_dataset(ds, meta.crs, meta.X, meta.Y, face_dim=dims[0])
+        var = cf_get(ds, name)
+        grid.Z = _guess_z_dimension(var, exclude_dims=grid.dims_for(var))
+        _validate_grid_dims(grid, var)
+        return grid
 
     # Cubed sphere has its own construction signature (face_dim) and uses
     # the outer ds for Z lookup, so dispatch directly instead of going
