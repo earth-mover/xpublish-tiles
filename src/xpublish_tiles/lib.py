@@ -1112,9 +1112,20 @@ def _iter_subset_shapes(
     from xpublish_tiles.grids import (
         FacetedGridSystem,
         FacetedIndexer,
+        HealpixCube,
+        HealpixCubeIndexer,
         Triangular,
         UgridIndexer,
     )
+
+    if isinstance(grid, HealpixCube):
+        for ix in slicers[grid.dim]:
+            assert isinstance(ix, HealpixCubeIndexer)
+            yield (
+                _get_indexer_size(ix.y, None, chunks.get(grid.Ydim)),
+                _get_indexer_size(ix.x, None, chunks.get(grid.Xdim)),
+            )
+        return
 
     if isinstance(grid, Triangular):
         indexer = next(iter(slicers[grid.dim]))
@@ -1274,7 +1285,7 @@ def decompressed_size_bytes(
     ``ValidatedArray.chunks``); without it we fall back to reading whatever the
     array can still tell us, which is exact only while its dims are intact.
     """
-    from xpublish_tiles.grids import FacetedGridSystem
+    from xpublish_tiles.grids import FacetedGridSystem, HealpixCube
 
     if chunks is None:
         chunks = _chunk_sizes(da)
@@ -1285,6 +1296,8 @@ def decompressed_size_bytes(
     covered = set(slicers)
     if isinstance(grid, FacetedGridSystem):
         covered |= {str(d) for f in grid.faces for d in (f.Xdim, f.Ydim)}
+    if isinstance(grid, HealpixCube):
+        covered |= grid.dims
     for dim, chunk in chunks.items():
         if dim in covered:
             continue

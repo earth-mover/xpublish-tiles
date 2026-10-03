@@ -454,3 +454,13 @@ UTM50S_HIRES_BENCHMARK_TILES = [
 # fmt: on
 
 TILES = WEBMERC_TILES + WGS84_TILES + ETRS89_TILES
+
+# (tile, id) pairs; wrapped in pytest.param by the tests (no runtime pytest dep)
+HEALPIX_CUBE_TILES = [
+    (Tile(x=0, y=0, z=0), "0/0/0"),
+    (Tile(x=3, y=0, z=2), "2/0/3"),  # antimeridian, north
+    (Tile(x=0, y=15, z=5), "5/0/15"),  # west of antimeridian
+    (Tile(x=31, y=15, z=5), "5/31/15"),  # east of antimeridian
+    (Tile(x=8, y=12, z=5), "5/8/12"),
+    (Tile(x=148, y=134, z=9), "9/134/148"),
+]
