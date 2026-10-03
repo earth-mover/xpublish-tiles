@@ -93,7 +93,7 @@ def test_cube_fixture_matches_1d():
     cube = _create_global_healpix_cube(level=3, dtype=np.float64)
     flat = _create_global_healpix(level=3, dtype=np.float64)
     f, y, x = nested_to_fyx(np.arange(12 * 4**3), 3)
-    got = cube["foo"].isel(time=0).values[f, y, x]
+    got = cube["foo"].isel(time=-1).values[f, y, x]
     np.testing.assert_array_equal(got, flat["foo"].values)
 
 
@@ -157,7 +157,7 @@ def test_cube_select_coarsen_and_gather():
     flat = _create_global_healpix(level=5, dtype=np.float64)["foo"].values
     expected = flat.reshape(-1, 16).mean(axis=1)  # nested children are contiguous
     for ix in indexers:
-        rect = ds["foo"].isel(time=0, face=ix.face, y=ix.y, x=ix.x).load()
+        rect = ds["foo"].isel(time=-1, face=ix.face, y=ix.y, x=ix.x).load()
         got = grid.gather(rect, ix)
         assert got.dims == (grid.dim,)
         np.testing.assert_allclose(
@@ -205,8 +205,69 @@ def test_cube_partial_bbox_gather(bbox, max_cells, coarsened):
     flat = _create_global_healpix(level=5, dtype=np.float64)["foo"].values
     expected = flat.reshape(-1, factor**2).mean(axis=1)
     for ix in indexers:
-        rect = ds["foo"].isel(time=0, face=ix.face, y=ix.y, x=ix.x).load()
+        rect = ds["foo"].isel(time=-1, face=ix.face, y=ix.y, x=ix.x).load()
         got = grid.gather(rect, ix)
         np.testing.assert_allclose(
             got.values, expected[ix.cell_ids.astype(np.int64)], atol=1e-12
         )
+
+
+def test_bbox_cell_ids_globe_returns_all():
+    ids = bbox_cell_ids(BBox(west=-180, south=-90, east=180, north=90), 3)
+    np.testing.assert_array_equal(ids, np.arange(12 * 4**3))
+
+
+def test_bbox_cell_ids_full_width_strip():
+    ids = bbox_cell_ids(BBox(west=-180, south=10, east=180, north=40), 3)
+    core, _, _ = hpn.zone_coverage((0.0, 10, 360.0 - 1e-9, 40), 3, flat=True)
+    expected = hpn.kth_neighbourhood(core.astype(np.uint64), 3, ring=1).ravel()
+    np.testing.assert_array_equal(ids, np.unique(expected[expected >= 0]))
+
+
+@pytest.mark.parametrize(
+    "bbox",
+    [
+        BBox(west=-180, south=85, east=180, north=90),
+        BBox(west=-180, south=-90, east=180, north=-60),
+    ],
+)
+def test_cube_select_polar_strip_respects_budget(bbox):
+    grid = HealpixCube(face_dim="face", Ydim="y", Xdim="x", level=9)
+    indexers = grid.select(bbox)
+    (level,) = {ix.level for ix in indexers}
+    ids = np.concatenate([ix.cell_ids for ix in indexers])
+    assert ids.size <= config.get("max_num_geometries")
+    core, _, _ = hpn.zone_coverage(
+        (0.0, bbox.south, 360.0 - 1e-9, bbox.north), level, flat=True
+    )
+    assert np.isin(core, ids).all()
+
+
+def test_cube_select_globe_matches_generic_path():
+    grid = HealpixCube(face_dim="face", Ydim="y", Xdim="x", level=3)
+    fast = grid.select(BBox(west=-180, south=-90, east=180, north=90))
+    # height < 180 forces the bbox_cell_ids path, which still covers every cell
+    slow = grid.select(BBox(west=-180, south=-89.999, east=180, north=90))
+    assert len(fast) == len(slow) == 12
+    for a, b in zip(fast, slow, strict=True):
+        assert (a.face, a.y, a.x, a.level, a.factor) == (
+            b.face,
+            b.y,
+            b.x,
+            b.level,
+            b.factor,
+        )
+        for name in ("indices", "antimeridian_mask", "cell_ids", "ys", "xs"):
+            np.testing.assert_array_equal(getattr(a, name), getattr(b, name))
+
+
+def test_cube_equals():
+    a = HealpixCube(face_dim="face", Ydim="y", Xdim="x", level=3)
+    assert a == HealpixCube(face_dim="face", Ydim="y", Xdim="x", level=3)
+    assert a != HealpixCube(face_dim="face", Ydim="y", Xdim="x", level=4)
+    assert a != HealpixCube(face_dim="tile", Ydim="y", Xdim="x", level=3)
+
+
+def test_antimeridian_cells_read_only():
+    with pytest.raises(ValueError):
+        antimeridian_cells(3)[0] = 0

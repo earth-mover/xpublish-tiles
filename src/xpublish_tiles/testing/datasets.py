@@ -2222,7 +2222,7 @@ def _create_global_healpix_cube(*, level: int, dtype: npt.DTypeLike) -> xr.Datas
         {
             "foo": (
                 ("time", "face", "y", "x"),
-                np.stack([cube, cube]),
+                np.stack([cube + 1, cube]),
                 dict(flat["foo"].attrs),
             )
         },

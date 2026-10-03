@@ -101,7 +101,9 @@ def bbox_cell_ids(bbox: BBox, depth: int) -> np.ndarray:
         east = MAX_LON
     south = max(bbox.south, -90.0)
     north = min(bbox.north, 90.0)
-    if west < east:
+    if bbox.east - bbox.west >= 360:
+        cell_ids, _, _ = zone_coverage((0.0, south, MAX_LON, north), depth, flat=True)
+    elif west < east:
         cell_ids, _, _ = zone_coverage((west, south, east, north), depth, flat=True)
     else:
         # spans the anti-meridian
@@ -126,4 +128,5 @@ def antimeridian_cells(depth: int) -> np.ndarray:
 
     eps = 1e-6
     cells, _, _ = zone_coverage((180.0 - eps, -90.0, 180.0 + eps, 90.0), depth, flat=True)
+    cells.setflags(write=False)
     return cells

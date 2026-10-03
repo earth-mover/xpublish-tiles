@@ -1104,6 +1104,16 @@ async def test_cube_render_matches_1d(tile):
 
 
 @pytest.mark.asyncio
+async def test_cube_time_selector():
+    cube = GLOBAL_HEALPIX_CUBE_L3.create()
+    query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style="polygons")
+    default = _pixels(await pipeline(cube, query))
+    query.selectors = {"time": "2000-01-01"}
+    first = _pixels(await pipeline(cube, query))
+    assert not np.array_equal(first, default)
+
+
+@pytest.mark.asyncio
 async def test_cube_coarsened_matches_parent_mean():
     # L5 cube coarsened to L3 must render like a 1-D L3 grid of child means.
     cube = GLOBAL_HEALPIX_CUBE_L5.create()

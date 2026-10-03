@@ -37,9 +37,6 @@
 - ~coarse_level(bbox, level, max_cells) -> int~: smallest ~k~ with
   ~Ω(bbox) / (4π / (12·4**level)) / 4**k <= max_cells~. ~max_cells = config["max_num_geometries"]~.
   Returns ~level - k~. No I/O, no ~zone_coverage~ at the fine level.
-- ~face_rectangles(coarse_ids, coarse_level, k)~: per face that has cells,
-  ~y ∈ [min(y')·2**k, (max(y')+1)·2**k)~, same for x; and each coarse cell's position in its
-  face rectangle (in coarse units). Rectangle starts are multiples of ~2**k~, so blocks align.
 
 ** Healpix refactor
 - No ~Healpix.index~ change: the cube overrides every method that reads it
@@ -68,7 +65,9 @@
 - ~sel(bbox)~:
   1. ~L' = coarse_level(bbox, L, max_num_geometries)~, ~k = L - L'~.
   2. ~ids~ = shared helper at depth ~L'~. No ~intersect1d~: all ids exist.
-  3. ~face_rectangles(ids, L', k)~.
+  3. Face rectangles, inline in ~select~: per face that has cells,
+     ~y ∈ [min(y')·2**k, (max(y')+1)·2**k)~, same for x; and each coarse cell's position in its
+     face rectangle (in coarse units). Rectangle starts are multiples of ~2**k~, so blocks align.
   4. Antimeridian mask: hairline ~zone_coverage~ at ~L'~, cached per level.
 - ~cell_corners~: ~healpix_geo.nested.vertices(indexer.cell_ids, depth=indexer.level)~.
 - ~build_subset_dataset~: no lon/lat coords exist; the subset carries only the data var.
@@ -104,7 +103,7 @@
    ~nested_to_fyx~. Tiles with ~k = 0~ (antimeridian tiles included) must be pixel-identical to
    the same tiles from ~global_healpix_l5~. Direct image compare, not a new snapshot.
 3. Coarsening: cube at ~k = 2~ equals a level-3 grid from ~groupby(id >> 4).mean()~.
-   Render snapshot at zoom 0 (~k > 0~). ~DiscreteData~ is not coarsened.
+   Covered by ~test_cube_coarsened_matches_parent_mean~ (no zoom-0 render snapshot). ~DiscreteData~ is not coarsened.
 4. Detection: ~guess_grid_metadata(ds).grid_cls is HealpixCube~. Negative cases: attr missing,
    ~n~ not a power of 2, ~face_ordering="other"~ raises. ~CubedSphere~ detection unchanged.
 5. Selection dims: the ~/tiles/~ metadata snapshot for ~global_healpix_cube_l5~ advertises no
@@ -117,6 +116,10 @@
 * Open items
 - Check whether ~wvc_quality_flag~ (~flag_masks~, no ~flag_values~) is classified as ~DiscreteData~.
   If not, coarsening takes a nanmean of a bit field. This is the current 2-D behaviour too.
+
+* Known gaps
+- ~adversarial_slicers~ does not shift cube rectangles. This is exact when the in-face chunk
+  equals nside, and under-estimates the minzoom cost otherwise.
 
 * Future work
 - Upstream ~nested <-> (face, x, y)~ to ~healpix-geo~ (cds-healpix-rust probably has hash

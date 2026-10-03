@@ -3209,11 +3209,10 @@ class HealpixCube(Healpix):
             else self.level
         )
         factor = 2 ** (self.level - level)
-        # same whole-globe shortcut as Healpix.sel
-        if bbox.east - bbox.west >= 360 or bbox.north - bbox.south >= 180:
-            ids = np.arange(12 * 4**level, dtype=np.uint64)
-        else:
-            ids = bbox_cell_ids(bbox, level).astype(np.uint64)
+        # `and`, not `or`: a full-width polar strip must still go through the budget
+        if bbox.east - bbox.west >= 360 and bbox.north - bbox.south >= 180:
+            return self._select_globe(level, factor)
+        ids = bbox_cell_ids(bbox, level).astype(np.uint64)
         am = np.isin(ids, antimeridian_cells(level))
         f, yc, xc = nested_to_fyx(ids, level)
         out = []
@@ -3236,6 +3235,37 @@ class HealpixCube(Healpix):
                 )
             )
         return out
+
+    def _select_globe(self, level: int, factor: int) -> list[HealpixCubeIndexer]:
+        """Whole faces: ids are the contiguous range ``face*4**level ..``; no masking."""
+        n = 4**level
+        side = 2**self.level
+        _, ys, xs = nested_to_fyx(np.arange(n, dtype=np.uint64), level)
+        am = np.zeros(12 * n, dtype=bool)
+        am[antimeridian_cells(level)] = True
+        return [
+            HealpixCubeIndexer(
+                indices=np.arange(n),
+                antimeridian_mask=am[face * n : (face + 1) * n],
+                cell_ids=np.arange(face * n, (face + 1) * n, dtype=np.uint64),
+                level=level,
+                face=face,
+                y=slice(0, side),
+                x=slice(0, side),
+                factor=factor,
+                ys=ys,
+                xs=xs,
+            )
+            for face in range(12)
+        ]
+
+    def equals(self, other: object) -> bool:
+        return (
+            type(self) is type(other)
+            and isinstance(other, HealpixCube)
+            and self.level == other.level
+            and self.face_dim == other.face_dim
+        )
 
     def sel(self, *, bbox: BBox) -> Slicers:
         return {self.dim: list(self.select(bbox))}
