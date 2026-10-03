@@ -42,8 +42,9 @@
   face rectangle (in coarse units). Rectangle starts are multiples of ~2**k~, so blocks align.
 
 ** Healpix refactor
-- ~Healpix.index: HealpixIndex~ becomes ~Healpix.grid_info: HealpixInfo~.
-  Only ~index.grid_info~ is read today (~grids.py~ lines 2873, 2901, 2915, 2975).
+- No ~Healpix.index~ change: the cube overrides every method that reads it
+  (~__init__~, ~sel~, ~cell_corners~) and keeps its own ~grid_info~.
+- Extract ~Healpix._corner_array(cell_ids, depth, ellipsoid)~ from ~cell_corners~ for reuse.
 - Keep the 1-D ~Healpix.Xdim~ / ~Healpix.Ydim~ properties and its ~_iter_subset_shapes~ behaviour as they are.
 - Add an explicit ~HealpixCube~ branch to ~lib._iter_subset_shapes~ (like ~Triangular~) that yields
   ~(n,)~, where ~n~ is the cell count in the loaded rectangles. Required: the 2-D fall-through
@@ -51,12 +52,10 @@
 - The bbox -> nested ids code in ~Healpix.sel~ (~zone_coverage~ with the antimeridian split,
   ~EPS~ nudge, 1-ring ~kth_neighbourhood~ dilation) moves to a shared helper with a ~depth~ argument.
 
-** HealpixIndexer
-Add optional fields. The 1-D grid leaves them ~None~.
-- ~cell_ids: np.ndarray | None~: nested ids at ~level~.
-- ~level: int | None~: render level (~L' = L - k~).
-- ~rectangles~: per-face ~(face, y slice, x slice)~ and the gather positions.
-  No new indexer class, so the 8 ~isinstance(..., HealpixIndexer)~ sites stay as they are.
+** HealpixCubeIndexer(HealpixIndexer)
+- A subclass, so the 8 ~isinstance(..., HealpixIndexer)~ sites accept it with no change.
+- Fields: ~cell_ids~ (nested ids at ~level~), ~level~, ~face~, ~y~/~x~ (fine slices read),
+  ~factor~ (~2**k~), ~ys~/~xs~ (coarse positions in the rectangle). ~indices = arange(n)~.
 
 ** HealpixCube(Healpix)
 - Fields: ~face_dim~, ~Ydim~, ~Xdim~, ~grid_info = HealpixInfo(level=log2(n), indexing_scheme="nested")~.
@@ -78,10 +77,12 @@ Add optional fields. The 1-D grid leaves them ~None~.
 - If ~DiscreteData~: force ~k = 0~.
 
 ** Pipeline
-- ~apply_slicers~: for ~HealpixCube~, one orthogonal ~isel(face=f, y=ys, x=xs)~ per rectangle.
+- One ~Patch~ per face (like ~FacetedGridSystem~): ~load_plans~ concatenates the subsets of one
+  plan, and face rectangles have different shapes.
+- ~apply_slicers~: for ~HealpixCube~, one orthogonal ~isel(face=f, y=ys, x=xs)~ per patch.
   Lazy; loaded by the current async path. Same chunks as a pointwise load (one chunk per face);
   up to ~2x decompressed cells, because face axes are 45° to lon/lat.
-- After load (~_finish_subsets~): if ~k > 0~, ~coarsen_mean_pad(rect, {y: 2**k, x: 2**k})~.
+- After load (~_post_load~): if ~k > 0~, ~coarsen_mean_pad(rect, {y: 2**k, x: 2**k})~.
   Then gather coarse cells into one 1-D ~cell~ dim, in ~indexer.cell_ids~ order.
 - From here the subset matches a 1-D HEALPix subset. ~fix_healpix_discontinuity~ and the
   polygon render run unchanged.
