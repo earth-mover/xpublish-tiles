@@ -71,16 +71,44 @@ def nested_to_fyx(ids, level: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return f.astype(np.int64), y.astype(np.int64), x.astype(np.int64)
 
 
-def coarse_level(bbox: BBox, level: int, max_cells: int) -> int:
+MERCATOR_MAX_LAT = 85.0511287798
+POLAR_CLIP_LAT = 75.0
+
+
+def mercator_polar_stretch(south: float, north: float) -> float:
+    """Budget multiplier so the poleward row (clipped to POLAR_CLIP_LAT) keeps the mean density.
+
+    Web Mercator pixel area on the sphere goes as cos²φ; its tile mean is
+    (sin φn − sin φs) / (yn − ys).
+    """
+    s, n = (
+        math.radians(min(max(v, -MERCATOR_MAX_LAT), MERCATOR_MAX_LAT))
+        for v in (south, north)
+    )
+    if n - s < 1e-9:
+        return 1.0
+    mean_cos2 = (math.sin(n) - math.sin(s)) / (
+        math.asinh(math.tan(n)) - math.asinh(math.tan(s))
+    )
+    ref = math.radians(min(max(abs(south), abs(north)), POLAR_CLIP_LAT))
+    return max(1.0, mean_cos2 / math.cos(ref) ** 2)
+
+
+def coarse_level(
+    bbox: BBox, level: int, max_cells: int, *, mercator_stretch: bool = True
+) -> int:
     """Finest level <= ``level`` whose estimated cell count in ``bbox`` fits ``max_cells``."""
     width = min(max(bbox.east - bbox.west, 0.0), 360.0)
     south, north = max(bbox.south, -90.0), min(bbox.north, 90.0)
+    budget = max_cells * (
+        mercator_polar_stretch(south, north) if mercator_stretch else 1.0
+    )
     omega = math.radians(width) * (
         math.sin(math.radians(north)) - math.sin(math.radians(south))
     )
     ncells = omega / (4 * math.pi / (12 * 4**level))
     k = 0
-    while k < level and ncells / 4**k > max_cells:
+    while k < level and ncells / 4**k > budget:
         k += 1
     return level - k
 

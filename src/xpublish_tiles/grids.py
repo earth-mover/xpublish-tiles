@@ -1,4 +1,5 @@
 import itertools
+import math
 import re
 import threading
 import warnings
@@ -40,6 +41,7 @@ from xpublish_tiles.lib import (
     coarsen_mean_pad,
     crs_repr,
     fill_rings_from_corners,
+    max_render_shape,
     round_bbox,
     suppress_cf_dangling_ref_warnings,
     sync_load_async,
@@ -3203,10 +3205,15 @@ class HealpixCube(Healpix):
         return f"HealpixCube(face_dim={self.face_dim!r}, level={self.level}, crs={crs_repr(self.crs)})"
 
     def select(
-        self, bbox: BBox, *, allow_coarsen: bool = True
+        self,
+        bbox: BBox,
+        *,
+        max_cells: int,
+        mercator_stretch: bool = True,
+        allow_coarsen: bool = True,
     ) -> list[HealpixCubeIndexer]:
         level = (
-            coarse_level(bbox, self.level, config.get("max_num_geometries"))
+            coarse_level(bbox, self.level, max_cells, mercator_stretch=mercator_stretch)
             if allow_coarsen
             else self.level
         )
@@ -3274,7 +3281,9 @@ class HealpixCube(Healpix):
         )
 
     def sel(self, *, bbox: BBox) -> Slicers:
-        return {self.dim: list(self.select(bbox))}
+        return {
+            self.dim: list(self.select(bbox, max_cells=math.prod(max_render_shape())))
+        }
 
     def gather(self, da: xr.DataArray, indexer: HealpixCubeIndexer) -> xr.DataArray:
         """Block-mean a loaded face rectangle by ``factor`` and gather the selected cells."""

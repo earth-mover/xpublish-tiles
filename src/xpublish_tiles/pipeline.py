@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import datetime
 import io
+import math
 from collections.abc import Hashable, Iterable, Mapping
 from dataclasses import dataclass
 from functools import partial
@@ -64,6 +65,7 @@ from xpublish_tiles.lib import (
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.projections import (
+    is_mercator_like,
     transformer_from_crs,
 )
 from xpublish_tiles.types import (
@@ -834,9 +836,7 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
         raise MissingParameterError(
             "The 'rgb' variant does not accept abovemaxcolor or belowmincolor."
         )
-    max_shape = max_render_shape(
-        style=query.style, width=query.width, height=query.height
-    )
+    max_shape = max_render_shape(width=query.width, height=query.height)
 
     # Capture the context logger before entering thread pool
     context_logger = get_context_logger()
@@ -1264,7 +1264,11 @@ async def subset_to_bbox(
                 )
             allow_coarsen = not isinstance(array.datatype, DiscreteData)
             indexers = await async_run(
-                grid.select, input_bbox, allow_coarsen=allow_coarsen
+                grid.select,
+                input_bbox,
+                max_cells=math.prod(max_shape),
+                mercator_stretch=is_mercator_like(crs),
+                allow_coarsen=allow_coarsen,
             )
             # one patch per face rectangle; [] falls through to NullRenderContext
             patches.extend(

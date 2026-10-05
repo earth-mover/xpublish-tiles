@@ -1315,21 +1315,8 @@ def decompressed_size_bytes(
     return total * da.dtype.itemsize
 
 
-def max_render_shape(
-    *, style: str, width: int = 256, height: int = 256
-) -> tuple[int, int]:
-    """Compute the per-axis max data shape for coarsening, given the render style.
-
-    For raster: ``max_pixel_factor * tile_size`` per axis.
-    For polygons: derived from ``max_num_geometries`` so that
-    ``product(max_shape) <= max_num_geometries``.
-    """
-    if style == "polygons":
-        max_num = config.get("max_num_geometries")
-        aspect = width / height
-        max_h = int(math.sqrt(max_num / aspect))
-        max_w = int(max_h * aspect)
-        return (max_w, max_h)
+def max_render_shape(*, width: int = 256, height: int = 256) -> tuple[int, int]:
+    """Per-axis max data shape for coarsening: ``max_pixel_factor * tile_size``."""
     pixel_factor = config.get("max_pixel_factor")
     return (pixel_factor * width, pixel_factor * height)
 

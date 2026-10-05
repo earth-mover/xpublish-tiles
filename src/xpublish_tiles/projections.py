@@ -43,6 +43,21 @@ def is_degree_geographic(crs: CRS) -> bool:
     return crs.is_geographic and all(ax.unit_name == "degree" for ax in crs.axis_info)
 
 
+_MERCATOR_METHODS = frozenset(
+    {
+        "Popular Visualisation Pseudo Mercator",
+        "Mercator (variant A)",
+        "Mercator (variant B)",
+    }
+)
+
+
+def is_mercator_like(crs: CRS) -> bool:
+    """True for normal-aspect Mercator (EPSG:3857, 3395, ...); excludes Transverse Mercator."""
+    op = crs.coordinate_operation
+    return op is not None and op.method_name in _MERCATOR_METHODS
+
+
 @lru_cache
 def has_null_datum_shift(crs: CRS) -> bool:
     """True when `crs` lon/lat may be treated as WGS84 lon/lat.

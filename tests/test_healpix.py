@@ -3,7 +3,6 @@ import numpy as np
 import pytest
 from pyproj.aoi import BBox
 
-from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
     HealpixCube,
     HealpixCubeIndexer,
@@ -17,6 +16,7 @@ from xpublish_tiles.healpix import (
     bbox_cell_ids,
     coarse_level,
     fyx_to_nested,
+    mercator_polar_stretch,
     nested_to_fyx,
 )
 from xpublish_tiles.testing.datasets import (
@@ -68,7 +68,20 @@ def test_coarse_level_no_coarsening_when_small():
 def test_coarse_level_reduces_for_globe():
     globe = BBox(west=-180, south=-90, east=180, north=90)
     # 12 * 4**9 = 3_145_728 cells > 1.5M, so one level up.
-    assert coarse_level(globe, 9, 1_500_000) == 8
+    assert coarse_level(globe, 9, 1_500_000, mercator_stretch=False) == 8
+
+
+def test_coarse_level_mercator_stretch():
+    z0 = BBox(west=-180, south=-85.0511287798, east=180, north=85.0511287798)
+    assert mercator_polar_stretch(z0.south, z0.north) == pytest.approx(4.73, abs=0.01)
+    budget = 9 * 256 * 256
+    assert coarse_level(z0, 12, budget, mercator_stretch=False) == 7
+    assert coarse_level(z0, 12, budget) == 8
+
+
+@pytest.mark.parametrize("south, north", [(0, 0.1), (60, 61), (80, 81), (-61, -60)])
+def test_mercator_polar_stretch_near_one_for_narrow_tiles(south, north):
+    assert mercator_polar_stretch(south, north) == pytest.approx(1.0, rel=0.05)
 
 
 def test_coarse_level_clamps():
@@ -138,7 +151,7 @@ def test_cube_select_no_coarsen_matches_1d_ids():
     grid = guess_grid_system(GLOBAL_HEALPIX_CUBE_L3.create(), "foo")
     assert isinstance(grid, HealpixCube)
     bbox = BBox(west=-30, south=-20, east=40, north=50)
-    indexers = grid.select(bbox)
+    indexers = grid.select(bbox, max_cells=10**9)
     assert all(isinstance(ix, HealpixCubeIndexer) for ix in indexers)
     assert all(ix.level == 3 and ix.factor == 1 for ix in indexers)
     got = np.concatenate([ix.cell_ids for ix in indexers])
@@ -150,8 +163,7 @@ def test_cube_select_coarsen_and_gather():
     grid = guess_grid_system(ds, "foo")
     assert isinstance(grid, HealpixCube)
     globe = BBox(west=-180, south=-90, east=180, north=90)
-    with config.set({"max_num_geometries": 12 * 4**3}):
-        indexers = grid.select(globe)
+    indexers = grid.select(globe, max_cells=12 * 4**3, mercator_stretch=False)
     assert {ix.level for ix in indexers} == {3}
     assert {ix.factor for ix in indexers} == {4}
     flat = _create_global_healpix(level=5, dtype=np.float64)["foo"].values
@@ -170,8 +182,7 @@ def test_cube_select_discrete_not_coarsened():
     grid = guess_grid_system(ds, "foo")
     assert isinstance(grid, HealpixCube)
     globe = BBox(west=-180, south=-90, east=180, north=90)
-    with config.set({"max_num_geometries": 10}):
-        indexers = grid.select(globe, allow_coarsen=False)
+    indexers = grid.select(globe, max_cells=10, allow_coarsen=False)
     assert {ix.level for ix in indexers} == {5}
 
 
@@ -197,8 +208,7 @@ def test_cube_partial_bbox_gather(bbox, max_cells, coarsened):
     ds = GLOBAL_HEALPIX_CUBE_L5.create()
     grid = guess_grid_system(ds, "foo")
     assert isinstance(grid, HealpixCube)
-    with config.set({"max_num_geometries": max_cells}):
-        indexers = grid.select(bbox)
+    indexers = grid.select(bbox, max_cells=max_cells, mercator_stretch=False)
     (factor,) = {ix.factor for ix in indexers}
     assert (factor > 1) == coarsened
     assert any(ix.y.start > 0 or ix.x.start > 0 for ix in indexers)
@@ -233,10 +243,11 @@ def test_bbox_cell_ids_full_width_strip():
 )
 def test_cube_select_polar_strip_respects_budget(bbox):
     grid = HealpixCube(face_dim="face", Ydim="y", Xdim="x", level=9)
-    indexers = grid.select(bbox)
+    max_cells = 9 * 256 * 256
+    indexers = grid.select(bbox, max_cells=max_cells, mercator_stretch=False)
     (level,) = {ix.level for ix in indexers}
     ids = np.concatenate([ix.cell_ids for ix in indexers])
-    assert ids.size <= config.get("max_num_geometries")
+    assert ids.size <= max_cells
     core, _, _ = hpn.zone_coverage(
         (0.0, bbox.south, 360.0 - 1e-9, bbox.north), level, flat=True
     )
@@ -245,9 +256,11 @@ def test_cube_select_polar_strip_respects_budget(bbox):
 
 def test_cube_select_globe_matches_generic_path():
     grid = HealpixCube(face_dim="face", Ydim="y", Xdim="x", level=3)
-    fast = grid.select(BBox(west=-180, south=-90, east=180, north=90))
+    fast = grid.select(BBox(west=-180, south=-90, east=180, north=90), max_cells=10**9)
     # height < 180 forces the bbox_cell_ids path, which still covers every cell
-    slow = grid.select(BBox(west=-180, south=-89.999, east=180, north=90))
+    slow = grid.select(
+        BBox(west=-180, south=-89.999, east=180, north=90), max_cells=10**9
+    )
     assert len(fast) == len(slow) == 12
     for a, b in zip(fast, slow, strict=True):
         assert (a.face, a.y, a.x, a.level, a.factor) == (

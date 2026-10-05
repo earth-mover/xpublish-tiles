@@ -1110,8 +1110,11 @@ async def test_cube_coarsened_matches_parent_mean():
     child = _create_global_healpix(level=5, dtype=np.float64)["foo"].values
     parent["foo"].values[:] = child.reshape(-1, 16).mean(axis=1)
     parent["foo"].attrs.update(cube["foo"].attrs)
-    query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style="polygons")
-    with config.set({"max_num_geometries": 12 * 4**3}):
+    # 16² px × stretch(z0) ≈ 1212 cells -> L3
+    query = create_query_params(
+        Tile(x=0, y=0, z=0), WEBMERC_TMS, style="polygons", size=16
+    )
+    with config.set({"max_pixel_factor": 1}):
         actual = _pixels(await pipeline(cube, query))
     expected = _pixels(await pipeline(parent, query))
     np.testing.assert_array_equal(actual, expected)
@@ -1125,9 +1128,9 @@ async def test_cube_discrete_not_coarsened(monkeypatch):
     calls = []
     original = HealpixCube.select
 
-    def spy(self, bbox, *, allow_coarsen=True):
+    def spy(self, bbox, *, allow_coarsen=True, **kwargs):
         calls.append(allow_coarsen)
-        return original(self, bbox, allow_coarsen=allow_coarsen)
+        return original(self, bbox, allow_coarsen=allow_coarsen, **kwargs)
 
     monkeypatch.setattr(HealpixCube, "select", spy)
     query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style="polygons")
@@ -1148,7 +1151,7 @@ def test_cube_decompressed_size(face_chunk):
     cube = GLOBAL_HEALPIX_CUBE_L3.create()
     grid = guess_grid_system(cube, "foo")
     assert isinstance(grid, HealpixCube)
-    (ix, *_) = grid.select(BBox(west=0, south=0, east=10, north=10))
+    (ix, *_) = grid.select(BBox(west=0, south=0, east=10, north=10), max_cells=10**9)
     da = cube["foo"].isel(time=0, face=ix.face, y=ix.y, x=ix.x)
     chunks = {"time": 1, "face": face_chunk, "y": 8, "x": 8}
     got = decompressed_size_bytes({grid.dim: [ix]}, da, grid, chunks=chunks)
@@ -1431,7 +1434,7 @@ async def test_rgb_lazy_array_stays_sliceable(tmp_path):
         validated,
         bbox=query.bbox,
         crs=query.crs,
-        max_shape=max_render_shape(style="raster", width=256, height=256),
+        max_shape=max_render_shape(width=256, height=256),
     )
     context = contexts["foo"]
     assert isinstance(context, PopulatedRenderContext)
