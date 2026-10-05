@@ -213,3 +213,7 @@ src/xpublish_tiles/_version.py
 
 # Claude Code worktrees
 .claude/worktrees/
+
+# Superpowers specs, plans and session state
+.superpowers/
+docs/superpowers/

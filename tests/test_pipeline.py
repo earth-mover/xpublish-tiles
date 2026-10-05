@@ -24,6 +24,7 @@ from src.xpublish_tiles.render.raster import nearest_on_uniform_grid_quadmesh
 from tests import NUMERIC_DTYPES, create_query_params
 from xarray.testing import assert_equal
 from xpublish_tiles import config
+from xpublish_tiles.grids import HealpixCube, guess_grid_system
 from xpublish_tiles.lib import (
     THREAD_POOL_NUM_THREADS,
     AsyncLoadTimeoutError,
@@ -33,6 +34,7 @@ from xpublish_tiles.lib import (
     VariableNotFoundError,
     async_run,
     check_transparent_pixels,
+    decompressed_size_bytes,
     max_render_shape,
 )
 from xpublish_tiles.pipeline import (
@@ -50,6 +52,8 @@ from xpublish_tiles.testing.datasets import (
     GEOSTATIONARY,
     GLOBAL_6KM,
     GLOBAL_6KM_360,
+    GLOBAL_HEALPIX_CUBE_L3,
+    GLOBAL_HEALPIX_CUBE_L5,
     GLOBAL_HEALPIX_L3,
     GLOBAL_NANS,
     HRRR,
@@ -75,6 +79,7 @@ from xpublish_tiles.testing.lib import (
 from xpublish_tiles.testing.tiles import (
     CURVILINEAR_TILES,
     GEOSTATIONARY_TILES,
+    HEALPIX_CUBE_TILES,
     PARA_TILES,
     RGB_TILES,
     TILES,
@@ -1066,6 +1071,94 @@ async def test_healpix_tile(tile, png_snapshot, pytestconfig):
     )
 
 
+CUBE_TILE_PARAMS = [pytest.param(t, id=i) for t, i in HEALPIX_CUBE_TILES]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tile", CUBE_TILE_PARAMS)
+async def test_healpix_cube_tile(tile, png_snapshot, pytestconfig):
+    ds = GLOBAL_HEALPIX_CUBE_L5.create()
+    query_params = create_query_params(tile, WEBMERC_TMS, style="polygons")
+    result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    # same pole-sliver exemption as test_healpix_tile
+    assert_render_matches_snapshot(
+        result, png_snapshot, skip_transparency_check=tile.y == 0
+    )
+
+
+def _pixels(buf):
+    return np.asarray(Image.open(io.BytesIO(buf.getvalue())))
+
+
+@pytest.mark.asyncio
+async def test_cube_time_selector():
+    cube = GLOBAL_HEALPIX_CUBE_L3.create()
+    query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style="polygons")
+    default = _pixels(await pipeline(cube, query))
+    query.selectors = {"time": "2000-01-01"}
+    first = _pixels(await pipeline(cube, query))
+    assert not np.array_equal(first, default)
+
+
+@pytest.mark.asyncio
+async def test_cube_coarsened_matches_parent_mean():
+    # L5 cube coarsened to L3 must render like a 1-D L3 grid of child means.
+    cube = GLOBAL_HEALPIX_CUBE_L5.create()
+    parent = _create_global_healpix(level=3, dtype=np.float64)
+    child = _create_global_healpix(level=5, dtype=np.float64)["foo"].values
+    parent["foo"].values[:] = child.reshape(-1, 16).mean(axis=1)
+    parent["foo"].attrs.update(cube["foo"].attrs)
+    # 16² px × stretch(z0) ≈ 1212 cells -> L3
+    query = create_query_params(
+        Tile(x=0, y=0, z=0), WEBMERC_TMS, style="polygons", size=16
+    )
+    with config.set({"max_pixel_factor": 1}):
+        actual = _pixels(await pipeline(cube, query))
+    expected = _pixels(await pipeline(parent, query))
+    np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.asyncio
+async def test_cube_discrete_not_coarsened(monkeypatch):
+    cube = GLOBAL_HEALPIX_CUBE_L5.create()
+    cube["foo"] = (cube["foo"] > 0).astype(np.int8)
+    cube["foo"].attrs.update(flag_values=[0, 1], flag_meanings="no yes")
+    calls = []
+    original = HealpixCube.select
+
+    def spy(self, bbox, *, allow_coarsen=True, **kwargs):
+        calls.append(allow_coarsen)
+        return original(self, bbox, allow_coarsen=allow_coarsen, **kwargs)
+
+    monkeypatch.setattr(HealpixCube, "select", spy)
+    query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style="polygons")
+    await pipeline(cube, query)
+    assert calls == [False]
+
+
+@pytest.mark.asyncio
+async def test_cube_raster_rejected():
+    cube = GLOBAL_HEALPIX_CUBE_L3.create()
+    query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style="raster")
+    with pytest.raises(ValueError, match="only supports style='polygons'"):
+        await pipeline(cube, query)
+
+
+@pytest.mark.parametrize("face_chunk", [1, 12])
+def test_cube_decompressed_size(face_chunk):
+    cube = GLOBAL_HEALPIX_CUBE_L3.create()
+    grid = guess_grid_system(cube, "foo")
+    assert isinstance(grid, HealpixCube)
+    (ix, *_) = grid.select(BBox(west=0, south=0, east=10, north=10), max_cells=10**9)
+    da = cube["foo"].isel(time=0, face=ix.face, y=ix.y, x=ix.x)
+    chunks = {"time": 1, "face": face_chunk, "y": 8, "x": 8}
+    got = decompressed_size_bytes({grid.dim: [ix]}, da, grid, chunks=chunks)
+    # one 8x8 y/x chunk of float64, times the face and time chunks it sits in
+    assert got == face_chunk * 1 * 8 * 8 * 8
+
+
 @pytest.mark.xfail(reason="HEALPix L1 polar base cell not covering tile at z=9")
 @pytest.mark.asyncio
 async def test_healpix_l1_polar_high_zoom(png_snapshot):
@@ -1341,7 +1434,7 @@ async def test_rgb_lazy_array_stays_sliceable(tmp_path):
         validated,
         bbox=query.bbox,
         crs=query.crs,
-        max_shape=max_render_shape(style="raster", width=256, height=256),
+        max_shape=max_render_shape(width=256, height=256),
     )
     context = contexts["foo"]
     assert isinstance(context, PopulatedRenderContext)

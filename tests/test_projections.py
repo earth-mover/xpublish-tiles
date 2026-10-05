@@ -11,6 +11,7 @@ from xpublish_tiles.projections import (
     CONIC_TOLERANCE_METERS,
     conic_to_cylindrical,
     has_null_datum_shift,
+    is_mercator_like,
     transformer_from_crs,
 )
 
@@ -163,3 +164,11 @@ def test_transform_coordinates_conic(curvilinear):
 )
 def test_has_null_datum_shift(code, expected):
     assert has_null_datum_shift(pyproj.CRS.from_epsg(code)) is expected
+
+
+@pytest.mark.parametrize(
+    "epsg, expected",
+    [(3857, True), (3395, True), (32633, False), (4326, False), (3031, False)],
+)
+def test_is_mercator_like(epsg, expected):
+    assert is_mercator_like(pyproj.CRS.from_epsg(epsg)) is expected

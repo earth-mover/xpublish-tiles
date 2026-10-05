@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import datetime
 import io
+import math
 from collections.abc import Hashable, Iterable, Mapping
 from dataclasses import dataclass
 from functools import partial
@@ -23,6 +24,8 @@ from xpublish_tiles.grids import (
     GridSystem,
     GridSystem2D,
     Healpix,
+    HealpixCube,
+    HealpixCubeIndexer,
     HealpixIndexer,
     Polar,
     RasterAffine,
@@ -62,6 +65,7 @@ from xpublish_tiles.lib import (
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.projections import (
+    is_mercator_like,
     transformer_from_crs,
 )
 from xpublish_tiles.types import (
@@ -324,9 +328,10 @@ def apply_slicers(
     chunks: Mapping[str, int] | None = None,
 ) -> SubsetPlan:
     has_alternate = alternate.crs != grid.crs
-    pick = [alternate.X, alternate.Y]
+    # cube coords are synthetic: corners come from the indexer's cell ids
+    pick = [] if isinstance(grid, HealpixCube) else [alternate.X, alternate.Y]
     # For Healpix, also keep the cell_ids coordinate
-    if isinstance(grid, Healpix):
+    if isinstance(grid, Healpix) and not isinstance(grid, HealpixCube):
         pick.append(grid.cell_ids_name)
     if isinstance(grid, Triangular):
         # Face-located vars don't inherit node X/Y as coords (different dim);
@@ -365,6 +370,10 @@ def apply_slicers(
             if isinstance(sl, UgridIndexer)
         ]
         concat_dim = grid.Xdim
+    elif isinstance(grid, HealpixCube):
+        # patch.da is already the face rectangle
+        subsets = [ds]
+        concat_dim = grid.Ydim
     elif isinstance(grid, Healpix):
         subsets = [
             ds.isel({grid.dim: sl.indices})
@@ -827,9 +836,7 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
         raise MissingParameterError(
             "The 'rgb' variant does not accept abovemaxcolor or belowmincolor."
         )
-    max_shape = max_render_shape(
-        style=query.style, width=query.width, height=query.height
-    )
+    max_shape = max_render_shape(width=query.width, height=query.height)
 
     # Capture the context logger before entering thread pool
     context_logger = get_context_logger()
@@ -1250,6 +1257,32 @@ async def subset_to_bbox(
                         alternate=face_grid.to_metadata(),
                     )
                 )
+        elif isinstance(grid, HealpixCube):
+            if style != "polygons":
+                raise ValueError(
+                    f"HealpixCube only supports style='polygons'; got {style!r}."
+                )
+            allow_coarsen = not isinstance(array.datatype, DiscreteData)
+            indexers = await async_run(
+                grid.select,
+                input_bbox,
+                max_cells=math.prod(max_shape),
+                mercator_stretch=is_mercator_like(crs),
+                allow_coarsen=allow_coarsen,
+            )
+            # one patch per face rectangle; [] falls through to NullRenderContext
+            patches.extend(
+                Patch(
+                    grid=grid,
+                    da=array.da.isel(
+                        {grid.face_dim: ix.face, grid.Ydim: ix.y, grid.Xdim: ix.x}
+                    ),
+                    slicers={grid.dim: [ix]},
+                    alternate=grid.to_metadata(),
+                    indexer=ix,
+                )
+                for ix in indexers
+            )
         else:
             array.datatype.validate_ndim(array.da)
             if min(array.da.shape) < 2:
@@ -1338,6 +1371,9 @@ async def subset_to_bbox(
             ld = ld.transpose(datatype.band_dim, ...)
         if isinstance(patch.grid, Polar):
             ld = patch.grid.assign_index(ld)
+        if isinstance(patch.grid, HealpixCube):
+            assert isinstance(patch.indexer, HealpixCubeIndexer)
+            ld = await async_run(patch.grid.gather, ld, patch.indexer)
         if patch.coarsen_factors:
             ld = await async_run(
                 partial(coarsen, ld, patch.coarsen_factors, grid=patch.grid)

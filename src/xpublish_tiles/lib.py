@@ -1080,7 +1080,7 @@ def _get_indexer_size(
         if isinstance(sl.indices, np.ndarray):
             if chunk is None:
                 return int(sl.indices.size)
-            return int(np.unique(sl.indices // chunk).size) * chunk
+            return int(pd.unique(sl.indices // chunk).size) * chunk
         sl = sl.indices
     if not isinstance(sl, slice):
         raise TypeError(f"Unknown indexer type: {type(sl)!r}")
@@ -1112,9 +1112,27 @@ def _iter_subset_shapes(
     from xpublish_tiles.grids import (
         FacetedGridSystem,
         FacetedIndexer,
+        Healpix,
+        HealpixCube,
+        HealpixCubeIndexer,
         Triangular,
         UgridIndexer,
     )
+
+    if isinstance(grid, HealpixCube):
+        for ix in slicers[grid.dim]:
+            assert isinstance(ix, HealpixCubeIndexer)
+            yield (
+                _get_indexer_size(ix.y, None, chunks.get(grid.Ydim)),
+                _get_indexer_size(ix.x, None, chunks.get(grid.Xdim)),
+            )
+        return
+
+    if isinstance(grid, Healpix):
+        # Xdim == Ydim == the cell dim; the 2-D path below would square it
+        for ix in slicers[grid.dim]:
+            yield (_get_indexer_size(ix, da.sizes[grid.dim], chunks.get(grid.dim)),)
+        return
 
     if isinstance(grid, Triangular):
         indexer = next(iter(slicers[grid.dim]))
@@ -1274,7 +1292,7 @@ def decompressed_size_bytes(
     ``ValidatedArray.chunks``); without it we fall back to reading whatever the
     array can still tell us, which is exact only while its dims are intact.
     """
-    from xpublish_tiles.grids import FacetedGridSystem
+    from xpublish_tiles.grids import FacetedGridSystem, HealpixCube
 
     if chunks is None:
         chunks = _chunk_sizes(da)
@@ -1285,6 +1303,9 @@ def decompressed_size_bytes(
     covered = set(slicers)
     if isinstance(grid, FacetedGridSystem):
         covered |= {str(d) for f in grid.faces for d in (f.Xdim, f.Ydim)}
+    if isinstance(grid, HealpixCube):
+        # face stays uncovered: each face rectangle decompresses its whole face chunk
+        covered |= {grid.Ydim, grid.Xdim}
     for dim, chunk in chunks.items():
         if dim in covered:
             continue
@@ -1294,21 +1315,8 @@ def decompressed_size_bytes(
     return total * da.dtype.itemsize
 
 
-def max_render_shape(
-    *, style: str, width: int = 256, height: int = 256
-) -> tuple[int, int]:
-    """Compute the per-axis max data shape for coarsening, given the render style.
-
-    For raster: ``max_pixel_factor * tile_size`` per axis.
-    For polygons: derived from ``max_num_geometries`` so that
-    ``product(max_shape) <= max_num_geometries``.
-    """
-    if style == "polygons":
-        max_num = config.get("max_num_geometries")
-        aspect = width / height
-        max_h = int(math.sqrt(max_num / aspect))
-        max_w = int(max_h * aspect)
-        return (max_w, max_h)
+def max_render_shape(*, width: int = 256, height: int = 256) -> tuple[int, int]:
+    """Per-axis max data shape for coarsening: ``max_pixel_factor * tile_size``."""
     pixel_factor = config.get("max_pixel_factor")
     return (pixel_factor * width, pixel_factor * height)
 

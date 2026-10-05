@@ -14,6 +14,7 @@ from pyproj.aoi import BBox
 import dask.array
 import xarray as xr
 from xarray import DataTree
+from xpublish_tiles.healpix import fyx_to_nested
 from xpublish_tiles.multiscale import assign_leaf_xpublish_ids
 from xpublish_tiles.projections import transformer_from_crs
 from xpublish_tiles.testing.tiles import (
@@ -2210,6 +2211,38 @@ def create_regional_healpix_na(
     return _create_regional_healpix(level=5, dtype=dtype, bbox=_NA_BBOX)
 
 
+def create_healpix_cube(
+    *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
+) -> xr.Dataset:
+    """``global_healpix`` values in the zeus-healpix (time, face, y, x) layout."""
+    (_, _, xdim) = (d for d in dims if d.name != "time")
+    n = xdim.size
+    level = n.bit_length() - 1
+    assert 2**level == n, f"x size {n} is not a power of 2"
+    flat = _create_global_healpix(level=level, dtype=dtype)
+    f, y, x = np.meshgrid(np.arange(12), np.arange(n), np.arange(n), indexing="ij")
+    ids = fyx_to_nested(f, y, x, level).astype(np.int64).reshape(12, n, n)
+    cube = flat["foo"].values[ids]
+    ds = xr.Dataset(
+        {
+            "foo": (
+                ("time", "face", "y", "x"),
+                np.stack([cube + 1, cube]),
+                dict(flat["foo"].attrs),
+            )
+        },
+        coords={
+            "time": pd.date_range("2000-01-01", periods=2),
+            "face": np.arange(12),
+            "y": np.arange(n),
+            "x": np.arange(n),
+        },
+        attrs={**flat.attrs, "healpix_nside": n, "face_ordering": "standard"},
+    )
+    del ds["foo"].attrs["grid_mapping"], ds["foo"].attrs["coordinates"]
+    return ds
+
+
 GLOBAL_HEALPIX_L3 = Dataset(
     name="global_healpix_l3",
     dims=(Dim(name="cell_ids", size=12 * 4**3, chunk_size=12 * 4**3),),
@@ -2230,6 +2263,33 @@ REGIONAL_HEALPIX_NA = Dataset(
     name="regional_healpix_na",
     dims=(Dim(name="cell_ids", size=1, chunk_size=1),),
     setup=create_regional_healpix_na,
+    dtype=np.float64,
+    benchmark_tiles=GLOBAL_BENCHMARK_TILES,
+)
+
+
+GLOBAL_HEALPIX_CUBE_L3 = Dataset(
+    name="global_healpix_cube_l3",
+    dims=(
+        Dim(name="time", size=2, chunk_size=1),
+        Dim(name="face", size=12, chunk_size=1),
+        Dim(name="y", size=8, chunk_size=8),
+        Dim(name="x", size=8, chunk_size=8),
+    ),
+    setup=create_healpix_cube,
+    dtype=np.float64,
+    benchmark_tiles=GLOBAL_BENCHMARK_TILES,
+)
+
+GLOBAL_HEALPIX_CUBE_L5 = Dataset(
+    name="global_healpix_cube_l5",
+    dims=(
+        Dim(name="time", size=2, chunk_size=1),
+        Dim(name="face", size=12, chunk_size=1),
+        Dim(name="y", size=32, chunk_size=32),
+        Dim(name="x", size=32, chunk_size=32),
+    ),
+    setup=create_healpix_cube,
     dtype=np.float64,
     benchmark_tiles=GLOBAL_BENCHMARK_TILES,
 )
@@ -2549,6 +2609,8 @@ DATASET_LOOKUP = {
     "rgb_uint8": RGB_UINT8,
     "global_healpix_l3": GLOBAL_HEALPIX_L3,
     "global_healpix_l5": GLOBAL_HEALPIX_L5,
+    "global_healpix_cube_l3": GLOBAL_HEALPIX_CUBE_L3,
+    "global_healpix_cube_l5": GLOBAL_HEALPIX_CUBE_L5,
     "regional_healpix_na": REGIONAL_HEALPIX_NA,
     "geozarr_multiscale": GEOZARR_MULTISCALE,
     "native_at_root_multiscale": NATIVE_AT_ROOT_MULTISCALE,
