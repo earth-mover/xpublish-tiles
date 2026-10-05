@@ -42,6 +42,7 @@ from xpublish_tiles.grids import (
     _guess_grid_for_dataset,
     _guess_z_dimension,
     _resolve_corner_name,
+    _runs_to_slices,
     find_cubed_sphere_face_dim,
     guess_coordinate_vars,
     guess_grid_metadata,
@@ -2111,3 +2112,26 @@ class TestRasterAffinePeriodic:
         assert isinstance(grid, RasterAffine)
         assert grid.indexes[0]._periods() == (None, None)
         assert not grid.lon_spans_globe
+
+
+def test_runs_to_slices():
+    assert _runs_to_slices(np.r_[350:360, 0:11]) == [slice(350, 360), slice(0, 11)]
+    assert _runs_to_slices(np.arange(3, 7)) == [slice(3, 7)]
+    assert _runs_to_slices(np.array([], dtype=int)) == [slice(0, 0)]
+
+
+@pytest.mark.parametrize(
+    "west, east, expected",
+    [
+        (170.0, 190.0, [slice(350, 360), slice(0, 11)]),
+        (-190.0, -170.0, [slice(350, 360), slice(0, 11)]),
+        (185.0, 200.0, [slice(5, 21)]),
+        (-10.0, 10.0, [slice(170, 191)]),
+    ],
+)
+def test_raster_affine_sel_across_antimeridian(west, east, expected):
+    grid = RasterAffine.from_dataset(
+        _geotransform_ds(360, 180, 1.0), CRS.from_epsg(4326), "x", "y"
+    )
+    slicers = grid.sel(bbox=BBox(west=west, east=east, south=-10.0, north=10.0))
+    assert slicers["x"] == expected

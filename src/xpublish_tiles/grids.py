@@ -1602,6 +1602,14 @@ class GridSystem(ABC):
         return GridMetadata(X=self.X, Y=self.Y, crs=self.crs, grid_cls=type(self))
 
 
+def _runs_to_slices(indexer: np.ndarray) -> list[slice]:
+    """Split ascending int runs (e.g. a periodic indexer across the seam) into slices."""
+    if indexer.size == 0:
+        return [slice(0, 0)]
+    breaks = np.flatnonzero(np.diff(indexer) != 1) + 1
+    return [slice(int(run[0]), int(run[-1]) + 1) for run in np.split(indexer, breaks)]
+
+
 class RectilinearMixin:
     """Mixin for rectilinear grid operations (.sel and .corners_to_rings)."""
 
@@ -1682,8 +1690,13 @@ class RectilinearMixin:
         # X dimension: LongitudeCellIndex can return multiple slices for antimeridian crossing
         x_raw = xsel_result.dim_indexers[self.X]
 
-        # Handle single slice from PandasIndex
-        x_indexers = x_raw if isinstance(x_raw, list) else [x_raw]
+        if isinstance(x_raw, np.ndarray):
+            # periodic RasterIndex: int array across the seam; normalize negative indices
+            x_normalized = np.where(x_raw < 0, x_raw + x_size, x_raw)
+            x_indexers = _runs_to_slices(x_normalized)
+        else:
+            # Handle single slice from PandasIndex
+            x_indexers = x_raw if isinstance(x_raw, list) else [x_raw]
 
         # Y dimension: always a single slice from PandasIndex
         y_indexers = [yslice]
