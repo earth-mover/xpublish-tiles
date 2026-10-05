@@ -1548,7 +1548,8 @@ SEAM_TILES = [
 @pytest.mark.parametrize("seam_copy", [False, True])
 @pytest.mark.parametrize("tile", SEAM_TILES)
 async def test_raster_affine_matches_rectilinear_at_seam(lon0, seam_copy, tile):
-    # 119 columns: no cell edge lies exactly on a pixel edge (no float tie-breaking)
+    # 119 columns avoid cell edges on the z0 pixel edges (+-22.5, +-67.5), where pyproj
+    # gives 1-ulp different results for lon and lon+-360
     rect, raster = _triangle_wave_datasets(119, lon0=lon0, seam_copy=seam_copy)
     tms = morecantile.tms.get("WebMercatorQuad")
     query = create_query_params(tile, tms)
@@ -1560,6 +1561,34 @@ async def test_raster_affine_matches_rectilinear_at_seam(lon0, seam_copy, tile):
     actual = await pipeline(raster, query)
     assert check_transparent_pixels(actual.getvalue()) == 0
     assert compare_image_buffers(expected, actual)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lon0", [-180.0, 0.0])
+@pytest.mark.parametrize("tile", [Tile(0, 0, 0), Tile(1, 0, 1)])
+async def test_raster_affine_matches_rectilinear_at_seam_coarsened(lon0, tile):
+    # 2399 columns (>> 256 px at z0/z1): the coarsening path
+    rect, raster = _triangle_wave_datasets(2399, lon0=lon0, seam_copy=False)
+    tms = morecantile.tms.get("WebMercatorQuad")
+    query = create_query_params(tile, tms)
+    expected = await pipeline(rect, query)
+    actual = await pipeline(raster, query)
+    assert check_transparent_pixels(actual.getvalue()) == 0
+    assert compare_image_buffers(expected, actual)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lon0", [-180.0, 0.0])
+@pytest.mark.parametrize("seam_copy", [False, True])
+@pytest.mark.parametrize("tile", [Tile(0, 0, 0), Tile(0, 3, 3), Tile(7, 3, 3)])
+async def test_raster_affine_polygons_at_seam(lon0, seam_copy, tile):
+    """Smoke test: polygons style across the seam renders without error or holes."""
+    _, raster = _triangle_wave_datasets(119, lon0=lon0, seam_copy=seam_copy)
+    query = create_query_params(
+        tile, morecantile.tms.get("WebMercatorQuad"), style="polygons"
+    )
+    result = await pipeline(raster, query)
+    assert check_transparent_pixels(result.getvalue()) == 0
 
 
 @pytest.mark.asyncio
