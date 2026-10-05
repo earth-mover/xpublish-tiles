@@ -1548,7 +1548,8 @@ SEAM_TILES = [
 @pytest.mark.parametrize("seam_copy", [False, True])
 @pytest.mark.parametrize("tile", SEAM_TILES)
 async def test_raster_affine_matches_rectilinear_at_seam(lon0, seam_copy, tile):
-    rect, raster = _triangle_wave_datasets(120, lon0=lon0, seam_copy=seam_copy)
+    # 119 columns: no cell edge lies exactly on a pixel edge (no float tie-breaking)
+    rect, raster = _triangle_wave_datasets(119, lon0=lon0, seam_copy=seam_copy)
     tms = morecantile.tms.get("WebMercatorQuad")
     query = create_query_params(tile, tms)
     expected = await pipeline(rect, query)
