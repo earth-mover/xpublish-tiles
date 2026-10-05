@@ -65,6 +65,7 @@ from xpublish_tiles.pipeline import (
     apply_query,
     apply_slicers,
     fix_coordinate_discontinuities,
+    has_coordinate_discontinuity,
     load_plans,
     pipeline,
 )
@@ -1044,6 +1045,26 @@ class TestLongitudeCellIndex:
 
         result = lon_index.sel({"longitude": slice(380, 420)})
         assert result.dim_indexers == {"longitude": [slice(0, 1)]}
+
+
+@pytest.mark.parametrize(
+    "lo, hi, expected",
+    [
+        (354.0, 546.0, True),  # contains 540 = 180 + 360 (rasterix concat frame)
+        (-546.0, -354.0, True),  # contains -540
+        (-190.0, -170.0, True),
+        (170.0, 190.0, True),
+        (0.0, 179.0, False),
+        (190.0, 530.0, False),
+        (-179.0, 179.0, False),
+    ],
+)
+def test_has_coordinate_discontinuity_any_antimeridian(lo, hi, expected):
+    x = np.linspace(lo, hi, 65)[np.newaxis, :]
+    assert (
+        has_coordinate_discontinuity(x, 360.0, axis=1, check_antimeridian=True)
+        is expected
+    )
 
 
 class TestFixCoordinateDiscontinuities:

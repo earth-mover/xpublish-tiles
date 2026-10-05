@@ -591,7 +591,8 @@ def has_coordinate_discontinuity(
     # and must trigger the discontinuity fix.
     if check_antimeridian:
         x_min, x_max = coordinates.min(), coordinates.max()
-        if x_min <= 180.0 <= x_max or x_min <= -180.0 <= x_max:
+        # any antimeridian 180 + 360k in range; a periodic concat may label past 360
+        if math.ceil((x_min - 180.0) / 360.0) <= math.floor((x_max - 180.0) / 360.0):
             return True
 
     return False
