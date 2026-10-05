@@ -1316,11 +1316,13 @@ def _with_longitude_period(
     if affine.b != 0 or affine.d != 0:
         return index, False
     nx, ny = index.xy_shape
+    if affine.a == 0:
+        return index, False
     ncells = round(360.0 / abs(affine.a))
     if ncells < 1 or nx not in (ncells, ncells + 1):
         return index, False
-    # GeoTransforms often carry a truncated dx; rasterix wants 360 / |dx| integral to 1e-12
-    if not math.isclose(360.0 / abs(affine.a), ncells, rel_tol=1e-9):
+    # GeoTransforms carry truncated or float32 dx; snap if the seam misaligns by < 1/1000 pixel
+    if ncells * abs(abs(affine.a) - 360.0 / ncells) >= 1e-3 * abs(affine.a):
         return index, False
     if affine.a < 0:
         # _rectilinear_sel passes ascending lon slices; decreasing periodic x is not planned

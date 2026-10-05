@@ -2115,6 +2115,35 @@ class TestRasterAffinePeriodic:
         assert index.transform().c == -180.0
         assert not grid.drop_seam
 
+    def test_float32_dx_is_snapped(self):
+        # float32 dx has rel. error ~3e-8; seam drift is ~3e-2 of a pixel / 1e3
+        dx = float(np.float32(1 / 3))
+        grid = RasterAffine.from_dataset(
+            _geotransform_ds(1080, 10, dx), CRS.from_epsg(4326), "x", "y"
+        )
+        (index,) = grid.indexes
+        assert index._periods() == (360.0, None)
+        assert index.transform().a == 360.0 / 1080
+        assert not grid.drop_seam
+
+    def test_seam_drift_bound(self):
+        # drift = n * |dx - 360/n| = 360 * rel; bound is dx / 1e3, so rel < 1e-3 / n
+        n, dx0 = 1000, 0.36
+        inside = RasterAffine.from_dataset(
+            _geotransform_ds(n, 10, dx0 * (1 + 5e-7)), CRS.from_epsg(4326), "x", "y"
+        )
+        assert inside.indexes[0]._periods() == (360.0, None)
+        outside = RasterAffine.from_dataset(
+            _geotransform_ds(n, 10, dx0 * (1 + 2e-6)), CRS.from_epsg(4326), "x", "y"
+        )
+        assert outside.indexes[0]._periods() == (None, None)
+
+    def test_zero_dx_is_not_periodic(self):
+        grid = RasterAffine.from_dataset(
+            _geotransform_ds(100, 50, 0.0), CRS.from_epsg(4326), "x", "y"
+        )
+        assert grid.indexes[0]._periods() == (None, None)
+
     @pytest.mark.parametrize("nx, dx", [(100, 1.0), (514, 0.7)])
     def test_not_global_or_not_integer_is_not_periodic(self, nx, dx):
         grid = RasterAffine.from_dataset(
