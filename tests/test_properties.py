@@ -22,7 +22,7 @@ from pyproj.aoi import BBox
 import xarray as xr
 from tests import create_query_params
 from xpublish_tiles import config
-from xpublish_tiles.grids import Rectilinear
+from xpublish_tiles.grids import RasterAffine, Rectilinear
 from xpublish_tiles.lib import TileTooBigError, check_transparent_pixels
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.testing.datasets import (
@@ -815,3 +815,73 @@ def test_roll_invariance(
         rolled_flat,
         err_msg=f"Data differs for bbox={bbox}, roll_amount={roll_amount}",
     )
+
+
+def _as_raster_affine(
+    rect: xr.Dataset, *, roll: int = 0, shift_origin: float = 0.0
+) -> xr.Dataset:
+    """``rect`` as a GeoTransform grid, with column ``roll`` first and the origin moved to match."""
+    lon, lat = rect.longitude.values, rect.latitude.values
+    dx, dy = lon[1] - lon[0], lat[1] - lat[0]
+    origin = lon[0] - dx / 2 + roll * dx + shift_origin
+    raster = rect.drop_vars(["longitude", "latitude"]).rename_dims(
+        longitude="x", latitude="y"
+    )
+    raster = raster.roll(x=-roll)
+    raster["foo"].attrs["grid_mapping"] = "spatial_ref"
+    raster.coords["spatial_ref"] = (
+        (),
+        0,
+        CRS.from_epsg(4326).to_cf()
+        | {"GeoTransform": f"{origin} {dx} 0.0 {lat[0] - dy / 2} 0.0 {dy}"},
+    )
+    return raster
+
+
+def _off_cell_edge(value: float, edge0: float, spacing: float) -> bool:
+    # rounding ties at a cell edge can flip under the float error of a moved origin
+    frac = ((value - edge0) / abs(spacing)) % 1.0
+    return min(frac, 1.0 - frac) > 1e-6
+
+
+@given(
+    ds=global_rectilinear_datasets(allow_categorical=False, maxsize=300, perturb=False),
+    roll_fraction=st.floats(min_value=0.0, max_value=0.99),
+    shift_origin=st.sampled_from([-360.0, 0.0, 360.0]),
+    data=st.data(),
+)
+@settings(max_examples=100, deadline=None)
+def test_raster_affine_roll_invariance(ds, roll_fraction, shift_origin, data):
+    """A periodic RasterAffine selects the same data wherever the seam is in the array."""
+    nlon = ds.sizes["longitude"]
+    roll = math.floor(roll_fraction * nlon)
+    original = _as_raster_affine(ds)
+    rolled = _as_raster_affine(ds, roll=roll, shift_origin=shift_origin)
+    grid_original = RasterAffine.from_dataset(original, CRS.from_epsg(4326), "x", "y")
+    grid_rolled = RasterAffine.from_dataset(rolled, CRS.from_epsg(4326), "x", "y")
+    assert grid_original.lon_spans_globe
+    assert grid_rolled.lon_spans_globe
+
+    floats = lambda lo, hi: st.floats(
+        min_value=lo, max_value=hi, allow_nan=False, allow_subnormal=False
+    )
+    west, east = sorted(data.draw(st.lists(floats(-180, 180), min_size=2, max_size=2)))
+    south, north = sorted(data.draw(st.lists(floats(-90, 90), min_size=2, max_size=2)))
+    west, east, south, north = (round(v, 12) for v in (west, east, south, north))
+    assume(east - west >= 0.0001 and north - south >= 0.0001)
+    lon, lat = ds.longitude.values, ds.latitude.values
+    dx, dy = lon[1] - lon[0], lat[1] - lat[0]
+    assume(all(_off_cell_edge(v, lon[0] - dx / 2, dx) for v in (west, east)))
+    assume(all(_off_cell_edge(v, lat[0] - dy / 2, dy) for v in (south, north)))
+    bbox = BBox(west=west, east=east, south=south, north=north)
+
+    def subset(grid: RasterAffine, dataset: xr.Dataset) -> xr.DataArray:
+        slicers = grid.sel(bbox=bbox)
+        da = grid.assign_index(dataset.foo)
+        parts = [da.isel(x=s, y=slicers["y"][0]) for s in slicers["x"]]
+        return parts[0] if len(parts) == 1 else xr.concat(parts, dim="x")
+
+    a = subset(grid_original, original)
+    b = subset(grid_rolled, rolled)
+    assert a.shape == b.shape, f"roll={roll}, shift_origin={shift_origin}, bbox={bbox}"
+    npt.assert_array_equal(np.sort(a.values.ravel()), np.sort(b.values.ravel()))

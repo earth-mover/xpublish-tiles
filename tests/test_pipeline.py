@@ -1490,3 +1490,102 @@ async def test_rgb_colormap_rejected():
     )
     with pytest.raises(ColormapError, match="does not accept a colormap"):
         await pipeline(ds, query_params)
+
+
+def _geotransform(lon: np.ndarray, lat: np.ndarray) -> str:
+    dx, dy = lon[1] - lon[0], lat[1] - lat[0]
+    return f"{lon[0] - dx / 2} {dx} 0.0 {lat[0] - dy / 2} 0.0 {dy}"
+
+
+def _triangle_wave_datasets(
+    nlon: int, *, lon0: float, seam_copy: bool
+) -> tuple[xr.Dataset, xr.Dataset]:
+    """The same periodic field as Rectilinear (lon/lat coords) and as RasterAffine (GeoTransform)."""
+    if seam_copy:
+        lon = np.linspace(lon0, lon0 + 360, nlon + 1)
+    else:
+        lon = np.linspace(lon0, lon0 + 360, nlon, endpoint=False)
+    lat = np.linspace(-89.5, 89.5, 180)
+    tri = np.abs(((lon + 180) % 360) - 180) / 180
+    data = (0.5 * tri[np.newaxis, :] + 0.25 * (1 + lat[:, np.newaxis] / 90)).astype(
+        "float32"
+    )
+    attrs = {"valid_min": 0, "valid_max": 1}
+    rect = xr.Dataset(
+        {"foo": (("latitude", "longitude"), data, attrs)},
+        coords={
+            "latitude": ("latitude", lat, {"units": "degrees_north", "axis": "Y"}),
+            "longitude": ("longitude", lon, {"units": "degrees_east", "axis": "X"}),
+        },
+    )
+    raster = xr.Dataset(
+        {"foo": (("y", "x"), data, attrs | {"grid_mapping": "spatial_ref"})}
+    )
+    raster.coords["spatial_ref"] = (
+        (),
+        0,
+        CRS.from_epsg(4326).to_cf() | {"GeoTransform": _geotransform(lon, lat)},
+    )
+    return rect, raster
+
+
+# x=0 / x=2**z - 1 touch the antimeridian; x=3, 4 at z=3 touch lon 0 (the seam of [0, 360) grids)
+SEAM_TILES = [
+    Tile(0, 0, 0),
+    Tile(0, 0, 1),
+    Tile(1, 0, 1),
+    Tile(0, 3, 3),
+    Tile(3, 3, 3),
+    Tile(4, 3, 3),
+    Tile(7, 3, 3),
+    Tile(0, 15, 5),
+    Tile(31, 15, 5),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lon0", [-180.0, 0.0])
+@pytest.mark.parametrize("seam_copy", [False, True])
+@pytest.mark.parametrize("tile", SEAM_TILES)
+async def test_raster_affine_matches_rectilinear_at_seam(lon0, seam_copy, tile):
+    rect, raster = _triangle_wave_datasets(120, lon0=lon0, seam_copy=seam_copy)
+    tms = morecantile.tms.get("WebMercatorQuad")
+    query = create_query_params(tile, tms)
+    expected = await pipeline(rect, query)
+    # a broken reference is a Rectilinear bug (cf. #206 high-zoom patchiness): report, do not fix here
+    assert check_transparent_pixels(expected.getvalue()) == 0, (
+        "Rectilinear reference has transparent pixels"
+    )
+    actual = await pipeline(raster, query)
+    assert check_transparent_pixels(actual.getvalue()) == 0
+    assert compare_image_buffers(expected, actual)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tile", [Tile(0, 0, 0), Tile(0, 3, 3), Tile(7, 3, 3)])
+async def test_issue_206_mock_renders(tile):
+    """The literal mock from #206 (not periodic) with a GeoTransform: no error, no transparent pixels."""
+    n = 100
+    x = np.linspace(-180, 180, n)
+    y = np.linspace(-90, 90, n)
+    xx, yy = np.meshgrid(x, y)
+    data = ((xx - xx.min()) + (yy - yy.min())) / 2
+    data = (data / data.max()).astype("float32")
+    ds = xr.Dataset(
+        {
+            "foo": (
+                ("y", "x"),
+                data,
+                {"valid_min": 0, "valid_max": 1, "grid_mapping": "spatial_ref"},
+            )
+        }
+    )
+    ds.coords["spatial_ref"] = (
+        (),
+        0,
+        CRS.from_epsg(4326).to_cf() | {"GeoTransform": _geotransform(x, y)},
+    )
+    result = await pipeline(
+        ds, create_query_params(tile, morecantile.tms.get("WebMercatorQuad"))
+    )
+    assert check_transparent_pixels(result.getvalue()) == 0
