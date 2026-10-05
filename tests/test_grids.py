@@ -2088,7 +2088,7 @@ class TestRasterAffinePeriodic:
             _geotransform_ds(360, 180, 1.0), CRS.from_epsg(4326), "x", "y"
         )
         (index,) = grid.indexes
-        assert index._periods() == (360.0, None)
+        assert (index.x_period, index.y_period) == (360.0, None)
         assert grid.lon_spans_globe
         assert not grid.drop_seam
 
@@ -2110,7 +2110,7 @@ class TestRasterAffinePeriodic:
             _geotransform_ds(405000, 10, dx), CRS.from_epsg(4326), "x", "y"
         )
         (index,) = grid.indexes
-        assert index._periods() == (360.0, None)
+        assert (index.x_period, index.y_period) == (360.0, None)
         assert index.transform().a == 360.0 / 405000
         assert index.transform().c == -180.0
         assert not grid.drop_seam
@@ -2122,7 +2122,7 @@ class TestRasterAffinePeriodic:
             _geotransform_ds(1080, 10, dx), CRS.from_epsg(4326), "x", "y"
         )
         (index,) = grid.indexes
-        assert index._periods() == (360.0, None)
+        assert (index.x_period, index.y_period) == (360.0, None)
         assert index.transform().a == 360.0 / 1080
         assert not grid.drop_seam
 
@@ -2132,17 +2132,17 @@ class TestRasterAffinePeriodic:
         inside = RasterAffine.from_dataset(
             _geotransform_ds(n, 10, dx0 * (1 + 5e-7)), CRS.from_epsg(4326), "x", "y"
         )
-        assert inside.indexes[0]._periods() == (360.0, None)
+        assert (inside.indexes[0].x_period, inside.indexes[0].y_period) == (360.0, None)
         outside = RasterAffine.from_dataset(
             _geotransform_ds(n, 10, dx0 * (1 + 2e-6)), CRS.from_epsg(4326), "x", "y"
         )
-        assert outside.indexes[0]._periods() == (None, None)
+        assert (outside.indexes[0].x_period, outside.indexes[0].y_period) == (None, None)
 
     def test_zero_dx_is_not_periodic(self):
         grid = RasterAffine.from_dataset(
             _geotransform_ds(100, 50, 0.0), CRS.from_epsg(4326), "x", "y"
         )
-        assert grid.indexes[0]._periods() == (None, None)
+        assert (grid.indexes[0].x_period, grid.indexes[0].y_period) == (None, None)
 
     @pytest.mark.parametrize("nx, dx", [(100, 1.0), (514, 0.7)])
     def test_not_global_or_not_integer_is_not_periodic(self, nx, dx):
@@ -2150,7 +2150,7 @@ class TestRasterAffinePeriodic:
             _geotransform_ds(nx, 50, dx), CRS.from_epsg(4326), "x", "y"
         )
         (index,) = grid.indexes
-        assert index._periods() == (None, None)
+        assert (index.x_period, index.y_period) == (None, None)
         assert not grid.lon_spans_globe
 
     def test_decreasing_longitude_raises(self):
@@ -2161,7 +2161,7 @@ class TestRasterAffinePeriodic:
     def test_projected_is_not_periodic(self):
         grid = guess_grid_system(EU3035.create(), "foo")
         assert isinstance(grid, RasterAffine)
-        assert grid.indexes[0]._periods() == (None, None)
+        assert (grid.indexes[0].x_period, grid.indexes[0].y_period) == (None, None)
         assert not grid.lon_spans_globe
 
 

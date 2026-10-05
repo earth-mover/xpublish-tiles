@@ -1731,7 +1731,7 @@ class RasterAffine(RectilinearMixin, GridSystem):
         self.Ydim = self.Y
         (index,) = self.indexes
         # periodic iff rasterix has the period (set in from_dataset)
-        self.lon_spans_globe = self.crs.is_geographic and index._periods()[0] is not None
+        self.lon_spans_globe = self.crs.is_geographic and index.x_period is not None
         # Calculate minimum grid spacing from affine transform
         affine = index.transform()
         self.dXmin = abs(affine.a)  # X pixel size
@@ -1791,15 +1791,15 @@ class RasterAffine(RectilinearMixin, GridSystem):
         return self._rectilinear_sel(
             bbox=bbox,
             y_is_increasing=affine.e > 0,
-            x_size=index._xy_shape[0],
-            y_size=index._xy_shape[1],
+            x_size=index.xy_shape[0],
+            y_size=index.xy_shape[1],
         )
 
     def _get_edge_arrays(self) -> tuple[np.ndarray, np.ndarray]:
         """Return full 1D edge arrays (x_edges size nx+1, y_edges size ny+1)."""
         (index,) = self.indexes
         affine = index.transform()
-        nx, ny = index._xy_shape
+        nx, ny = index.xy_shape
         x_edges = affine.c + np.arange(nx + 1) * affine.a
         y_edges = affine.f + np.arange(ny + 1) * affine.e
         return x_edges, y_edges
