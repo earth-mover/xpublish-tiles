@@ -2036,3 +2036,78 @@ def test_guess_grid_system_rotated_pole_is_a_detection_error():
         UnsupportedGridError, match="Rotated pole grids are not supported"
     ):
         guess_grid_system(create_rotated_pole_dataset(), "temp")
+
+
+def _geotransform_ds(
+    nx: int, ny: int, dx: float, *, origin: float = -180.0
+) -> xr.Dataset:
+    ds = xr.Dataset(
+        {
+            "foo": (
+                ("y", "x"),
+                np.zeros((ny, nx), dtype="float32"),
+                {"grid_mapping": "spatial_ref"},
+            )
+        }
+    )
+    ds.coords["spatial_ref"] = (
+        (),
+        0,
+        CRS.from_epsg(4326).to_cf()
+        | {"GeoTransform": f"{origin} {dx} 0.0 90.0 0.0 {-180.0 / ny}"},
+    )
+    return ds
+
+
+class TestRasterAffinePeriodic:
+    def test_global_is_periodic(self):
+        grid = RasterAffine.from_dataset(
+            _geotransform_ds(360, 180, 1.0), CRS.from_epsg(4326), "x", "y"
+        )
+        (index,) = grid.indexes
+        assert index._periods() == (360.0, None)
+        assert grid.lon_spans_globe
+        assert not grid.drop_seam
+
+    def test_seam_copy_is_dropped(self):
+        # linspace(-180, 180, 100): 99 unique columns + a copy of the first
+        dx = 360.0 / 99
+        ds = _geotransform_ds(100, 50, dx, origin=-180.0 - dx / 2)
+        grid = RasterAffine.from_dataset(ds, CRS.from_epsg(4326), "x", "y")
+        (index,) = grid.indexes
+        assert grid.drop_seam
+        assert index.xy_shape == (99, 50)
+        assert grid.lon_spans_globe
+        assert grid.assign_index(ds.foo).sizes["x"] == 99
+
+    def test_truncated_dx_is_snapped(self):
+        # ctrees/aboveground_biomass_100m_global_open: 1/1125 deg, rel. error 1.09e-12
+        dx = 0.0008888888888879225
+        grid = RasterAffine.from_dataset(
+            _geotransform_ds(405000, 10, dx), CRS.from_epsg(4326), "x", "y"
+        )
+        (index,) = grid.indexes
+        assert index._periods() == (360.0, None)
+        assert index.transform().a == 360.0 / 405000
+        assert index.transform().c == -180.0
+        assert not grid.drop_seam
+
+    @pytest.mark.parametrize("nx, dx", [(100, 1.0), (514, 0.7)])
+    def test_not_global_or_not_integer_is_not_periodic(self, nx, dx):
+        grid = RasterAffine.from_dataset(
+            _geotransform_ds(nx, 50, dx), CRS.from_epsg(4326), "x", "y"
+        )
+        (index,) = grid.indexes
+        assert index._periods() == (None, None)
+        assert not grid.lon_spans_globe
+
+    def test_decreasing_longitude_raises(self):
+        ds = _geotransform_ds(360, 180, -1.0, origin=180.0)
+        with pytest.raises(NotImplementedError, match="decreasing longitude"):
+            RasterAffine.from_dataset(ds, CRS.from_epsg(4326), "x", "y")
+
+    def test_projected_is_not_periodic(self):
+        grid = guess_grid_system(EU3035.create(), "foo")
+        assert isinstance(grid, RasterAffine)
+        assert grid.indexes[0]._periods() == (None, None)
+        assert not grid.lon_spans_globe

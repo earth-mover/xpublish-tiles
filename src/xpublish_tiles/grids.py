@@ -16,6 +16,7 @@ import pandas as pd
 import pyproj
 import rasterix
 import triangular
+from affine import Affine
 from numba_celltree import CellTree2d
 from pyproj import CRS
 from pyproj.aoi import BBox
@@ -1304,30 +1305,40 @@ def is_rotated_pole(crs: CRS) -> bool:
     return crs.to_cf().get("grid_mapping_name") == "rotated_latitude_longitude"
 
 
-def _is_raster_index_global(raster_index, grid_bbox, crs) -> bool:
+def _with_longitude_period(
+    index: rasterix.RasterIndex,
+) -> tuple[rasterix.RasterIndex, bool]:
+    """``(index with x_period=360, drop_seam)`` for a global lon axis, else ``(index, False)``.
+
+    ``dx`` is snapped to ``360 / n``. ``drop_seam``: the last column repeats the first.
     """
-    Determine if a RasterIndex represents global longitude coverage.
-
-    Parameters
-    ----------
-    raster_index : RasterIndex
-        The raster index to check
-    grid_bbox : BBox
-        The grid's bounding box
-    crs : CRS
-        The coordinate reference system
-
-    Returns
-    -------
-    bool
-        True if the index covers the full globe
-    """
-    if not crs.is_geographic:
-        return False
-
-    # Check if longitude span is nearly 360 degrees
-    lon_span = grid_bbox.east - grid_bbox.west
-    return lon_span >= 359.0
+    affine = index.transform()
+    if affine.b != 0 or affine.d != 0:
+        return index, False
+    nx, ny = index.xy_shape
+    ncells = round(360.0 / abs(affine.a))
+    if ncells < 1 or nx not in (ncells, ncells + 1):
+        return index, False
+    # GeoTransforms often carry a truncated dx; rasterix wants 360 / |dx| integral to 1e-12
+    if not math.isclose(360.0 / abs(affine.a), ncells, rel_tol=1e-9):
+        return index, False
+    if affine.a < 0:
+        # _rectilinear_sel passes ascending lon slices; decreasing periodic x is not planned
+        raise NotImplementedError(
+            "Global RasterAffine grids with decreasing longitude are not supported."
+        )
+    snapped = Affine(360.0 / ncells, 0.0, affine.c, 0.0, affine.e, affine.f)
+    x_dim, y_dim = index.xy_dims
+    periodic = rasterix.RasterIndex.from_transform(
+        snapped,
+        width=ncells,
+        height=ny,
+        x_dim=x_dim,
+        y_dim=y_dim,
+        crs=index.crs,
+        x_period=360.0,
+    )
+    return periodic, nx == ncells + 1
 
 
 def _indexes_equal(a: xr.Index, b: xr.Index) -> bool:
@@ -1694,6 +1705,7 @@ class RasterAffine(RectilinearMixin, GridSystem):
     Ydim: str = field(init=False)
     indexes: tuple[rasterix.RasterIndex]
     Z: str | None = None
+    drop_seam: bool = False
     lon_spans_globe: bool = field(init=False)
     npoints_per_geometry: int = field(init=False, default=5)
     dXmin: float = field(init=False)
@@ -1702,12 +1714,10 @@ class RasterAffine(RectilinearMixin, GridSystem):
     def __post_init__(self) -> None:
         self.Xdim = self.X
         self.Ydim = self.Y
-        # Determine if this raster spans the globe in longitude
-        self.lon_spans_globe = self.crs.is_geographic and _is_raster_index_global(
-            self.indexes[0], self.bbox, self.crs
-        )
-        # Calculate minimum grid spacing from affine transform
         (index,) = self.indexes
+        # periodic iff rasterix has the period (set in from_dataset)
+        self.lon_spans_globe = self.crs.is_geographic and index._periods()[0] is not None
+        # Calculate minimum grid spacing from affine transform
         affine = index.transform()
         self.dXmin = abs(affine.a)  # X pixel size
         self.dYmin = abs(affine.e)  # Y pixel size
@@ -1729,6 +1739,9 @@ class RasterAffine(RectilinearMixin, GridSystem):
         """
         ds = rasterix.assign_index(ds, x_dim=Xname, y_dim=Yname)
         raster_index = cast(rasterix.RasterIndex, ds.xindexes[Xname])
+        drop_seam = False
+        if crs.is_geographic:
+            raster_index, drop_seam = _with_longitude_period(raster_index)
 
         return cls(
             crs=crs,
@@ -1741,6 +1754,7 @@ class RasterAffine(RectilinearMixin, GridSystem):
                 north=raster_index.bbox.top,
             ),
             indexes=(raster_index,),
+            drop_seam=drop_seam,
         )
 
     @property
@@ -1749,6 +1763,9 @@ class RasterAffine(RectilinearMixin, GridSystem):
         return {self.Xdim, self.Ydim}
 
     def assign_index(self, da: xr.DataArray) -> xr.DataArray:
+        if self.drop_seam:
+            # lazy; the duplicate seam column is never loaded
+            da = da.isel({self.Xdim: slice(0, -1)})
         (index,) = self.indexes
         return da.assign_coords(xr.Coordinates.from_xindex(index))
 
