@@ -1057,6 +1057,7 @@ class TestLongitudeCellIndex:
         (0.0, 179.0, False),
         (190.0, 530.0, False),
         (-179.0, 179.0, False),
+        (np.nan, np.nan, False),  # NaN coordinates (curvilinear grids)
     ],
 )
 def test_has_coordinate_discontinuity_any_antimeridian(lo, hi, expected):

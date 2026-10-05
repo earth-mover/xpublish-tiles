@@ -568,6 +568,8 @@ def has_coordinate_discontinuity(
     The function detects antimeridian crossings in different coordinate conventions:
     - For -180→180 system: Looks for gaps > 180°
     - For 0→360 system: Looks for data crossing the 180° longitude line
+    - With ``check_antimeridian``, a crossing at any 180 + 360k counts, because a
+      periodic concat can label x past 360 (e.g. 354 to 546 contains 540)
 
     Examples of discontinuity cases:
     - [-179°, -178°, ..., 178°, 179°] → Large gap when wrapped
@@ -592,7 +594,8 @@ def has_coordinate_discontinuity(
     if check_antimeridian:
         x_min, x_max = coordinates.min(), coordinates.max()
         # any antimeridian 180 + 360k in range; a periodic concat may label past 360
-        if math.ceil((x_min - 180.0) / 360.0) <= math.floor((x_max - 180.0) / 360.0):
+        # np (not math) so that NaN compares False instead of raising
+        if np.ceil((x_min - 180.0) / 360.0) <= np.floor((x_max - 180.0) / 360.0):
             return True
 
     return False
