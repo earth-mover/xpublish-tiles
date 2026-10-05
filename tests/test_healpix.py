@@ -21,8 +21,8 @@ from xpublish_tiles.healpix import (
 )
 from xpublish_tiles.testing.datasets import (
     GLOBAL_HEALPIX_CUBE_L3,
+    GLOBAL_HEALPIX_CUBE_L5,
     _create_global_healpix,
-    _create_global_healpix_cube,
 )
 
 
@@ -90,7 +90,7 @@ def test_antimeridian_cells_cached():
 
 
 def test_cube_fixture_matches_1d():
-    cube = _create_global_healpix_cube(level=3, dtype=np.float64)
+    cube = GLOBAL_HEALPIX_CUBE_L3.create()
     flat = _create_global_healpix(level=3, dtype=np.float64)
     f, y, x = nested_to_fyx(np.arange(12 * 4**3), 3)
     got = cube["foo"].isel(time=-1).values[f, y, x]
@@ -146,7 +146,7 @@ def test_cube_select_no_coarsen_matches_1d_ids():
 
 
 def test_cube_select_coarsen_and_gather():
-    ds = _create_global_healpix_cube(level=5, dtype=np.float64)
+    ds = GLOBAL_HEALPIX_CUBE_L5.create()
     grid = guess_grid_system(ds, "foo")
     assert isinstance(grid, HealpixCube)
     globe = BBox(west=-180, south=-90, east=180, north=90)
@@ -166,7 +166,7 @@ def test_cube_select_coarsen_and_gather():
 
 
 def test_cube_select_discrete_not_coarsened():
-    ds = _create_global_healpix_cube(level=5, dtype=np.float64)
+    ds = GLOBAL_HEALPIX_CUBE_L5.create()
     grid = guess_grid_system(ds, "foo")
     assert isinstance(grid, HealpixCube)
     globe = BBox(west=-180, south=-90, east=180, north=90)
@@ -194,7 +194,7 @@ def test_cube_aux_var_is_rejected_like_cubed_sphere():
     ],
 )
 def test_cube_partial_bbox_gather(bbox, max_cells, coarsened):
-    ds = _create_global_healpix_cube(level=5, dtype=np.float64)
+    ds = GLOBAL_HEALPIX_CUBE_L5.create()
     grid = guess_grid_system(ds, "foo")
     assert isinstance(grid, HealpixCube)
     with config.set({"max_num_geometries": max_cells}):

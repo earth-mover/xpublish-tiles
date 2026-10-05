@@ -656,7 +656,7 @@ class CellTreeIndex(xr.Index):
             _, face_indices = self.tree.locate_boxes(
                 np.array([[xidxr.start, xidxr.stop, yidxr.start, yidxr.stop]])
             )
-        face_indices = np.unique(face_indices)
+        face_indices = np.sort(pd.unique(face_indices))
 
         inverse, vertex_indices = pd.factorize(
             self.tree.faces[face_indices].ravel(), sort=True
@@ -2924,7 +2924,7 @@ class Healpix(GridSystem):
         width_lon = bbox.east - bbox.west
         width_lat = bbox.north - bbox.south
         if width_lon >= 360 or width_lat >= 180:
-            am_mask = np.isin(self.cell_ids, self.antimeridian_cells)
+            am_mask = np.isin(self.cell_ids, self.antimeridian_cells, assume_unique=True)
             return {
                 self.dim: [HealpixIndexer(indices=slice(None), antimeridian_mask=am_mask)]
             }
@@ -2947,7 +2947,9 @@ class Healpix(GridSystem):
                 ]
             }
 
-        am_mask = np.isin(self.cell_ids[indices], self.antimeridian_cells)
+        am_mask = np.isin(
+            self.cell_ids[indices], self.antimeridian_cells, assume_unique=True
+        )
         return {self.dim: [HealpixIndexer(indices=indices, antimeridian_mask=am_mask)]}
 
     def cell_corners(
@@ -3213,20 +3215,24 @@ class HealpixCube(Healpix):
         if bbox.east - bbox.west >= 360 and bbox.north - bbox.south >= 180:
             return self._select_globe(level, factor)
         ids = bbox_cell_ids(bbox, level).astype(np.uint64)
-        am = np.isin(ids, antimeridian_cells(level))
+        am = np.isin(ids, antimeridian_cells(level), assume_unique=True)
         f, yc, xc = nested_to_fyx(ids, level)
+        # ids sorted => faces contiguous
+        bounds = np.searchsorted(f, np.arange(13))
         out = []
-        for face in np.unique(f):
-            m = f == face
+        for face in range(12):
+            m = slice(bounds[face], bounds[face + 1])
+            if m.start == m.stop:
+                continue
             y0, y1 = int(yc[m].min()), int(yc[m].max()) + 1
             x0, x1 = int(xc[m].min()), int(xc[m].max()) + 1
             out.append(
                 HealpixCubeIndexer(
-                    indices=np.arange(int(m.sum())),
+                    indices=np.arange(m.stop - m.start),
                     antimeridian_mask=am[m],
                     cell_ids=ids[m],
                     level=level,
-                    face=int(face),
+                    face=face,
                     y=slice(y0 * factor, y1 * factor),
                     x=slice(x0 * factor, x1 * factor),
                     factor=factor,
@@ -3386,7 +3392,13 @@ _CUBED_SPHERE_PATTERN = re.compile(r"cubed?[-_ ]sphere", re.IGNORECASE)
 
 
 def find_healpix_cube_dims(ds: xr.Dataset) -> tuple[str, str, str] | None:
-    """Detect the HEALPix xyf cube layout (face=12, y=nside, x=nside); see zeus-healpix."""
+    """
+    Detect the HEALPix xyf cube layout (face=12, y=nside, x=nside).
+
+    There is no CF-convention for the double pixelization scheme, so we use this ad-hoc
+    convention from Zeus AI where the dataset has `healpix_nside` and `face_ordering`
+    attributes.
+    """
     nside = ds.attrs.get("healpix_nside")
     if nside is None:
         return None

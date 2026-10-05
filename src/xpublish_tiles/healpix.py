@@ -5,6 +5,7 @@ import math
 
 import numba
 import numpy as np
+import pandas as pd
 from pyproj.aoi import BBox
 
 _M1 = np.uint64(0x5555555555555555)
@@ -118,7 +119,7 @@ def bbox_cell_ids(bbox: BBox, depth: int) -> np.ndarray:
     neighbors = kth_neighbourhood(cell_ids.astype(np.uint64), depth, ring=1)
     neighbors = neighbors.ravel()
     # base-cell corners have 7 neighbours; the missing slot is -1
-    return np.unique(neighbors[neighbors >= 0]).astype(cell_ids.dtype)
+    return np.sort(pd.unique(neighbors[neighbors >= 0])).astype(cell_ids.dtype)
 
 
 @functools.cache

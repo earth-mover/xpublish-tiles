@@ -1093,17 +1093,6 @@ def _pixels(buf):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tile", CUBE_TILE_PARAMS)
-async def test_cube_render_matches_1d(tile):
-    flat = GLOBAL_HEALPIX_L3.create().compute()
-    cube = GLOBAL_HEALPIX_CUBE_L3.create()
-    query = create_query_params(tile, WEBMERC_TMS, style="polygons")
-    expected = _pixels(await pipeline(flat, query))
-    actual = _pixels(await pipeline(cube, query))
-    np.testing.assert_array_equal(actual, expected)
-
-
-@pytest.mark.asyncio
 async def test_cube_time_selector():
     cube = GLOBAL_HEALPIX_CUBE_L3.create()
     query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style="polygons")

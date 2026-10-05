@@ -33,6 +33,7 @@ from xpublish_tiles.testing.datasets import (
     REDGAUSS_N320,
     Dim,
     _create_global_healpix,
+    create_healpix_cube,
     uniform_grid,
 )
 from xpublish_tiles.testing.lib import (
@@ -472,6 +473,34 @@ async def test_rectilinear_triangular_equivalency(data, rect, pytestconfig):
             assert images_similar, (
                 f"Rectilinear and triangular results differ for tile {tile} (SSIM: {ssim_score:.4f})"
             )
+
+
+@pytest.mark.asyncio
+@given(data=st.data(), level=st.integers(min_value=1, max_value=7))
+@settings(max_examples=10, deadline=None)
+async def test_healpix_cube_1d_equivalency(data, level):
+    # the cube's last time step holds the 1-D values; level <= 7 stays under the coarsening budget
+    flat = _create_global_healpix(level=level, dtype=np.float64)
+    flat.attrs["_xpublish_id"] = f"healpix_1d_l{level}_proptest"
+    n = 2**level
+    cube = create_healpix_cube(
+        dims=(
+            Dim(name="time", size=2, chunk_size=1),
+            Dim(name="face", size=12, chunk_size=1),
+            Dim(name="y", size=n, chunk_size=n),
+            Dim(name="x", size=n, chunk_size=n),
+        ),
+        dtype=np.float64,
+        attrs={},
+    )
+    cube.attrs["_xpublish_id"] = f"healpix_cube_l{level}_proptest"
+
+    for _ in range(10):
+        tile, tms = data.draw(tile_and_tms())
+        query = create_query_params(tile, tms, style="polygons")
+        expected = np.asarray(Image.open(await pipeline(flat, query)))
+        actual = np.asarray(Image.open(await pipeline(cube, query)))
+        npt.assert_array_equal(actual, expected, err_msg=f"{tms.id} {tile}")
 
 
 @pytest.mark.asyncio

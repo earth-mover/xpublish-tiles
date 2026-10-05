@@ -2211,10 +2211,15 @@ def create_regional_healpix_na(
     return _create_regional_healpix(level=5, dtype=dtype, bbox=_NA_BBOX)
 
 
-def _create_global_healpix_cube(*, level: int, dtype: npt.DTypeLike) -> xr.Dataset:
+def create_healpix_cube(
+    *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
+) -> xr.Dataset:
     """``global_healpix`` values in the zeus-healpix (time, face, y, x) layout."""
+    (_, _, xdim) = (d for d in dims if d.name != "time")
+    n = xdim.size
+    level = n.bit_length() - 1
+    assert 2**level == n, f"x size {n} is not a power of 2"
     flat = _create_global_healpix(level=level, dtype=dtype)
-    n = 2**level
     f, y, x = np.meshgrid(np.arange(12), np.arange(n), np.arange(n), indexing="ij")
     ids = fyx_to_nested(f, y, x, level).astype(np.int64).reshape(12, n, n)
     cube = flat["foo"].values[ids]
@@ -2236,13 +2241,6 @@ def _create_global_healpix_cube(*, level: int, dtype: npt.DTypeLike) -> xr.Datas
     )
     del ds["foo"].attrs["grid_mapping"], ds["foo"].attrs["coordinates"]
     return ds
-
-
-def create_healpix_cube(
-    *, dims: tuple[Dim, ...], dtype: npt.DTypeLike, attrs: dict[str, Any]
-) -> xr.Dataset:
-    (_, _, x) = (d for d in dims if d.name != "time")
-    return _create_global_healpix_cube(level=x.size.bit_length() - 1, dtype=dtype)
 
 
 GLOBAL_HEALPIX_L3 = Dataset(

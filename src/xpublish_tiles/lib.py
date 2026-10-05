@@ -1080,7 +1080,7 @@ def _get_indexer_size(
         if isinstance(sl.indices, np.ndarray):
             if chunk is None:
                 return int(sl.indices.size)
-            return int(np.unique(sl.indices // chunk).size) * chunk
+            return int(pd.unique(sl.indices // chunk).size) * chunk
         sl = sl.indices
     if not isinstance(sl, slice):
         raise TypeError(f"Unknown indexer type: {type(sl)!r}")
@@ -1112,6 +1112,7 @@ def _iter_subset_shapes(
     from xpublish_tiles.grids import (
         FacetedGridSystem,
         FacetedIndexer,
+        Healpix,
         HealpixCube,
         HealpixCubeIndexer,
         Triangular,
@@ -1125,6 +1126,12 @@ def _iter_subset_shapes(
                 _get_indexer_size(ix.y, None, chunks.get(grid.Ydim)),
                 _get_indexer_size(ix.x, None, chunks.get(grid.Xdim)),
             )
+        return
+
+    if isinstance(grid, Healpix):
+        # Xdim == Ydim == the cell dim; the 2-D path below would square it
+        for ix in slicers[grid.dim]:
+            yield (_get_indexer_size(ix, da.sizes[grid.dim], chunks.get(grid.dim)),)
         return
 
     if isinstance(grid, Triangular):
