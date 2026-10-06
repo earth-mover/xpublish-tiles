@@ -454,7 +454,7 @@ def _convert_longitude_slice(
 
 
 def _longitude_sel(
-    xrindex: xr.Index,
+    xrindex: xr.indexes.PandasIndex | rasterix.RasterIndex,
     key: Hashable,
     lon_slice: slice,
     *,
@@ -1707,12 +1707,8 @@ class RectilinearMixin:
                 self.Y
             ]
 
-        x_indexers = self._x_sel(bbox)
-
         # Y dimension: always a single slice from PandasIndex
-        y_indexers = [yslice]
-
-        slicers = {self.X: x_indexers, self.Y: y_indexers}
+        slicers: Slicers = {self.X: [*self._x_sel(bbox)], self.Y: [yslice]}
 
         return slicers
 
