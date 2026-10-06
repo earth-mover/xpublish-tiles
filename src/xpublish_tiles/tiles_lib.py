@@ -315,7 +315,8 @@ def get_min_zoom(
         Required since we use `Grid.sel`.
     xpublish_id : str | None
         Optional dataset identifier for caching. When provided,
-        results are cached per (xpublish_id, spatial_dims, tms.id).
+        results are cached per (xpublish_id, spatial_dims, tms.id, style,
+        max_renderable_size, minzoom_polar_cutoff).
 
     Returns
     -------
@@ -323,7 +324,15 @@ def get_min_zoom(
         Minimum safe zoom level for this grid and data
     """
     if xpublish_id is not None:
-        cache_key: tuple | None = (xpublish_id, xarray_object_key(da), tms.id, style)
+        cache_key: tuple | None = (
+            xpublish_id,
+            xarray_object_key(da),
+            tms.id,
+            style,
+            # config that changes the answer
+            config.get("max_renderable_size"),
+            config.get("minzoom_polar_cutoff"),
+        )
     else:
         cache_key = None
 

@@ -666,6 +666,32 @@ def test_min_zoom_caches_failure():
     assert compute.call_count == 1
 
 
+def test_min_zoom_cache_key_has_config():
+    """The cached minzoom depends on the budget and the polar cutoff."""
+    ds = create_global_dataset(lat_ascending=False, nlat=181, nlon=361)
+    ds.foo.encoding["preferred_chunks"] = {"latitude": 10, "longitude": 10}
+    grid = guess_grid_system(ds, "foo")
+    lcc = morecantile.tms.get("CanadianNAD83_LCC")
+    wmq = morecantile.tms.get("WebMercatorQuad")
+
+    def minzoom(tms, **cfg):
+        with config.set(cfg):
+            return get_min_zoom(
+                grid=grid, tms=tms, da=ds.foo, style="raster", xpublish_id="cfg"
+            )
+
+    _MIN_ZOOM_CACHE.clear()
+    try:
+        assert minzoom(wmq, max_renderable_size=20_000) > minzoom(
+            wmq, max_renderable_size=1024**3
+        )
+        assert isinstance(minzoom(lcc, max_renderable_size=20_000), int)
+        with pytest.raises(TileTooBigError):
+            minzoom(lcc, max_renderable_size=20_000, minzoom_polar_cutoff=90)
+    finally:
+        _MIN_ZOOM_CACHE.clear()
+
+
 @pytest.mark.parametrize("tms_id", ["CanadianNAD83_LCC", "UPSArcticWGS84Quad"])
 def test_min_zoom_polar_cutoff(tms_id):
     """Pole tiles span every longitude; minzoom leaves them out on geographic grids."""
