@@ -8,6 +8,7 @@ import cachetools
 import morecantile
 import numpy as np
 from morecantile.errors import PointOutsideTMSBounds
+from morecantile.models import LL_EPSILON
 from pyproj import CRS
 from pyproj.aoi import BBox
 
@@ -48,6 +49,41 @@ def _lon_ranges(west: float, east: float) -> list[tuple[float, float]]:
     if west <= east:
         return [(west, east)]
     return [(west, 180.0), (-180.0, east)]
+
+
+def _tiles_at_zoom(
+    tms: morecantile.TileMatrixSet,
+    bounds: tuple[float, float, float, float],
+    zoom: int,
+    *,
+    limit: int,
+) -> list[morecantile.Tile]:
+    """The first ``limit + 1`` tiles of ``tms.tiles(*bounds, [zoom])``.
+
+    morecantile walks every column of a coalesced row and drops all but every
+    ``cf``-th, ~2**z steps per GNOSISGlobalGrid polar row. Step by ``cf`` instead.
+    """
+    matrix = tms.matrix(zoom)
+    if matrix.variableMatrixWidths is None:
+        return list(itertools.islice(tms.tiles(*bounds, [zoom]), limit + 1))
+    # Variable-width TMSs are global (CDB1, GNOSIS): clamp like tms.tiles, no
+    # antimeridian split.
+    west, south, east, north = bounds
+    left, bottom, right, top = tms.bbox
+    west, east = max(left, west), min(right, east)
+    south, north = max(bottom, south), min(top, north)
+    nw = tms.tile(west + LL_EPSILON, north - LL_EPSILON, zoom, ignore_coalescence=True)
+    se = tms.tile(east - LL_EPSILON, south + LL_EPSILON, zoom, ignore_coalescence=True)
+    minx, maxx = min(nw.x, se.x), max(nw.x, se.x)
+    miny, maxy = min(nw.y, se.y), max(nw.y, se.y)
+    tiles: list[morecantile.Tile] = []
+    for j in range(miny, maxy + 1):
+        cf = matrix.get_coalesce_factor(j)
+        for i in range(-(-minx // cf) * cf, maxx + 1, cf):
+            tiles.append(morecantile.Tile(i, j, zoom))
+            if len(tiles) > limit:
+                return tiles
+    return tiles
 
 
 def grid_overlaps_tms(grid: GridSystem, tms: morecantile.TileMatrixSet) -> bool:
@@ -218,9 +254,7 @@ def _compute_min_zoom(
         # boundary tiles are the cheap ones: their slicers are clipped by the
         # grid edge. Interior tiles straddle more chunks, so the costliest tile
         # at this zoom is what decides renderability.
-        tiles = list(
-            itertools.islice(tms.tiles(*sample_bounds, [zoom]), MAX_TILES_TO_CHECK + 1)
-        )
+        tiles = _tiles_at_zoom(tms, sample_bounds, zoom, limit=MAX_TILES_TO_CHECK)
         if len(tiles) > MAX_TILES_TO_CHECK:
             # Too many to enumerate: bound the sampled tiles over every chunk
             # alignment instead. That is tight at these zooms — with this many
@@ -287,15 +321,26 @@ def get_min_zoom(
         cache_key = None
 
     if cache_key is not None and cache_key in _MIN_ZOOM_CACHE:
-        return _MIN_ZOOM_CACHE[cache_key]
+        return _from_cache(_MIN_ZOOM_CACHE[cache_key])
 
     with _MIN_ZOOM_LOCK:
         if cache_key is not None and cache_key in _MIN_ZOOM_CACHE:
-            return _MIN_ZOOM_CACHE[cache_key]
+            return _from_cache(_MIN_ZOOM_CACHE[cache_key])
 
-        result = _compute_min_zoom(grid, tms, da, style=style)
+        try:
+            result: int | str = _compute_min_zoom(grid, tms, da, style=style)
+        except TileTooBigError as e:
+            # cache the message, not the exception: re-raising one instance grows its traceback
+            result = str(e)
 
         if cache_key is not None:
             _MIN_ZOOM_CACHE[cache_key] = result
 
-        return result
+        return _from_cache(result)
+
+
+def _from_cache(result: int | str) -> int:
+    """A cached minzoom, or a cached "no renderable zoom" message raised anew."""
+    if isinstance(result, str):
+        raise TileTooBigError(result)
+    return result

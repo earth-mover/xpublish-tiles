@@ -26,6 +26,7 @@ from xpublish_tiles.testing.datasets import (
     REGIONAL_HEALPIX_NA,
     RGB,
     UTM50S_HIRES,
+    create_global_dataset,
 )
 from xpublish_tiles.tiles_lib import _MIN_ZOOM_CACHE
 from xpublish_tiles.xpublish.tiles import TilesPlugin
@@ -1035,3 +1036,30 @@ def test_multiscale_variable_missing_from_overviews():
             assert response.status_code == 200
             assert response.json()["minzoom"] == expected
     _MIN_ZOOM_CACHE.clear()
+
+
+def test_tiles_list_skips_unrenderable_tms():
+    """One TMS with no renderable zoom must not fail the whole list.
+
+    A projected TMS that holds a pole maps the pole tile onto every longitude
+    of a lat/lon grid, so with small chunks and a small budget no zoom of
+    CanadianNAD83_LCC fits, while WebMercatorQuad (no poles) does.
+    """
+    ds = create_global_dataset(lat_ascending=False, nlat=181, nlon=361)
+    ds.foo.encoding["preferred_chunks"] = {"latitude": 10, "longitude": 10}
+    rest = xpublish.Rest({"polar": ds}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    _MIN_ZOOM_CACHE.clear()
+    with config.set(max_renderable_size=20_000):
+        response = client.get("/datasets/polar/tiles/")
+    _MIN_ZOOM_CACHE.clear()
+    assert response.status_code == 200
+    tms_ids = {
+        link["href"].removeprefix("./")
+        for ts in response.json()["tilesets"]
+        for link in ts["links"]
+        if link["rel"] == "self"
+    }
+    assert "WebMercatorQuad" in tms_ids
+    assert "CanadianNAD83_LCC" not in tms_ids

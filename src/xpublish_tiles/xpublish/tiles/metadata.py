@@ -340,11 +340,14 @@ async def create_tileset_for_tms(
     # Each variable's minzoom comes from its own coarsest level; the tileset
     # limits must hold for every layer, so they start at the largest one.
     min_zooms = await get_min_zooms(tms_id, minzoom_sources)
+    if not min_zooms:
+        logger.info(f"skipping {tms_id}: no renderable zoom for any variable")
+        return None
 
     # Create layers for each renderable data variable
     layers = []
     for var_name in var_grids:
-        if var_name not in layer_extents:
+        if var_name not in layer_extents or var_name not in min_zooms:
             continue
         var_data = dataset[var_name]
         extents = layer_extents[var_name]

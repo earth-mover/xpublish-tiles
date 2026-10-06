@@ -14,7 +14,8 @@ import pyproj.aoi
 
 import xarray as xr
 from xpublish_tiles.grids import GridSystem, guess_grid_system
-from xpublish_tiles.lib import async_run, cf_get, timedelta_to_iso8601
+from xpublish_tiles.lib import TileTooBigError, async_run, cf_get, timedelta_to_iso8601
+from xpublish_tiles.logger import logger
 from xpublish_tiles.tiles_lib import get_min_zoom
 from xpublish_tiles.types import OutputBBox, OutputCRS
 from xpublish_tiles.xpublish.tiles.types import (
@@ -179,7 +180,10 @@ class MinZoomSource:
 
 
 async def get_min_zooms(tms_id: str, sources: dict[str, MinZoomSource]) -> dict[str, int]:
-    """Minimum zoom per variable. Variables sharing a grid and spatial dims compute once."""
+    """Minimum zoom per variable. Variables sharing a grid and spatial dims compute once.
+
+    Variables with no renderable zoom in this TMS are left out.
+    """
     tms = morecantile.tms.get(tms_id)
     groups: dict[tuple, list[str]] = {}
     for var_name, source in sources.items():
@@ -188,14 +192,18 @@ async def get_min_zooms(tms_id: str, sources: dict[str, MinZoomSource]) -> dict[
     min_zooms: dict[str, int] = {}
     for names in groups.values():
         source = sources[names[0]]
-        zoom = await async_run(
-            get_min_zoom,
-            grid=source.grid,
-            tms=tms,
-            da=source.da,
-            style="raster",
-            xpublish_id=source.xpublish_id,
-        )
+        try:
+            zoom = await async_run(
+                get_min_zoom,
+                grid=source.grid,
+                tms=tms,
+                da=source.da,
+                style="raster",
+                xpublish_id=source.xpublish_id,
+            )
+        except TileTooBigError as e:
+            logger.info(f"skipping {names} in {tms_id}: {e}")
+            continue
         min_zooms.update(dict.fromkeys(names, zoom))
     return min_zooms
 
