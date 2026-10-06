@@ -3,6 +3,7 @@ import json
 import urllib.parse
 from unittest.mock import patch
 
+import morecantile
 import numpy as np
 import pandas as pd
 import pytest
@@ -1365,7 +1366,7 @@ def test_tilejson_unrenderable_tms_returns_422():
     client = TestClient(rest.app)
 
     _MIN_ZOOM_CACHE.clear()
-    with config.set(max_renderable_size=20_000):
+    with config.set(max_renderable_size=20_000, minzoom_polar_cutoff=90):
         bad = client.get(
             "/datasets/polar/tiles/CanadianNAD83_LCC/tilejson.json?variables=foo&width=256&height=256"
         )
@@ -1376,6 +1377,32 @@ def test_tilejson_unrenderable_tms_returns_422():
     assert bad.status_code == 422
     assert "CanadianNAD83_LCC" in bad.json()["detail"]
     assert good.status_code == 200
+
+
+def test_pole_tile_at_minzoom_returns_413():
+    """minzoom leaves pole tiles out; requesting one is still refused as too big."""
+    ds = create_global_dataset(lat_ascending=False, nlat=181, nlon=361)
+    ds.foo.encoding["preferred_chunks"] = {"latitude": 10, "longitude": 10}
+    rest = xpublish.Rest({"polar": ds}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+    tms = morecantile.tms.get("CanadianNAD83_LCC")
+
+    _MIN_ZOOM_CACHE.clear()
+    # the pole tile reads one 10-row chunk band over all longitudes: 16 kB
+    with config.set(max_renderable_size=10_000):
+        tilejson = client.get(
+            "/datasets/polar/tiles/CanadianNAD83_LCC/tilejson.json"
+            "?variables=foo&width=256&height=256"
+        )
+        assert tilejson.status_code == 200
+        z = tilejson.json()["minzoom"]
+        tile = tms.tile(0, 90, z)
+        response = client.get(
+            f"/datasets/polar/tiles/CanadianNAD83_LCC/{z}/{tile.y}/{tile.x}"
+            "?variables=foo&width=256&height=256"
+        )
+    _MIN_ZOOM_CACHE.clear()
+    assert response.status_code == 413
 
 
 @pytest.mark.parametrize(

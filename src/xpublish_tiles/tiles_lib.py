@@ -219,6 +219,7 @@ def _compute_min_zoom(
         float(wgs84_lats.max()),
     )
 
+    polar_cutoff = config.get("minzoom_polar_cutoff")
     alternate = grid.pick_alternate_grid(tms_crs, coarsen_factors={})
     transformer = transformer_from_crs(tms_crs, grid.crs)
 
@@ -231,6 +232,12 @@ def _compute_min_zoom(
         # Handle antimeridian-crossing tiles where left > right after transform
         if grid.crs.is_geographic and left > right:
             right += 360
+        if grid.crs.is_geographic:
+            # A pole maps to every longitude, so tiles touching it fan out to the
+            # whole chunk row. Leave them out of minzoom; requested, they get a 413.
+            top, bottom = min(top, polar_cutoff), max(bottom, -polar_cutoff)
+            if top <= bottom:
+                return True
 
         tile_bbox = BBox(west=left, south=bottom, east=right, north=top)
         slicers = grid.sel(bbox=tile_bbox)

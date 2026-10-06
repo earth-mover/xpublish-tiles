@@ -650,7 +650,8 @@ def test_min_zoom_caches_failure():
 
     _MIN_ZOOM_CACHE.clear()
     with (
-        config.set({"max_renderable_size": 20_000}),
+        # no polar cutoff, so the pole tile makes every zoom unrenderable
+        config.set({"max_renderable_size": 20_000, "minzoom_polar_cutoff": 90}),
         patch(
             "xpublish_tiles.tiles_lib._compute_min_zoom",
             wraps=tiles_lib._compute_min_zoom,
@@ -663,6 +664,36 @@ def test_min_zoom_caches_failure():
                 )
     _MIN_ZOOM_CACHE.clear()
     assert compute.call_count == 1
+
+
+@pytest.mark.parametrize("tms_id", ["CanadianNAD83_LCC", "UPSArcticWGS84Quad"])
+def test_min_zoom_polar_cutoff(tms_id):
+    """Pole tiles span every longitude; minzoom leaves them out on geographic grids."""
+    ds = create_global_dataset(lat_ascending=False, nlat=181, nlon=361)
+    ds.foo.encoding["preferred_chunks"] = {"latitude": 10, "longitude": 10}
+    grid = guess_grid_system(ds, "foo")
+    tms = morecantile.tms.get(tms_id)
+
+    with config.set({"max_renderable_size": 20_000, "minzoom_polar_cutoff": 90}):
+        with pytest.raises(TileTooBigError):
+            get_min_zoom(grid=grid, tms=tms, da=ds.foo, style="raster")
+    with config.set({"max_renderable_size": 20_000}):
+        minzoom = get_min_zoom(grid=grid, tms=tms, da=ds.foo, style="raster")
+    assert tms.minzoom <= minzoom < tms.maxzoom
+
+
+def test_min_zoom_polar_cutoff_keeps_webmercator():
+    """The default cutoff is the Web Mercator limit, so WebMercatorQuad is unchanged."""
+    ds = create_global_dataset(lat_ascending=False, nlat=181, nlon=361)
+    ds.foo.encoding["preferred_chunks"] = {"latitude": 10, "longitude": 10}
+    grid = guess_grid_system(ds, "foo")
+    tms = morecantile.tms.get("WebMercatorQuad")
+
+    zooms = []
+    for cutoff in (90, config.get("minzoom_polar_cutoff")):
+        with config.set({"max_renderable_size": 20_000, "minzoom_polar_cutoff": cutoff}):
+            zooms.append(get_min_zoom(grid=grid, tms=tms, da=ds.foo, style="raster"))
+    assert zooms[0] == zooms[1]
 
 
 @pytest.mark.parametrize(

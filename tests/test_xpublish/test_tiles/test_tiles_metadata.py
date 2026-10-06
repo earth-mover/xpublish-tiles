@@ -1043,7 +1043,8 @@ def test_tiles_list_skips_unrenderable_tms():
 
     A projected TMS that holds a pole maps the pole tile onto every longitude
     of a lat/lon grid, so with small chunks and a small budget no zoom of
-    CanadianNAD83_LCC fits, while WebMercatorQuad (no poles) does.
+    CanadianNAD83_LCC fits, while WebMercatorQuad (no poles) does. The polar
+    cutoff is off here so that the pole tile still counts.
     """
     ds = create_global_dataset(lat_ascending=False, nlat=181, nlon=361)
     ds.foo.encoding["preferred_chunks"] = {"latitude": 10, "longitude": 10}
@@ -1051,7 +1052,7 @@ def test_tiles_list_skips_unrenderable_tms():
     client = TestClient(rest.app)
 
     _MIN_ZOOM_CACHE.clear()
-    with config.set(max_renderable_size=20_000):
+    with config.set(max_renderable_size=20_000, minzoom_polar_cutoff=90):
         response = client.get("/datasets/polar/tiles/")
     _MIN_ZOOM_CACHE.clear()
     assert response.status_code == 200
