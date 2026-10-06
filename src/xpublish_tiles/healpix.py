@@ -2,11 +2,50 @@
 
 import functools
 import math
+from dataclasses import dataclass
+from typing import Literal
 
 import numba
 import numpy as np
 import pandas as pd
 from pyproj.aoi import BBox
+
+_INDEXING_SCHEMES = ("nested", "ring")
+
+
+@dataclass(frozen=True, kw_only=True)
+class HealpixGridInfo:
+    """HEALPix grid parameters: level, indexing scheme, ellipsoid."""
+
+    level: int
+    indexing_scheme: Literal["nested", "ring"] = "nested"
+    ellipsoid: str = "sphere"
+
+    def __post_init__(self):
+        # attrs from netCDF/zarr are often numpy ints
+        object.__setattr__(self, "level", int(self.level))
+        if not 0 <= self.level <= 29:
+            raise ValueError(f"HEALPix level must be in [0, 29], got {self.level}")
+        if self.indexing_scheme not in _INDEXING_SCHEMES:
+            raise ValueError(
+                f"HEALPix indexing_scheme must be one of {_INDEXING_SCHEMES}, "
+                f"got {self.indexing_scheme!r}"
+            )
+
+    @property
+    def ncells(self) -> int:
+        return 12 * 4**self.level
+
+    def cell_ids2geographic(self, cell_ids: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Cell-center lon/lat in degrees; lon in healpix-geo's native range."""
+        import healpix_geo
+
+        mod = healpix_geo.nested if self.indexing_scheme == "nested" else healpix_geo.ring
+        lon, lat = mod.healpix_to_lonlat(
+            cell_ids, depth=self.level, ellipsoid=self.ellipsoid
+        )
+        return np.asarray(lon), np.asarray(lat)
+
 
 _M1 = np.uint64(0x5555555555555555)
 _M2 = np.uint64(0x3333333333333333)

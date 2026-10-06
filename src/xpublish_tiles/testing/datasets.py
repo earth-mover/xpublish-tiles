@@ -14,7 +14,7 @@ from pyproj.aoi import BBox
 import dask.array
 import xarray as xr
 from xarray import DataTree
-from xpublish_tiles.healpix import fyx_to_nested
+from xpublish_tiles.healpix import HealpixGridInfo, fyx_to_nested
 from xpublish_tiles.multiscale import assign_leaf_xpublish_ids
 from xpublish_tiles.projections import transformer_from_crs
 from xpublish_tiles.testing.tiles import (
@@ -2137,9 +2137,7 @@ def _create_global_healpix(*, level: int, dtype: npt.DTypeLike) -> xr.Dataset:
     n_cells = 12 * 4**level. Values are a smooth lon/lat function so visual
     checks can verify antimeridian handling.
     """
-    import xdggs
-
-    info = xdggs.HealpixInfo(level=level, indexing_scheme="nested")
+    info = HealpixGridInfo(level=level)
     n_cells = 12 * 4**level
     cell_ids = np.arange(n_cells, dtype=np.int64)
     lon, lat = info.cell_ids2geographic(cell_ids)
@@ -2209,9 +2207,7 @@ def _create_regional_healpix(
     bbox = (west, south, east, north). Cell indices remain the global ``nested``
     ones at the given level, so downstream HEALPix math stays valid.
     """
-    import xdggs
-
-    info = xdggs.HealpixInfo(level=level, indexing_scheme="nested")
+    info = HealpixGridInfo(level=level)
     n_cells = 12 * 4**level
     all_ids = np.arange(n_cells, dtype=np.int64)
     lon, lat = info.cell_ids2geographic(all_ids)

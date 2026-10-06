@@ -25,6 +25,7 @@ import xarray as xr
 from xarray.core.indexing import IndexSelResult
 from xpublish_tiles.config import config
 from xpublish_tiles.healpix import (
+    HealpixGridInfo,
     antimeridian_cells,
     bbox_cell_ids,
     coarse_level,
@@ -64,7 +65,6 @@ from xpublish_tiles.utils import (
 
 if TYPE_CHECKING:
     import shapely
-    from xdggs.healpix import HealpixIndex
 
 GRID_DETECTION_LOCK = threading.Lock()
 
@@ -3088,11 +3088,6 @@ class Features(GridSystem1D):
         )
 
 
-def _healpix_ellipsoid(info) -> Any:
-    # xdggs has no public ellipsoid serializer; HealpixInfo._format_ellipsoid is gone in 0.7.
-    return info.to_dict().get("ellipsoid", "sphere")
-
-
 @dataclass(init=False, kw_only=True, eq=False)
 class HealpixBase(GridSystem):
     """Shared base of the HEALPix layouts; isinstance means "any HEALPix"."""
@@ -3102,6 +3097,7 @@ class HealpixBase(GridSystem):
     X: str
     Y: str
     dim: str  # 1-D cell dim; for the cube, the gathered "_healpix_cell"
+    grid_info: HealpixGridInfo
     indexes: tuple[xr.Index, ...]
 
     npoints_per_geometry: int = field(init=False, default=5)
@@ -3147,7 +3143,6 @@ class Healpix(HealpixBase):
     """Grid system for HealPix discrete global grid."""
 
     cell_ids_name: str
-    index: "HealpixIndex"
     cell_ids: np.ndarray
 
     def __init__(
@@ -3157,7 +3152,7 @@ class Healpix(HealpixBase):
         dim: str,
         Xname: str,
         Yname: str,
-        index: "HealpixIndex",
+        grid_info: HealpixGridInfo,
         cell_ids_name: str,
         cell_ids: np.ndarray,
         bbox: BBox,
@@ -3166,15 +3161,16 @@ class Healpix(HealpixBase):
         self.X, self.Y = Xname, Yname
         self.dim = dim
         self.cell_ids_name = cell_ids_name
-        self.index = index
+        self.grid_info = grid_info
         self.indexes = ()
         self.bbox = bbox
         self.alternates = ()
         self.cell_ids = cell_ids
         self._bbox_xform_cache = {}
 
-        depth = int(index.grid_info.level)
-        self.antimeridian_cells = np.intersect1d(antimeridian_cells(depth), cell_ids)
+        self.antimeridian_cells = np.intersect1d(
+            antimeridian_cells(grid_info.level), cell_ids
+        )
 
     @property
     def Xdim(self) -> str:
@@ -3194,9 +3190,9 @@ class Healpix(HealpixBase):
         Uses healpix_geo to find HEALPix cells that intersect the bbox,
         then returns the indices of those cells in our dataset.
         """
-        if self.index.grid_info.indexing_scheme != "nested":
+        if self.grid_info.indexing_scheme != "nested":
             raise NotImplementedError(
-                f"Healpix sel() only supports nested indexing, got {self.index.grid_info.indexing_scheme!r}"
+                f"Healpix sel() only supports nested indexing, got {self.grid_info.indexing_scheme!r}"
             )
 
         # For very large bboxes covering most of the globe, return all cells
@@ -3208,9 +3204,7 @@ class Healpix(HealpixBase):
                 self.dim: [HealpixIndexer(indices=slice(None), antimeridian_mask=am_mask)]
             }
 
-        depth = int(self.index.grid_info.level)
-
-        selected = bbox_cell_ids(bbox, depth)
+        selected = bbox_cell_ids(bbox, self.grid_info.level)
 
         _, _, indices = np.intersect1d(
             selected, self.cell_ids, assume_unique=True, return_indices=True
@@ -3240,9 +3234,8 @@ class Healpix(HealpixBase):
         """Return a 1D DataArray with flattened (n_cells * 4,) corner lon/lat coords."""
         parts = [np.asarray(self.cell_ids[sl.indices]) for sl in slicers[self.dim]]
         subset_cell_ids = parts[0] if len(parts) == 1 else np.concatenate(parts)
-        info = self.index.grid_info
         return self._corner_array(
-            subset_cell_ids, int(info.level), _healpix_ellipsoid(info)
+            subset_cell_ids, self.grid_info.level, self.grid_info.ellipsoid
         )
 
     @classmethod
@@ -3253,39 +3246,27 @@ class Healpix(HealpixBase):
         Xname: str,
         Yname: str,
     ) -> Self:
-        import xdggs
-        from xdggs.healpix import HealpixIndex
+        import healpix_geo  # noqa: F401  # fail at detection, not at render, without the extra
 
-        # FIXME: upstream to xdggs
-        name = ds.cf.standard_names["healpix_index"][0]
-        info = xdggs.HealpixInfo(
-            level=ds["healpix"].attrs["refinement_level"],
-            indexing_scheme=ds["healpix"].attrs["indexing_scheme"],
+        cell_ids_name = ds.cf.standard_names["healpix_index"][0]
+        (mapping,) = (
+            v
+            for v in ds.variables.values()
+            if v.attrs.get("grid_mapping_name") == "healpix"
         )
-        ds = xdggs.decode(ds, info, name=name)
-
-        # Find the HealpixIndex in the dataset
-        healpix_index = None
-        cell_dim = None
-        cell_ids_name = None
-        for name, idx in ds.xindexes.items():
-            if isinstance(idx, HealpixIndex):
-                healpix_index = idx
-                cell_ids_name = str(name)
-                cell_dim = ds[name].dims[0]
-                break
-
-        if healpix_index is None or cell_ids_name is None or cell_dim is None:
-            raise ValueError("No HealpixIndex found in dataset.")
-
+        info = HealpixGridInfo(
+            level=mapping.attrs["refinement_level"],
+            indexing_scheme=mapping.attrs["indexing_scheme"],
+        )
+        (cell_dim,) = ds[cell_ids_name].dims
+        # TODO: O(ncells) memory, and sel() does an O(N log N) intersect1d per tile.
+        # Full coverage: skip storing ids (position == id). Sorted regional: searchsorted.
         cell_ids = ds[cell_ids_name].load().to_numpy()
-        info = healpix_index.grid_info
-        if cell_ids.size == 12 * 4**info.level:
+        if cell_ids.size == info.ncells:
             bbox = BBox(west=-180, south=-90, east=180, north=90)
         else:
-            lon, lat = info.cell_ids2geographic(np.asarray(cell_ids))
-            lon = ((np.asarray(lon) + 180) % 360) - 180
-            lat = np.asarray(lat)
+            lon, lat = info.cell_ids2geographic(cell_ids)
+            lon = ((lon + 180) % 360) - 180
             bbox = BBox(
                 west=float(lon.min()),
                 south=float(lat.min()),
@@ -3297,9 +3278,9 @@ class Healpix(HealpixBase):
             crs=crs,
             Xname=Xname,
             Yname=Yname,
-            dim=cell_dim,
-            index=healpix_index,
-            cell_ids_name=cell_ids_name,
+            dim=str(cell_dim),
+            grid_info=info,
+            cell_ids_name=str(cell_ids_name),
             cell_ids=cell_ids,
             bbox=bbox,
         )
@@ -3403,21 +3384,21 @@ class HealpixCube(HealpixBase):
     """
 
     face_dim: str
-    level: int
 
     def __init__(self, *, face_dim: str, Ydim: str, Xdim: str, level: int):
-        import xdggs
-
         self.crs = DEFAULT_CRS
         self.X, self.Y = "longitude", "latitude"
         self.dim = "_healpix_cell"
         self.face_dim, self._Ydim, self._Xdim = face_dim, Ydim, Xdim
-        self.level = level
-        self.grid_info = xdggs.HealpixInfo(level=level, indexing_scheme="nested")
+        self.grid_info = HealpixGridInfo(level=level)
         self.indexes = ()
         self.alternates = ()
         self.bbox = BBox(west=-180, south=-90, east=180, north=90)
         self._bbox_xform_cache = {}
+
+    @property
+    def level(self) -> int:
+        return self.grid_info.level
 
     @property
     def Xdim(self) -> str:
@@ -3441,6 +3422,8 @@ class HealpixCube(HealpixBase):
         *,
         face_dim: str = "face",
     ) -> Self:
+        import healpix_geo  # noqa: F401  # fail at detection, not at render, without the extra
+
         return cls(
             face_dim=face_dim, Ydim="y", Xdim="x", level=ds.sizes["x"].bit_length() - 1
         )
@@ -3549,7 +3532,7 @@ class HealpixCube(HealpixBase):
         (indexer,) = slicers[self.dim]
         assert isinstance(indexer, HealpixCubeIndexer)
         return self._corner_array(
-            indexer.cell_ids, indexer.level, _healpix_ellipsoid(self.grid_info)
+            indexer.cell_ids, indexer.level, self.grid_info.ellipsoid
         )
 
 
