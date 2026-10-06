@@ -2126,16 +2126,27 @@ class TestRasterAffinePeriodic:
         assert not grid.drop_seam
 
     def test_seam_drift_bound(self):
-        # drift = n * |dx - 360/n| = 360 * rel; bound is dx / 1e3, so rel < 1e-3 / n
+        # drift in cells = |360/dx - n| ~ n * rel; default bound is 0.05 cells
         n, dx0 = 1000, 0.36
         inside = RasterAffine.from_dataset(
-            _geotransform_ds(n, 10, dx0 * (1 + 5e-7)), CRS.from_epsg(4326), "x", "y"
+            _geotransform_ds(n, 10, dx0 * (1 + 2e-5)), CRS.from_epsg(4326), "x", "y"
         )
         assert (inside.indexes[0].x_period, inside.indexes[0].y_period) == (360.0, None)
         outside = RasterAffine.from_dataset(
-            _geotransform_ds(n, 10, dx0 * (1 + 2e-6)), CRS.from_epsg(4326), "x", "y"
+            _geotransform_ds(n, 10, dx0 * (1 + 1e-4)), CRS.from_epsg(4326), "x", "y"
         )
         assert (outside.indexes[0].x_period, outside.indexes[0].y_period) == (None, None)
+        with config.set(rasterix_period_atol=0.2):
+            loosened = RasterAffine.from_dataset(
+                _geotransform_ds(n, 10, dx0 * (1 + 1e-4)), CRS.from_epsg(4326), "x", "y"
+            )
+        assert loosened.indexes[0].x_period == 360.0
+
+    def test_drifted_dx_isels(self):
+        # 0.02 cells of drift is above the rasterix default, which it re-checks on isel
+        ds = _geotransform_ds(1000, 10, 0.36 * (1 + 2e-5))
+        grid = RasterAffine.from_dataset(ds, CRS.from_epsg(4326), "x", "y")
+        assert grid.assign_index(ds.foo).isel(x=slice(0, 10)).sizes["x"] == 10
 
     def test_zero_dx_is_not_periodic(self):
         grid = RasterAffine.from_dataset(
