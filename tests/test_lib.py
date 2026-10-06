@@ -657,13 +657,50 @@ def test_min_zoom_caches_failure():
             wraps=tiles_lib._compute_min_zoom,
         ) as compute,
     ):
+        messages = []
         for _ in range(2):
-            with pytest.raises(TileTooBigError, match="CanadianNAD83_LCC"):
+            with pytest.raises(TileTooBigError, match="CanadianNAD83_LCC") as e:
                 get_min_zoom(
                     grid=grid, tms=tms, da=ds.foo, style="raster", xpublish_id="polar"
                 )
+            messages.append(str(e.value))
     _MIN_ZOOM_CACHE.clear()
     assert compute.call_count == 1
+    assert messages[0] == messages[1]
+
+
+def test_min_zoom_error_names_cause():
+    """The error tells chunks that are too big apart from a tile that fans out."""
+    ds = create_global_dataset(lat_ascending=False, nlat=181, nlon=361)
+    grid = guess_grid_system(ds, "foo")
+
+    # one 181x361 float32 chunk is 261364 bytes, over the budget on its own
+    ds.foo.encoding["preferred_chunks"] = {"latitude": 181, "longitude": 361}
+    with config.set({"max_renderable_size": 20_000}):
+        with pytest.raises(TileTooBigError) as e:
+            get_min_zoom(
+                grid=grid,
+                tms=morecantile.tms.get("WebMercatorQuad"),
+                da=ds.foo,
+                style="raster",
+            )
+    assert "a single chunk (shape (181, 361), 261364 bytes)" in str(e.value)
+
+    # small chunks, but the pole tile spans every longitude
+    ds.foo.encoding["preferred_chunks"] = {"latitude": 10, "longitude": 10}
+    with config.set({"max_renderable_size": 20_000, "minzoom_polar_cutoff": 90}):
+        with pytest.raises(TileTooBigError) as e:
+            get_min_zoom(
+                grid=grid,
+                tms=morecantile.tms.get("CanadianNAD83_LCC"),
+                da=ds.foo,
+                style="raster",
+            )
+    msg = str(e.value)
+    assert "spans many chunks" in msg
+    assert "tile 25/" in msg
+    assert "lon -180..180" in msg
+    assert "max_renderable_size 20000" in msg
 
 
 def test_min_zoom_cache_key_has_config():
