@@ -138,9 +138,9 @@ def _compute_min_zoom(
         left=geo_left, bottom=geo_bottom, right=geo_right, top=geo_top
     )
 
-    if isinstance(grid, RasterAffine) and grid.drop_seam:
-        # slicers index the P-wide periodic axis; drop the duplicate seam column from da
-        da = grid.assign_index(da)
+    if isinstance(grid, RasterAffine):
+        # slicers index the periodic axis, which has no seam column
+        da = grid.drop_seam_column(da)
 
     grid_to_wgs84 = transformer_from_crs(grid.crs, 4326)
 

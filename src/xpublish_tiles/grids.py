@@ -6,7 +6,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Hashable, Iterable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Self, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, Self, cast
 
 import cachetools
 import cf_xarray  # noqa: F401
@@ -1328,27 +1328,32 @@ def is_rotated_pole(crs: CRS) -> bool:
     return crs.to_cf().get("grid_mapping_name") == "rotated_latitude_longitude"
 
 
-def _with_longitude_period(
-    index: rasterix.RasterIndex,
-) -> tuple[rasterix.RasterIndex, bool]:
-    """``(index with x_period=360, drop_seam)`` for a global lon axis, else ``(index, False)``.
+class _LongitudePeriod(NamedTuple):
+    index: rasterix.RasterIndex
+    # the last x column repeats the first
+    drop_seam: bool
 
-    ``dx`` is snapped to ``360 / n``. ``drop_seam``: the last column repeats the first.
+
+def _with_longitude_period(index: rasterix.RasterIndex) -> _LongitudePeriod:
+    """Rebuild ``index`` with ``x_period=360`` if its x axis is a global longitude axis.
+
+    ``dx`` is snapped to ``360 / ncells``. A non-global ``index`` is returned unchanged.
     """
+    unchanged = _LongitudePeriod(index, drop_seam=False)
     affine = index.transform()
     if affine.b != 0 or affine.d != 0:
-        return index, False
+        return unchanged
     nx, ny = index.xy_shape
     if affine.a == 0:
-        return index, False
+        return unchanged
     ncells = round(360.0 / abs(affine.a))
     if ncells < 1 or nx not in (ncells, ncells + 1):
-        return index, False
+        return unchanged
     # GeoTransforms carry truncated or float32 dx; snap if the seam misaligns by < 1/1000 pixel
     if ncells * abs(abs(affine.a) - 360.0 / ncells) >= 1e-3 * abs(affine.a):
-        return index, False
+        return unchanged
     if affine.a < 0:
-        # _rectilinear_sel passes ascending lon slices; decreasing periodic x is not planned
+        # RasterAffine._x_sel passes ascending lon slices; decreasing periodic x is not planned
         raise NotImplementedError(
             "Global RasterAffine grids with decreasing longitude are not supported."
         )
@@ -1363,7 +1368,7 @@ def _with_longitude_period(
         crs=index.crs,
         x_period=360.0,
     )
-    return periodic, nx == ncells + 1
+    return _LongitudePeriod(periodic, drop_seam=nx == ncells + 1)
 
 
 def _indexes_equal(a: xr.Index, b: xr.Index) -> bool:
@@ -1688,7 +1693,7 @@ class RectilinearMixin:
             Whether to handle wraparound for X dimension
         """
         assert len(self.indexes) >= 1
-        xindex, yindex = self.indexes[0], self.indexes[-1]
+        yindex = self.indexes[-1]
 
         # Handle Y dimension selection
         if y_is_increasing:
@@ -1700,25 +1705,7 @@ class RectilinearMixin:
                 self.Y
             ]
 
-        # Handle X dimension selection
-        if isinstance(self, RasterAffine) and self.lon_spans_globe:
-            # one periodic sel across the seam is an int array; split into slices
-            affine = self._xrindex.transform()
-            x_indexers = _longitude_sel(
-                self._xrindex,
-                self.X,
-                slice(bbox.west, bbox.east),
-                size=self._xrindex.xy_shape[0],
-                left_break=self.left_break,
-                right_break=self.right_break,
-                cell_left=lambda i: affine.c + i * affine.a,
-            )
-        else:
-            xsel_result = xindex.sel({self.X: slice(bbox.west, bbox.east)})
-            # X dimension: LongitudeCellIndex can return multiple slices for antimeridian crossing
-            x_raw = xsel_result.dim_indexers[self.X]
-            # Handle single slice from PandasIndex
-            x_indexers = x_raw if isinstance(x_raw, list) else [x_raw]
+        x_indexers = self._x_sel(bbox)
 
         # Y dimension: always a single slice from PandasIndex
         y_indexers = [yslice]
@@ -1726,6 +1713,13 @@ class RectilinearMixin:
         slicers = {self.X: x_indexers, self.Y: y_indexers}
 
         return slicers
+
+    def _x_sel(self, bbox: BBox) -> list[slice]:
+        xsel_result = self.indexes[0].sel({self.X: slice(bbox.west, bbox.east)})
+        # X dimension: LongitudeCellIndex can return multiple slices for antimeridian crossing
+        x_raw = xsel_result.dim_indexers[self.X]
+        # Handle single slice from PandasIndex
+        return x_raw if isinstance(x_raw, list) else [x_raw]
 
 
 @dataclass(kw_only=True, eq=False)
@@ -1745,10 +1739,8 @@ class RasterAffine(RectilinearMixin, GridSystem):
     npoints_per_geometry: int = field(init=False, default=5)
     dXmin: float = field(init=False)
     dYmin: float = field(init=False)
-    # non-periodic copy of the index and its x domain, for _longitude_sel
-    _xrindex: rasterix.RasterIndex = field(init=False, repr=False)
-    left_break: float = field(init=False)
-    right_break: float = field(init=False)
+    # non-periodic copy of the periodic index; _x_sel splits at the seam and sels on it
+    _xrindex: rasterix.RasterIndex | None = field(init=False, repr=False, default=None)
 
     def __post_init__(self) -> None:
         self.Xdim = self.X
@@ -1764,8 +1756,6 @@ class RasterAffine(RectilinearMixin, GridSystem):
             self._xrindex = rasterix.RasterIndex.from_transform(
                 affine, width=nx, height=ny, x_dim=x_dim, y_dim=y_dim, crs=index.crs
             )
-            self.left_break = affine.c
-            self.right_break = affine.c + nx * affine.a
         self.dXmin = abs(affine.a)  # X pixel size
         self.dYmin = abs(affine.e)  # Y pixel size
 
@@ -1809,12 +1799,32 @@ class RasterAffine(RectilinearMixin, GridSystem):
         """Return the set of dimension names for this grid system."""
         return {self.Xdim, self.Ydim}
 
-    def assign_index(self, da: xr.DataArray) -> xr.DataArray:
+    def drop_seam_column(self, da: xr.DataArray) -> xr.DataArray:
+        """Lazily drop the last x column if it repeats the first (``drop_seam``)."""
         if self.drop_seam:
-            # lazy; the duplicate seam column is never loaded
             da = da.isel({self.Xdim: slice(0, -1)})
+        return da
+
+    def assign_index(self, da: xr.DataArray) -> xr.DataArray:
+        da = self.drop_seam_column(da)
         (index,) = self.indexes
         return da.assign_coords(xr.Coordinates.from_xindex(index))
+
+    def _x_sel(self, bbox: BBox) -> list[slice]:
+        if self._xrindex is None:
+            return super()._x_sel(bbox)
+        index = self._xrindex
+        affine = index.transform()
+        nx = index.xy_shape[0]
+        return _longitude_sel(
+            index,
+            self.X,
+            slice(bbox.west, bbox.east),
+            size=nx,
+            left_break=affine.c,
+            right_break=affine.c + nx * affine.a,
+            cell_left=lambda i: affine.c + i * affine.a,
+        )
 
     def sel(self, *, bbox: BBox) -> Slicers:
         (index,) = self.indexes
