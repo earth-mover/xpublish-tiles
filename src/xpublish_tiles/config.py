@@ -26,6 +26,8 @@ config = donfig.Config(
             "grid_cache_max_size": 16,  # maximum number of grid systems to cache
             # one of "nearest", "coarser", "finer"; see OverviewSelectionStrategy
             "overview_selection_strategy": "nearest",
+            # cells; max seam drift |360/|dx| - n| accepted for a periodic RasterAffine x axis
+            "rasterix_period_atol": 0.05,
         }
     ],
     paths=[],

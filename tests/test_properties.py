@@ -367,6 +367,7 @@ async def test_property_equivalent_grids_render_equivalently(
     1. rectilinear grid
     2. curvilinear grid constructed from broadcasting out rectilinear grid
     3. unstructured grid constructed from stacking rectilinear grid
+    4. RasterAffine grid with a GeoTransform from the rectilinear cell centers
     must be preceptually very very similar.
 
     Note that this test receives new datasets and repeatedly triangulating the grid is slow;
@@ -397,6 +398,24 @@ async def test_property_equivalent_grids_render_equivalently(
     # )
 
     lon, lat = curvi.longitude, curvi.latitude
+
+    lons, lats = rect.longitude.data, rect.latitude.data
+    dx, dy = lons[1] - lons[0], lats[1] - lats[0]
+    raster = xr.Dataset(
+        {
+            "foo": (
+                ("y", "x"),
+                rect.foo.transpose("latitude", "longitude").data,
+                rect.foo.attrs | {"grid_mapping": "spatial_ref"},
+            )
+        }
+    )
+    raster.coords["spatial_ref"] = (
+        (),
+        0,
+        CRS.from_epsg(4326).to_cf()
+        | {"GeoTransform": f"{lons[0] - dx / 2} {dx} 0.0 {lats[0] - dy / 2} 0.0 {dy}"},
+    )
     transposed = curvi.assign_coords(
         longitude=lon.transpose() if data.draw(st.booleans()) else curvi.longitude,
         latitude=lat.transpose() if data.draw(st.booleans()) else curvi.latitude,
@@ -427,6 +446,14 @@ async def test_property_equivalent_grids_render_equivalently(
             )
             assert images_similar, (
                 f"Rectilinear and curvilinear results differ for tile {tile} (SSIM: {ssim_score:.4f})"
+            )
+
+            raster_result = await pipeline(raster, query)
+            images_similar, ssim_score = compare(
+                rectilinear_result, raster_result, tile, tms
+            )
+            assert images_similar, (
+                f"Rectilinear and RasterAffine results differ for tile {tile} (SSIM: {ssim_score:.4f})"
             )
 
             transposed_result = await pipeline(transposed, query)

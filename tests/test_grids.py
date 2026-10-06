@@ -64,6 +64,7 @@ from xpublish_tiles.pipeline import (
     apply_query,
     apply_slicers,
     fix_coordinate_discontinuities,
+    has_coordinate_discontinuity,
     load_plans,
     pipeline,
 )
@@ -1043,6 +1044,27 @@ class TestLongitudeCellIndex:
 
         result = lon_index.sel({"longitude": slice(380, 420)})
         assert result.dim_indexers == {"longitude": [slice(0, 1)]}
+
+
+@pytest.mark.parametrize(
+    "lo, hi, expected",
+    [
+        (354.0, 546.0, True),  # contains 540 = 180 + 360 (rasterix concat frame)
+        (-546.0, -354.0, True),  # contains -540
+        (-190.0, -170.0, True),
+        (170.0, 190.0, True),
+        (0.0, 179.0, False),
+        (190.0, 530.0, False),
+        (-179.0, 179.0, False),
+        (np.nan, np.nan, False),  # NaN coordinates (curvilinear grids)
+    ],
+)
+def test_has_coordinate_discontinuity_any_antimeridian(lo, hi, expected):
+    x = np.linspace(lo, hi, 65)[np.newaxis, :]
+    assert (
+        has_coordinate_discontinuity(x, 360.0, axis=1, check_antimeridian=True)
+        is expected
+    )
 
 
 class TestFixCoordinateDiscontinuities:
@@ -2036,3 +2058,142 @@ def test_guess_grid_system_rotated_pole_is_a_detection_error():
         UnsupportedGridError, match="Rotated pole grids are not supported"
     ):
         guess_grid_system(create_rotated_pole_dataset(), "temp")
+
+
+def _geotransform_ds(
+    nx: int, ny: int, dx: float, *, origin: float = -180.0
+) -> xr.Dataset:
+    ds = xr.Dataset(
+        {
+            "foo": (
+                ("y", "x"),
+                np.zeros((ny, nx), dtype="float32"),
+                {"grid_mapping": "spatial_ref"},
+            )
+        }
+    )
+    ds.coords["spatial_ref"] = (
+        (),
+        0,
+        CRS.from_epsg(4326).to_cf()
+        | {"GeoTransform": f"{origin} {dx} 0.0 90.0 0.0 {-180.0 / ny}"},
+    )
+    return ds
+
+
+class TestRasterAffinePeriodic:
+    def test_global_is_periodic(self):
+        grid = RasterAffine.from_dataset(
+            _geotransform_ds(360, 180, 1.0), CRS.from_epsg(4326), "x", "y"
+        )
+        (index,) = grid.indexes
+        assert (index.x_period, index.y_period) == (360.0, None)
+        assert grid.lon_spans_globe
+        assert not grid.drop_seam
+
+    def test_seam_copy_is_dropped(self):
+        # linspace(-180, 180, 100): 99 unique columns + a copy of the first
+        dx = 360.0 / 99
+        ds = _geotransform_ds(100, 50, dx, origin=-180.0 - dx / 2)
+        grid = RasterAffine.from_dataset(ds, CRS.from_epsg(4326), "x", "y")
+        (index,) = grid.indexes
+        assert grid.drop_seam
+        assert index.xy_shape == (99, 50)
+        assert grid.lon_spans_globe
+        assert grid.assign_index(ds.foo).sizes["x"] == 99
+
+    def test_truncated_dx_is_snapped(self):
+        # ctrees/aboveground_biomass_100m_global_open: 1/1125 deg, rel. error 1.09e-12
+        dx = 0.0008888888888879225
+        grid = RasterAffine.from_dataset(
+            _geotransform_ds(405000, 10, dx), CRS.from_epsg(4326), "x", "y"
+        )
+        (index,) = grid.indexes
+        assert (index.x_period, index.y_period) == (360.0, None)
+        assert index.transform().a == 360.0 / 405000
+        assert index.transform().c == -180.0
+        assert not grid.drop_seam
+
+    def test_float32_dx_is_snapped(self):
+        # float32 dx has rel. error ~3e-8; seam drift is ~3e-2 of a pixel / 1e3
+        dx = float(np.float32(1 / 3))
+        grid = RasterAffine.from_dataset(
+            _geotransform_ds(1080, 10, dx), CRS.from_epsg(4326), "x", "y"
+        )
+        (index,) = grid.indexes
+        assert (index.x_period, index.y_period) == (360.0, None)
+        assert index.transform().a == 360.0 / 1080
+        assert not grid.drop_seam
+
+    def test_seam_drift_bound(self):
+        # drift in cells = |360/dx - n| ~ n * rel; default bound is 0.05 cells
+        n, dx0 = 1000, 0.36
+        inside = RasterAffine.from_dataset(
+            _geotransform_ds(n, 10, dx0 * (1 + 2e-5)), CRS.from_epsg(4326), "x", "y"
+        )
+        assert (inside.indexes[0].x_period, inside.indexes[0].y_period) == (360.0, None)
+        outside = RasterAffine.from_dataset(
+            _geotransform_ds(n, 10, dx0 * (1 + 1e-4)), CRS.from_epsg(4326), "x", "y"
+        )
+        assert (outside.indexes[0].x_period, outside.indexes[0].y_period) == (None, None)
+        with config.set(rasterix_period_atol=0.2):
+            loosened = RasterAffine.from_dataset(
+                _geotransform_ds(n, 10, dx0 * (1 + 1e-4)), CRS.from_epsg(4326), "x", "y"
+            )
+        assert loosened.indexes[0].x_period == 360.0
+
+    def test_drifted_dx_isels(self):
+        # 0.02 cells of drift is above the rasterix default, which it re-checks on isel
+        ds = _geotransform_ds(1000, 10, 0.36 * (1 + 2e-5))
+        grid = RasterAffine.from_dataset(ds, CRS.from_epsg(4326), "x", "y")
+        assert grid.assign_index(ds.foo).isel(x=slice(0, 10)).sizes["x"] == 10
+
+    def test_zero_dx_is_not_periodic(self):
+        grid = RasterAffine.from_dataset(
+            _geotransform_ds(100, 50, 0.0), CRS.from_epsg(4326), "x", "y"
+        )
+        assert (grid.indexes[0].x_period, grid.indexes[0].y_period) == (None, None)
+
+    @pytest.mark.parametrize("nx, dx", [(100, 1.0), (514, 0.7)])
+    def test_not_global_or_not_integer_is_not_periodic(self, nx, dx):
+        grid = RasterAffine.from_dataset(
+            _geotransform_ds(nx, 50, dx), CRS.from_epsg(4326), "x", "y"
+        )
+        (index,) = grid.indexes
+        assert (index.x_period, index.y_period) == (None, None)
+        assert not grid.lon_spans_globe
+
+    def test_decreasing_longitude_raises(self):
+        ds = _geotransform_ds(360, 180, -1.0, origin=180.0)
+        with pytest.raises(NotImplementedError, match="decreasing longitude"):
+            RasterAffine.from_dataset(ds, CRS.from_epsg(4326), "x", "y")
+
+    def test_projected_is_not_periodic(self):
+        grid = guess_grid_system(EU3035.create(), "foo")
+        assert isinstance(grid, RasterAffine)
+        assert (grid.indexes[0].x_period, grid.indexes[0].y_period) == (None, None)
+        assert not grid.lon_spans_globe
+
+
+@pytest.mark.parametrize(
+    "west, east, expected",
+    [
+        (170.0, 190.0, [slice(350, 360), slice(0, 10)]),
+        (-190.0, -170.0, [slice(350, 360), slice(0, 10)]),
+        (170.25, 190.25, [slice(350, 360), slice(0, 11)]),
+        (-180.0, 180.0, [slice(0, 360)]),
+        (-200.0, 200.0, [slice(0, 360)]),
+        (180.0, 190.0, [slice(0, 10)]),
+        (170.0, 180.0, [slice(350, 360)]),
+        # morecantile round-off at the seam: no wrapped column
+        (179.99999999999997, 190.0, [slice(360, 360), slice(0, 10)]),
+        (-180.00000000000003, -170.0, [slice(360, 360), slice(0, 10)]),
+        (-10.0, 10.0, [slice(170, 190)]),
+    ],
+)
+def test_raster_affine_sel_across_antimeridian(west, east, expected):
+    grid = RasterAffine.from_dataset(
+        _geotransform_ds(360, 180, 1.0), CRS.from_epsg(4326), "x", "y"
+    )
+    slicers = grid.sel(bbox=BBox(west=west, east=east, south=-10.0, north=10.0))
+    assert slicers["x"] == expected

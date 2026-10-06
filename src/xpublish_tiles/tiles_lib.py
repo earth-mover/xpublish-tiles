@@ -16,6 +16,7 @@ from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
     GridSystem,
     GridSystem2D,
+    RasterAffine,
     Triangular,
 )
 from xpublish_tiles.lib import (
@@ -136,6 +137,10 @@ def _compute_min_zoom(
     tms_geo_bounds = morecantile.BoundingBox(
         left=geo_left, bottom=geo_bottom, right=geo_right, top=geo_top
     )
+
+    if isinstance(grid, RasterAffine):
+        # slicers index the periodic axis, which has no seam column
+        da = grid.drop_seam_column(da)
 
     grid_to_wgs84 = transformer_from_crs(grid.crs, 4326)
 

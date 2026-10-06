@@ -4,9 +4,9 @@ import re
 import threading
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Hashable, Iterable
+from collections.abc import Callable, Hashable, Iterable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Self, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, Self, cast
 
 import cachetools
 import cf_xarray  # noqa: F401
@@ -16,6 +16,7 @@ import pandas as pd
 import pyproj
 import rasterix
 import triangular
+from affine import Affine
 from numba_celltree import CellTree2d
 from pyproj import CRS
 from pyproj.aoi import BBox
@@ -450,6 +451,44 @@ def _convert_longitude_slice(
         # Both within valid range
         # [L===[start,stop]===R]
         return (slice(start, stop),)
+
+
+def _longitude_sel(
+    xrindex: xr.indexes.PandasIndex | rasterix.RasterIndex,
+    key: Hashable,
+    lon_slice: slice,
+    *,
+    size: int,
+    left_break: float,
+    right_break: float,
+    cell_left: Callable[[int], float],
+    method=None,
+    tolerance=None,
+) -> list[slice]:
+    """Split ``lon_slice`` at the breaks and ``sel`` each part on the non-periodic ``xrindex``.
+
+    ``cell_left(i)`` is the left edge of cell ``i``.
+    """
+    all_indexers: list[slice] = []
+    for slice_part in _convert_longitude_slice(
+        lon_slice, left_break=left_break, right_break=right_break
+    ):
+        result = xrindex.sel({key: slice_part}, method=method, tolerance=tolerance)
+        indexer = next(iter(result.dim_indexers.values()))
+        start, stop, _ = indexer.indices(size)
+        # Treat the stop endpoint as exclusive at exact cell boundaries:
+        # if the last selected cell's left edge equals the query stop, its
+        # center lies entirely past bbox.east and it should be excluded.
+        # Otherwise two grids representing the same physical data but with
+        # different longitude offsets (e.g. rolled) can select different
+        # numbers of cells when the query lands on a cell edge.
+        if stop > start and slice_part.stop is not None:
+            if cell_left(stop - 1) == slice_part.stop:
+                stop -= 1
+        all_indexers.append(slice(start, stop))
+
+    # Prevent overlap between adjacent slices
+    return _prevent_slice_overlap(all_indexers)
 
 
 def _sgrid_topology_var(ds: xr.Dataset) -> str | None:
@@ -1267,32 +1306,17 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         if not isinstance(value, slice):
             raise NotImplementedError
 
-        converted_slices = _convert_longitude_slice(
-            value, left_break=self.left_break, right_break=self.right_break
+        all_indexers = _longitude_sel(
+            self._xrindex,
+            self.dim,
+            value,
+            size=len(self),
+            left_break=self.left_break,
+            right_break=self.right_break,
+            cell_left=lambda i: self._interval_index[i].left,
+            method=method,
+            tolerance=tolerance,
         )
-
-        # If we got multiple slices (for boundary crossing), create multiple indexers
-        # Handle multiple slices by selecting each and creating multiple indexers
-        all_indexers: list[slice] = []
-        for slice_part in converted_slices:
-            sel_dict = {self.dim: slice_part}
-            result = self._xrindex.sel(sel_dict, method=method, tolerance=tolerance)
-            indexer = next(iter(result.dim_indexers.values()))
-            start, stop, _ = indexer.indices(len(self))
-            # Treat the stop endpoint as exclusive at exact cell boundaries:
-            # if the last selected cell's left edge equals the query stop, its
-            # center lies entirely past bbox.east and it should be excluded.
-            # Otherwise two grids representing the same physical data but with
-            # different longitude offsets (e.g. rolled) can select different
-            # numbers of cells when the query lands on a cell edge.
-            if stop > start and slice_part.stop is not None:
-                last_left = self._interval_index[stop - 1].left
-                if last_left == slice_part.stop:
-                    stop -= 1
-            all_indexers.append(slice(start, stop))
-
-        # Prevent overlap between adjacent slices
-        all_indexers = _prevent_slice_overlap(all_indexers)
         return IndexSelResult({self.dim: all_indexers})
 
     def __len__(self) -> int:
@@ -1304,30 +1328,49 @@ def is_rotated_pole(crs: CRS) -> bool:
     return crs.to_cf().get("grid_mapping_name") == "rotated_latitude_longitude"
 
 
-def _is_raster_index_global(raster_index, grid_bbox, crs) -> bool:
+class _LongitudePeriod(NamedTuple):
+    index: rasterix.RasterIndex
+    # the last x column repeats the first
+    drop_seam: bool
+
+
+def _with_longitude_period(index: rasterix.RasterIndex) -> _LongitudePeriod:
+    """Rebuild ``index`` with ``x_period=360`` and ``dx = 360 / ncells`` if its x axis is global.
+
+    rasterix re-checks ``period_atol`` on every periodic ``isel``. Snapping once here lets
+    later ``isel`` pass its default tolerance. A non-global ``index`` is returned unchanged.
     """
-    Determine if a RasterIndex represents global longitude coverage.
-
-    Parameters
-    ----------
-    raster_index : RasterIndex
-        The raster index to check
-    grid_bbox : BBox
-        The grid's bounding box
-    crs : CRS
-        The coordinate reference system
-
-    Returns
-    -------
-    bool
-        True if the index covers the full globe
-    """
-    if not crs.is_geographic:
-        return False
-
-    # Check if longitude span is nearly 360 degrees
-    lon_span = grid_bbox.east - grid_bbox.west
-    return lon_span >= 359.0
+    unchanged = _LongitudePeriod(index, drop_seam=False)
+    affine = index.transform()
+    if affine.b != 0 or affine.d != 0:
+        return unchanged
+    nx, ny = index.xy_shape
+    if affine.a == 0:
+        return unchanged
+    ncells_float = 360.0 / abs(affine.a)
+    ncells = round(ncells_float)
+    if ncells < 1 or nx not in (ncells, ncells + 1):
+        return unchanged
+    # GeoTransforms carry truncated or float32 dx; tolerance is the seam drift in cells
+    if abs(ncells_float - ncells) > config.get("rasterix_period_atol"):
+        return unchanged
+    if affine.a < 0:
+        # RasterAffine._x_sel passes ascending lon slices; decreasing periodic x is not planned
+        raise NotImplementedError(
+            "Global RasterAffine grids with decreasing longitude are not supported."
+        )
+    snapped = Affine(360.0 / ncells, 0.0, affine.c, 0.0, affine.e, affine.f)
+    x_dim, y_dim = index.xy_dims
+    periodic = rasterix.RasterIndex.from_transform(
+        snapped,
+        width=ncells,
+        height=ny,
+        x_dim=x_dim,
+        y_dim=y_dim,
+        crs=index.crs,
+        x_period=360.0,
+    )
+    return _LongitudePeriod(periodic, drop_seam=nx == ncells + 1)
 
 
 def _indexes_equal(a: xr.Index, b: xr.Index) -> bool:
@@ -1652,7 +1695,7 @@ class RectilinearMixin:
             Whether to handle wraparound for X dimension
         """
         assert len(self.indexes) >= 1
-        xindex, yindex = self.indexes[0], self.indexes[-1]
+        yindex = self.indexes[-1]
 
         # Handle Y dimension selection
         if y_is_increasing:
@@ -1664,22 +1707,17 @@ class RectilinearMixin:
                 self.Y
             ]
 
-        # Handle X dimension selection
-        xsel_result = xindex.sel({self.X: slice(bbox.west, bbox.east)})
-
-        # Prepare slicers for padding (ensure lists of slices for consistency)
-        # X dimension: LongitudeCellIndex can return multiple slices for antimeridian crossing
-        x_raw = xsel_result.dim_indexers[self.X]
-
-        # Handle single slice from PandasIndex
-        x_indexers = x_raw if isinstance(x_raw, list) else [x_raw]
-
         # Y dimension: always a single slice from PandasIndex
-        y_indexers = [yslice]
-
-        slicers = {self.X: x_indexers, self.Y: y_indexers}
+        slicers: Slicers = {self.X: [*self._x_sel(bbox)], self.Y: [yslice]}
 
         return slicers
+
+    def _x_sel(self, bbox: BBox) -> list[slice]:
+        xsel_result = self.indexes[0].sel({self.X: slice(bbox.west, bbox.east)})
+        # X dimension: LongitudeCellIndex can return multiple slices for antimeridian crossing
+        x_raw = xsel_result.dim_indexers[self.X]
+        # Handle single slice from PandasIndex
+        return x_raw if isinstance(x_raw, list) else [x_raw]
 
 
 @dataclass(kw_only=True, eq=False)
@@ -1694,21 +1732,28 @@ class RasterAffine(RectilinearMixin, GridSystem):
     Ydim: str = field(init=False)
     indexes: tuple[rasterix.RasterIndex]
     Z: str | None = None
+    drop_seam: bool = False
     lon_spans_globe: bool = field(init=False)
     npoints_per_geometry: int = field(init=False, default=5)
     dXmin: float = field(init=False)
     dYmin: float = field(init=False)
+    # non-periodic copy of the periodic index; _x_sel splits at the seam and sels on it
+    _xrindex: rasterix.RasterIndex | None = field(init=False, repr=False, default=None)
 
     def __post_init__(self) -> None:
         self.Xdim = self.X
         self.Ydim = self.Y
-        # Determine if this raster spans the globe in longitude
-        self.lon_spans_globe = self.crs.is_geographic and _is_raster_index_global(
-            self.indexes[0], self.bbox, self.crs
-        )
-        # Calculate minimum grid spacing from affine transform
         (index,) = self.indexes
+        # periodic iff rasterix has the period (set in from_dataset)
+        self.lon_spans_globe = self.crs.is_geographic and index.x_period is not None
+        # Calculate minimum grid spacing from affine transform
         affine = index.transform()
+        if self.lon_spans_globe:
+            nx, ny = index.xy_shape
+            x_dim, y_dim = index.xy_dims
+            self._xrindex = rasterix.RasterIndex.from_transform(
+                affine, width=nx, height=ny, x_dim=x_dim, y_dim=y_dim, crs=index.crs
+            )
         self.dXmin = abs(affine.a)  # X pixel size
         self.dYmin = abs(affine.e)  # Y pixel size
 
@@ -1729,6 +1774,9 @@ class RasterAffine(RectilinearMixin, GridSystem):
         """
         ds = rasterix.assign_index(ds, x_dim=Xname, y_dim=Yname)
         raster_index = cast(rasterix.RasterIndex, ds.xindexes[Xname])
+        drop_seam = False
+        if crs.is_geographic:
+            raster_index, drop_seam = _with_longitude_period(raster_index)
 
         return cls(
             crs=crs,
@@ -1741,6 +1789,7 @@ class RasterAffine(RectilinearMixin, GridSystem):
                 north=raster_index.bbox.top,
             ),
             indexes=(raster_index,),
+            drop_seam=drop_seam,
         )
 
     @property
@@ -1748,9 +1797,32 @@ class RasterAffine(RectilinearMixin, GridSystem):
         """Return the set of dimension names for this grid system."""
         return {self.Xdim, self.Ydim}
 
+    def drop_seam_column(self, da: xr.DataArray) -> xr.DataArray:
+        """Lazily drop the last x column if it repeats the first (``drop_seam``)."""
+        if self.drop_seam:
+            da = da.isel({self.Xdim: slice(0, -1)})
+        return da
+
     def assign_index(self, da: xr.DataArray) -> xr.DataArray:
+        da = self.drop_seam_column(da)
         (index,) = self.indexes
         return da.assign_coords(xr.Coordinates.from_xindex(index))
+
+    def _x_sel(self, bbox: BBox) -> list[slice]:
+        if self._xrindex is None:
+            return super()._x_sel(bbox)
+        index = self._xrindex
+        affine = index.transform()
+        nx = index.xy_shape[0]
+        return _longitude_sel(
+            index,
+            self.X,
+            slice(bbox.west, bbox.east),
+            size=nx,
+            left_break=affine.c,
+            right_break=affine.c + nx * affine.a,
+            cell_left=lambda i: affine.c + i * affine.a,
+        )
 
     def sel(self, *, bbox: BBox) -> Slicers:
         (index,) = self.indexes
@@ -1759,15 +1831,15 @@ class RasterAffine(RectilinearMixin, GridSystem):
         return self._rectilinear_sel(
             bbox=bbox,
             y_is_increasing=affine.e > 0,
-            x_size=index._xy_shape[0],
-            y_size=index._xy_shape[1],
+            x_size=index.xy_shape[0],
+            y_size=index.xy_shape[1],
         )
 
     def _get_edge_arrays(self) -> tuple[np.ndarray, np.ndarray]:
         """Return full 1D edge arrays (x_edges size nx+1, y_edges size ny+1)."""
         (index,) = self.indexes
         affine = index.transform()
-        nx, ny = index._xy_shape
+        nx, ny = index.xy_shape
         x_edges = affine.c + np.arange(nx + 1) * affine.a
         y_edges = affine.f + np.arange(ny + 1) * affine.e
         return x_edges, y_edges
