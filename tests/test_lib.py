@@ -1,4 +1,5 @@
 import asyncio
+import itertools
 import math
 from typing import cast
 from unittest.mock import patch
@@ -16,10 +17,12 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from tests import NUMERIC_DTYPES
+from xpublish_tiles import tiles_lib
 from xpublish_tiles.config import config
 from xpublish_tiles.grids import guess_grid_system
 from xpublish_tiles.lib import (
     InvalidCoordinateValues,
+    TileTooBigError,
     _chunk_aligned_count,
     _chunk_sizes,
     adversarial_slicers,
@@ -39,8 +42,13 @@ from xpublish_tiles.projections import (
     epsg4326to3857,
     transformer_from_crs,
 )
-from xpublish_tiles.testing.datasets import IFS, PARA
-from xpublish_tiles.tiles_lib import get_min_zoom, grid_overlaps_tms
+from xpublish_tiles.testing.datasets import IFS, PARA, create_global_dataset
+from xpublish_tiles.tiles_lib import (
+    _MIN_ZOOM_CACHE,
+    _tiles_at_zoom,
+    get_min_zoom,
+    grid_overlaps_tms,
+)
 
 
 @given(
@@ -631,6 +639,142 @@ def test_min_zoom_covers_interior_tiles():
         assert num_over_limit(minzoom) == 0
         # and no higher than it has to be
         assert num_over_limit(minzoom - 1) > 0
+
+
+def test_min_zoom_caches_failure():
+    """No renderable zoom is cached too, so it is not recomputed per request."""
+    ds = create_global_dataset(lat_ascending=False, nlat=181, nlon=361)
+    ds.foo.encoding["preferred_chunks"] = {"latitude": 10, "longitude": 10}
+    grid = guess_grid_system(ds, "foo")
+    tms = morecantile.tms.get("CanadianNAD83_LCC")
+
+    _MIN_ZOOM_CACHE.clear()
+    with (
+        # no polar cutoff, so the pole tile makes every zoom unrenderable
+        config.set({"max_renderable_size": 20_000, "minzoom_polar_cutoff": 90}),
+        patch(
+            "xpublish_tiles.tiles_lib._compute_min_zoom",
+            wraps=tiles_lib._compute_min_zoom,
+        ) as compute,
+    ):
+        messages = []
+        for _ in range(2):
+            with pytest.raises(TileTooBigError, match="CanadianNAD83_LCC") as e:
+                get_min_zoom(
+                    grid=grid, tms=tms, da=ds.foo, style="raster", xpublish_id="polar"
+                )
+            messages.append(str(e.value))
+    _MIN_ZOOM_CACHE.clear()
+    assert compute.call_count == 1
+    assert messages[0] == messages[1]
+
+
+def test_min_zoom_error_names_cause():
+    """The error tells chunks that are too big apart from a tile that fans out."""
+    ds = create_global_dataset(lat_ascending=False, nlat=181, nlon=361)
+    grid = guess_grid_system(ds, "foo")
+
+    # one 181x361 float32 chunk is 261364 bytes, over the budget on its own
+    ds.foo.encoding["preferred_chunks"] = {"latitude": 181, "longitude": 361}
+    with config.set({"max_renderable_size": 20_000}):
+        with pytest.raises(TileTooBigError) as e:
+            get_min_zoom(
+                grid=grid,
+                tms=morecantile.tms.get("WebMercatorQuad"),
+                da=ds.foo,
+                style="raster",
+            )
+    assert "a single chunk (shape (181, 361), 261364 bytes)" in str(e.value)
+
+    # small chunks, but the pole tile spans every longitude
+    ds.foo.encoding["preferred_chunks"] = {"latitude": 10, "longitude": 10}
+    with config.set({"max_renderable_size": 20_000, "minzoom_polar_cutoff": 90}):
+        with pytest.raises(TileTooBigError) as e:
+            get_min_zoom(
+                grid=grid,
+                tms=morecantile.tms.get("CanadianNAD83_LCC"),
+                da=ds.foo,
+                style="raster",
+            )
+    msg = str(e.value)
+    assert "spans many chunks" in msg
+    assert "tile 25/" in msg
+    assert "lon -180..180" in msg
+    assert "max_renderable_size 20000" in msg
+
+
+def test_min_zoom_cache_key_has_config():
+    """The cached minzoom depends on the budget and the polar cutoff."""
+    ds = create_global_dataset(lat_ascending=False, nlat=181, nlon=361)
+    ds.foo.encoding["preferred_chunks"] = {"latitude": 10, "longitude": 10}
+    grid = guess_grid_system(ds, "foo")
+    lcc = morecantile.tms.get("CanadianNAD83_LCC")
+    wmq = morecantile.tms.get("WebMercatorQuad")
+
+    def minzoom(tms, **cfg):
+        with config.set(cfg):
+            return get_min_zoom(
+                grid=grid, tms=tms, da=ds.foo, style="raster", xpublish_id="cfg"
+            )
+
+    _MIN_ZOOM_CACHE.clear()
+    try:
+        assert minzoom(wmq, max_renderable_size=20_000) > minzoom(
+            wmq, max_renderable_size=1024**3
+        )
+        assert isinstance(minzoom(lcc, max_renderable_size=20_000), int)
+        with pytest.raises(TileTooBigError):
+            minzoom(lcc, max_renderable_size=20_000, minzoom_polar_cutoff=90)
+    finally:
+        _MIN_ZOOM_CACHE.clear()
+
+
+@pytest.mark.parametrize("tms_id", ["CanadianNAD83_LCC", "UPSArcticWGS84Quad"])
+def test_min_zoom_polar_cutoff(tms_id):
+    """Pole tiles span every longitude; minzoom leaves them out on geographic grids."""
+    ds = create_global_dataset(lat_ascending=False, nlat=181, nlon=361)
+    ds.foo.encoding["preferred_chunks"] = {"latitude": 10, "longitude": 10}
+    grid = guess_grid_system(ds, "foo")
+    tms = morecantile.tms.get(tms_id)
+
+    with config.set({"max_renderable_size": 20_000, "minzoom_polar_cutoff": 90}):
+        with pytest.raises(TileTooBigError):
+            get_min_zoom(grid=grid, tms=tms, da=ds.foo, style="raster")
+    with config.set({"max_renderable_size": 20_000}):
+        minzoom = get_min_zoom(grid=grid, tms=tms, da=ds.foo, style="raster")
+    assert tms.minzoom <= minzoom < tms.maxzoom
+
+
+def test_min_zoom_polar_cutoff_keeps_webmercator():
+    """The default cutoff is the Web Mercator limit, so WebMercatorQuad is unchanged."""
+    ds = create_global_dataset(lat_ascending=False, nlat=181, nlon=361)
+    ds.foo.encoding["preferred_chunks"] = {"latitude": 10, "longitude": 10}
+    grid = guess_grid_system(ds, "foo")
+    tms = morecantile.tms.get("WebMercatorQuad")
+
+    zooms = []
+    for cutoff in (90, config.get("minzoom_polar_cutoff")):
+        with config.set({"max_renderable_size": 20_000, "minzoom_polar_cutoff": cutoff}):
+            zooms.append(get_min_zoom(grid=grid, tms=tms, da=ds.foo, style="raster"))
+    assert zooms[0] == zooms[1]
+
+
+@pytest.mark.parametrize(
+    "tms_id", ["CDB1GlobalGrid", "GNOSISGlobalGrid", "WebMercatorQuad"]
+)
+def test_tiles_at_zoom_matches_morecantile(tms_id):
+    tms = morecantile.tms.get(tms_id)
+    for bounds in [(-180, -90, 180, 90), (-30.5, 60.2, 75.1, 89.9), (10, -10, 11, -9)]:
+        for zoom in [*range(6), 10, 12]:
+            expected = list(itertools.islice(tms.tiles(*bounds, [zoom]), 50))
+            assert _tiles_at_zoom(tms, bounds, zoom, limit=49) == expected
+
+
+def test_tiles_at_zoom_fast_for_coalesced_rows():
+    """morecantile walks every column of a coalesced GNOSIS row: ~2**z steps."""
+    tms = morecantile.tms.get("GNOSISGlobalGrid")
+    tiles = _tiles_at_zoom(tms, (-180, -90, 180, 90), tms.maxzoom, limit=512)
+    assert len(tiles) == 513
 
 
 @pytest.mark.parametrize(

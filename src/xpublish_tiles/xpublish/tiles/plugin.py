@@ -534,14 +534,18 @@ class TilesPlugin(Plugin):
 
             # Cache under the level that was measured; levels share dim names.
             xpublish_id = minzoom_dataset.attrs.get("_xpublish_id")
-            minzoom = await async_run(
-                get_min_zoom,
-                grid=grid,
-                tms=tms,
-                da=da,
-                style=style,
-                xpublish_id=xpublish_id,
-            )
+            try:
+                minzoom = await async_run(
+                    get_min_zoom,
+                    grid=grid,
+                    tms=tms,
+                    da=da,
+                    style=style,
+                    xpublish_id=xpublish_id,
+                )
+            except TileTooBigError as e:
+                bound_logger.info("TileTooBigError", message=str(e))
+                raise HTTPException(status_code=422, detail=str(e)) from None
             # TileJSON 3.0 bounds zoom to 0..30; CDB1GlobalGrid starts at -10.
             minzoom = max(minzoom, 0)
             maxzoom = min(tms.maxzoom, 30)

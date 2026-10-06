@@ -1,13 +1,16 @@
 """Tile-related utility functions for grids."""
 
 import itertools
+import math
 import threading
 import warnings
+from collections.abc import Iterable
 
 import cachetools
 import morecantile
 import numpy as np
 from morecantile.errors import PointOutsideTMSBounds
+from morecantile.models import LL_EPSILON
 from pyproj import CRS
 from pyproj.aoi import BBox
 
@@ -21,9 +24,11 @@ from xpublish_tiles.grids import (
 )
 from xpublish_tiles.lib import (
     TileTooBigError,
+    _chunk_sizes,
     adversarial_slicers,
     apply_default_pad,
     check_data_is_renderable_size,
+    estimated_render_bytes,
     normalize_slicers,
 )
 from xpublish_tiles.projections import (
@@ -48,6 +53,41 @@ def _lon_ranges(west: float, east: float) -> list[tuple[float, float]]:
     if west <= east:
         return [(west, east)]
     return [(west, 180.0), (-180.0, east)]
+
+
+def _tiles_at_zoom(
+    tms: morecantile.TileMatrixSet,
+    bounds: tuple[float, float, float, float],
+    zoom: int,
+    *,
+    limit: int,
+) -> list[morecantile.Tile]:
+    """The first ``limit + 1`` tiles of ``tms.tiles(*bounds, [zoom])``.
+
+    morecantile walks every column of a coalesced row and drops all but every
+    ``cf``-th, ~2**z steps per GNOSISGlobalGrid polar row. Step by ``cf`` instead.
+    """
+    matrix = tms.matrix(zoom)
+    if matrix.variableMatrixWidths is None:
+        return list(itertools.islice(tms.tiles(*bounds, [zoom]), limit + 1))
+    # Variable-width TMSs are global (CDB1, GNOSIS): clamp like tms.tiles, no
+    # antimeridian split.
+    west, south, east, north = bounds
+    left, bottom, right, top = tms.bbox
+    west, east = max(left, west), min(right, east)
+    south, north = max(bottom, south), min(top, north)
+    nw = tms.tile(west + LL_EPSILON, north - LL_EPSILON, zoom, ignore_coalescence=True)
+    se = tms.tile(east - LL_EPSILON, south + LL_EPSILON, zoom, ignore_coalescence=True)
+    minx, maxx = min(nw.x, se.x), max(nw.x, se.x)
+    miny, maxy = min(nw.y, se.y), max(nw.y, se.y)
+    tiles: list[morecantile.Tile] = []
+    for j in range(miny, maxy + 1):
+        cf = matrix.get_coalesce_factor(j)
+        for i in range(-(-minx // cf) * cf, maxx + 1, cf):
+            tiles.append(morecantile.Tile(i, j, zoom))
+            if len(tiles) > limit:
+                return tiles
+    return tiles
 
 
 def grid_overlaps_tms(grid: GridSystem, tms: morecantile.TileMatrixSet) -> bool:
@@ -183,11 +223,15 @@ def _compute_min_zoom(
         float(wgs84_lats.max()),
     )
 
+    polar_cutoff = config.get("minzoom_polar_cutoff")
     alternate = grid.pick_alternate_grid(tms_crs, coarsen_factors={})
     transformer = transformer_from_crs(tms_crs, grid.crs)
 
-    def tile_renderable(tile: morecantile.Tile, *, worst_case: bool) -> bool:
-        """With ``worst_case``, bound the cost of a same-sized tile at any chunk offset."""
+    def tile_selection(tile: morecantile.Tile, *, worst_case: bool):
+        """The tile's bbox in the grid CRS and its slicers; None if minzoom skips it.
+
+        With ``worst_case``, bound the cost of a same-sized tile at any chunk offset.
+        """
         bounds = tms.xy_bounds(tile)
         left, bottom, right, top = transformer.transform_bounds(
             bounds.left, bounds.bottom, bounds.right, bounds.top
@@ -195,6 +239,12 @@ def _compute_min_zoom(
         # Handle antimeridian-crossing tiles where left > right after transform
         if grid.crs.is_geographic and left > right:
             right += 360
+        if grid.crs.is_geographic:
+            # A pole maps to every longitude, so tiles touching it fan out to the
+            # whole chunk row. Leave them out of minzoom; requested, they get a 413.
+            top, bottom = min(top, polar_cutoff), max(bottom, -polar_cutoff)
+            if top <= bottom:
+                return None
 
         tile_bbox = BBox(west=left, south=bottom, east=right, north=top)
         slicers = grid.sel(bbox=tile_bbox)
@@ -203,7 +253,15 @@ def _compute_min_zoom(
             slicers = normalize_slicers(slicers, dict(da.sizes))
         if worst_case:
             slicers = adversarial_slicers(slicers, da, grid)
-        return check_data_is_renderable_size(slicers, da, grid, alternate, style=style)
+        return tile_bbox, slicers
+
+    def tile_renderable(tile: morecantile.Tile, *, worst_case: bool) -> bool:
+        selection = tile_selection(tile, worst_case=worst_case)
+        if selection is None:
+            return True
+        return check_data_is_renderable_size(
+            selection[1], da, grid, alternate, style=style
+        )
 
     def sampled_tiles(zoom: int) -> set[morecantile.Tile]:
         with warnings.catch_warnings():
@@ -213,21 +271,47 @@ def _compute_min_zoom(
             warnings.simplefilter("ignore", PointOutsideTMSBounds)
             return {tms.tile(lon, lat, zoom) for lon, lat in test_points}
 
-    def all_renderable(zoom: int) -> bool:
+    def tiles_to_check(zoom: int) -> tuple[Iterable[morecantile.Tile], bool]:
+        """The tiles that decide ``zoom``, and whether to cost them worst-case."""
         # Chunk-aligned cost depends on where a tile falls, and the sampled
         # boundary tiles are the cheap ones: their slicers are clipped by the
         # grid edge. Interior tiles straddle more chunks, so the costliest tile
         # at this zoom is what decides renderability.
-        tiles = list(
-            itertools.islice(tms.tiles(*sample_bounds, [zoom]), MAX_TILES_TO_CHECK + 1)
-        )
+        tiles = _tiles_at_zoom(tms, sample_bounds, zoom, limit=MAX_TILES_TO_CHECK)
         if len(tiles) > MAX_TILES_TO_CHECK:
             # Too many to enumerate: bound the sampled tiles over every chunk
             # alignment instead. That is tight at these zooms — with this many
             # tiles per chunk, some tile does sit on every alignment — and
             # conservative if not.
-            return all(tile_renderable(t, worst_case=True) for t in sampled_tiles(zoom))
-        return all(tile_renderable(t, worst_case=False) for t in tiles)
+            return sampled_tiles(zoom), True
+        return tiles, False
+
+    def all_renderable(zoom: int) -> bool:
+        tiles, worst_case = tiles_to_check(zoom)
+        return all(tile_renderable(t, worst_case=worst_case) for t in tiles)
+
+    def unrenderable_message(zoom: int) -> str:
+        tiles, worst_case = tiles_to_check(zoom)
+        tile = next(t for t in tiles if not tile_renderable(t, worst_case=worst_case))
+        bbox, slicers = tile_selection(tile, worst_case=worst_case)
+        nbytes = estimated_render_bytes(slicers, da, grid, alternate, style=style)
+        budget = config.get("max_renderable_size")
+        chunks = _chunk_sizes(da)
+        chunk_shape = tuple(chunks.get(str(d), n) for d, n in da.sizes.items())
+        chunk_bytes = math.prod(chunk_shape) * da.dtype.itemsize
+        xname, yname = ("lon", "lat") if grid.crs.is_geographic else ("x", "y")
+        if chunk_bytes > budget:
+            cause = f"a single chunk (shape {chunk_shape}, {chunk_bytes} bytes) exceeds max_renderable_size"
+        else:
+            cause = (
+                "this tile spans many chunks (e.g. it covers all longitudes near a pole)"
+            )
+        return (
+            f"No zoom level of {tms.id} is renderable for this data: tile "
+            f"{tile.z}/{tile.x}/{tile.y} at maxzoom ({xname} {bbox.west:.7g}..{bbox.east:.7g}, "
+            f"{yname} {bbox.south:.7g}..{bbox.north:.7g} in the grid CRS) needs ~{nbytes} "
+            f"bytes, over max_renderable_size {budget}. Cause: {cause}."
+        )
 
     # Renderability is monotonic in zoom (higher zoom → smaller tiles → fewer
     # cells). Binary-search for the smallest zoom that is fully renderable.
@@ -235,12 +319,7 @@ def _compute_min_zoom(
     if all_renderable(lo):
         return lo
     if not all_renderable(hi):
-        raise TileTooBigError(
-            f"No zoom level of {tms.id} is renderable for this data: even a tile at "
-            f"maxzoom ({hi}) exceeds max_renderable_size "
-            f"({config.get('max_renderable_size')} bytes). The data is most likely "
-            "chunked too coarsely to serve as tiles."
-        )
+        raise TileTooBigError(unrenderable_message(hi))
     while lo + 1 < hi:
         mid = (lo + hi) // 2
         if all_renderable(mid):
@@ -274,7 +353,8 @@ def get_min_zoom(
         Required since we use `Grid.sel`.
     xpublish_id : str | None
         Optional dataset identifier for caching. When provided,
-        results are cached per (xpublish_id, spatial_dims, tms.id).
+        results are cached per (xpublish_id, spatial_dims, tms.id, style,
+        max_renderable_size, minzoom_polar_cutoff).
 
     Returns
     -------
@@ -282,20 +362,39 @@ def get_min_zoom(
         Minimum safe zoom level for this grid and data
     """
     if xpublish_id is not None:
-        cache_key: tuple | None = (xpublish_id, xarray_object_key(da), tms.id, style)
+        cache_key: tuple | None = (
+            xpublish_id,
+            xarray_object_key(da),
+            tms.id,
+            style,
+            # config that changes the answer
+            config.get("max_renderable_size"),
+            config.get("minzoom_polar_cutoff"),
+        )
     else:
         cache_key = None
 
     if cache_key is not None and cache_key in _MIN_ZOOM_CACHE:
-        return _MIN_ZOOM_CACHE[cache_key]
+        return _from_cache(_MIN_ZOOM_CACHE[cache_key])
 
     with _MIN_ZOOM_LOCK:
         if cache_key is not None and cache_key in _MIN_ZOOM_CACHE:
-            return _MIN_ZOOM_CACHE[cache_key]
+            return _from_cache(_MIN_ZOOM_CACHE[cache_key])
 
-        result = _compute_min_zoom(grid, tms, da, style=style)
+        try:
+            result: int | str = _compute_min_zoom(grid, tms, da, style=style)
+        except TileTooBigError as e:
+            # cache the message, not the exception: re-raising one instance grows its traceback
+            result = str(e)
 
         if cache_key is not None:
             _MIN_ZOOM_CACHE[cache_key] = result
 
-        return result
+        return _from_cache(result)
+
+
+def _from_cache(result: int | str) -> int:
+    """A cached minzoom, or a cached "no renderable zoom" message raised anew."""
+    if isinstance(result, str):
+        raise TileTooBigError(result)
+    return result

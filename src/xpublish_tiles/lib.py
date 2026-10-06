@@ -1256,6 +1256,20 @@ def check_data_is_renderable_size(
     bool
         True if data is within renderable size limits, False if too big
     """
+    return estimated_render_bytes(
+        slicers, da, grid, alternate, style=style
+    ) <= config.get("max_renderable_size")
+
+
+def estimated_render_bytes(
+    slicers: "Slicers",
+    da: xr.DataArray,
+    grid: "GridSystem",
+    alternate: "GridMetadata",
+    *,
+    style: str = "raster",
+) -> int:
+    """The cost that :func:`check_data_is_renderable_size` holds to the budget."""
     has_alternate = alternate.crs != grid.crs
     factor = 3 if has_alternate else 1
 
@@ -1272,7 +1286,7 @@ def check_data_is_renderable_size(
     total_bytes = factor * decompressed_size_bytes(slicers, da, grid, style=style)
     if style == "polygons":
         total_bytes *= grid.npoints_per_geometry
-    return total_bytes <= config.get("max_renderable_size")
+    return total_bytes
 
 
 def decompressed_size_bytes(

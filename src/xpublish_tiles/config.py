@@ -28,6 +28,9 @@ config = donfig.Config(
             "overview_selection_strategy": "nearest",
             # cells; max seam drift |360/|dx| - n| accepted for a periodic RasterAffine x axis
             "rasterix_period_atol": 0.05,
+            # degrees; minzoom ignores geographic-grid tiles poleward of this (Web
+            # Mercator limit, so WebMercatorQuad is unaffected)
+            "minzoom_polar_cutoff": 85.0511,
         }
     ],
     paths=[],
