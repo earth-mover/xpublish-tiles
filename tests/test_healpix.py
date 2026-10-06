@@ -4,6 +4,8 @@ import pytest
 from pyproj.aoi import BBox
 
 from xpublish_tiles.grids import (
+    Healpix,
+    HealpixBase,
     HealpixCube,
     HealpixCubeIndexer,
     UnsupportedGridError,
@@ -22,6 +24,7 @@ from xpublish_tiles.healpix import (
 from xpublish_tiles.testing.datasets import (
     GLOBAL_HEALPIX_CUBE_L3,
     GLOBAL_HEALPIX_CUBE_L5,
+    GLOBAL_HEALPIX_L3,
     _create_global_healpix,
 )
 
@@ -284,3 +287,13 @@ def test_cube_equals():
 def test_antimeridian_cells_read_only():
     with pytest.raises(ValueError):
         antimeridian_cells(3)[0] = 0
+
+
+def test_healpix_class_hierarchy():
+    cube = HealpixCube(face_dim="face", Ydim="y", Xdim="x", level=3)
+    assert isinstance(cube, HealpixBase)
+    # siblings: the cube is not a 1-D Healpix
+    assert not isinstance(cube, Healpix)
+    grid = guess_grid_system(GLOBAL_HEALPIX_L3.create(), "foo")
+    assert isinstance(grid, Healpix)
+    assert isinstance(grid, HealpixBase)

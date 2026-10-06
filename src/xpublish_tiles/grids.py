@@ -3094,22 +3094,61 @@ def _healpix_ellipsoid(info) -> Any:
 
 
 @dataclass(init=False, kw_only=True, eq=False)
-class Healpix(GridSystem):
-    """Grid system for HealPix discrete global grid."""
+class HealpixBase(GridSystem):
+    """Shared base of the HEALPix layouts; isinstance means "any HEALPix"."""
 
     crs: CRS
     bbox: BBox
     X: str
     Y: str
-    dim: str
-    cell_ids_name: str
-    index: "HealpixIndex"
+    dim: str  # 1-D cell dim; for the cube, the gathered "_healpix_cell"
     indexes: tuple[xr.Index, ...]
-    cell_ids: np.ndarray
 
     npoints_per_geometry: int = field(init=False, default=5)
     dXmin: float = 0
     dYmin: float = 0
+
+    def _corner_array(
+        self, cell_ids: np.ndarray, depth: int, ellipsoid: Any
+    ) -> xr.DataArray:
+        import healpix_geo
+
+        lon, lat = healpix_geo.nested.vertices(cell_ids, depth=depth, ellipsoid=ellipsoid)
+        lon = np.asarray(lon).ravel()
+        lat = np.asarray(lat).ravel()
+        corner_dim = "_corner"
+        return xr.DataArray(
+            np.empty(lon.shape),
+            dims=(corner_dim,),
+            coords={self.X: ((corner_dim,), lon), self.Y: ((corner_dim,), lat)},
+        )
+
+    def corners_to_rings(
+        self,
+        corner_x: np.ndarray,
+        corner_y: np.ndarray,
+        *,
+        ugrid_indexer: "UgridIndexer | None" = None,
+    ) -> np.ndarray:
+        """Assemble a ``(n_cells, 5, 2)`` ring buffer from flattened 4-corner arrays."""
+        assert corner_x.ndim == 1 and corner_x.size % 4 == 0
+        n = corner_x.size // 4
+        cx = corner_x.reshape(n, 4)
+        cy = corner_y.reshape(n, 4)
+        rings = np.empty((n, 5, 2), dtype=np.float64)
+        rings[:, :4, 0] = cx
+        rings[:, :4, 1] = cy
+        rings[:, 4, :] = rings[:, 0, :]
+        return rings
+
+
+@dataclass(init=False, kw_only=True, eq=False)
+class Healpix(HealpixBase):
+    """Grid system for HealPix discrete global grid."""
+
+    cell_ids_name: str
+    index: "HealpixIndex"
+    cell_ids: np.ndarray
 
     def __init__(
         self,
@@ -3205,39 +3244,6 @@ class Healpix(GridSystem):
         return self._corner_array(
             subset_cell_ids, int(info.level), _healpix_ellipsoid(info)
         )
-
-    def _corner_array(
-        self, cell_ids: np.ndarray, depth: int, ellipsoid: Any
-    ) -> xr.DataArray:
-        import healpix_geo
-
-        lon, lat = healpix_geo.nested.vertices(cell_ids, depth=depth, ellipsoid=ellipsoid)
-        lon = np.asarray(lon).ravel()
-        lat = np.asarray(lat).ravel()
-        corner_dim = "_corner"
-        return xr.DataArray(
-            np.empty(lon.shape),
-            dims=(corner_dim,),
-            coords={self.X: ((corner_dim,), lon), self.Y: ((corner_dim,), lat)},
-        )
-
-    def corners_to_rings(
-        self,
-        corner_x: np.ndarray,
-        corner_y: np.ndarray,
-        *,
-        ugrid_indexer: "UgridIndexer | None" = None,
-    ) -> np.ndarray:
-        """Assemble a ``(n_cells, 5, 2)`` ring buffer from flattened 4-corner arrays."""
-        assert corner_x.ndim == 1 and corner_x.size % 4 == 0
-        n = corner_x.size // 4
-        cx = corner_x.reshape(n, 4)
-        cy = corner_y.reshape(n, 4)
-        rings = np.empty((n, 5, 2), dtype=np.float64)
-        rings[:, :4, 0] = cx
-        rings[:, :4, 1] = cy
-        rings[:, 4, :] = rings[:, 0, :]
-        return rings
 
     @classmethod
     def from_dataset(
@@ -3390,7 +3396,7 @@ class FacetedGridSystem(GridSystem, ABC):
 
 
 @dataclass(init=False, kw_only=True, eq=False)
-class HealpixCube(Healpix):
+class HealpixCube(HealpixBase):
     """HEALPix stored as (face=12, y=nside, x=nside); xyf layout, nested ordering.
 
     Never builds an index: ids come from ``bbox_cell_ids`` and Morton bit arithmetic.
