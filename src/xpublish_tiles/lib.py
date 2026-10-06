@@ -1379,6 +1379,15 @@ def max_render_shape(*, width: int = 256, height: int = 256) -> tuple[int, int]:
     return (pixel_factor * width, pixel_factor * height)
 
 
+def max_polygon_cells(max_shape: tuple[int, int]) -> int:
+    """Cell budget for polygon grids that coarsen by level (HealpixCube).
+
+    One cell per output pixel: sub-pixel polygons add rasterization work, not detail.
+    """
+    pixel_factor = config.get("max_pixel_factor")
+    return math.prod(max_shape) // (pixel_factor * pixel_factor)
+
+
 def round_bbox(bbox: BBox) -> BBox:
     # https://github.com/developmentseed/morecantile/issues/175
     # the precision in morecantile tile bounds isn't perfect,

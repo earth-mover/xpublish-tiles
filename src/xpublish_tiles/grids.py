@@ -1,5 +1,4 @@
 import itertools
-import math
 import re
 import threading
 import warnings
@@ -43,6 +42,7 @@ from xpublish_tiles.lib import (
     coarsen_mean_pad,
     crs_repr,
     fill_rings_from_corners,
+    max_polygon_cells,
     max_render_shape,
     round_bbox,
     suppress_cf_dangling_ref_warnings,
@@ -3509,7 +3509,9 @@ class HealpixCube(HealpixBase):
 
     def sel(self, *, bbox: BBox) -> Slicers:
         return {
-            self.dim: list(self.select(bbox, max_cells=math.prod(max_render_shape())))
+            self.dim: list(
+                self.select(bbox, max_cells=max_polygon_cells(max_render_shape()))
+            )
         }
 
     def gather(self, da: xr.DataArray, indexer: HealpixCubeIndexer) -> xr.DataArray:

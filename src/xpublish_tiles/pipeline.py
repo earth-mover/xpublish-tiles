@@ -2,7 +2,6 @@ import asyncio
 import contextlib
 import datetime
 import io
-import math
 from collections.abc import Hashable, Iterable, Mapping
 from dataclasses import dataclass
 from functools import partial
@@ -59,6 +58,7 @@ from xpublish_tiles.lib import (
     coarsen_mean_pad,
     decompressed_size_bytes,
     get_data_load_semaphore,
+    max_polygon_cells,
     max_render_shape,
     normalize_slicers,
     pad_slicers,
@@ -1309,7 +1309,7 @@ async def subset_to_bbox(
             indexers = await async_run(
                 grid.select,
                 input_bbox,
-                max_cells=math.prod(max_shape),
+                max_cells=max_polygon_cells(max_shape),
                 mercator_stretch=is_mercator_like(crs),
                 allow_coarsen=allow_coarsen,
             )

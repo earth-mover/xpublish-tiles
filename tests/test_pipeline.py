@@ -1246,6 +1246,28 @@ async def test_cube_discrete_not_coarsened(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_cube_budget_one_cell_per_pixel(monkeypatch):
+    # z1 NW tile of L5 ≈ 3061 cells; 16² px × stretch 4.73 ≈ 1211 -> L4.
+    # A 3×3-per-pixel budget (≈ 10.9k) would keep L5.
+    cube = GLOBAL_HEALPIX_CUBE_L5.create()
+    levels = []
+    original = HealpixCube.select
+
+    def spy(self, bbox, **kwargs):
+        out = original(self, bbox, **kwargs)
+        levels.extend(ix.level for ix in out)
+        return out
+
+    monkeypatch.setattr(HealpixCube, "select", spy)
+    query = create_query_params(
+        Tile(x=0, y=0, z=1), WEBMERC_TMS, style="polygons", size=16
+    )
+    assert config.get("max_pixel_factor") == 3
+    await pipeline(cube, query)
+    assert set(levels) == {4}
+
+
+@pytest.mark.asyncio
 async def test_cube_raster_rejected():
     cube = GLOBAL_HEALPIX_CUBE_L3.create()
     query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style="raster")
