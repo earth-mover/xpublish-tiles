@@ -1335,9 +1335,10 @@ class _LongitudePeriod(NamedTuple):
 
 
 def _with_longitude_period(index: rasterix.RasterIndex) -> _LongitudePeriod:
-    """Rebuild ``index`` with ``x_period=360`` if its x axis is a global longitude axis.
+    """Rebuild ``index`` with ``x_period=360`` and ``dx = 360 / ncells`` if its x axis is global.
 
-    ``dx`` is snapped to ``360 / ncells``. A non-global ``index`` is returned unchanged.
+    rasterix re-checks ``period_atol`` on every periodic ``isel``. Snapping once here lets
+    later ``isel`` pass its default tolerance. A non-global ``index`` is returned unchanged.
     """
     unchanged = _LongitudePeriod(index, drop_seam=False)
     affine = index.transform()
@@ -1346,11 +1347,12 @@ def _with_longitude_period(index: rasterix.RasterIndex) -> _LongitudePeriod:
     nx, ny = index.xy_shape
     if affine.a == 0:
         return unchanged
-    ncells = round(360.0 / abs(affine.a))
+    ncells_float = 360.0 / abs(affine.a)
+    ncells = round(ncells_float)
     if ncells < 1 or nx not in (ncells, ncells + 1):
         return unchanged
-    # GeoTransforms carry truncated or float32 dx; snap if the seam misaligns by < 1/1000 pixel
-    if ncells * abs(abs(affine.a) - 360.0 / ncells) >= 1e-3 * abs(affine.a):
+    # GeoTransforms carry truncated or float32 dx; tolerance is the seam drift in cells
+    if abs(ncells_float - ncells) > config.get("rasterix_period_atol"):
         return unchanged
     if affine.a < 0:
         # RasterAffine._x_sel passes ascending lon slices; decreasing periodic x is not planned
