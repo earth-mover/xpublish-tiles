@@ -1268,6 +1268,28 @@ async def test_cube_budget_one_cell_per_pixel(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tile", [Tile(x=0, y=0, z=0), Tile(x=2, y=1, z=2)], ids=["z0", "2/1/2"]
+)
+async def test_cube_face_chunk_merge_renders_same(tile):
+    query = create_query_params(tile, WEBMERC_TMS, style="polygons")
+
+    def with_face_chunk(n):
+        cube = GLOBAL_HEALPIX_CUBE_L5.create()
+        cube["foo"].encoding["preferred_chunks"] = {
+            "time": 1,
+            "face": n,
+            "y": 32,
+            "x": 32,
+        }
+        return cube
+
+    one = _pixels(await pipeline(with_face_chunk(1), query))
+    two = _pixels(await pipeline(with_face_chunk(2), query))
+    np.testing.assert_array_equal(one, two)
+
+
+@pytest.mark.asyncio
 async def test_cube_raster_rejected():
     cube = GLOBAL_HEALPIX_CUBE_L3.create()
     query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style="raster")
@@ -1281,7 +1303,7 @@ def test_cube_decompressed_size(face_chunk):
     grid = guess_grid_system(cube, "foo")
     assert isinstance(grid, HealpixCube)
     (ix, *_) = grid.select(BBox(west=0, south=0, east=10, north=10), max_cells=10**9)
-    da = cube["foo"].isel(time=0, face=ix.face, y=ix.y, x=ix.x)
+    da = cube["foo"].isel(time=0, face=ix.faces, y=ix.y, x=ix.x)
     chunks = {"time": 1, "face": face_chunk, "y": 8, "x": 8}
     got = decompressed_size_bytes({grid.dim: [ix]}, da, grid, chunks=chunks)
     # one 8x8 y/x chunk of float64, times the face and time chunks it sits in
