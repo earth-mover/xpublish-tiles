@@ -600,6 +600,50 @@ async def test_continuous_data_with_range_colors(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("style", ["raster", "polygons"])
+async def test_continuous_range_colors_transparent_alpha(style):
+    ds = IFS.create().isel(time=0, step=0)
+    tile, tms = Tile(x=2, y=1, z=2), WGS84_TMS
+
+    async def alpha(**kwargs) -> np.ndarray:
+        query = create_query_params(
+            tile, tms, style=style, colorscalerange=(-0.5, 0.5), **kwargs
+        )
+        result = await pipeline(ds, query)
+        return np.asarray(Image.open(result).convert("RGBA"))[..., 3]
+
+    extend = await alpha(abovemaxcolor="extend", belowmincolor="extend")
+    transparent = await alpha(abovemaxcolor="transparent", belowmincolor="transparent")
+    assert (extend == 255).all()
+    assert 0 < (transparent == 0).mean() < 1
+    assert set(np.unique(transparent)) == {0, 255}
+
+
+@pytest.mark.asyncio
+async def test_continuous_colormap_alpha_is_kept():
+    ds = IFS.create().isel(time=0, step=0)
+    query = create_query_params(
+        Tile(x=2, y=1, z=2),
+        WGS84_TMS,
+        variant="custom",
+        colorscalerange=(-1, 1),
+        colormap={"0": "#ff000080", "255": "#0000ff80"},
+    )
+    result = await pipeline(ds, query)
+    alpha = np.asarray(Image.open(result).convert("RGBA"))[..., 3]
+    assert set(np.unique(alpha)) <= {127, 128}
+
+
+@pytest.mark.asyncio
+async def test_continuous_tile_is_indexed_png():
+    ds = IFS.create().isel(time=0, step=0)
+    result = await pipeline(ds, create_query_params(Tile(x=2, y=1, z=2), WGS84_TMS))
+    im = Image.open(result)
+    assert im.mode == "P"
+    assert "transparency" in im.info
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("tile,tms", as_pytestparams(GLOBAL_NANS.tiles))
 async def test_global_nans_data(tile, tms, png_snapshot, pytestconfig):
     """Test pipeline with global dataset containing diagonal NaN patterns."""
@@ -1090,7 +1134,7 @@ async def test_healpix_cube_tile(tile, png_snapshot, pytestconfig):
 
 
 def _pixels(buf):
-    return np.asarray(Image.open(io.BytesIO(buf.getvalue())))
+    return np.asarray(Image.open(io.BytesIO(buf.getvalue())).convert("RGBA"))
 
 
 @pytest.mark.asyncio

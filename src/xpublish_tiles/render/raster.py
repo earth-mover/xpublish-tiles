@@ -4,11 +4,9 @@ from typing import cast
 
 import datashader as dsh
 import datashader.reductions
-import matplotlib.colors as mcolors
 import numbagg
 import numpy as np
 import pandas as pd
-from PIL import Image
 from scipy.interpolate import NearestNDInterpolator
 
 import xarray as xr
@@ -21,7 +19,6 @@ from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import DatashaderRenderer, register_renderer, save_image
 from xpublish_tiles.render.kernels import footprint_mode, offdisk_quad_mask
 from xpublish_tiles.types import (
-    ContinuousData,
     DiscreteData,
     ImageFormat,
     RenderContext,
@@ -78,70 +75,6 @@ def fill_nonfinite_nearest(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np
                 a = numbagg.bfill(numbagg.ffill(a, axis=axis), axis=axis)
             filled.append(a)
     return filled[0], filled[1]
-
-
-def _range_color_to_rgba(color: str) -> tuple[int, int, int, int]:
-    if color == "transparent":
-        return (0, 0, 0, 0)
-    rgba = mcolors.to_rgba(color)
-    return tuple(round(channel * 255) for channel in rgba)
-
-
-def _apply_out_of_range_colors(
-    image: Image.Image,
-    mesh: xr.DataArray,
-    colorscalerange: tuple[Number, Number] | None,
-    abovemaxcolor: str | None,
-    belowmincolor: str | None,
-) -> Image.Image:
-    if colorscalerange is None:
-        return image
-
-    apply_over = abovemaxcolor not in (None, "extend")
-    apply_under = belowmincolor not in (None, "extend")
-    if not apply_over and not apply_under:
-        return image
-
-    mesh_values = np.asarray(mesh)
-    if mesh_values.size == 0:
-        return image
-
-    finite_mask = np.isfinite(mesh_values)
-    under_mask = finite_mask & (mesh_values < colorscalerange[0]) if apply_under else None
-    over_mask = finite_mask & (mesh_values > colorscalerange[1]) if apply_over else None
-
-    if under_mask is None or not np.any(under_mask):
-        under_mask = None
-    if over_mask is None or not np.any(over_mask):
-        over_mask = None
-    if under_mask is None and over_mask is None:
-        return image
-
-    should_flip = False
-    if mesh.dims:
-        y_dim = mesh.dims[0]
-        if y_dim in mesh.coords:
-            y_vals = np.asarray(mesh.coords[y_dim])
-            if y_vals.size >= 2 and y_vals[0] < y_vals[-1]:
-                # Datashader's PIL output is top-down; flip if y increases upward.
-                should_flip = True
-
-    if should_flip:
-        if under_mask is not None:
-            under_mask = np.flipud(under_mask)
-        if over_mask is not None:
-            over_mask = np.flipud(over_mask)
-
-    if image.mode != "RGBA":
-        image = image.convert("RGBA")
-    img_array = np.array(image)
-
-    if under_mask is not None and belowmincolor is not None:
-        img_array[under_mask] = _range_color_to_rgba(belowmincolor)
-    if over_mask is not None and abovemaxcolor is not None:
-        img_array[over_mask] = _range_color_to_rgba(abovemaxcolor)
-
-    return Image.fromarray(img_array, mode="RGBA")
 
 
 def nearest_on_uniform_grid_quadmesh(
@@ -395,14 +328,6 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                 abovemaxcolor=abovemaxcolor,
                 belowmincolor=belowmincolor,
             )
-            if isinstance(context.datatype, ContinuousData):
-                im = _apply_out_of_range_colors(
-                    im,
-                    mesh,
-                    colorscalerange,
-                    abovemaxcolor,
-                    belowmincolor,
-                )
 
         save_image(im, buffer, format)
 

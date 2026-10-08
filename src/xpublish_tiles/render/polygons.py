@@ -12,9 +12,7 @@ from xpublish_tiles.render import (
     register_renderer,
     save_image,
 )
-from xpublish_tiles.render.raster import _apply_out_of_range_colors
 from xpublish_tiles.types import (
-    ContinuousData,
     ImageFormat,
     RenderContext,
     RGBData,
@@ -119,14 +117,6 @@ class PolygonsRenderer(DatashaderRenderer):
                 abovemaxcolor=abovemaxcolor,
                 belowmincolor=belowmincolor,
             )
-            if isinstance(context.datatype, ContinuousData):
-                im = _apply_out_of_range_colors(
-                    im,
-                    mesh,
-                    colorscalerange,
-                    abovemaxcolor,
-                    belowmincolor,
-                )
         save_image(im, buffer, format)
 
     @staticmethod
