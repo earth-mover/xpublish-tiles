@@ -4,7 +4,9 @@ Logging setup and shared logger for the xpublish_tiles package.
 
 import contextlib
 import contextvars
+import copy
 import functools
+import inspect
 import logging
 import sys
 import threading
@@ -14,6 +16,8 @@ from typing import Any
 
 import structlog
 
+from xpublish_tiles import telemetry
+
 
 class LogAccumulator:
     """Accumulates log entries for later processing without outputting them."""
@@ -22,6 +26,15 @@ class LogAccumulator:
         self.logs = []
         # (message, ms) per log_duration block, kept at any log level for the summary
         self.timings: list[tuple[str, float]] = []
+        # summed wall ms per `log_duration` key (waits inside a stage are included);
+        # pool threads of one request write here concurrently
+        self.stages: dict[str, float] = {}
+        self.waits: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def add(self, totals: dict[str, float], key: str, duration_ms: float) -> None:
+        with self._lock:
+            totals[key] = totals.get(key, 0.0) + duration_ms
 
     def __call__(self, logger, method_name, event_dict):
         # Store the log entry
@@ -42,6 +55,13 @@ _context_accumulator: contextvars.ContextVar[LogAccumulator | None] = (
 
 # Lock to serialize the final flush so concurrent requests don't interleave
 _flush_lock = threading.Lock()
+
+
+def record_wait(key: str, duration_ms: float) -> None:
+    """Add queue time to the current request's `LogAccumulator.waits`."""
+    accumulator = _context_accumulator.get()
+    if accumulator is not None:
+        accumulator.add(accumulator.waits, key, duration_ms)
 
 
 def _accumulate_if_active(logger, method_name, event_dict):
@@ -167,35 +187,85 @@ def set_context_logger(bound_logger: structlog.stdlib.BoundLogger):
     _context_logger.set(bound_logger)
 
 
-@contextlib.contextmanager
-def log_duration(message: str, emoji: str = "⏱️", logger=None):
+class log_duration(contextlib.ContextDecorator):
     """
-    Context manager to log the duration of a code block with a custom message.
+    Log the duration of a code block or of each call to a sync or async function.
 
     Args:
         message: Custom message to log with timing
-        emoji: Emoji to prefix the message (optional)
+        key: Stable stage name; durations with the same key add up in
+             `LogAccumulator.stages`, also when the block fails or is cancelled
 
     Usage:
-        with log_duration("loading data", "📥"):
+        with log_duration("loading data"):
             result = await load_data()
+
+        @log_duration("select subsets", key="select")
+        async def subset_to_bbox(...): ...
     """
-    if logger is None:
-        logger = get_context_logger()
-    accumulator = _context_accumulator.get()
-    start_time = time.perf_counter()
+
+    def __init__(self, message: str, logger=None, *, key: str | None = None):
+        self.message = message
+        self.logger = logger
+        self.key = key
+
+    def __enter__(self):
+        self._logger = self.logger if self.logger is not None else get_context_logger()
+        self._accumulator = _context_accumulator.get()
+        self._start = time.perf_counter()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        duration_ms = (time.perf_counter() - self._start) * 1000
+        if exc_type is None:
+            status = ""
+        elif issubclass(exc_type, Exception):
+            status = " (failed)"
+        else:
+            status = " (cancelled)"
+        accumulator = self._accumulator
+        if accumulator is not None:
+            accumulator.timings.append((f"{self.message}{status}", duration_ms))
+            if self.key is not None:
+                accumulator.add(accumulator.stages, self.key, duration_ms)
+        line = f"({duration_ms:.0f}ms) {self.message}{status}"
+        if status == " (failed)":
+            self._logger.error(line, error=str(exc))
+        else:
+            self._logger.debug(line)
+        return False
+
+    def _recreate_cm(self):
+        # each call needs its own start time; concurrent calls share the decorator
+        return copy.copy(self)
+
+    def __call__(self, func):
+        if inspect.iscoroutinefunction(func):
+
+            @functools.wraps(func)
+            async def wrapper(*args, **kwargs):
+                with self._recreate_cm():
+                    return await func(*args, **kwargs)
+
+            return wrapper
+        return super().__call__(func)
+
+
+def _write_root_span(
+    span: Any, accumulator: LogAccumulator, total_ms: float, status: str
+) -> None:
     try:
-        yield
-        duration_ms = (time.perf_counter() - start_time) * 1000
-        if accumulator is not None:
-            accumulator.timings.append((message, duration_ms))
-        logger.debug(f"{emoji} ({duration_ms:.0f}ms) {message}")
-    except Exception as e:
-        duration_ms = (time.perf_counter() - start_time) * 1000
-        if accumulator is not None:
-            accumulator.timings.append((f"{message} (failed)", duration_ms))
-        logger.error(f"{emoji} ({duration_ms:.0f}ms) {message} (failed)", error=str(e))
-        raise
+        with accumulator._lock:
+            stages = dict(accumulator.stages)
+            waits = dict(accumulator.waits)
+        for key, ms in stages.items():
+            span.set_metric(f"tiles.stage_ms.{key}", ms)
+        span.set_metric("tiles.wait_ms.thread_pool", waits.get("thread_pool", 0.0))
+        span.set_metric("tiles.total_ms", total_ms)
+        span.set_tag("tiles.status", status)
+    except Exception:
+        # telemetry must never change the response
+        logger.warning("writing stage timings to the root span failed", exc_info=True)
 
 
 def with_accumulated_logs(
@@ -237,19 +307,22 @@ def with_accumulated_logs(
 
             set_context_logger(bound_logger)
 
-            # Track total processing time
+            span = telemetry.root_span()
             start_time = time.perf_counter()
-            total_ms = -1
-
+            # stays "cancelled" unless the handler returns or raises an Exception
+            status = "cancelled"
             try:
                 result = await func(*args, **kwargs)
-                total_ms = (time.perf_counter() - start_time) * 1000
+                status = "ok"
                 return result
             except Exception:
-                total_ms = (time.perf_counter() - start_time) * 1000
+                status = "error"
                 raise
             finally:
+                total_ms = (time.perf_counter() - start_time) * 1000
                 try:
+                    if span is not None:
+                        _write_root_span(span, accumulator, total_ms, status)
                     # Flush accumulated logs when non-empty; the entries stored here
                     # already passed structlog's level filter. At INFO the debug
                     # timers are filtered out, so emit their summary line alone.
@@ -258,12 +331,16 @@ def with_accumulated_logs(
                     ):
                         console_renderer = CleanConsoleRenderer()
 
+                        log_msg = func.__name__
                         if log_message_fn is not None:
-                            log_msg = log_message_fn(*args, **kwargs)
-                        else:
-                            log_msg = func.__name__
+                            try:
+                                log_msg = log_message_fn(*args, **kwargs)
+                            except Exception:
+                                logger.warning(
+                                    "log_message_fn for %s failed", log_msg, exc_info=True
+                                )
 
-                        header = f"🔧 {log_msg} (total: {total_ms:.0f}ms)"
+                        header = f"{log_msg} (total: {total_ms:.0f}ms)"
                         if accumulator.timings:
                             header += " | " + "; ".join(
                                 f"{ms:.0f}ms {msg}" for msg, ms in accumulator.timings

@@ -453,7 +453,7 @@ async def load_plans(plans: list[SubsetPlan]) -> list[xr.DataArray]:
 
     async with get_data_load_semaphore():
         if config.get("async_load"):
-            with log_duration("async_load data subsets", "📥"):
+            with log_duration("async_load data subsets", key="load"):
                 timeout = config.get("async_load_timeout_per_tile")
                 try:
                     if timeout is not None:
@@ -482,7 +482,7 @@ async def load_plans(plans: list[SubsetPlan]) -> list[xr.DataArray]:
                     )
                     raise
         else:
-            with log_duration("load data subsets", "📥"):
+            with log_duration("load data subsets", key="load"):
                 loaded_flat = [s.load() for s in subsets]
 
     results: list[xr.DataArray] = []
@@ -506,7 +506,7 @@ def coarsen(
     With this approach, we preserve exact coordinate values as present
     in the dataset. That in turn requires that coarsen_factors be odd.
     """
-    with log_duration(f"coarsen {da.shape} by {coarsen_factors!r}", "🔲"):
+    with log_duration(f"coarsen {da.shape} by {coarsen_factors!r}", key="coarsen"):
         # Drop coordinates before coarsening to avoid extra work
         coord_names = list(da.coords)
         da_no_coords = da.drop_vars(coord_names)
@@ -825,15 +825,16 @@ def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool
 
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     rgb = query.variant == "rgb"
-    validated = await async_run(
-        partial(
-            apply_query,
-            ds,
-            variables=query.variables,
-            selectors=query.selectors,
-            rgb=rgb,
+    with log_duration("apply_query", key="query"):
+        validated = await async_run(
+            partial(
+                apply_query,
+                ds,
+                variables=query.variables,
+                selectors=query.selectors,
+                rgb=rgb,
+            )
         )
-    )
     for array in validated.values():
         validate_colormap_for_datatype(query.colormap, array.datatype)
     if rgb and (query.abovemaxcolor is not None or query.belowmincolor is not None):
@@ -868,7 +869,8 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
         )
         for subset in subsets.values()
     ]
-    results = await asyncio.gather(*tasks)
+    with log_duration("maybe_rewrite_to_rectilinear", key="rewrite"):
+        results = await asyncio.gather(*tasks)
     new_subsets = dict(zip(subsets.keys(), results, strict=False))
 
     buffer = io.BytesIO()
@@ -1198,6 +1200,7 @@ def apply_query(
     return validated
 
 
+@log_duration("select subsets", key="select")
 async def subset_to_bbox(
     validated: dict[str, ValidatedArray],
     *,
@@ -1495,7 +1498,7 @@ async def _transform_one_grid_polygons(
         )
 
     input_to_output = transformer_from_crs(source_crs, output_crs)
-    with log_duration("transform_coordinates", "🔄"):
+    with log_duration("transform_coordinates", key="transform"):
         newX, newY = await transform_coordinates(
             to_transform, grid.X, grid.Y, input_to_output
         )
@@ -1610,7 +1613,7 @@ async def _transform_polygon_patch(
             has_discontinuity = bool(patch.indexer.antimeridian_mask.any())
 
     input_to_output = transformer_from_crs(source_crs, output_crs)
-    with log_duration("transform_coordinates", "🔄"):
+    with log_duration("transform_coordinates", key="transform"):
         newX, newY = await transform_coordinates(
             to_transform, alternate.X, alternate.Y, input_to_output
         )
@@ -1698,7 +1701,7 @@ async def _transform_raster_patch(
                 alternate.Y,
             )
 
-    with log_duration("transform_coordinates", "🔄"):
+    with log_duration("transform_coordinates", key="transform"):
         newX, newY = await transform_coordinates(
             subset, alternate.X, alternate.Y, input_to_output
         )

@@ -231,7 +231,7 @@ class DatashaderRenderer(Renderer):
 
         (context,) = contexts.values()
         if isinstance(context, NullRenderContext):
-            logger.debug("☐ No data")
+            logger.debug("No data")
             im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
             im.save(buffer, format=str(format))
             return None
