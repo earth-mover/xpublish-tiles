@@ -390,3 +390,129 @@ def _target_y(
 ) -> np.ndarray:
     """Y along the theta=0 ray, which is the central meridian."""
     return to_target.transform(np.full_like(rho, apex_x), apex_y - rho)[1]
+
+
+# --- geostationary source -> normal-cylindrical target -----------------------
+#
+# PROJ's geos inverse (geos.cpp, ellipsoidal form) fused with the target's
+# forward projection. The tan/hypot terms depend on one scan angle each, so
+# they cost n + m; only the ray-ellipsoid intersection runs per point.
+
+
+@numba.njit(inline="always", cache=True)
+def _geos_point(vy0, vz0, rg, rp2, c, lon0, mercator, scale):
+    """One view ray -> target (X, Y); inf in both axes when the ray misses the earth."""
+    a_ = vy0 * vy0 + vz0 * vz0 / rp2 + 1.0
+    det = rg * rg - a_ * c
+    if det < 0.0:
+        return np.inf, np.inf
+    k = (rg - np.sqrt(det)) / a_
+    vx = rg - k
+    vy = vy0 * k
+    lam = np.arctan2(vy, vx) + lon0
+    # PROJ's adjlon
+    if np.abs(lam) >= M_PI + 1e-12:
+        lam += M_PI
+        lam -= M_2_PI * np.floor(lam / M_2_PI)
+        lam -= M_PI
+    tan_phi = vz0 * k / (rp2 * np.hypot(vx, vy))
+    if mercator:
+        return scale * lam, scale * np.arcsinh(tan_phi)
+    return scale * lam, scale * np.arctan(tan_phi)
+
+
+@numba.njit(nogil=True, cache=True, boundscheck=False)
+def _geos_grid_kernel(sx, sy, sweep_x, rg, rp2, c, lon0, mercator, scale, out_x, out_y):
+    """Rectilinear scan-angle axes; out is (sx.size, sy.size)."""
+    tx = np.tan(sx)
+    ty = np.tan(sy)
+    if sweep_x:
+        hy = np.hypot(1.0, ty)
+        for i in range(sx.size):
+            for j in range(sy.size):
+                out_x[i, j], out_y[i, j] = _geos_point(
+                    tx[i] * hy[j], ty[j], rg, rp2, c, lon0, mercator, scale
+                )
+    else:
+        hx = np.hypot(1.0, tx)
+        for i in range(sx.size):
+            for j in range(sy.size):
+                out_x[i, j], out_y[i, j] = _geos_point(
+                    tx[i], ty[j] * hx[i], rg, rp2, c, lon0, mercator, scale
+                )
+
+
+@dataclass(frozen=True)
+class GeosToCylindrical:
+    """Geostationary (metres, x_0 = y_0 = 0) into Web Mercator or degree lon/lat.
+
+    Off-disk points come back as inf in both axes, as pyproj returns them.
+    """
+
+    height: float
+    sweep_x: bool
+    radius_g: float
+    radius_p2: float
+    c: float
+    lon0: float
+    mercator: bool
+    scale: float
+
+    def transform_grid(self, x: np.ndarray, y: np.ndarray) -> _XY:
+        """x and y are the 1D axes of a rectilinear grid; output is (x.size, y.size)."""
+        out_x = np.empty((x.size, y.size), dtype=np.float64)
+        out_y = np.empty((x.size, y.size), dtype=np.float64)
+        _geos_grid_kernel(
+            np.asarray(x, dtype=np.float64) / self.height,
+            np.asarray(y, dtype=np.float64) / self.height,
+            self.sweep_x,
+            self.radius_g,
+            self.radius_p2,
+            self.c,
+            self.lon0,
+            self.mercator,
+            self.scale,
+            out_x,
+            out_y,
+        )
+        return out_x, out_y
+
+
+@lru_cache
+def geos_to_cylindrical(source_crs: CRS, target_crs: CRS) -> GeosToCylindrical | None:
+    """The fused transform, or None if the pair is outside what it reproduces."""
+    with warnings.catch_warnings():
+        # We read only the geos parameters, which to_dict() keeps.
+        warnings.simplefilter("ignore", UserWarning)
+        params = source_crs.to_dict()
+    if (
+        params.get("proj") != "geos"
+        or params.get("x_0", 0.0) != 0.0
+        or params.get("y_0", 0.0) != 0.0
+        or params.get("units", "m") != "m"
+        or source_crs.ellipsoid is None
+    ):
+        return None
+    if target_crs == WEB_MERCATOR:
+        mercator, scale = True, float(WGS84_SEMI_MAJOR_AXIS)
+    elif is_degree_geographic(target_crs) and has_null_datum_shift(target_crs):
+        mercator, scale = False, float(np.rad2deg(1.0))
+    else:
+        return None
+    if not has_null_datum_shift(source_crs.geodetic_crs):
+        return None
+
+    a = source_crs.ellipsoid.semi_major_metre
+    b = source_crs.ellipsoid.semi_minor_metre
+    h = float(params["h"])
+    radius_g = 1.0 + h / a
+    return GeosToCylindrical(
+        height=h,
+        sweep_x=params.get("sweep", "y") == "x",
+        radius_g=radius_g,
+        radius_p2=(b / a) ** 2,
+        c=radius_g * radius_g - 1.0,
+        lon0=float(np.deg2rad(params.get("lon_0", 0.0))),
+        mercator=mercator,
+        scale=scale,
+    )
