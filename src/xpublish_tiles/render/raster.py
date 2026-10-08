@@ -305,13 +305,12 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                         # so the pixel -> cell map factors into 1D index maps.
                         with log_duration(
                             f"nearest neighbour regridding (discrete) {data.shape}",
-                            "⊞",
                             logger,
                             key="regrid",
                         ):
                             data = nearest_on_uniform_grid_quadmesh(data, grid.X, grid.Y)
                     with log_duration(
-                        f"render (discrete) {data.shape} mode", "🎨", logger, key="render"
+                        f"render (discrete) {data.shape} mode", logger, key="render"
                     ):
                         mesh = rasterize_categorical_rectilinear(
                             data,
@@ -340,7 +339,6 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                     )
                 with log_duration(
                     f"render (continuous) {data.shape} quadmesh",
-                    "🎨",
                     logger,
                     key="render",
                 ):
@@ -366,7 +364,7 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                     "triangular grids; use 'polygons/rgb'."
                 )
             with log_duration(
-                f"render (continuous) {data.shape} trimesh", "🔺", logger, key="render"
+                f"render (continuous) {data.shape} trimesh", logger, key="render"
             ):
                 assert context.ugrid_indexer is not None
                 if context.grid.dim in data.coords:
@@ -385,7 +383,7 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                 f"Grid type {type(context.grid)} not supported by DatashaderRasterRenderer"
             )
 
-        with log_duration("shade", "🖌️", logger, key="shade"):
+        with log_duration("shade", logger, key="shade"):
             if isinstance(context.datatype, RGBData):
                 im = self.shade_rgb(
                     mesh,
@@ -411,7 +409,7 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                         belowmincolor,
                     )
 
-        with log_duration(f"encode {format}", "📦", logger, key="encode"):
+        with log_duration(f"encode {format}", logger, key="encode"):
             im.save(buffer, format=str(format))
 
     @staticmethod

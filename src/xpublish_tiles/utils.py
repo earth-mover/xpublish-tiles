@@ -96,7 +96,7 @@ def time_debug(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         bound_logger = kwargs.get("bound_logger")
-        with log_duration(func.__name__, emoji="⏱️", logger=bound_logger):
+        with log_duration(func.__name__, logger=bound_logger):
             return func(*args, **kwargs)
 
     return wrapper
@@ -106,7 +106,7 @@ def async_time_debug(func):
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
         bound_logger = kwargs.get("bound_logger")
-        with log_duration(func.__name__, emoji="⏱️", logger=bound_logger):
+        with log_duration(func.__name__, logger=bound_logger):
             return await func(*args, **kwargs)
 
     return wrapper

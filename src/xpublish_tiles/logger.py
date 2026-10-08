@@ -193,23 +193,19 @@ class log_duration(contextlib.ContextDecorator):
 
     Args:
         message: Custom message to log with timing
-        emoji: Emoji to prefix the message (optional)
         key: Stable stage name; durations with the same key add up in
              `LogAccumulator.stages`, also when the block fails or is cancelled
 
     Usage:
-        with log_duration("loading data", "📥"):
+        with log_duration("loading data"):
             result = await load_data()
 
-        @log_duration("select subsets", "✂️", key="select")
+        @log_duration("select subsets", key="select")
         async def subset_to_bbox(...): ...
     """
 
-    def __init__(
-        self, message: str, emoji: str = "⏱️", logger=None, *, key: str | None = None
-    ):
+    def __init__(self, message: str, logger=None, *, key: str | None = None):
         self.message = message
-        self.emoji = emoji
         self.logger = logger
         self.key = key
 
@@ -232,7 +228,7 @@ class log_duration(contextlib.ContextDecorator):
             accumulator.timings.append((f"{self.message}{status}", duration_ms))
             if self.key is not None:
                 accumulator.add(accumulator.stages, self.key, duration_ms)
-        line = f"{self.emoji} ({duration_ms:.0f}ms) {self.message}{status}"
+        line = f"({duration_ms:.0f}ms) {self.message}{status}"
         if status == " (failed)":
             self._logger.error(line, error=str(exc))
         else:
@@ -344,7 +340,7 @@ def with_accumulated_logs(
                                     "log_message_fn for %s failed", log_msg, exc_info=True
                                 )
 
-                        header = f"🔧 {log_msg} (total: {total_ms:.0f}ms)"
+                        header = f"{log_msg} (total: {total_ms:.0f}ms)"
                         if accumulator.timings:
                             header += " | " + "; ".join(
                                 f"{ms:.0f}ms {msg}" for msg, ms in accumulator.timings

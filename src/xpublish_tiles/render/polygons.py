@@ -56,14 +56,14 @@ class PolygonsRenderer(DatashaderRenderer):
             )
 
         if len(context.cell_rings) == 0:
-            logger.debug("☐ No data")
+            logger.debug("No data")
             im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
             im.save(buffer, format=str(format))
             return
 
         data = context.da
 
-        with log_duration(f"render (polygons) {data.shape}", "⬡", logger, key="render"):
+        with log_duration(f"render (polygons) {data.shape}", logger, key="render"):
             geometry = polygons_from_rings(context.cell_rings)
             try:
                 if isinstance(context.datatype, RGBData):
@@ -96,7 +96,7 @@ class PolygonsRenderer(DatashaderRenderer):
             except ValueError as e:
                 if "Geometry type combination is not supported" not in str(e):
                     raise
-                logger.debug("☐ No data (polygons don't overlap tile bbox)")
+                logger.debug("No data (polygons don't overlap tile bbox)")
                 im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
                 im.save(buffer, format=str(format))
                 return
@@ -125,7 +125,7 @@ class PolygonsRenderer(DatashaderRenderer):
                     abovemaxcolor,
                     belowmincolor,
                 )
-        with log_duration(f"encode {format}", "📦", logger, key="encode"):
+        with log_duration(f"encode {format}", logger, key="encode"):
             im.save(buffer, format=str(format))
 
     @staticmethod

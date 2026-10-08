@@ -656,7 +656,7 @@ class CellTreeIndex(xr.Index):
             neg_verts[:, 0] -= 360
 
             vertices = np.concatenate([vertices, pos_verts, neg_verts], axis=0)
-            with log_duration("re-triangulating", "▲"):
+            with log_duration("re-triangulating"):
                 faces = triangular.delaunay(vertices)
             # need to reindex the data to match the padding
             self.reindexer = np.concatenate([np.arange(nverts), boundary, boundary])
@@ -664,11 +664,11 @@ class CellTreeIndex(xr.Index):
         else:
             self.reindexer = None
 
-        with log_duration("Creating CellTree", "⊠"):
+        with log_duration("Creating CellTree"):
             self.tree = CellTree2d(vertices, faces, fill_value=fill_value)
 
         if lon_spans_globe:
-            with log_duration("Handling periodic boundaries", "⊠"):
+            with log_duration("Handling periodic boundaries"):
                 # lets find the vertices closest to the -180 & 180 boundaries and cache them.
                 # At indexing time, we'll return the indexes for vertices at the boundary
                 # so we can fix the coordinate discontinuity later in `pipeline`
@@ -1606,19 +1606,19 @@ class GridSystem(ABC):
 
         logger = get_context_logger()
         if all(factor > 2 for factor in coarsen_factors.values()):
-            logger.debug("🚫 large coarsening, skipping alternate coordinates")
+            logger.debug("large coarsening, skipping alternate coordinates")
             return self.to_metadata()
 
         # Check if any alternate grid has a matching CRS
         for alt in self.alternates:
             if alt.crs == crs:
-                logger.debug(f"🔀 picking alternate grid system: {alt!r}")
+                logger.debug(f"picking alternate grid system: {alt!r}")
                 return alt
 
         # Check if any alternate grid is 4326-like
         for alt in self.alternates:
             if is_degree_geographic(alt.crs):
-                logger.debug(f"🔀 picking alternate grid system: {alt!r}")
+                logger.debug(f"picking alternate grid system: {alt!r}")
                 return alt
 
         return self.to_metadata()
@@ -2897,7 +2897,7 @@ class Triangular(GridSystem):
                 fill_value=-1,
             )
 
-        with log_duration("Triangulating", "🔺"):
+        with log_duration("Triangulating"):
             if numbagg.anynan(vertices):
                 raise ValueError(
                     f"Triangulation failed. Variables {Xname!r} or {Yname!r} contain NaNs."

@@ -299,7 +299,7 @@ class PopulatedRenderContext(RenderContext):
             Z=None,
         )
         logger = logger or get_context_logger()
-        logger.debug("✏️ rewriting to rectilinear")
+        logger.debug("rewriting to rectilinear")
         return type(self)(da=data, datatype=self.datatype, grid=self.grid, bbox=self.bbox)
 
 

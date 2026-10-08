@@ -38,7 +38,7 @@ async def test_info_level_emits_one_summary_line(capsys, restore_logging):
     lines = capsys.readouterr().out.strip().splitlines()
     assert len(lines) == 1
     (line,) = lines
-    assert line.startswith("🔧 tile 4/4/10 (total: ")
+    assert line.startswith("tile 4/4/10 (total: ")
     assert "ms async_load data subsets" in line
     assert "ms render quadmesh" in line
 
@@ -227,7 +227,7 @@ async def test_raising_log_message_fn_is_ignored(fake_span, capsys, restore_logg
         return "tile"
 
     assert await named() == "tile"
-    assert capsys.readouterr().out.startswith("🔧 named (total: ")
+    assert capsys.readouterr().out.startswith("named (total: ")
     assert fake_span.tags == {"tiles.status": "ok"}
 
 
