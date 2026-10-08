@@ -1619,3 +1619,34 @@ async def test_issue_206_mock_renders(tile):
         ds, create_query_params(tile, morecantile.tms.get("WebMercatorQuad"))
     )
     assert check_transparent_pixels(result.getvalue()) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "create_ds,tile,query_kwargs",
+    [
+        pytest.param(
+            lambda: RGB.create().sel(longitude=slice(0, None)),
+            Tile(x=0, y=0, z=0),
+            {"variant": "rgb"},
+            id="rgb_east_half",
+        ),
+        pytest.param(GLOBAL_NANS.create, Tile(x=0, y=0, z=0), {}, id="global_nans"),
+        pytest.param(
+            GEOSTATIONARY.create,
+            Tile(x=0, y=0, z=1),
+            {"colorscalerange": (-1.0, 1.0)},
+            id="geostationary_limb",
+        ),
+    ],
+)
+async def test_jpeg_render(create_ds, tile, query_kwargs, jpeg_snapshot):
+    """JPEG tiles flatten no-data and off-disk areas onto white."""
+    query_params = replace(
+        create_query_params(tile, WEBMERC_TMS, **query_kwargs), format=ImageFormat.JPEG
+    )
+    with config.set(rectilinear_check_min_size=0):
+        result = await pipeline(create_ds(), query_params)
+    content = result.getvalue()
+    assert Image.open(io.BytesIO(content)).mode == "RGB"
+    assert content == jpeg_snapshot
