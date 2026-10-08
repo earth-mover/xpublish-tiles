@@ -42,9 +42,9 @@ if TYPE_CHECKING:
     from xpublish_tiles.types import RenderContext
 
 
-def save_image(im: Image.Image, buffer: io.BytesIO, format: ImageFormat | str) -> None:
-    """Encode ``im``; JPEG has no alpha, so composite onto ``JPEG_BACKGROUND``."""
-    if str(format).upper() == "JPEG" and im.mode != "RGB":
+def save_image(im: Image.Image, buffer: io.BytesIO, format: str) -> None:
+    """Save ``im``; JPEG has no alpha, so composite onto ``JPEG_BACKGROUND``."""
+    if str(format).lower() == "jpeg" and im.mode != "RGB":
         background = Image.new("RGBA", im.size, JPEG_BACKGROUND)
         im = Image.alpha_composite(background, im.convert("RGBA")).convert("RGB")
     im.save(buffer, format=str(format))
@@ -506,6 +506,8 @@ class DatashaderRenderer(Renderer):
             raw.seek(0)
             img = Image.open(raw)
             img.load()
+        if pil_format == "JPEG" and img.mode != "RGB":
+            img = img.convert("RGB")
         save_image(img, buffer, pil_format)
 
     def legend_data(
