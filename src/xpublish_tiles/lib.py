@@ -39,6 +39,7 @@ from xpublish_tiles.projections import (
     WEB_MERCATOR,
     conic_to_cylindrical,
     epsg4326to3857,
+    geos_to_cylindrical,
     has_null_datum_shift,
     is_degree_geographic,
 )
@@ -548,6 +549,20 @@ async def transform_coordinates(
         _clamp_infinite(newy)
         return inx.copy(data=newx), iny.copy(data=newy)
 
+    # Geostationary scan angles have a closed-form inverse; fuse it with the
+    # target's forward projection and keep the axes 1D until the outer product.
+    if inx.ndim == 1 and iny.ndim == 1:
+        geos = geos_to_cylindrical(transformer.source_crs, transformer.target_crs)
+        if geos is not None:
+            newX, newY = await async_run(geos.transform_grid, inx.data, iny.data)
+            _mask_off_domain(newX, newY, transformer.target_crs)
+            dims = inx.dims + iny.dims
+            coords = {inx.name: inx.variable, iny.name: iny.variable}
+            return (
+                xr.DataArray(newX, dims=dims, coords=coords, name=inx.name),
+                xr.DataArray(newY, dims=dims, coords=coords, name=iny.name),
+            )
+
     # A conic source into a cylindrical target factors through polar coordinates
     # about the cone apex. We can do a bunch of operations on 1D vectors and then
     # form the outer product itself. So the rendering still always gets curvilinear inputs,
@@ -591,7 +606,13 @@ async def transform_coordinates(
     else:
         newX, newY = await async_run(transformer.transform, bx.data, by.data)
 
-    if not transformer.target_crs.is_geographic:
+    _mask_off_domain(newX, newY, transformer.target_crs)
+    return bx.copy(data=newX), by.copy(data=newY)
+
+
+def _mask_off_domain(newX: np.ndarray, newY: np.ndarray, target_crs: CRS) -> None:
+    """In-place: NaN points the source projection cannot invert; clamp single-axis infs."""
+    if not target_crs.is_geographic:
         # A point undefined in the source projection (e.g. off the geostationary
         # disk) transforms to inf in *both* axes — drop those cells (NaN) so they
         # render transparent instead of smearing. A single-axis inf is a pole
@@ -602,8 +623,6 @@ async def transform_coordinates(
         _clamp_infinite(newY)
         newX[both_bad] = np.nan
         newY[both_bad] = np.nan
-
-    return bx.copy(data=newX), by.copy(data=newY)
 
 
 def _clamp_infinite(arr: np.ndarray) -> None:
