@@ -417,6 +417,16 @@ Settings can be configured via environment variables or config files. The async 
 7. `XPUBLISH_TILES_DEFAULT_PAD: int` - how much to pad a selection on either side
 8. `XPUBLISH_TILES_GRID_CACHE_MAX_SIZE: int` - maximum number of grid systems to cache (default: 16). **Note:** This must be set via environment variable before importing the module, as the cache is initialized at import time.
 
+### Datadog stage timings
+Install the `datadog` extra (`pip install "xpublish-tiles[datadog]"`) to write per-request timings to the root span of the request's ddtrace trace. Without ddtrace, nothing is written.
+
+- `tiles.stage_ms.<stage>`: summed wall time per stage: `query`, `select` (includes `load`), `load`, `coarsen`, `transform`, `rewrite`, `regrid`, `render`, `shade`, `encode`. A stage includes any thread-pool wait inside it.
+- `tiles.wait_ms.thread_pool`: time spent waiting for a thread-pool slot.
+- `tiles.total_ms`: request wall time.
+- `tiles.status` tag: `ok`, `error` or `cancelled`.
+
+At log level `info` or `debug`, each request also logs one summary line: `<request> (total: Nms)`.
+
 ## Performance Notes
 
 For context, the rendering pipeline is:
