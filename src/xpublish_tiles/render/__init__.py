@@ -5,7 +5,6 @@ from numbers import Number
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 import datashader as dsh
-import datashader.transfer_functions as tf
 import matplotlib as mpl
 import matplotlib.colorbar
 import matplotlib.colors as mcolors
@@ -23,6 +22,12 @@ from xpublish_tiles.lib import (
     create_listed_colormap_from_dict,
 )
 from xpublish_tiles.logger import get_context_logger
+from xpublish_tiles.render.shade import (
+    continuous_index,
+    continuous_palette,
+    discrete_index,
+    indexed_image,
+)
 from xpublish_tiles.types import (
     ContinuousData,
     DataType,
@@ -300,37 +305,26 @@ class DatashaderRenderer(Renderer):
                 cmap = mpl.colormaps.get_cmap(variant)
 
             cmap = apply_range_colors(cmap, abovemaxcolor, belowmincolor)
-
-            with np.errstate(invalid="ignore"):
-                shaded = tf.shade(
-                    mesh,
-                    cmap=cmap,
-                    how="linear",
-                    span=colorscalerange,
-                )
-            return shaded.to_pil()
+            cmap, palette = continuous_palette(cmap)
+            lo, hi = colorscalerange
+            idx = continuous_index(np.asarray(mesh.data), float(lo), float(hi), cmap)  # ty: ignore[invalid-argument-type]
+            return indexed_image(idx, palette)
 
         elif isinstance(datatype, DiscreteData):
             flag_values = datatype.values
-            kwargs: dict = {}
             if colormap is not None:
-                kwargs["color_key"] = create_listed_colormap_from_dict(
-                    colormap, flag_values
-                )
+                color_key = create_listed_colormap_from_dict(colormap, flag_values)
             elif datatype.colors is not None:
-                kwargs["color_key"] = dict(
-                    zip(datatype.values, datatype.colors, strict=True)
-                )
+                color_key = dict(zip(datatype.values, datatype.colors, strict=True))
             else:
                 minv = min(flag_values)
                 maxv = max(flag_values)
                 cmap = mpl.colormaps.get_cmap(variant)
-                kwargs["color_key"] = {
+                color_key = {
                     v: mcolors.to_hex(cmap((v - minv) / maxv)) for v in flag_values
                 }
-            with np.errstate(invalid="ignore"):
-                shaded = tf.shade(mesh, how="linear", **kwargs)
-            return shaded.to_pil()
+            idx, palette = discrete_index(np.asarray(mesh.data), color_key)
+            return indexed_image(idx, palette)
 
         else:
             raise NotImplementedError(f"Unsupported datatype: {type(datatype)}")

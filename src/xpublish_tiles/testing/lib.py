@@ -22,16 +22,20 @@ from xpublish_tiles.logger import logger
 from xpublish_tiles.testing.tiles import TileTestParam
 
 
+def rgba_array(buffer: io.BytesIO) -> np.ndarray:
+    """Decode to RGBA so palette (``P``) and RGBA PNGs compare by colour."""
+    buffer.seek(0)
+    return np.array(Image.open(buffer).convert("RGBA"))
+
+
 def compare_image_buffers(buffer1: io.BytesIO, buffer2: io.BytesIO) -> bool:
     """Compare two image BytesIO buffers by converting them to numpy arrays."""
     buffer1.seek(0)
     buffer2.seek(0)
 
     # Convert both images to numpy arrays
-    img1 = Image.open(buffer1)
-    img2 = Image.open(buffer2)
-    array1 = np.array(img1)
-    array2 = np.array(img2)
+    array1 = rgba_array(buffer1)
+    array2 = rgba_array(buffer2)
     return np.array_equal(array1, array2)
 
 
@@ -50,10 +54,8 @@ def compare_images_perceptual(buffer1: io.BytesIO, buffer2: io.BytesIO) -> float
     buffer2.seek(0)
 
     # Convert to numpy arrays
-    img1 = Image.open(buffer1)
-    img2 = Image.open(buffer2)
-    array1 = np.array(img1)
-    array2 = np.array(img2)
+    array1 = rgba_array(buffer1)
+    array2 = rgba_array(buffer2)
 
     # Ensure same shape
     if array1.shape != array2.shape:
@@ -116,8 +118,8 @@ def compare_image_buffers_with_debug(
         # Convert buffers to numpy arrays
         buffer1.seek(0)
         buffer2.seek(0)
-        array1 = np.array(Image.open(buffer1))
-        array2 = np.array(Image.open(buffer2))
+        array1 = rgba_array(buffer1)
+        array2 = rgba_array(buffer2)
 
         # Create debug visualization with SSIM info if available
         create_debug_visualization(
@@ -446,8 +448,8 @@ def _create_png_snapshot_fixture():
                 expected_buffer = io.BytesIO(snapshot_data)
                 arrays_equal = compare_image_buffers(expected_buffer, actual_buffer)
 
-                actual_array = np.array(Image.open(actual_buffer))
-                expected_array = np.array(Image.open(expected_buffer))
+                actual_array = rgba_array(actual_buffer)
+                expected_array = rgba_array(expected_buffer)
 
                 if IS_SNAPSHOT_UPDATE:
                     return arrays_equal
@@ -696,8 +698,7 @@ def visualize_tile(result: io.BytesIO, tile: Tile) -> None:
         tile: Tile object with z, x, y coordinates
     """
     result.seek(0)
-    pil_img = Image.open(result)
-    img_array = np.array(pil_img)
+    img_array = rgba_array(result)
 
     _, axes = plt.subplots(1, 2, figsize=(10, 5))
 

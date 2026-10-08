@@ -632,8 +632,7 @@ async def test_zoom_in_doesnt_change_rendering(tile_tms, ds, data, pytestconfig)
 
     # Convert parent PNG to numpy array
     parent_result.seek(0)
-    parent_img = Image.open(parent_result)
-    parent_array = np.array(parent_img)
+    parent_array = np.array(Image.open(parent_result).convert("RGBA"))
 
     # Pick a child zoom level (absolute)
     # We choose minimum tile size of 32x32 (2048/2^6 = 32), so max delta is 6
