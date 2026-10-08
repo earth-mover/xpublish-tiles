@@ -1200,6 +1200,7 @@ def apply_query(
     return validated
 
 
+@log_duration("select subsets", "✂️", key="select")
 async def subset_to_bbox(
     validated: dict[str, ValidatedArray],
     *,
@@ -1208,168 +1209,166 @@ async def subset_to_bbox(
     max_shape: tuple[int, int],
     style: str = "raster",
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:
-    with log_duration("select subsets", "✂️", key="select"):
-        result: dict[str, PopulatedRenderContext | NullRenderContext] = {}
-        plans: list[SubsetPlan] = []
-        # ``plan_patches`` is aligned with ``plans``: each entry's loaded
-        # DataArray is mutated back onto the patch's ``.da`` after ``load_plans``
-        # returns. ``pending`` carries the per-var bookkeeping needed to build
-        # the ``PopulatedRenderContext`` once data has loaded.
-        plan_patches: list[Patch] = []
-        plan_datatypes: list[DataType] = []
-        pending: list[tuple[str, GridSystem, DataType, list[Patch]]] = []
+    result: dict[str, PopulatedRenderContext | NullRenderContext] = {}
+    plans: list[SubsetPlan] = []
+    # ``plan_patches`` is aligned with ``plans``: each entry's loaded
+    # DataArray is mutated back onto the patch's ``.da`` after ``load_plans``
+    # returns. ``pending`` carries the per-var bookkeeping needed to build
+    # the ``PopulatedRenderContext`` once data has loaded.
+    plan_patches: list[Patch] = []
+    plan_datatypes: list[DataType] = []
+    pending: list[tuple[str, GridSystem, DataType, list[Patch]]] = []
 
-        for var_name, array in validated.items():
-            grid = array.grid
+    for var_name, array in validated.items():
+        grid = array.grid
 
-            output_to_input = transformer_from_crs(crs_from=crs, crs_to=grid.crs)
+        output_to_input = transformer_from_crs(crs_from=crs, crs_to=grid.crs)
 
-            west, south, east, north = output_to_input.transform_bounds(
-                left=bbox.west, right=bbox.east, top=bbox.north, bottom=bbox.south
-            )
-            if grid.crs.is_geographic:
-                west = west - 360 if west > east else west
+        west, south, east, north = output_to_input.transform_bounds(
+            left=bbox.west, right=bbox.east, top=bbox.north, bottom=bbox.south
+        )
+        if grid.crs.is_geographic:
+            west = west - 360 if west > east else west
 
-            input_bbox = round_bbox(BBox(west=west, south=south, east=east, north=north))
+        input_bbox = round_bbox(BBox(west=west, south=south, east=east, north=north))
 
-            if input_bbox.west > input_bbox.east:
-                raise ValueError(f"Invalid Bbox after transformation: {input_bbox!r}")
+        if input_bbox.west > input_bbox.east:
+            raise ValueError(f"Invalid Bbox after transformation: {input_bbox!r}")
 
-            # Build patches: one per overlapping face for FacetedGridSystem, one
-            # patch for everything else.
-            # Pre-load ``patch.da`` is the unloaded source array fed to ``apply_slicers``;
-            # ``_post_load`` below mutates it to the loaded subset once ``load_plans`` returns.
-            patches: list[Patch] = []
+        # Build patches: one per overlapping face for FacetedGridSystem, one
+        # patch for everything else.
+        # Pre-load ``patch.da`` is the unloaded source array fed to ``apply_slicers``;
+        # ``_post_load`` below mutates it to the loaded subset once ``load_plans`` returns.
+        patches: list[Patch] = []
 
-            if isinstance(grid, FacetedGridSystem):
-                if style != "polygons":
-                    raise ValueError(
-                        f"FacetedGridSystem (e.g. cubed sphere) only supports style='polygons'; got {style!r}."
-                    )
-                slicers = grid.sel(bbox=input_bbox)
-                face_indexer = cast(FacetedIndexer, next(iter(slicers[grid.face_dim])))
-                for sel_slicers in face_indexer.selections:
-                    face_index = cast(slice, sel_slicers[grid.face_dim][0]).start
-                    face_grid = grid.faces[face_index]
-                    face_da = array.da.isel({grid.face_dim: face_index})
-                    face_slicers = normalize_slicers(
-                        {k: v for k, v in sel_slicers.items() if k != grid.face_dim},
-                        dict(face_da.sizes),
-                    )
-                    patches.append(
-                        Patch(
-                            grid=face_grid,
-                            da=face_da,
-                            slicers=face_slicers,
-                            alternate=face_grid.to_metadata(),
-                        )
-                    )
-            elif isinstance(grid, HealpixCube):
-                if style != "polygons":
-                    raise ValueError(
-                        f"HealpixCube only supports style='polygons'; got {style!r}."
-                    )
-                allow_coarsen = not isinstance(array.datatype, DiscreteData)
-                indexers = await async_run(
-                    grid.select,
-                    input_bbox,
-                    max_cells=math.prod(max_shape),
-                    mercator_stretch=is_mercator_like(crs),
-                    allow_coarsen=allow_coarsen,
+        if isinstance(grid, FacetedGridSystem):
+            if style != "polygons":
+                raise ValueError(
+                    f"FacetedGridSystem (e.g. cubed sphere) only supports style='polygons'; got {style!r}."
                 )
-                # one patch per face rectangle; [] falls through to NullRenderContext
-                patches.extend(
-                    Patch(
-                        grid=grid,
-                        da=array.da.isel(
-                            {grid.face_dim: ix.face, grid.Ydim: ix.y, grid.Xdim: ix.x}
-                        ),
-                        slicers={grid.dim: [ix]},
-                        alternate=grid.to_metadata(),
-                        indexer=ix,
-                    )
-                    for ix in indexers
+            slicers = grid.sel(bbox=input_bbox)
+            face_indexer = cast(FacetedIndexer, next(iter(slicers[grid.face_dim])))
+            for sel_slicers in face_indexer.selections:
+                face_index = cast(slice, sel_slicers[grid.face_dim][0]).start
+                face_grid = grid.faces[face_index]
+                face_da = array.da.isel({grid.face_dim: face_index})
+                face_slicers = normalize_slicers(
+                    {k: v for k, v in sel_slicers.items() if k != grid.face_dim},
+                    dict(face_da.sizes),
                 )
-            else:
-                array.datatype.validate_ndim(array.da)
-                if min(array.da.shape) < 2:
-                    raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
-
-                if not bbox_overlap(input_bbox, grid.bbox, grid.crs.is_geographic):
-                    result[var_name] = NullRenderContext()
-                    continue
-
-                # For most exotic grids this is expensive
-                if isinstance(grid, Rectilinear | RasterAffine):
-                    slicers = grid.sel(bbox=input_bbox)
-                else:
-                    slicers = await async_run(grid.sel, bbox=input_bbox)
-
-                # ugly; figure out how to get rid of this
-                if isinstance(grid, Healpix) and all(
-                    isinstance(s, HealpixIndexer) and s.is_empty
-                    for s in slicers[grid.dim]
-                ):
-                    result[var_name] = NullRenderContext()
-                    continue
-
-                # tile within the grid bbox but intersecting no triangles
-                # (e.g. a hole in the mesh or outside the hull)
-                if isinstance(grid, Triangular) and all(
-                    isinstance(s, UgridIndexer) and s.size == 0 for s in slicers[grid.dim]
-                ):
-                    result[var_name] = NullRenderContext()
-                    continue
-
-                da = grid.assign_index(array.da)
-                coarsen_factors, new_slicers = estimate_coarsen_factors_and_slicers(
-                    da,
-                    grid=grid,
-                    slicers=slicers,
-                    max_shape=max_shape,
-                    datatype=array.datatype,
-                )
-                new_slicers = normalize_slicers(new_slicers, dict(da.sizes))
-                alternate = grid.pick_alternate_grid(crs, coarsen_factors=coarsen_factors)
-
-                # Note: These are handled specially inside apply_slicers.
-                patch_indexer: UgridIndexer | HealpixIndexer | None = None
-                if isinstance(grid, Triangular):
-                    patch_indexer = cast(UgridIndexer, next(iter(slicers[grid.Xdim])))
-                elif isinstance(grid, Healpix):
-                    patch_indexer = cast(HealpixIndexer, next(iter(slicers[grid.dim])))
-
                 patches.append(
                     Patch(
-                        grid=grid,
-                        da=da,
-                        slicers=new_slicers,
-                        coarsen_factors=coarsen_factors,
-                        alternate=alternate,
-                        indexer=patch_indexer,
+                        grid=face_grid,
+                        da=face_da,
+                        slicers=face_slicers,
+                        alternate=face_grid.to_metadata(),
                     )
                 )
+        elif isinstance(grid, HealpixCube):
+            if style != "polygons":
+                raise ValueError(
+                    f"HealpixCube only supports style='polygons'; got {style!r}."
+                )
+            allow_coarsen = not isinstance(array.datatype, DiscreteData)
+            indexers = await async_run(
+                grid.select,
+                input_bbox,
+                max_cells=math.prod(max_shape),
+                mercator_stretch=is_mercator_like(crs),
+                allow_coarsen=allow_coarsen,
+            )
+            # one patch per face rectangle; [] falls through to NullRenderContext
+            patches.extend(
+                Patch(
+                    grid=grid,
+                    da=array.da.isel(
+                        {grid.face_dim: ix.face, grid.Ydim: ix.y, grid.Xdim: ix.x}
+                    ),
+                    slicers={grid.dim: [ix]},
+                    alternate=grid.to_metadata(),
+                    indexer=ix,
+                )
+                for ix in indexers
+            )
+        else:
+            array.datatype.validate_ndim(array.da)
+            if min(array.da.shape) < 2:
+                raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
 
-            if not patches:
+            if not bbox_overlap(input_bbox, grid.bbox, grid.crs.is_geographic):
                 result[var_name] = NullRenderContext()
                 continue
 
-            plans.extend(
-                apply_slicers(
-                    patch.da,
-                    grid=patch.grid,
-                    alternate=patch.alternate or patch.grid.to_metadata(),
-                    slicers=patch.slicers,
-                    datatype=array.datatype,
-                    min_dim_size=1 if style == "polygons" else 2,
-                    style=style,
-                    chunks=array.chunks,
-                )
-                for patch in patches
+            # For most exotic grids this is expensive
+            if isinstance(grid, Rectilinear | RasterAffine):
+                slicers = grid.sel(bbox=input_bbox)
+            else:
+                slicers = await async_run(grid.sel, bbox=input_bbox)
+
+            # ugly; figure out how to get rid of this
+            if isinstance(grid, Healpix) and all(
+                isinstance(s, HealpixIndexer) and s.is_empty for s in slicers[grid.dim]
+            ):
+                result[var_name] = NullRenderContext()
+                continue
+
+            # tile within the grid bbox but intersecting no triangles
+            # (e.g. a hole in the mesh or outside the hull)
+            if isinstance(grid, Triangular) and all(
+                isinstance(s, UgridIndexer) and s.size == 0 for s in slicers[grid.dim]
+            ):
+                result[var_name] = NullRenderContext()
+                continue
+
+            da = grid.assign_index(array.da)
+            coarsen_factors, new_slicers = estimate_coarsen_factors_and_slicers(
+                da,
+                grid=grid,
+                slicers=slicers,
+                max_shape=max_shape,
+                datatype=array.datatype,
             )
-            plan_patches.extend(patches)
-            plan_datatypes.extend([array.datatype] * len(patches))
-            pending.append((var_name, grid, array.datatype, patches))
+            new_slicers = normalize_slicers(new_slicers, dict(da.sizes))
+            alternate = grid.pick_alternate_grid(crs, coarsen_factors=coarsen_factors)
+
+            # Note: These are handled specially inside apply_slicers.
+            patch_indexer: UgridIndexer | HealpixIndexer | None = None
+            if isinstance(grid, Triangular):
+                patch_indexer = cast(UgridIndexer, next(iter(slicers[grid.Xdim])))
+            elif isinstance(grid, Healpix):
+                patch_indexer = cast(HealpixIndexer, next(iter(slicers[grid.dim])))
+
+            patches.append(
+                Patch(
+                    grid=grid,
+                    da=da,
+                    slicers=new_slicers,
+                    coarsen_factors=coarsen_factors,
+                    alternate=alternate,
+                    indexer=patch_indexer,
+                )
+            )
+
+        if not patches:
+            result[var_name] = NullRenderContext()
+            continue
+
+        plans.extend(
+            apply_slicers(
+                patch.da,
+                grid=patch.grid,
+                alternate=patch.alternate or patch.grid.to_metadata(),
+                slicers=patch.slicers,
+                datatype=array.datatype,
+                min_dim_size=1 if style == "polygons" else 2,
+                style=style,
+                chunks=array.chunks,
+            )
+            for patch in patches
+        )
+        plan_patches.extend(patches)
+        plan_datatypes.extend([array.datatype] * len(patches))
+        pending.append((var_name, grid, array.datatype, patches))
 
     loaded = await load_plans(plans) if plans else []
 

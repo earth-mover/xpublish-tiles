@@ -134,6 +134,68 @@ async def test_cancelled_request_records_open_stage(fake_span):
     assert fake_span.metrics["tiles.stage_ms.load"] >= 0
 
 
+@log_duration("select subsets", key="select")
+async def _decorated_select(delay: float) -> str:
+    await asyncio.sleep(delay)
+    return "subsets"
+
+
+@log_duration("coarsen", key="coarsen")
+def _decorated_coarsen() -> str:
+    time.sleep(0.02)
+    return "coarse"
+
+
+async def test_decorated_async_function_records_its_stage(fake_span):
+    @with_accumulated_logs(log_message_fn=lambda: "decorated")
+    async def endpoint():
+        return await _decorated_select(0.02)
+
+    assert await endpoint() == "subsets"
+    assert fake_span.metrics["tiles.stage_ms.select"] >= 20
+
+
+async def test_concurrent_decorated_calls_each_record(fake_span):
+    async def late_select():
+        await asyncio.sleep(0.05)
+        return await _decorated_select(0.02)
+
+    @with_accumulated_logs(log_message_fn=lambda: "concurrent")
+    async def endpoint():
+        return await asyncio.gather(_decorated_select(0.1), late_select())
+
+    assert await endpoint() == ["subsets", "subsets"]
+    # 100 + 20 ms; a start time shared by both calls gives about 50 + 20
+    assert fake_span.metrics["tiles.stage_ms.select"] >= 110
+
+
+async def test_decorated_sync_function_records_its_stage(fake_span):
+    @with_accumulated_logs(log_message_fn=lambda: "sync")
+    async def endpoint():
+        return await async_run(_decorated_coarsen)
+
+    assert await endpoint() == "coarse"
+    assert fake_span.metrics["tiles.stage_ms.coarsen"] >= 20
+
+
+async def test_decorated_function_records_and_reraises(fake_span):
+    error = ValueError("boom")
+
+    @log_duration("select subsets", key="select")
+    async def failing():
+        await asyncio.sleep(0.02)
+        raise error
+
+    @with_accumulated_logs(log_message_fn=lambda: "fails")
+    async def endpoint():
+        await failing()
+
+    with pytest.raises(ValueError) as excinfo:
+        await endpoint()
+    assert excinfo.value is error
+    assert fake_span.metrics["tiles.stage_ms.select"] >= 20
+
+
 async def test_no_root_span_is_a_noop(monkeypatch):
     monkeypatch.setattr(telemetry, "root_span", lambda: None)
     assert await _keyed_endpoint() == "tile"

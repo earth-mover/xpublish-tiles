@@ -4,7 +4,9 @@ Logging setup and shared logger for the xpublish_tiles package.
 
 import contextlib
 import contextvars
+import copy
 import functools
+import inspect
 import logging
 import sys
 import threading
@@ -185,10 +187,9 @@ def set_context_logger(bound_logger: structlog.stdlib.BoundLogger):
     _context_logger.set(bound_logger)
 
 
-@contextlib.contextmanager
-def log_duration(message: str, emoji: str = "⏱️", logger=None, *, key: str | None = None):
+class log_duration(contextlib.ContextDecorator):
     """
-    Context manager to log the duration of a code block with a custom message.
+    Log the duration of a code block or of each call to a sync or async function.
 
     Args:
         message: Custom message to log with timing
@@ -199,33 +200,59 @@ def log_duration(message: str, emoji: str = "⏱️", logger=None, *, key: str |
     Usage:
         with log_duration("loading data", "📥"):
             result = await load_data()
+
+        @log_duration("select subsets", "✂️", key="select")
+        async def subset_to_bbox(...): ...
     """
-    if logger is None:
-        logger = get_context_logger()
-    accumulator = _context_accumulator.get()
-    status = ""
-    error: Exception | None = None
-    start_time = time.perf_counter()
-    try:
-        yield
-    except Exception as e:
-        status, error = " (failed)", e
-        raise
-    except BaseException:
-        status = " (cancelled)"
-        raise
-    finally:
-        duration_ms = (time.perf_counter() - start_time) * 1000
-        if accumulator is not None:
-            accumulator.timings.append((f"{message}{status}", duration_ms))
-            if key is not None:
-                accumulator.add(accumulator.stages, key, duration_ms)
-        if error is not None:
-            logger.error(
-                f"{emoji} ({duration_ms:.0f}ms) {message}{status}", error=str(error)
-            )
+
+    def __init__(
+        self, message: str, emoji: str = "⏱️", logger=None, *, key: str | None = None
+    ):
+        self.message = message
+        self.emoji = emoji
+        self.logger = logger
+        self.key = key
+
+    def __enter__(self):
+        self._logger = self.logger if self.logger is not None else get_context_logger()
+        self._accumulator = _context_accumulator.get()
+        self._start = time.perf_counter()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        duration_ms = (time.perf_counter() - self._start) * 1000
+        if exc_type is None:
+            status = ""
+        elif issubclass(exc_type, Exception):
+            status = " (failed)"
         else:
-            logger.debug(f"{emoji} ({duration_ms:.0f}ms) {message}{status}")
+            status = " (cancelled)"
+        accumulator = self._accumulator
+        if accumulator is not None:
+            accumulator.timings.append((f"{self.message}{status}", duration_ms))
+            if self.key is not None:
+                accumulator.add(accumulator.stages, self.key, duration_ms)
+        line = f"{self.emoji} ({duration_ms:.0f}ms) {self.message}{status}"
+        if status == " (failed)":
+            self._logger.error(line, error=str(exc))
+        else:
+            self._logger.debug(line)
+        return False
+
+    def _recreate_cm(self):
+        # each call needs its own start time; concurrent calls share the decorator
+        return copy.copy(self)
+
+    def __call__(self, func):
+        if inspect.iscoroutinefunction(func):
+
+            @functools.wraps(func)
+            async def wrapper(*args, **kwargs):
+                with self._recreate_cm():
+                    return await func(*args, **kwargs)
+
+            return wrapper
+        return super().__call__(func)
 
 
 def _write_root_span(
