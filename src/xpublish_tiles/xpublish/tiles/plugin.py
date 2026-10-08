@@ -712,6 +712,8 @@ class TilesPlugin(Plugin):
             if resolution_level is not None:
                 headers["X-Multiscale-Level"] = resolution_level
 
-            return Response(buffer.getbuffer(), media_type="image/png", headers=headers)
+            return Response(
+                buffer.getbuffer(), media_type=f"image/{query.f}", headers=headers
+            )
 
         return router

@@ -7,7 +7,7 @@ from PIL import Image
 
 from xpublish_tiles.lib import polygons_from_rings
 from xpublish_tiles.logger import get_context_logger, log_duration
-from xpublish_tiles.render import DatashaderRenderer, register_renderer
+from xpublish_tiles.render import DatashaderRenderer, register_renderer, save_image
 from xpublish_tiles.render.raster import _apply_out_of_range_colors
 from xpublish_tiles.types import (
     ContinuousData,
@@ -58,7 +58,7 @@ class PolygonsRenderer(DatashaderRenderer):
         if len(context.cell_rings) == 0:
             logger.debug("☐ No data")
             im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-            im.save(buffer, format=str(format))
+            save_image(im, buffer, format)
             return
 
         data = context.da
@@ -98,7 +98,7 @@ class PolygonsRenderer(DatashaderRenderer):
                     raise
                 logger.debug("☐ No data (polygons don't overlap tile bbox)")
                 im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-                im.save(buffer, format=str(format))
+                save_image(im, buffer, format)
                 return
 
         if isinstance(context.datatype, RGBData):
@@ -125,7 +125,7 @@ class PolygonsRenderer(DatashaderRenderer):
                     abovemaxcolor,
                     belowmincolor,
                 )
-        im.save(buffer, format=str(format))
+        save_image(im, buffer, format)
 
     @staticmethod
     def style_id() -> str:

@@ -34,10 +34,20 @@ from xpublish_tiles.types import (
 )
 
 RGB_VARIANT = "rgb"
+# Matches the WMS BGCOLOR default, so Tiles and WMS JPEGs agree.
+JPEG_BACKGROUND = (255, 255, 255, 255)
 
 
 if TYPE_CHECKING:
     from xpublish_tiles.types import RenderContext
+
+
+def save_image(im: Image.Image, buffer: io.BytesIO, format: ImageFormat | str) -> None:
+    """Encode ``im``; JPEG has no alpha, so composite onto ``JPEG_BACKGROUND``."""
+    if str(format).upper() == "JPEG" and im.mode != "RGB":
+        background = Image.new("RGBA", im.size, JPEG_BACKGROUND)
+        im = Image.alpha_composite(background, im.convert("RGBA")).convert("RGB")
+    im.save(buffer, format=str(format))
 
 
 def render_error_image(
@@ -48,7 +58,7 @@ def render_error_image(
     img = Image.new("RGBA", (width, height), (255, 0, 0, 255))
     draw = ImageDraw.Draw(img)
     draw.text((10, 10), message, fill=(255, 255, 255, 255))
-    img.save(buffer, format=format)
+    save_image(img, buffer, format)
     buffer.seek(0)
     return buffer
 
@@ -233,7 +243,7 @@ class DatashaderRenderer(Renderer):
         if isinstance(context, NullRenderContext):
             logger.debug("☐ No data")
             im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-            im.save(buffer, format=str(format))
+            save_image(im, buffer, format)
             return None
 
         assert isinstance(context, PopulatedRenderContext)
@@ -496,9 +506,7 @@ class DatashaderRenderer(Renderer):
             raw.seek(0)
             img = Image.open(raw)
             img.load()
-        if pil_format == "JPEG" and img.mode != "RGB":
-            img = img.convert("RGB")
-        img.save(buffer, format=pil_format)
+        save_image(img, buffer, pil_format)
 
     def legend_data(
         self,
