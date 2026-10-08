@@ -7,6 +7,7 @@ import io
 import itertools
 import math
 import operator
+import time
 import warnings
 from collections.abc import Hashable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -53,7 +54,7 @@ if TYPE_CHECKING:
         Slicers,
     )
     from xpublish_tiles.types import DataType
-from xpublish_tiles.logger import logger
+from xpublish_tiles.logger import logger, record_wait
 
 
 def anynotfinite(data: np.ndarray) -> bool:
@@ -320,7 +321,9 @@ async def async_run(func, *args, **kwargs):
     loop = asyncio.get_running_loop()
     semaphore = _get_semaphore(loop)
     ctx = contextvars.copy_context()
+    requested = time.perf_counter()
     async with semaphore:
+        record_wait("thread_pool", (time.perf_counter() - requested) * 1000)
         return await loop.run_in_executor(
             EXECUTOR, partial(ctx.run, func, *args, **kwargs)
         )

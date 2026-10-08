@@ -67,6 +67,9 @@ healpix = [
     "xdggs>=0.5.0",
     "healpix-geo>=0.0.10",
 ]
+datadog = [
+    "ddtrace>=3.0",
+]
 complete = [
     "xpublish-tiles[healpix]",
 ]

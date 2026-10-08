@@ -307,10 +307,11 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                             f"nearest neighbour regridding (discrete) {data.shape}",
                             "⊞",
                             logger,
+                            key="regrid",
                         ):
                             data = nearest_on_uniform_grid_quadmesh(data, grid.X, grid.Y)
                     with log_duration(
-                        f"render (discrete) {data.shape} mode", "🎨", logger
+                        f"render (discrete) {data.shape} mode", "🎨", logger, key="render"
                     ):
                         mesh = rasterize_categorical_rectilinear(
                             data,
@@ -338,7 +339,10 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                         {grid.X: xcoord.copy(data=fx), grid.Y: ycoord.copy(data=fy)}
                     )
                 with log_duration(
-                    f"render (continuous) {data.shape} quadmesh", "🎨", logger
+                    f"render (continuous) {data.shape} quadmesh",
+                    "🎨",
+                    logger,
+                    key="render",
                 ):
                     # Lock is only used when tbb is not available (e.g., on macOS)
                     # AND if we use the rectilinear or raster code path.
@@ -361,7 +365,9 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                     "The 'rgb' variant is not supported with style 'raster' on "
                     "triangular grids; use 'polygons/rgb'."
                 )
-            with log_duration(f"render (continuous) {data.shape} trimesh", "🔺", logger):
+            with log_duration(
+                f"render (continuous) {data.shape} trimesh", "🔺", logger, key="render"
+            ):
                 assert context.ugrid_indexer is not None
                 if context.grid.dim in data.coords:
                     # dropping gets us a cheap RangeIndex in the DataFrame
@@ -379,32 +385,34 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                 f"Grid type {type(context.grid)} not supported by DatashaderRasterRenderer"
             )
 
-        if isinstance(context.datatype, RGBData):
-            im = self.shade_rgb(
-                mesh,
-                context.datatype,
-                colorscalerange=colorscalerange,
-            )
-        else:
-            im = self.shade_mesh(
-                mesh,
-                context.datatype,
-                variant=variant,
-                colorscalerange=colorscalerange,
-                colormap=colormap,
-                abovemaxcolor=abovemaxcolor,
-                belowmincolor=belowmincolor,
-            )
-            if isinstance(context.datatype, ContinuousData):
-                im = _apply_out_of_range_colors(
-                    im,
+        with log_duration("shade", "🖌️", logger, key="shade"):
+            if isinstance(context.datatype, RGBData):
+                im = self.shade_rgb(
                     mesh,
-                    colorscalerange,
-                    abovemaxcolor,
-                    belowmincolor,
+                    context.datatype,
+                    colorscalerange=colorscalerange,
                 )
+            else:
+                im = self.shade_mesh(
+                    mesh,
+                    context.datatype,
+                    variant=variant,
+                    colorscalerange=colorscalerange,
+                    colormap=colormap,
+                    abovemaxcolor=abovemaxcolor,
+                    belowmincolor=belowmincolor,
+                )
+                if isinstance(context.datatype, ContinuousData):
+                    im = _apply_out_of_range_colors(
+                        im,
+                        mesh,
+                        colorscalerange,
+                        abovemaxcolor,
+                        belowmincolor,
+                    )
 
-        im.save(buffer, format=str(format))
+        with log_duration(f"encode {format}", "📦", logger, key="encode"):
+            im.save(buffer, format=str(format))
 
     @staticmethod
     def style_id() -> str:

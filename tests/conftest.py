@@ -6,6 +6,7 @@ from hypothesis import Verbosity, settings
 
 import icechunk
 import xarray as xr
+from xpublish_tiles import telemetry
 from xpublish_tiles.testing.datasets import (
     EU3035,
     EU3035_HIRES,
@@ -24,6 +25,29 @@ logging.getLogger("datashader").setLevel(logging.WARNING)
 logging.getLogger("PIL").setLevel(logging.WARNING)
 
 IS_SNAPSHOT_UPDATE = False
+
+
+class FakeSpan:
+    """(test only) Records what `with_accumulated_logs` writes to the root span."""
+
+    def __init__(self):
+        self.metrics: dict[str, float] = {}
+        self.tags: dict[str, str] = {}
+
+    def set_metric(self, key: str, value: float) -> None:
+        self.metrics[key] = value
+
+    def set_tag(self, key: str, value: str) -> None:
+        self.tags[key] = value
+
+
+@pytest.fixture
+def fake_span(monkeypatch) -> FakeSpan:
+    """(test only) Stand in for the ddtrace root span."""
+    span = FakeSpan()
+    monkeypatch.setattr(telemetry, "root_span", lambda: span)
+    return span
+
 
 settings.register_profile(
     "ci",

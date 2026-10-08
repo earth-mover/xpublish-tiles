@@ -63,7 +63,7 @@ class PolygonsRenderer(DatashaderRenderer):
 
         data = context.da
 
-        with log_duration(f"render (polygons) {data.shape}", "⬡", logger):
+        with log_duration(f"render (polygons) {data.shape}", "⬡", logger, key="render"):
             geometry = polygons_from_rings(context.cell_rings)
             try:
                 if isinstance(context.datatype, RGBData):
@@ -125,7 +125,8 @@ class PolygonsRenderer(DatashaderRenderer):
                     abovemaxcolor,
                     belowmincolor,
                 )
-        im.save(buffer, format=str(format))
+        with log_duration(f"encode {format}", "📦", logger, key="encode"):
+            im.save(buffer, format=str(format))
 
     @staticmethod
     def style_id() -> str:

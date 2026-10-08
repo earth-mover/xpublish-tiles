@@ -37,6 +37,7 @@ from xpublish_tiles.lib import (
     decompressed_size_bytes,
     max_render_shape,
 )
+from xpublish_tiles.logger import with_accumulated_logs
 from xpublish_tiles.pipeline import (
     apply_query,
     bbox_overlap,
@@ -1619,3 +1620,31 @@ async def test_issue_206_mock_renders(tile):
         ds, create_query_params(tile, morecantile.tms.get("WebMercatorQuad"))
     )
     assert check_transparent_pixels(result.getvalue()) == 0
+
+
+@pytest.mark.asyncio
+async def test_pipeline_writes_stage_metrics(fake_span):
+    param = GEOSTATIONARY_TILES[2]
+    tile, tms = param.tile, param.tms
+
+    @with_accumulated_logs(log_message_fn=lambda: "geos")
+    async def endpoint():
+        return await pipeline(
+            GEOSTATIONARY.create(),
+            create_query_params(tile, tms, colorscalerange=(-1.0, 1.0)),
+        )
+
+    await endpoint()
+    stages = {
+        "query",
+        "select",
+        "load",
+        "transform",
+        "rewrite",
+        "render",
+        "shade",
+        "encode",
+    }
+    assert {f"tiles.stage_ms.{k}" for k in stages} <= fake_span.metrics.keys()
+    assert {"tiles.total_ms", "tiles.wait_ms.thread_pool"} <= fake_span.metrics.keys()
+    assert fake_span.tags == {"tiles.status": "ok"}
