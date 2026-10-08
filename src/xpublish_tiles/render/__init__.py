@@ -45,9 +45,21 @@ if TYPE_CHECKING:
 def save_image(im: Image.Image, buffer: io.BytesIO, format: str) -> None:
     """Save ``im``; JPEG has no alpha, so composite onto ``JPEG_BACKGROUND``."""
     if str(format).lower() == "jpeg" and im.mode != "RGB":
-        background = Image.new("RGBA", im.size, JPEG_BACKGROUND)
-        im = Image.alpha_composite(background, im.convert("RGBA")).convert("RGB")
+        rgba = im if im.mode == "RGBA" else im.convert("RGBA")
+        alpha = rgba.getchannel("A")
+        if alpha.getextrema() == (255, 255):
+            im = rgba.convert("RGB")
+        else:
+            im = Image.new("RGB", im.size, JPEG_BACKGROUND[:3])
+            im.paste(rgba, mask=alpha)
     im.save(buffer, format=str(format))
+
+
+def empty_image(width: int, height: int, format: str) -> Image.Image:
+    """A no-data tile: transparent, or ``JPEG_BACKGROUND`` for JPEG."""
+    if str(format).lower() == "jpeg":
+        return Image.new("RGB", (width, height), JPEG_BACKGROUND[:3])
+    return Image.new("RGBA", (width, height), (0, 0, 0, 0))
 
 
 def render_error_image(
@@ -242,8 +254,7 @@ class DatashaderRenderer(Renderer):
         (context,) = contexts.values()
         if isinstance(context, NullRenderContext):
             logger.debug("☐ No data")
-            im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-            save_image(im, buffer, format)
+            save_image(empty_image(width, height, format), buffer, format)
             return None
 
         assert isinstance(context, PopulatedRenderContext)
