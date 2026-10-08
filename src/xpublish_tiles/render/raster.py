@@ -18,7 +18,7 @@ from xpublish_tiles.lib import (
     maybe_cast_data,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
-from xpublish_tiles.render import DatashaderRenderer, register_renderer
+from xpublish_tiles.render import DatashaderRenderer, register_renderer, save_image
 from xpublish_tiles.render.kernels import footprint_mode, offdisk_quad_mask
 from xpublish_tiles.types import (
     ContinuousData,
@@ -404,7 +404,7 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                     belowmincolor,
                 )
 
-        im.save(buffer, format=str(format))
+        save_image(im, buffer, format)
 
     @staticmethod
     def style_id() -> str:

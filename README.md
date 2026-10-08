@@ -124,6 +124,12 @@ For continuous data, you can control how values outside the `colorscalerange` ar
 http://localhost:8080/tiles/WebMercatorQuad/4/4/14?variables=temperature&colorscalerange=280,300&abovemaxcolor=red&belowmincolor=transparent
 ```
 
+### Image formats
+
+Tiles are PNG by default. Use `f=jpeg` (or `f=image/jpeg`) for JPEG, which usually encodes faster.
+JPEG has no alpha channel, so JPEG tiles are opaque. Transparent areas (no data, off-disk geostationary pixels, empty tiles, `transparent` out-of-range colors) are composited onto white (`JPEG_BACKGROUND`). This is the same as the WMS `bgcolor` default.
+To overlay tiles on a basemap, use PNG.
+
 ### Legends
 
 Each variable's legend is available at `/tiles/legend`. The endpoint accepts the same styling parameters as a tile request (`style`, `colorscalerange`, `colormap`, `abovemaxcolor`, `belowmincolor`) so the legend matches the tile rendering. The OGC API – Tiles spec doesn't define a legend resource, so it's also discovered via:

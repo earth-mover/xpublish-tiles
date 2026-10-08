@@ -34,10 +34,32 @@ from xpublish_tiles.types import (
 )
 
 RGB_VARIANT = "rgb"
+# Matches the WMS BGCOLOR default, so Tiles and WMS JPEGs agree.
+JPEG_BACKGROUND = (255, 255, 255, 255)
 
 
 if TYPE_CHECKING:
     from xpublish_tiles.types import RenderContext
+
+
+def save_image(im: Image.Image, buffer: io.BytesIO, format: str) -> None:
+    """Save ``im``; JPEG has no alpha, so composite onto ``JPEG_BACKGROUND``."""
+    if str(format).lower() == "jpeg" and im.mode != "RGB":
+        rgba = im if im.mode == "RGBA" else im.convert("RGBA")
+        alpha = rgba.getchannel("A")
+        if alpha.getextrema() == (255, 255):
+            im = rgba.convert("RGB")
+        else:
+            im = Image.new("RGB", im.size, JPEG_BACKGROUND[:3])
+            im.paste(rgba, mask=alpha)
+    im.save(buffer, format=str(format))
+
+
+def empty_image(width: int, height: int, format: str) -> Image.Image:
+    """A no-data tile: transparent, or ``JPEG_BACKGROUND`` for JPEG."""
+    if str(format).lower() == "jpeg":
+        return Image.new("RGB", (width, height), JPEG_BACKGROUND[:3])
+    return Image.new("RGBA", (width, height), (0, 0, 0, 0))
 
 
 def render_error_image(
@@ -48,7 +70,7 @@ def render_error_image(
     img = Image.new("RGBA", (width, height), (255, 0, 0, 255))
     draw = ImageDraw.Draw(img)
     draw.text((10, 10), message, fill=(255, 255, 255, 255))
-    img.save(buffer, format=format)
+    save_image(img, buffer, format)
     buffer.seek(0)
     return buffer
 
@@ -232,8 +254,7 @@ class DatashaderRenderer(Renderer):
         (context,) = contexts.values()
         if isinstance(context, NullRenderContext):
             logger.debug("☐ No data")
-            im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-            im.save(buffer, format=str(format))
+            save_image(empty_image(width, height, format), buffer, format)
             return None
 
         assert isinstance(context, PopulatedRenderContext)
@@ -498,7 +519,7 @@ class DatashaderRenderer(Renderer):
             img.load()
         if pil_format == "JPEG" and img.mode != "RGB":
             img = img.convert("RGB")
-        img.save(buffer, format=pil_format)
+        save_image(img, buffer, pil_format)
 
     def legend_data(
         self,

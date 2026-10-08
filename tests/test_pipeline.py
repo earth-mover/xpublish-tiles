@@ -43,6 +43,7 @@ from xpublish_tiles.pipeline import (
     pipeline,
     subset_to_bbox,
 )
+from xpublish_tiles.render import save_image
 from xpublish_tiles.render.raster import fill_nonfinite_nearest
 from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
@@ -1619,3 +1620,61 @@ async def test_issue_206_mock_renders(tile):
         ds, create_query_params(tile, morecantile.tms.get("WebMercatorQuad"))
     )
     assert check_transparent_pixels(result.getvalue()) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "create_ds,tile,query_kwargs",
+    [
+        pytest.param(
+            lambda: RGB.create().sel(longitude=slice(0, None)),
+            Tile(x=0, y=0, z=0),
+            {"variant": "rgb"},
+            id="rgb_east_half",
+        ),
+        pytest.param(GLOBAL_NANS.create, Tile(x=0, y=0, z=0), {}, id="global_nans"),
+        pytest.param(
+            GEOSTATIONARY.create,
+            Tile(x=0, y=0, z=1),
+            {"colorscalerange": (-1.0, 1.0)},
+            id="geostationary_limb",
+        ),
+    ],
+)
+async def test_jpeg_render(create_ds, tile, query_kwargs, jpeg_snapshot):
+    """JPEG tiles flatten no-data and off-disk areas onto white."""
+    query_params = replace(
+        create_query_params(tile, WEBMERC_TMS, **query_kwargs), format=ImageFormat.JPEG
+    )
+    with config.set(rectilinear_check_min_size=0):
+        result = await pipeline(create_ds(), query_params)
+    content = result.getvalue()
+    assert Image.open(io.BytesIO(content)).mode == "RGB"
+    assert content == jpeg_snapshot
+
+
+@pytest.mark.parametrize(
+    "mode,clear_is_white",
+    [("RGBA", True), ("LA", True), ("P", True), ("RGB", False), ("L", False)],
+)
+def test_save_image_jpeg_modes(mode, clear_is_white):
+    """Alpha-0 pixels go to white; inputs without alpha keep their colour."""
+    rgba = Image.new("RGBA", (16, 16), (0, 0, 0, 255))
+    rgba.paste((0, 0, 0, 0), (0, 0, 8, 16))
+    im = rgba.convert(mode)
+    buffer = io.BytesIO()
+    save_image(im, buffer, "jpeg")
+    out = Image.open(io.BytesIO(buffer.getvalue()))
+    assert out.mode == "RGB"
+    arr = np.asarray(out).astype(int)
+    assert (np.abs(arr[:, 10:] - 0) <= 8).all()
+    expected_clear = 255 if clear_is_white else 0
+    assert (np.abs(arr[:, :6] - expected_clear) <= 8).all()
+
+
+def test_save_image_jpeg_opaque_rgba():
+    im = Image.new("RGBA", (16, 16), (200, 30, 60, 255))
+    buffer = io.BytesIO()
+    save_image(im, buffer, "jpeg")
+    arr = np.asarray(Image.open(io.BytesIO(buffer.getvalue()))).astype(int)
+    assert (np.abs(arr - [200, 30, 60]) <= 8).all()

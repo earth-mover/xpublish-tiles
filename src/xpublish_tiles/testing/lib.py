@@ -508,6 +508,54 @@ except ImportError:
         )
 
 
+# Max per-channel difference; covers IDCT/encoder rounding between libjpeg builds.
+JPEG_SNAPSHOT_TOLERANCE = 8
+
+
+def jpeg_arrays_match(actual: bytes, expected: bytes) -> bool:
+    """Compare decoded JPEGs with a per-channel tolerance of ``JPEG_SNAPSHOT_TOLERANCE``."""
+    actual_img = Image.open(io.BytesIO(actual))
+    expected_img = Image.open(io.BytesIO(expected))
+    if actual_img.mode != expected_img.mode or actual_img.size != expected_img.size:
+        return False
+    diff = np.abs(
+        np.asarray(actual_img, dtype=np.int16) - np.asarray(expected_img, dtype=np.int16)
+    )
+    if diff.max() > JPEG_SNAPSHOT_TOLERANCE:
+        logger.error(f"JPEG snapshot max channel difference {diff.max()}")
+        return False
+    return True
+
+
+def _create_jpeg_snapshot_fixture():
+    """Create the jpeg_snapshot fixture. Only available when pytest is installed."""
+    from syrupy.extensions.single_file import SingleFileSnapshotExtension
+
+    class JPEGSnapshotExtension(SingleFileSnapshotExtension):
+        file_extension = "jpg"
+
+        def matches(self, *, serialized_data: bytes, snapshot_data: bytes) -> bool:
+            return jpeg_arrays_match(serialized_data, snapshot_data)
+
+    @pytest.fixture
+    def jpeg_snapshot(snapshot):
+        """JPEG snapshot stored as ``.jpg``, compared with a JPEG tolerance."""
+        return snapshot.use_extension(JPEGSnapshotExtension)
+
+    return jpeg_snapshot
+
+
+try:
+    jpeg_snapshot = _create_jpeg_snapshot_fixture()
+except ImportError:
+
+    def jpeg_snapshot(*args, **kwargs):
+        raise ImportError(
+            "pytest and syrupy are required for jpeg_snapshot fixture. "
+            "Install with: uv add --group testing pytest syrupy"
+        )
+
+
 def validate_transparency(
     content: bytes,
     *,

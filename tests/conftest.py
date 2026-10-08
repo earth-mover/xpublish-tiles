@@ -15,7 +15,11 @@ from xpublish_tiles.testing.datasets import (
     UTM33S,
     create_global_dataset,
 )
-from xpublish_tiles.testing.lib import compare_image_buffers, png_snapshot  # noqa: F401
+from xpublish_tiles.testing.lib import (  # noqa: F401
+    compare_image_buffers,
+    jpeg_snapshot,
+    png_snapshot,
+)
 from xpublish_tiles.testing.tiles import RADAR_TILES
 
 # Disable numba, datashader, and PIL debug logs

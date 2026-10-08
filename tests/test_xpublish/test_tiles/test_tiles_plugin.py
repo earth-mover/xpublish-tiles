@@ -1570,3 +1570,61 @@ def test_rgb_style_not_advertised_without_band_dim():
     client = TestClient(rest.app)
     styles = client.get("/datasets/ifs/tiles/WebMercatorQuad").json()["styles"]
     assert not any(s["id"].endswith("/rgb") for s in styles)
+
+
+@pytest.fixture(scope="module")
+def east_rgb_client():
+    ds = RGB.create().sel(longitude=slice(0, None))
+    rest = xpublish.Rest({"rgb_east": ds}, plugins={"tiles": TilesPlugin()})
+    return TestClient(rest.app)
+
+
+@pytest.mark.parametrize("renderer", ["raster", "polygons"])
+@pytest.mark.parametrize(
+    "variant_params",
+    [
+        {"variant": "rgb"},
+        {"variant": "viridis", "colorscalerange": "0,1", "rgb": "red"},
+    ],
+    ids=["rgb", "viridis"],
+)
+def test_jpeg_tile_flattens_onto_white(east_rgb_client, renderer, variant_params):
+    """JPEG tiles are opaque RGB; the area with no data is white."""
+    params = dict(variant_params)
+    variant = params.pop("variant")
+    r = east_rgb_client.get(
+        "/datasets/rgb_east/tiles/WebMercatorQuad/0/0/0",
+        params={
+            "variables": "foo",
+            "style": f"{renderer}/{variant}",
+            "width": 256,
+            "height": 256,
+            "f": "jpeg",
+            **params,
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "image/jpeg"
+    img = Image.open(io.BytesIO(r.content))
+    assert img.format == "JPEG"
+    assert img.mode == "RGB"
+    arr = np.asarray(img).astype(int)
+    assert arr.shape == (256, 256, 3)
+    west = arr[16:240, 8:112]
+    assert (np.abs(west - 255) <= 8).all()
+    east = arr[16:240, 144:248]
+    assert (np.abs(east - 255) > 8).any()
+
+
+def test_jpeg_tile_outside_extent_is_white():
+    rest = xpublish.Rest({"europe": EU3035.create()}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+    r = client.get(
+        "/datasets/europe/tiles/WebMercatorQuad/9/10/200"
+        "?variables=foo&style=raster/viridis&width=256&height=256&f=jpeg"
+    )
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "image/jpeg"
+    img = Image.open(io.BytesIO(r.content))
+    assert img.mode == "RGB"
+    assert (np.abs(np.asarray(img).astype(int) - 255) <= 2).all()

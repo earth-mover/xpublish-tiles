@@ -27,7 +27,7 @@ from xpublish_tiles.logger import get_context_logger, with_accumulated_logs
 from xpublish_tiles.multiscale import get_dataset, get_resolution_level
 from xpublish_tiles.pipeline import _infer_datatype, pipeline
 from xpublish_tiles.projections import transformer_from_crs
-from xpublish_tiles.render import RenderRegistry
+from xpublish_tiles.render import RenderRegistry, save_image
 from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
 from xpublish_tiles.xpublish.wms.types import (
     WMS_FILTERED_QUERY_PARAMS,
@@ -201,7 +201,7 @@ def finalize_image(buffer: io.BytesIO, query: WMSGetMapQuery) -> io.BytesIO:
     background = Image.new("RGBA", image.size, query.bgcolor)
     flattened = Image.alpha_composite(background, image).convert("RGB")
     out = io.BytesIO()
-    flattened.save(out, format=str(query.format))
+    save_image(flattened, out, query.format)
     return out
 
 
@@ -318,7 +318,7 @@ async def handle_get_map(
                 )
             case "BLANK":
                 buffer = io.BytesIO()
-                Image.new("RGBA", (query.width, query.height)).save(buffer, format="png")
+                save_image(Image.new("RGBA", (query.width, query.height)), buffer, "png")
             case _:
                 return wms_exception(detail, status_code=status_code, code=code)
 
