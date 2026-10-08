@@ -10,12 +10,38 @@ from xpublish_tiles.projections import (
     CONIC_ALLOWLIST,
     CONIC_TOLERANCE_METERS,
     conic_to_cylindrical,
+    geos_to_cylindrical,
     has_null_datum_shift,
     is_mercator_like,
     transformer_from_crs,
 )
 
 WEB_MERCATOR = pyproj.CRS.from_epsg(3857)
+
+GEOS_HEIGHT = 35785831.0
+# Scan angles out past the limb (~0.1518 rad), so the off-disk mask is exercised.
+GEOS_MAX_SCAN = 0.16
+GEOS_ELLIPSOIDS = {
+    "ellipsoid": "+a=6378137 +b=6356752.31414",
+    "sphere": "+R=6371229",
+}
+# Target -> tolerance in target units: 1e-3 m, or about 1 mm in degrees.
+GEOS_TARGETS = {3857: 1e-3, 4326: 1e-8}
+
+
+def _geos_crs(*, sweep="y", lon_0=0.0, ellipsoid="ellipsoid", extra=""):
+    return pyproj.CRS.from_proj4(
+        f"+proj=geos +h={GEOS_HEIGHT} +lon_0={lon_0} +sweep={sweep} "
+        f"{GEOS_ELLIPSOIDS[ellipsoid]} +units=m {extra}"
+    )
+
+
+def _scan_axes(nx=401, ny=399):
+    """Projection metres, as Geostationary.assign_index hands them over."""
+    x = np.linspace(-GEOS_MAX_SCAN, GEOS_MAX_SCAN, nx) * GEOS_HEIGHT
+    y = np.linspace(GEOS_MAX_SCAN, -GEOS_MAX_SCAN, ny) * GEOS_HEIGHT
+    return x, y
+
 
 # (code, x range, y range) in the CRS's own units
 CONIC_EXTENTS = {
@@ -172,3 +198,65 @@ def test_has_null_datum_shift(code, expected):
 )
 def test_is_mercator_like(epsg, expected):
     assert is_mercator_like(pyproj.CRS.from_epsg(epsg)) is expected
+
+
+@pytest.mark.parametrize("sweep", ["x", "y"])
+@pytest.mark.parametrize("ellipsoid", list(GEOS_ELLIPSOIDS))
+@pytest.mark.parametrize("target", list(GEOS_TARGETS))
+@pytest.mark.parametrize("lon_0", [0.0, 140.7, -75.2])
+def test_geos_to_cylindrical_matches_pyproj(sweep, ellipsoid, target, lon_0):
+    src = _geos_crs(sweep=sweep, lon_0=lon_0, ellipsoid=ellipsoid)
+    fast = geos_to_cylindrical(src, pyproj.CRS.from_epsg(target))
+    assert fast is not None
+
+    x, y = _scan_axes()
+    out_x, out_y = fast.transform_grid(x, y)
+
+    grid_x, grid_y = np.meshgrid(x, y, indexing="ij")
+    expected_x, expected_y = transformer_from_crs(src, target).transform(grid_x, grid_y)
+    finite = np.isfinite(expected_x)
+    assert np.array_equal(np.isfinite(out_x), finite)
+    assert np.array_equal(np.isfinite(out_y), finite)
+    assert 0 < finite.sum() < finite.size
+    np.testing.assert_allclose(
+        out_x[finite], expected_x[finite], rtol=0, atol=GEOS_TARGETS[target]
+    )
+    np.testing.assert_allclose(
+        out_y[finite], expected_y[finite], rtol=0, atol=GEOS_TARGETS[target]
+    )
+
+
+@pytest.mark.parametrize(
+    "source, target",
+    [
+        (_geos_crs(extra="+x_0=1000"), WEB_MERCATOR),
+        (_geos_crs(extra="+y_0=1000"), WEB_MERCATOR),
+        (_geos_crs(), pyproj.CRS.from_epsg(3395)),  # ellipsoidal Mercator
+        (_geos_crs(), pyproj.CRS.from_epsg(4267)),  # NAD27 shifts by ~140m
+        (pyproj.CRS.from_epsg(5070), WEB_MERCATOR),
+    ],
+)
+def test_geos_to_cylindrical_rejects(source, target):
+    assert geos_to_cylindrical(source, target) is None
+
+
+@pytest.mark.parametrize("target", list(GEOS_TARGETS))
+def test_transform_coordinates_geos(target):
+    """Same output contract as the pyproj path, off-disk cells included."""
+    x, y = _scan_axes(nx=201, ny=203)
+    subset = xr.DataArray(
+        np.zeros((y.size, x.size)), coords={"y": y, "x": x}, dims=("y", "x")
+    )
+    transformer = transformer_from_crs(_geos_crs(lon_0=140.7), target)
+    out_x, out_y = asyncio.run(transform_coordinates(subset, "x", "y", transformer))
+    assert out_x.dims == ("x", "y")
+
+    grid_x, grid_y = np.meshgrid(x, y, indexing="ij")
+    expected_x, expected_y = transformer.transform(grid_x, grid_y)
+    if target == 3857:
+        # The pyproj path NaNs points that are off the disk.
+        off_disk = ~np.isfinite(expected_x)
+        expected_x[off_disk] = np.nan
+        expected_y[off_disk] = np.nan
+    np.testing.assert_allclose(out_x.data, expected_x, rtol=0, atol=GEOS_TARGETS[target])
+    np.testing.assert_allclose(out_y.data, expected_y, rtol=0, atol=GEOS_TARGETS[target])

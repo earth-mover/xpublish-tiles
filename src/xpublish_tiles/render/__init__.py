@@ -583,8 +583,7 @@ class DatashaderRenderer(Renderer):
 
     @staticmethod
     def supported_variants() -> list[str]:
-        colormaps = list(mpl.colormaps)
-        variants = [name for name in sorted(colormaps) if not name.endswith("_r")]
+        variants = sorted(mpl.colormaps)
         variants.append("custom")
         return variants
 
