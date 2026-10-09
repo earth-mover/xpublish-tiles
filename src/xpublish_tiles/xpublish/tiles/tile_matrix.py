@@ -242,34 +242,36 @@ def _constant_step_segments(
 ) -> list[list[str]] | None:
     """Split a 1D axis into maximal runs of constant step, as ``[start, stop, step]``.
 
-    The gap between runs is not a step of either run (GFS ``lead_time``:
+    The jump between runs is not a step of either run (GFS ``lead_time``:
     0-120 h hourly, then 123-384 h 3-hourly). None past ``MAX_SEGMENTS``.
     """
     n = len(values)
     if n < 2:
         return None
     steps = values[1:] - values[:-1]
-    # k where steps[k] != steps[k-1]; a run starting at i ends at the first such k > i.
-    changes = np.flatnonzero(steps[1:] != steps[:-1]) + 1
-    segments: list[list[str]] = []
-    i = 0
-    while i < n:
-        if i == n - 1:
-            segments.append(
-                [
-                    fmt_value(values[i]),
-                    fmt_value(values[i]),
-                    fmt_step(values[i] - values[i]),
-                ]
-            )
-            break
-        k = np.searchsorted(changes, i, side="right")
-        j = int(changes[k]) if k < len(changes) else n - 1
-        segments.append([fmt_value(values[i]), fmt_value(values[j]), fmt_step(steps[i])])
-        if len(segments) > MAX_SEGMENTS:
-            return None
-        i = j + 1
-    return segments
+    # Candidate end: the step changes here. A segment start is never an end, so within
+    # each chain of consecutive candidates every second one, from the first, is an end.
+    candidate = np.zeros(n, dtype=bool)
+    candidate[1:-1] = steps[1:] != steps[:-1]
+    idx = np.arange(n)
+    chain_start = np.maximum.accumulate(
+        np.where(candidate & ~np.roll(candidate, 1), idx, 0)
+    )
+    is_end = candidate & ((idx - chain_start) % 2 == 0)
+    is_end[-1] = True
+    ends = np.flatnonzero(is_end)
+    if len(ends) > MAX_SEGMENTS:
+        return None
+    starts = np.concatenate([[0], ends[:-1] + 1])
+    zero = values[0] - values[0]
+    return [
+        [
+            fmt_value(values[a]),
+            fmt_value(values[b]),
+            fmt_step(steps[a] if a < b else zero),
+        ]
+        for a, b in zip(starts, ends, strict=True)
+    ]
 
 
 async def extract_dimension_extents(
