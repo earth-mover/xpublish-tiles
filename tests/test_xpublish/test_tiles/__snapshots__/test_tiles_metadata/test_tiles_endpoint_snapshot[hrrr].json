@@ -17,12 +17,8 @@
                 "PT0S",
                 "PT1H"
               ],
-              "segments": [
-                [
-                  "PT0S",
-                  "PT1H",
-                  "PT1H"
-                ]
+              "values": [
+                "R2/PT0S/PT1H"
               ]
             },
             "time": {
@@ -2132,12 +2128,8 @@
                 "PT0S",
                 "PT1H"
               ],
-              "segments": [
-                [
-                  "PT0S",
-                  "PT1H",
-                  "PT1H"
-                ]
+              "values": [
+                "R2/PT0S/PT1H"
               ]
             },
             "time": {
@@ -4205,12 +4197,8 @@
                 "PT0S",
                 "PT1H"
               ],
-              "segments": [
-                [
-                  "PT0S",
-                  "PT1H",
-                  "PT1H"
-                ]
+              "values": [
+                "R2/PT0S/PT1H"
               ]
             },
             "time": {
@@ -6299,12 +6287,8 @@
                 "PT0S",
                 "PT1H"
               ],
-              "segments": [
-                [
-                  "PT0S",
-                  "PT1H",
-                  "PT1H"
-                ]
+              "values": [
+                "R2/PT0S/PT1H"
               ]
             },
             "time": {
@@ -8358,12 +8342,8 @@
                 "PT0S",
                 "PT1H"
               ],
-              "segments": [
-                [
-                  "PT0S",
-                  "PT1H",
-                  "PT1H"
-                ]
+              "values": [
+                "R2/PT0S/PT1H"
               ]
             },
             "time": {
@@ -10424,12 +10404,8 @@
                 "PT0S",
                 "PT1H"
               ],
-              "segments": [
-                [
-                  "PT0S",
-                  "PT1H",
-                  "PT1H"
-                ]
+              "values": [
+                "R2/PT0S/PT1H"
               ]
             },
             "time": {
@@ -12483,12 +12459,8 @@
                 "PT0S",
                 "PT1H"
               ],
-              "segments": [
-                [
-                  "PT0S",
-                  "PT1H",
-                  "PT1H"
-                ]
+              "values": [
+                "R2/PT0S/PT1H"
               ]
             },
             "time": {

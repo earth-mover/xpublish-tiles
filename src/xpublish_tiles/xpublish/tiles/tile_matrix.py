@@ -232,18 +232,19 @@ def get_all_tile_matrix_set_ids() -> list[str]:
     return list(TILE_MATRIX_SETS.keys())
 
 
-MAX_SEGMENTS = 16
+MAX_REPEATING_INTERVALS = 16
 
 
-def _constant_step_segments(
+def _repeating_intervals(
     values: np.ndarray,
     fmt_value: Callable[[Any], str],
     fmt_step: Callable[[Any], str],
-) -> list[list[str]] | None:
-    """Split a 1D axis into maximal runs of constant step, as ``[start, stop, step]``.
+) -> list[str] | None:
+    """Describe a 1D axis as ISO 8601 repeating intervals ``R<count>/<start>/<step>``.
 
+    One interval per maximal run of constant step, as OGC API EDR ``extent.values``.
     The jump between runs is not a step of either run (GFS ``lead_time``:
-    0-120 h hourly, then 123-384 h 3-hourly). None past ``MAX_SEGMENTS``.
+    0-120 h hourly, then 123-384 h 3-hourly). None past ``MAX_REPEATING_INTERVALS``.
     """
     n = len(values)
     if n < 2:
@@ -260,16 +261,12 @@ def _constant_step_segments(
     is_end = candidate & ((idx - chain_start) % 2 == 0)
     is_end[-1] = True
     ends = np.flatnonzero(is_end)
-    if len(ends) > MAX_SEGMENTS:
+    if len(ends) > MAX_REPEATING_INTERVALS:
         return None
     starts = np.concatenate([[0], ends[:-1] + 1])
     zero = values[0] - values[0]
     return [
-        [
-            fmt_value(values[a]),
-            fmt_value(values[b]),
-            fmt_step(steps[a] if a < b else zero),
-        ]
+        f"R{b - a + 1}/{fmt_value(values[a])}/{fmt_step(steps[a] if a < b else zero)}"
         for a, b in zip(starts, ends, strict=True)
     ]
 
@@ -337,7 +334,7 @@ async def extract_dimension_extents(
         extent: list[str | float | int] = []
         actual_values: list[str | float | int] | None = None
         resolution: str | float | int | None = None
-        segments: list[list[str]] | None = None
+        repeating: list[str] | None = None
 
         if len(values) == 0:
             extent = []
@@ -352,7 +349,7 @@ async def extract_dimension_extents(
             if len(values) > 1:
                 resolution = _calculate_temporal_resolution(coord)
             if resolution is None:
-                segments = _constant_step_segments(
+                repeating = _repeating_intervals(
                     values, timedelta_to_iso8601, timedelta_to_iso8601
                 )
         elif np.issubdtype(values.dtype, np.datetime64):
@@ -369,7 +366,7 @@ async def extract_dimension_extents(
             if len(values) > 1:
                 resolution = _calculate_temporal_resolution(coord)
             if resolution is None:
-                segments = _constant_step_segments(
+                repeating = _repeating_intervals(
                     values, lambda v: pd.Timestamp(v).isoformat(), timedelta_to_iso8601
                 )
         elif isinstance(values[0], cftime.datetime):
@@ -381,7 +378,7 @@ async def extract_dimension_extents(
             if len(values) > 1:
                 resolution = _calculate_temporal_resolution(coord)
             if resolution is None:
-                segments = _constant_step_segments(
+                repeating = _repeating_intervals(
                     values, lambda v: v.isoformat(), timedelta_to_iso8601
                 )
         elif np.issubdtype(values.dtype, np.number):
@@ -424,7 +421,7 @@ async def extract_dimension_extents(
             default=default,
             values=actual_values,
             resolution=resolution,
-            segments=segments,
+            repeating_intervals=repeating,
         )
         dimensions.append(dimension)
 

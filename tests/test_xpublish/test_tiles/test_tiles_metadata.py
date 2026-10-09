@@ -189,56 +189,50 @@ def _axis_dataset(name: str, coord, attrs: dict | None = None) -> xr.Dataset:
     )
 
 
-async def test_extract_dataset_extents_segments_lead_time():
+async def test_extract_dataset_extents_repeating_intervals_lead_time():
     """GFS-style lead_time: hourly to 120 h, then 3-hourly to 384 h."""
     hours = np.concatenate([np.arange(0, 121), np.arange(123, 385, 3)])
     lead = hours.astype("timedelta64[h]").astype("timedelta64[ns]")
     extents = await extract_dataset_extents(_axis_dataset("lead_time", lead), "v")
     assert extents["lead_time"]["interval"] == ["PT0S", "P16D"]
     assert "resolution" not in extents["lead_time"]
-    assert extents["lead_time"]["segments"] == [
-        ["PT0S", "P5D", "PT1H"],
-        ["P5DT3H", "P16D", "PT3H"],
-    ]
+    assert extents["lead_time"]["values"] == ["R121/PT0S/PT1H", "R88/P5DT3H/PT3H"]
 
 
-async def test_extract_dataset_extents_segments_datetime_gap():
+async def test_extract_dataset_extents_repeating_intervals_datetime_gap():
     time = pd.DatetimeIndex(
         list(pd.date_range("2020-01-01", "2020-01-10", freq="D"))
         + list(pd.date_range("2020-01-15", "2020-01-20", freq="D"))
     )
     ds = _axis_dataset("time", time, {"axis": "T", "standard_name": "time"})
     extents = await extract_dataset_extents(ds, "v")
-    assert extents["time"]["segments"] == [
-        ["2020-01-01T00:00:00", "2020-01-10T00:00:00", "P1D"],
-        ["2020-01-15T00:00:00", "2020-01-20T00:00:00", "P1D"],
+    assert extents["time"]["values"] == [
+        "R10/2020-01-01T00:00:00/P1D",
+        "R6/2020-01-15T00:00:00/P1D",
     ]
 
 
-async def test_extract_dataset_extents_segments_trailing_point():
+async def test_extract_dataset_extents_repeating_intervals_trailing_point():
     lead = np.array([0, 1, 2, 10], dtype="timedelta64[h]").astype("timedelta64[ns]")
     extents = await extract_dataset_extents(_axis_dataset("lead_time", lead), "v")
-    assert extents["lead_time"]["segments"] == [
-        ["PT0S", "PT2H", "PT1H"],
-        ["PT10H", "PT10H", "PT0S"],
-    ]
+    assert extents["lead_time"]["values"] == ["R3/PT0S/PT1H", "R1/PT10H/PT0S"]
 
 
-async def test_extract_dataset_extents_no_segments():
+async def test_extract_dataset_extents_no_repeating_intervals():
     """Regular axes keep interval + resolution; very irregular axes get neither."""
     regular = pd.date_range("2020-01-01", periods=100, freq="h")
     ds = _axis_dataset("time", regular, {"axis": "T", "standard_name": "time"})
     extents = await extract_dataset_extents(ds, "v")
     assert extents["time"]["resolution"] == "PT1H"
-    assert "segments" not in extents["time"]
+    assert "values" not in extents["time"]
 
-    # 40 distinct gaps → more runs than MAX_SEGMENTS
+    # 40 distinct gaps → more runs than MAX_REPEATING_INTERVALS
     irregular = pd.DatetimeIndex(
         np.cumsum(np.arange(1, 41)).astype("timedelta64[h]") + np.datetime64("2020-01-01")
     )
     ds = _axis_dataset("time", irregular, {"axis": "T", "standard_name": "time"})
     extents = await extract_dataset_extents(ds, "v")
-    assert "segments" not in extents["time"]
+    assert "values" not in extents["time"]
     assert "resolution" not in extents["time"]
 
 
