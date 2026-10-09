@@ -257,7 +257,6 @@ def test_one_dimensional_dataset():
             "default": "2001-01-05T00:00:00",
             "resolution": "P1D",
             "interval": ["2001-01-01T00:00:00", "2001-01-05T00:00:00"],
-            "values": [f"2001-01-0{d}T00:00:00" for d in range(1, 6)],
         }
     }
 

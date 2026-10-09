@@ -180,13 +180,16 @@ async def extract_dataset_extents(
 
     extents: dict[str, dict[str, Any]] = {}
     for dim in dimensions:
-        # A categorical [first, last] interval is meaningless; send the values only.
-        categorical = dim.type == DimensionType.CUSTOM and isinstance(
-            next(iter(dim.extent), None), str
-        )
-        extent_dict: dict[str, Any] = {} if categorical else {"interval": dim.extent}
-        if dim.values is not None:
-            extent_dict["values"] = dim.values
+        # A categorical [first, last] interval is meaningless; send the values instead.
+        # Past max_actual_values there are no values, so keep the interval.
+        if (
+            dim.type == DimensionType.CUSTOM
+            and dim.values is not None
+            and isinstance(next(iter(dim.extent), None), str)
+        ):
+            extent_dict: dict[str, Any] = {"values": dim.values}
+        else:
+            extent_dict = {"interval": dim.extent}
         if dim.resolution is not None:
             extent_dict["resolution"] = dim.resolution
         if dim.units:

@@ -105,11 +105,7 @@ async def test_extract_dataset_extents():
     assert time_extent["interval"][0] == "2023-01-01T00:00:00"
     assert time_extent["interval"][1] == "2023-01-01T02:00:00"
     assert time_extent["resolution"] == "PT1H"  # Hourly
-    assert time_extent["values"] == [
-        "2023-01-01T00:00:00",
-        "2023-01-01T01:00:00",
-        "2023-01-01T02:00:00",
-    ]
+    assert "values" not in time_extent  # only categorical dimensions list values
 
     # Check elevation extent
     elevation_extent = extents["elevation"]
@@ -169,7 +165,7 @@ async def test_extract_dataset_extents_cftime_monthly():
     assert extents["time"]["interval"] == ["1921-01-16T12:00:00", "1925-12-16T12:00:00"]
     assert extents["time"]["resolution"] == "P1M"
     assert extents["time"]["default"] == "1925-12-16T12:00:00"
-    assert "values" not in extents["time"]  # 60 > max_actual_values
+    assert "values" not in extents["time"]  # only categorical dimensions list values
     assert "interval" not in extents["member_id"]
     assert extents["member_id"]["values"] == [f"r{i}i1p1f1" for i in range(1, 31)]
 
