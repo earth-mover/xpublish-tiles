@@ -192,6 +192,9 @@ async def extract_dataset_extents(
             extent_dict = {"interval": dim.extent}
         if dim.resolution is not None:
             extent_dict["resolution"] = dim.resolution
+        if dim.repeating_intervals is not None:
+            # OGC API EDR form: values as ISO 8601 repeating intervals.
+            extent_dict["values"] = dim.repeating_intervals
         if dim.units:
             extent_dict["units"] = dim.units
         if dim.description:

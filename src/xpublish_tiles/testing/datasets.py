@@ -591,6 +591,41 @@ IFS = Dataset(
     benchmark_tiles=GLOBAL_BENCHMARK_TILES,
 )
 
+GFS = Dataset(
+    # https://dynamical.org/catalog/noaa-gfs-forecast/ — lead_time steps hourly to 120 h, then 3-hourly.
+    name="gfs",
+    dims=(
+        Dim(
+            name="init_time",
+            size=8,
+            chunk_size=1,
+            data=pd.date_range("2000-01-01", periods=8, freq="6h").values,
+        ),
+        Dim(
+            name="lead_time",
+            size=209,
+            chunk_size=1,
+            data=pd.to_timedelta(
+                np.concatenate([np.arange(0, 121), np.arange(123, 385, 3)]), unit="h"
+            ).values,
+        ),
+        Dim(
+            name="latitude",
+            size=721,
+            chunk_size=721,
+            data=np.linspace(90, -90, 721),
+        ),
+        Dim(
+            name="longitude",
+            size=1440,
+            chunk_size=1440,
+            data=np.arange(1440) * 0.25,
+        ),
+    ),
+    dtype=np.float32,
+    setup=uniform_grid,
+)
+
 ERA5 = Dataset(
     # https://app.earthmover.io/earthmover-demos/ecmwf-ifs-oper/array/main/tprate
     name="era5",

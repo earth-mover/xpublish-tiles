@@ -20,6 +20,7 @@ from xpublish_tiles.testing.datasets import (
     FVCOM,
     GEOSTATIONARY,
     GEOZARR_MULTISCALE,
+    GFS,
     GLOBAL_HEALPIX_CUBE_L3,
     GLOBAL_HEALPIX_L3,
     HRRR,
@@ -168,6 +169,72 @@ async def test_extract_dataset_extents_cftime_monthly():
     assert "values" not in extents["time"]  # only categorical dimensions list values
     assert "interval" not in extents["member_id"]
     assert extents["member_id"]["values"] == [f"r{i}i1p1f1" for i in range(1, 31)]
+
+
+def _axis_dataset(name: str, coord, attrs: dict | None = None) -> xr.Dataset:
+    return xr.Dataset(
+        {"v": ((name, "lat", "lon"), np.zeros((len(coord), 5, 10)))},
+        coords={
+            name: (name, coord, attrs or {}),
+            "lat": (
+                "lat",
+                np.linspace(-2, 2, 5),
+                {"axis": "Y", "standard_name": "latitude"},
+            ),
+            "lon": (
+                "lon",
+                np.linspace(-5, 5, 10),
+                {"axis": "X", "standard_name": "longitude"},
+            ),
+        },
+    )
+
+
+async def test_extract_dataset_extents_repeating_intervals_lead_time():
+    """GFS-style lead_time: hourly to 120 h, then 3-hourly to 384 h."""
+    hours = np.concatenate([np.arange(0, 121), np.arange(123, 385, 3)])
+    lead = hours.astype("timedelta64[h]").astype("timedelta64[ns]")
+    extents = await extract_dataset_extents(_axis_dataset("lead_time", lead), "v")
+    assert extents["lead_time"]["interval"] == ["PT0S", "P16D"]
+    assert "resolution" not in extents["lead_time"]
+    assert extents["lead_time"]["values"] == ["R121/PT0S/PT1H", "R88/P5DT3H/PT3H"]
+
+
+async def test_extract_dataset_extents_repeating_intervals_datetime_gap():
+    time = pd.DatetimeIndex(
+        list(pd.date_range("2020-01-01", "2020-01-10", freq="D"))
+        + list(pd.date_range("2020-01-15", "2020-01-20", freq="D"))
+    )
+    ds = _axis_dataset("time", time, {"axis": "T", "standard_name": "time"})
+    extents = await extract_dataset_extents(ds, "v")
+    assert extents["time"]["values"] == [
+        "R10/2020-01-01T00:00:00/P1D",
+        "R6/2020-01-15T00:00:00/P1D",
+    ]
+
+
+async def test_extract_dataset_extents_repeating_intervals_trailing_point():
+    lead = np.array([0, 1, 2, 10], dtype="timedelta64[h]").astype("timedelta64[ns]")
+    extents = await extract_dataset_extents(_axis_dataset("lead_time", lead), "v")
+    assert extents["lead_time"]["values"] == ["R3/PT0S/PT1H", "R1/PT10H/PT0S"]
+
+
+async def test_extract_dataset_extents_no_repeating_intervals():
+    """Regular axes keep interval + resolution; very irregular axes get neither."""
+    regular = pd.date_range("2020-01-01", periods=100, freq="h")
+    ds = _axis_dataset("time", regular, {"axis": "T", "standard_name": "time"})
+    extents = await extract_dataset_extents(ds, "v")
+    assert extents["time"]["resolution"] == "PT1H"
+    assert "values" not in extents["time"]
+
+    # 40 distinct gaps → more runs than MAX_REPEATING_INTERVALS
+    irregular = pd.DatetimeIndex(
+        np.cumsum(np.arange(1, 41)).astype("timedelta64[h]") + np.datetime64("2020-01-01")
+    )
+    ds = _axis_dataset("time", irregular, {"axis": "T", "standard_name": "time"})
+    extents = await extract_dataset_extents(ds, "v")
+    assert "values" not in extents["time"]
+    assert "resolution" not in extents["time"]
 
 
 async def test_extract_dataset_extents_empty():
@@ -905,6 +972,7 @@ def _normalize_for_snapshot(obj):
         pytest.param(ERA5, id="era5"),
         pytest.param(HRRR, id="hrrr"),
         pytest.param(IFS, id="ifs"),
+        pytest.param(GFS, id="gfs"),
         pytest.param(GLOBAL_HEALPIX_L3, id="global_healpix_l3"),
         pytest.param(GLOBAL_HEALPIX_CUBE_L3, id="global_healpix_cube_l3"),
         pytest.param(REGIONAL_HEALPIX_NA, id="regional_healpix_na"),

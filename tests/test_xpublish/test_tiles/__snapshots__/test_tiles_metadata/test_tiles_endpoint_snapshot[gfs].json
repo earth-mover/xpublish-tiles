@@ -11,22 +11,23 @@
           "dataType": "coverage",
           "description": "",
           "extents": {
-            "step": {
-              "default": "P2D",
-              "interval": [
-                "PT0S",
-                "P2D"
-              ],
-              "resolution": "PT1H"
-            },
-            "time": {
-              "default": "2000-01-02T00:00:00",
+            "init_time": {
+              "default": "2000-01-02T18:00:00",
               "interval": [
                 "2000-01-01T00:00:00",
-                "2000-01-02T00:00:00"
+                "2000-01-02T18:00:00"
+              ],
+              "resolution": "PT6H"
+            },
+            "lead_time": {
+              "default": "P16D",
+              "interval": [
+                "PT0S",
+                "P16D"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "R121/PT0S/PT1H",
+                "R88/P5DT3H/PT3H"
               ]
             }
           },
@@ -2123,22 +2124,23 @@
           "dataType": "coverage",
           "description": "",
           "extents": {
-            "step": {
-              "default": "P2D",
-              "interval": [
-                "PT0S",
-                "P2D"
-              ],
-              "resolution": "PT1H"
-            },
-            "time": {
-              "default": "2000-01-02T00:00:00",
+            "init_time": {
+              "default": "2000-01-02T18:00:00",
               "interval": [
                 "2000-01-01T00:00:00",
-                "2000-01-02T00:00:00"
+                "2000-01-02T18:00:00"
+              ],
+              "resolution": "PT6H"
+            },
+            "lead_time": {
+              "default": "P16D",
+              "interval": [
+                "PT0S",
+                "P16D"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "R121/PT0S/PT1H",
+                "R88/P5DT3H/PT3H"
               ]
             }
           },
@@ -4193,22 +4195,23 @@
           "dataType": "coverage",
           "description": "",
           "extents": {
-            "step": {
-              "default": "P2D",
-              "interval": [
-                "PT0S",
-                "P2D"
-              ],
-              "resolution": "PT1H"
-            },
-            "time": {
-              "default": "2000-01-02T00:00:00",
+            "init_time": {
+              "default": "2000-01-02T18:00:00",
               "interval": [
                 "2000-01-01T00:00:00",
-                "2000-01-02T00:00:00"
+                "2000-01-02T18:00:00"
+              ],
+              "resolution": "PT6H"
+            },
+            "lead_time": {
+              "default": "P16D",
+              "interval": [
+                "PT0S",
+                "P16D"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "R121/PT0S/PT1H",
+                "R88/P5DT3H/PT3H"
               ]
             }
           },
@@ -6193,22 +6196,23 @@
           "dataType": "coverage",
           "description": "",
           "extents": {
-            "step": {
-              "default": "P2D",
-              "interval": [
-                "PT0S",
-                "P2D"
-              ],
-              "resolution": "PT1H"
-            },
-            "time": {
-              "default": "2000-01-02T00:00:00",
+            "init_time": {
+              "default": "2000-01-02T18:00:00",
               "interval": [
                 "2000-01-01T00:00:00",
-                "2000-01-02T00:00:00"
+                "2000-01-02T18:00:00"
+              ],
+              "resolution": "PT6H"
+            },
+            "lead_time": {
+              "default": "P16D",
+              "interval": [
+                "PT0S",
+                "P16D"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "R121/PT0S/PT1H",
+                "R88/P5DT3H/PT3H"
               ]
             }
           },
@@ -8284,22 +8288,23 @@
           "dataType": "coverage",
           "description": "",
           "extents": {
-            "step": {
-              "default": "P2D",
-              "interval": [
-                "PT0S",
-                "P2D"
-              ],
-              "resolution": "PT1H"
-            },
-            "time": {
-              "default": "2000-01-02T00:00:00",
+            "init_time": {
+              "default": "2000-01-02T18:00:00",
               "interval": [
                 "2000-01-01T00:00:00",
-                "2000-01-02T00:00:00"
+                "2000-01-02T18:00:00"
+              ],
+              "resolution": "PT6H"
+            },
+            "lead_time": {
+              "default": "P16D",
+              "interval": [
+                "PT0S",
+                "P16D"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "R121/PT0S/PT1H",
+                "R88/P5DT3H/PT3H"
               ]
             }
           },
@@ -10269,22 +10274,23 @@
           "dataType": "coverage",
           "description": "",
           "extents": {
-            "step": {
-              "default": "P2D",
-              "interval": [
-                "PT0S",
-                "P2D"
-              ],
-              "resolution": "PT1H"
-            },
-            "time": {
-              "default": "2000-01-02T00:00:00",
+            "init_time": {
+              "default": "2000-01-02T18:00:00",
               "interval": [
                 "2000-01-01T00:00:00",
-                "2000-01-02T00:00:00"
+                "2000-01-02T18:00:00"
+              ],
+              "resolution": "PT6H"
+            },
+            "lead_time": {
+              "default": "P16D",
+              "interval": [
+                "PT0S",
+                "P16D"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "R121/PT0S/PT1H",
+                "R88/P5DT3H/PT3H"
               ]
             }
           },
@@ -12310,22 +12316,23 @@
           "dataType": "coverage",
           "description": "",
           "extents": {
-            "step": {
-              "default": "P2D",
-              "interval": [
-                "PT0S",
-                "P2D"
-              ],
-              "resolution": "PT1H"
-            },
-            "time": {
-              "default": "2000-01-02T00:00:00",
+            "init_time": {
+              "default": "2000-01-02T18:00:00",
               "interval": [
                 "2000-01-01T00:00:00",
-                "2000-01-02T00:00:00"
+                "2000-01-02T18:00:00"
+              ],
+              "resolution": "PT6H"
+            },
+            "lead_time": {
+              "default": "P16D",
+              "interval": [
+                "PT0S",
+                "P16D"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "R121/PT0S/PT1H",
+                "R88/P5DT3H/PT3H"
               ]
             }
           },
@@ -14373,22 +14380,23 @@
           "dataType": "coverage",
           "description": "",
           "extents": {
-            "step": {
-              "default": "P2D",
-              "interval": [
-                "PT0S",
-                "P2D"
-              ],
-              "resolution": "PT1H"
-            },
-            "time": {
-              "default": "2000-01-02T00:00:00",
+            "init_time": {
+              "default": "2000-01-02T18:00:00",
               "interval": [
                 "2000-01-01T00:00:00",
-                "2000-01-02T00:00:00"
+                "2000-01-02T18:00:00"
+              ],
+              "resolution": "PT6H"
+            },
+            "lead_time": {
+              "default": "P16D",
+              "interval": [
+                "PT0S",
+                "P16D"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "R121/PT0S/PT1H",
+                "R88/P5DT3H/PT3H"
               ]
             }
           },
@@ -16436,22 +16444,23 @@
           "dataType": "coverage",
           "description": "",
           "extents": {
-            "step": {
-              "default": "P2D",
-              "interval": [
-                "PT0S",
-                "P2D"
-              ],
-              "resolution": "PT1H"
-            },
-            "time": {
-              "default": "2000-01-02T00:00:00",
+            "init_time": {
+              "default": "2000-01-02T18:00:00",
               "interval": [
                 "2000-01-01T00:00:00",
-                "2000-01-02T00:00:00"
+                "2000-01-02T18:00:00"
+              ],
+              "resolution": "PT6H"
+            },
+            "lead_time": {
+              "default": "P16D",
+              "interval": [
+                "PT0S",
+                "P16D"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "R121/PT0S/PT1H",
+                "R88/P5DT3H/PT3H"
               ]
             }
           },
@@ -18492,22 +18501,23 @@
           "dataType": "coverage",
           "description": "",
           "extents": {
-            "step": {
-              "default": "P2D",
-              "interval": [
-                "PT0S",
-                "P2D"
-              ],
-              "resolution": "PT1H"
-            },
-            "time": {
-              "default": "2000-01-02T00:00:00",
+            "init_time": {
+              "default": "2000-01-02T18:00:00",
               "interval": [
                 "2000-01-01T00:00:00",
-                "2000-01-02T00:00:00"
+                "2000-01-02T18:00:00"
+              ],
+              "resolution": "PT6H"
+            },
+            "lead_time": {
+              "default": "P16D",
+              "interval": [
+                "PT0S",
+                "P16D"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "R121/PT0S/PT1H",
+                "R88/P5DT3H/PT3H"
               ]
             }
           },
@@ -20548,22 +20558,23 @@
           "dataType": "coverage",
           "description": "",
           "extents": {
-            "step": {
-              "default": "P2D",
-              "interval": [
-                "PT0S",
-                "P2D"
-              ],
-              "resolution": "PT1H"
-            },
-            "time": {
-              "default": "2000-01-02T00:00:00",
+            "init_time": {
+              "default": "2000-01-02T18:00:00",
               "interval": [
                 "2000-01-01T00:00:00",
-                "2000-01-02T00:00:00"
+                "2000-01-02T18:00:00"
+              ],
+              "resolution": "PT6H"
+            },
+            "lead_time": {
+              "default": "P16D",
+              "interval": [
+                "PT0S",
+                "P16D"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "R121/PT0S/PT1H",
+                "R88/P5DT3H/PT3H"
               ]
             }
           },
@@ -22611,22 +22622,23 @@
           "dataType": "coverage",
           "description": "",
           "extents": {
-            "step": {
-              "default": "P2D",
-              "interval": [
-                "PT0S",
-                "P2D"
-              ],
-              "resolution": "PT1H"
-            },
-            "time": {
-              "default": "2000-01-02T00:00:00",
+            "init_time": {
+              "default": "2000-01-02T18:00:00",
               "interval": [
                 "2000-01-01T00:00:00",
-                "2000-01-02T00:00:00"
+                "2000-01-02T18:00:00"
+              ],
+              "resolution": "PT6H"
+            },
+            "lead_time": {
+              "default": "P16D",
+              "interval": [
+                "PT0S",
+                "P16D"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "R121/PT0S/PT1H",
+                "R88/P5DT3H/PT3H"
               ]
             }
           },
@@ -24667,22 +24679,23 @@
           "dataType": "coverage",
           "description": "",
           "extents": {
-            "step": {
-              "default": "P2D",
-              "interval": [
-                "PT0S",
-                "P2D"
-              ],
-              "resolution": "PT1H"
-            },
-            "time": {
-              "default": "2000-01-02T00:00:00",
+            "init_time": {
+              "default": "2000-01-02T18:00:00",
               "interval": [
                 "2000-01-01T00:00:00",
-                "2000-01-02T00:00:00"
+                "2000-01-02T18:00:00"
+              ],
+              "resolution": "PT6H"
+            },
+            "lead_time": {
+              "default": "P16D",
+              "interval": [
+                "PT0S",
+                "P16D"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "R121/PT0S/PT1H",
+                "R88/P5DT3H/PT3H"
               ]
             }
           },

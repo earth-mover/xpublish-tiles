@@ -16,6 +16,9 @@
               "interval": [
                 "PT0S",
                 "PT1H"
+              ],
+              "values": [
+                "R2/PT0S/PT1H"
               ]
             },
             "time": {
@@ -2124,6 +2127,9 @@
               "interval": [
                 "PT0S",
                 "PT1H"
+              ],
+              "values": [
+                "R2/PT0S/PT1H"
               ]
             },
             "time": {
@@ -4190,6 +4196,9 @@
               "interval": [
                 "PT0S",
                 "PT1H"
+              ],
+              "values": [
+                "R2/PT0S/PT1H"
               ]
             },
             "time": {
@@ -6277,6 +6286,9 @@
               "interval": [
                 "PT0S",
                 "PT1H"
+              ],
+              "values": [
+                "R2/PT0S/PT1H"
               ]
             },
             "time": {
@@ -8329,6 +8341,9 @@
               "interval": [
                 "PT0S",
                 "PT1H"
+              ],
+              "values": [
+                "R2/PT0S/PT1H"
               ]
             },
             "time": {
@@ -10388,6 +10403,9 @@
               "interval": [
                 "PT0S",
                 "PT1H"
+              ],
+              "values": [
+                "R2/PT0S/PT1H"
               ]
             },
             "time": {
@@ -12440,6 +12458,9 @@
               "interval": [
                 "PT0S",
                 "PT1H"
+              ],
+              "values": [
+                "R2/PT0S/PT1H"
               ]
             },
             "time": {

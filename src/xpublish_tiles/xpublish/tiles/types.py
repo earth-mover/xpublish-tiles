@@ -674,6 +674,16 @@ class DimensionExtent(BaseModel):
             }
         ),
     ] = None
+    repeating_intervals: Annotated[
+        list[str] | None,
+        Field(
+            json_schema_extra={
+                "description": "Irregular axis as ISO 8601 repeating intervals "
+                "R<count>/<start>/<step>, one per run of constant step "
+                "(OGC API EDR extent values)",
+            }
+        ),
+    ] = None
     units: Annotated[
         str | None,
         Field(
