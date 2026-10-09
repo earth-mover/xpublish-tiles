@@ -4,7 +4,6 @@ from typing import Any
 
 import morecantile.models
 import numpy as np
-import pandas as pd
 import pyproj.exceptions
 
 import xarray as xr
@@ -182,12 +181,13 @@ async def extract_dataset_extents(
     for dim in dimensions:
         # A categorical [first, last] interval is meaningless; send the values instead.
         # Past max_actual_values there are no values, so keep the interval.
+        extent_dict: dict[str, Any]
         if (
             dim.type == DimensionType.CUSTOM
             and dim.values is not None
             and isinstance(next(iter(dim.extent), None), str)
         ):
-            extent_dict: dict[str, Any] = {"values": dim.values}
+            extent_dict = {"values": dim.values}
         else:
             extent_dict = {"interval": dim.extent}
         if dim.resolution is not None:
@@ -280,7 +280,8 @@ def _calendar_step_resolution(values: xr.DataArray) -> str | None:
     ``infer_freq`` needs anchored stamps; CMIP-style monthly means sit
     mid-month (16th 12:00, 15th 00:00, ...), so match on step length instead.
     """
-    days = pd.to_timedelta(np.diff(values.values)).total_seconds() / 86400
+    steps = np.asarray(np.diff(values.values), dtype="timedelta64[ns]")
+    days = steps / np.timedelta64(1, "D")
     if np.all((days >= 28) & (days <= 31)):
         return "P1M"
     if np.all((days >= 365) & (days <= 366)):
