@@ -192,6 +192,8 @@ async def extract_dataset_extents(
             extent_dict = {"interval": dim.extent}
         if dim.resolution is not None:
             extent_dict["resolution"] = dim.resolution
+        if dim.segments is not None:
+            extent_dict["segments"] = dim.segments
         if dim.units:
             extent_dict["units"] = dim.units
         if dim.description:

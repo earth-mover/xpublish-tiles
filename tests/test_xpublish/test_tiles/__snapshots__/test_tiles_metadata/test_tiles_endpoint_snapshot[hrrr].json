@@ -16,6 +16,13 @@
               "interval": [
                 "PT0S",
                 "PT1H"
+              ],
+              "segments": [
+                [
+                  "PT0S",
+                  "PT1H",
+                  "PT1H"
+                ]
               ]
             },
             "time": {
@@ -2124,6 +2131,13 @@
               "interval": [
                 "PT0S",
                 "PT1H"
+              ],
+              "segments": [
+                [
+                  "PT0S",
+                  "PT1H",
+                  "PT1H"
+                ]
               ]
             },
             "time": {
@@ -4190,6 +4204,13 @@
               "interval": [
                 "PT0S",
                 "PT1H"
+              ],
+              "segments": [
+                [
+                  "PT0S",
+                  "PT1H",
+                  "PT1H"
+                ]
               ]
             },
             "time": {
@@ -6277,6 +6298,13 @@
               "interval": [
                 "PT0S",
                 "PT1H"
+              ],
+              "segments": [
+                [
+                  "PT0S",
+                  "PT1H",
+                  "PT1H"
+                ]
               ]
             },
             "time": {
@@ -8329,6 +8357,13 @@
               "interval": [
                 "PT0S",
                 "PT1H"
+              ],
+              "segments": [
+                [
+                  "PT0S",
+                  "PT1H",
+                  "PT1H"
+                ]
               ]
             },
             "time": {
@@ -10388,6 +10423,13 @@
               "interval": [
                 "PT0S",
                 "PT1H"
+              ],
+              "segments": [
+                [
+                  "PT0S",
+                  "PT1H",
+                  "PT1H"
+                ]
               ]
             },
             "time": {
@@ -12440,6 +12482,13 @@
               "interval": [
                 "PT0S",
                 "PT1H"
+              ],
+              "segments": [
+                [
+                  "PT0S",
+                  "PT1H",
+                  "PT1H"
+                ]
               ]
             },
             "time": {

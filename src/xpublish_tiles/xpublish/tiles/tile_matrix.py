@@ -1,8 +1,8 @@
 """Tile matrix set definitions for OGC Tiles API"""
 
-from collections.abc import Hashable
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass
-from typing import cast
+from typing import Any, cast
 
 import cf_xarray as cfxr  # noqa: F401 - needed to enable .cf accessor
 import cftime
@@ -232,6 +232,46 @@ def get_all_tile_matrix_set_ids() -> list[str]:
     return list(TILE_MATRIX_SETS.keys())
 
 
+MAX_SEGMENTS = 16
+
+
+def _constant_step_segments(
+    values: np.ndarray,
+    fmt_value: Callable[[Any], str],
+    fmt_step: Callable[[Any], str],
+) -> list[list[str]] | None:
+    """Split a 1D axis into maximal runs of constant step, as ``[start, stop, step]``.
+
+    The gap between runs is not a step of either run (GFS ``lead_time``:
+    0-120 h hourly, then 123-384 h 3-hourly). None past ``MAX_SEGMENTS``.
+    """
+    n = len(values)
+    if n < 2:
+        return None
+    steps = values[1:] - values[:-1]
+    # k where steps[k] != steps[k-1]; a run starting at i ends at the first such k > i.
+    changes = np.flatnonzero(steps[1:] != steps[:-1]) + 1
+    segments: list[list[str]] = []
+    i = 0
+    while i < n:
+        if i == n - 1:
+            segments.append(
+                [
+                    fmt_value(values[i]),
+                    fmt_value(values[i]),
+                    fmt_step(values[i] - values[i]),
+                ]
+            )
+            break
+        k = np.searchsorted(changes, i, side="right")
+        j = int(changes[k]) if k < len(changes) else n - 1
+        segments.append([fmt_value(values[i]), fmt_value(values[j]), fmt_step(steps[i])])
+        if len(segments) > MAX_SEGMENTS:
+            return None
+        i = j + 1
+    return segments
+
+
 async def extract_dimension_extents(
     ds: xr.Dataset,
     name: Hashable,
@@ -295,6 +335,7 @@ async def extract_dimension_extents(
         extent: list[str | float | int] = []
         actual_values: list[str | float | int] | None = None
         resolution: str | float | int | None = None
+        segments: list[list[str]] | None = None
 
         if len(values) == 0:
             extent = []
@@ -308,6 +349,10 @@ async def extract_dimension_extents(
                 actual_values = [timedelta_to_iso8601(value) for value in values]
             if len(values) > 1:
                 resolution = _calculate_temporal_resolution(coord)
+            if resolution is None:
+                segments = _constant_step_segments(
+                    values, timedelta_to_iso8601, timedelta_to_iso8601
+                )
         elif np.issubdtype(values.dtype, np.datetime64):
             dim_type = DimensionType.TEMPORAL
             # Convert datetime to ISO strings - only get first and last values for extent
@@ -321,6 +366,10 @@ async def extract_dimension_extents(
                 ]
             if len(values) > 1:
                 resolution = _calculate_temporal_resolution(coord)
+            if resolution is None:
+                segments = _constant_step_segments(
+                    values, lambda v: pd.Timestamp(v).isoformat(), timedelta_to_iso8601
+                )
         elif isinstance(values[0], cftime.datetime):
             # Non-standard calendars decode to cftime objects, not datetime64.
             dim_type = DimensionType.TEMPORAL
@@ -329,6 +378,10 @@ async def extract_dimension_extents(
                 actual_values = [value.isoformat() for value in values]
             if len(values) > 1:
                 resolution = _calculate_temporal_resolution(coord)
+            if resolution is None:
+                segments = _constant_step_segments(
+                    values, lambda v: v.isoformat(), timedelta_to_iso8601
+                )
         elif np.issubdtype(values.dtype, np.number):
             # Numeric coordinates
             extent = [float(values.min()), float(values.max())]
@@ -369,6 +422,7 @@ async def extract_dimension_extents(
             default=default,
             values=actual_values,
             resolution=resolution,
+            segments=segments,
         )
         dimensions.append(dimension)
 

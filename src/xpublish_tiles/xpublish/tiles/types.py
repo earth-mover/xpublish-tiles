@@ -674,6 +674,15 @@ class DimensionExtent(BaseModel):
             }
         ),
     ] = None
+    segments: Annotated[
+        list[list[str]] | None,
+        Field(
+            json_schema_extra={
+                "description": "Irregular axis as maximal runs of constant step, "
+                "each [start, stop, step] (OGC WMS start/end/period list)",
+            }
+        ),
+    ] = None
     units: Annotated[
         str | None,
         Field(
