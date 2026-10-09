@@ -13,8 +13,9 @@
           "extents": {
             "rgb": {
               "default": "blue",
-              "interval": [
+              "values": [
                 "red",
+                "green",
                 "blue"
               ]
             }
@@ -2124,8 +2125,9 @@
           "extents": {
             "rgb": {
               "default": "blue",
-              "interval": [
+              "values": [
                 "red",
+                "green",
                 "blue"
               ]
             }
@@ -4193,8 +4195,9 @@
           "extents": {
             "rgb": {
               "default": "blue",
-              "interval": [
+              "values": [
                 "red",
+                "green",
                 "blue"
               ]
             }
@@ -6192,8 +6195,9 @@
           "extents": {
             "rgb": {
               "default": "blue",
-              "interval": [
+              "values": [
                 "red",
+                "green",
                 "blue"
               ]
             }
@@ -8282,8 +8286,9 @@
           "extents": {
             "rgb": {
               "default": "blue",
-              "interval": [
+              "values": [
                 "red",
+                "green",
                 "blue"
               ]
             }
@@ -10266,8 +10271,9 @@
           "extents": {
             "rgb": {
               "default": "blue",
-              "interval": [
+              "values": [
                 "red",
+                "green",
                 "blue"
               ]
             }
@@ -12306,8 +12312,9 @@
           "extents": {
             "rgb": {
               "default": "blue",
-              "interval": [
+              "values": [
                 "red",
+                "green",
                 "blue"
               ]
             }
@@ -14368,8 +14375,9 @@
           "extents": {
             "rgb": {
               "default": "blue",
-              "interval": [
+              "values": [
                 "red",
+                "green",
                 "blue"
               ]
             }
@@ -16430,8 +16438,9 @@
           "extents": {
             "rgb": {
               "default": "blue",
-              "interval": [
+              "values": [
                 "red",
+                "green",
                 "blue"
               ]
             }
@@ -18485,8 +18494,9 @@
           "extents": {
             "rgb": {
               "default": "blue",
-              "interval": [
+              "values": [
                 "red",
+                "green",
                 "blue"
               ]
             }
@@ -20540,8 +20550,9 @@
           "extents": {
             "rgb": {
               "default": "blue",
-              "interval": [
+              "values": [
                 "red",
+                "green",
                 "blue"
               ]
             }
@@ -22602,8 +22613,9 @@
           "extents": {
             "rgb": {
               "default": "blue",
-              "interval": [
+              "values": [
                 "red",
+                "green",
                 "blue"
               ]
             }
@@ -24657,8 +24669,9 @@
           "extents": {
             "rgb": {
               "default": "blue",
-              "interval": [
+              "values": [
                 "red",
+                "green",
                 "blue"
               ]
             }

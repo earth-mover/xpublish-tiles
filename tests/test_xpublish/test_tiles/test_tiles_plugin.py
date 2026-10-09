@@ -388,10 +388,10 @@ def test_multi_dimensional_dataset():
     # Check scenario extent (custom, now in layer)
     assert "scenario" in layer["extents"]
     scenario_extent = layer["extents"]["scenario"]
-    assert "interval" in scenario_extent
+    assert "interval" not in scenario_extent
     assert "description" in scenario_extent
     assert scenario_extent["description"] == "Climate scenario"
-    assert scenario_extent["interval"] == ["RCP45", "Historical"]
+    assert scenario_extent["values"] == ["RCP45", "RCP85", "Historical"]
 
 
 async def test_dimension_extraction_utilities():

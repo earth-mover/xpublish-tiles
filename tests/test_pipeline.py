@@ -4,6 +4,7 @@
 import asyncio
 import io
 from dataclasses import replace
+from itertools import pairwise
 from typing import Any
 
 import cf_xarray  # noqa: F401 - Enable cf accessor
@@ -777,6 +778,26 @@ def test_apply_query_selectors_method_nearest():
         hrrr, variables=["foo"], selectors={"time": f"pad::{target_time}"}
     )
     expected = hrrr.sel(time=target_time, method="pad").isel(step=-1)
+    xr.testing.assert_equal(actual["foo"].da, expected["foo"])
+
+
+@pytest.mark.parametrize(
+    "selector, expected_index",
+    [
+        ("1921-02-15T00:00:00", 1),
+        ("nearest::1921-02-16T12:00:00", 1),  # UI steps P1M from interval[0]
+        ("ffill::1921-03-01T00:00:00", 1),
+    ],
+)
+def test_apply_query_cftime_selectors(selector, expected_index):
+    """A non-standard calendar decodes to cftime; selectors parse to that class."""
+    starts = xr.date_range(
+        "1921-01-01", periods=4, freq="MS", calendar="julian", use_cftime=True
+    )
+    time = [a + (b - a) / 2 for a, b in pairwise(starts)]
+    hrrr = HRRR.create().isel(time=[0] * 3).assign_coords(time=time)
+    actual = apply_query(hrrr, variables=["foo"], selectors={"time": selector})
+    expected = hrrr.isel(time=expected_index, step=-1)
     xr.testing.assert_equal(actual["foo"].da, expected["foo"])
 
 

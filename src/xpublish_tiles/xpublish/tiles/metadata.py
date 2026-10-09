@@ -3,6 +3,7 @@ import re
 from typing import Any
 
 import morecantile.models
+import numpy as np
 import pyproj.exceptions
 
 import xarray as xr
@@ -29,6 +30,7 @@ from xpublish_tiles.xpublish.tiles.tile_matrix import (
 from xpublish_tiles.xpublish.tiles.types import (
     BoundingBox,
     DataType,
+    DimensionType,
     Layer,
     Link,
     Style,
@@ -177,7 +179,17 @@ async def extract_dataset_extents(
 
     extents: dict[str, dict[str, Any]] = {}
     for dim in dimensions:
-        extent_dict: dict[str, Any] = {"interval": dim.extent}
+        # A categorical [first, last] interval is meaningless; send the values instead.
+        # Past max_actual_values there are no values, so keep the interval.
+        extent_dict: dict[str, Any]
+        if (
+            dim.type == DimensionType.CUSTOM
+            and dim.values is not None
+            and isinstance(next(iter(dim.extent), None), str)
+        ):
+            extent_dict = {"values": dim.values}
+        else:
+            extent_dict = {"interval": dim.extent}
         if dim.resolution is not None:
             extent_dict["resolution"] = dim.resolution
         if dim.units:
@@ -255,11 +267,26 @@ def _calculate_temporal_resolution(values: xr.DataArray) -> str | None:
     try:
         freq = xr.infer_freq(values)
         if freq is None:
-            return None
+            return _calendar_step_resolution(values)
         return _pandas_freq_to_iso8601(freq)
     except Exception:
         # TypeError: not datetime-like, ValueError: not enough values or not 1D
         return None
+
+
+def _calendar_step_resolution(values: xr.DataArray) -> str | None:
+    """Return P1M or P1Y when every step spans one calendar month or year.
+
+    ``infer_freq`` needs anchored stamps; CMIP-style monthly means sit
+    mid-month (16th 12:00, 15th 00:00, ...), so match on step length instead.
+    """
+    steps = np.asarray(np.diff(values.values), dtype="timedelta64[ns]")
+    days = steps / np.timedelta64(1, "D")
+    if np.all((days >= 28) & (days <= 31)):
+        return "P1M"
+    if np.all((days >= 365) & (days <= 366)):
+        return "P1Y"
+    return None
 
 
 def extract_variable_bounding_box(

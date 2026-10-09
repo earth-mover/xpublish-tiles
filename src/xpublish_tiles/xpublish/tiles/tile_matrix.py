@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import cast
 
 import cf_xarray as cfxr  # noqa: F401 - needed to enable .cf accessor
+import cftime
 import morecantile
 import morecantile.errors
 import numpy as np
@@ -318,6 +319,14 @@ async def extract_dimension_extents(
                     value.isoformat()
                     for value in cast(list[pd.Timestamp], pd.to_datetime(values))
                 ]
+            if len(values) > 1:
+                resolution = _calculate_temporal_resolution(coord)
+        elif isinstance(values[0], cftime.datetime):
+            # Non-standard calendars decode to cftime objects, not datetime64.
+            dim_type = DimensionType.TEMPORAL
+            extent = [values[0].isoformat(), values[-1].isoformat()]
+            if len(values) <= max_actual_values:
+                actual_values = [value.isoformat() for value in values]
             if len(values) > 1:
                 resolution = _calculate_temporal_resolution(coord)
         elif np.issubdtype(values.dtype, np.number):
