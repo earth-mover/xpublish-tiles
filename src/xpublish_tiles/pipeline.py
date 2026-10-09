@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any, cast
 
+import cftime
 import numpy as np
 import pandas as pd
 import pydantic
@@ -1011,6 +1012,11 @@ def _cast_selector(coord: xr.DataArray, name: Hashable, value: str) -> Any:
     IndexingError
         If ``value`` cannot be interpreted as a label along ``coord``.
     """
+    if coord.size and isinstance(first := coord.values.flat[0], cftime.datetime):
+        # ``np.object_`` keeps the str, and inexact methods cannot compare str to cftime.
+        with contextlib.suppress(ValueError):
+            parsed = datetime.datetime.fromisoformat(value)
+            return type(first)(*parsed.timetuple()[:6], parsed.microsecond)
     try:
         typed = coord.dtype.type(value)
         if coord.dtype.kind in "mM" and np.isnat(typed):

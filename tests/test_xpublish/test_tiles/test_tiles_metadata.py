@@ -1,5 +1,8 @@
 """Tests for tiles metadata functionality"""
 
+from datetime import timedelta
+from itertools import pairwise
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -102,6 +105,11 @@ async def test_extract_dataset_extents():
     assert time_extent["interval"][0] == "2023-01-01T00:00:00"
     assert time_extent["interval"][1] == "2023-01-01T02:00:00"
     assert time_extent["resolution"] == "PT1H"  # Hourly
+    assert time_extent["values"] == [
+        "2023-01-01T00:00:00",
+        "2023-01-01T01:00:00",
+        "2023-01-01T02:00:00",
+    ]
 
     # Check elevation extent
     elevation_extent = extents["elevation"]
@@ -114,12 +122,56 @@ async def test_extract_dataset_extents():
     assert elevation_extent["description"] == "Height above ground"
     assert elevation_extent["resolution"] == 100.0  # Min step size
 
-    # Check scenario extent (categorical)
+    # Categorical: every value, no meaningless [first, last] interval
     scenario_extent = extents["scenario"]
-    assert "interval" in scenario_extent
+    assert "interval" not in scenario_extent
     assert "description" in scenario_extent
-    assert scenario_extent["interval"] == ["A", "B"]
+    assert scenario_extent["values"] == ["A", "B"]
     assert scenario_extent["description"] == "Test scenario"
+
+
+def _mid_month(n: int, calendar: str) -> list:
+    """Mid-month stamps, as CMIP-style monthly means store them."""
+    starts = xr.date_range(
+        "1921-01-01", periods=n + 1, freq="MS", calendar=calendar, use_cftime=True
+    )
+    return [a + (b - a) / 2 for a, b in pairwise(starts)]
+
+
+async def test_extract_dataset_extents_cftime_monthly():
+    """A julian mid-month axis reports as temporal, ISO, monthly."""
+    time = _mid_month(60, "julian")
+    dataset = xr.Dataset(
+        {
+            "tas": (
+                ("member_id", "time", "lat", "lon"),
+                np.zeros((30, 60, 5, 10)),
+            )
+        },
+        coords={
+            "member_id": [f"r{i}i1p1f1" for i in range(1, 31)],
+            "time": ("time", time, {"axis": "T", "standard_name": "time"}),
+            "lat": (
+                "lat",
+                np.linspace(-2, 2, 5),
+                {"axis": "Y", "standard_name": "latitude"},
+            ),
+            "lon": (
+                "lon",
+                np.linspace(-5, 5, 10),
+                {"axis": "X", "standard_name": "longitude"},
+            ),
+        },
+    )
+
+    extents = await extract_dataset_extents(dataset, "tas")
+
+    assert extents["time"]["interval"] == ["1921-01-16T12:00:00", "1925-12-16T12:00:00"]
+    assert extents["time"]["resolution"] == "P1M"
+    assert extents["time"]["default"] == "1925-12-16T12:00:00"
+    assert "values" not in extents["time"]  # 60 > max_actual_values
+    assert "interval" not in extents["member_id"]
+    assert extents["member_id"]["values"] == [f"r{i}i1p1f1" for i in range(1, 31)]
 
 
 async def test_extract_dataset_extents_empty():
@@ -308,6 +360,37 @@ def test_calculate_temporal_resolution(use_cftime, freq, expected):
 def test_pandas_freq_to_iso8601(pandas_freq, expected_iso):
     """Test conversion of pandas frequency strings to ISO 8601 durations"""
     assert _pandas_freq_to_iso8601(pandas_freq) == expected_iso
+
+
+@pytest.mark.parametrize("calendar", ["julian", "noleap", "standard"])
+def test_calculate_temporal_resolution_calendar_steps(calendar):
+    """Mid-month stamps defeat infer_freq; report P1M."""
+    monthly = xr.DataArray(_mid_month(36, calendar), dims="time")
+    assert _calculate_temporal_resolution(monthly) == "P1M"
+
+    # One missing month is irregular
+    gappy = xr.DataArray(
+        _mid_month(36, calendar)[:10] + _mid_month(36, calendar)[11:], dims="time"
+    )
+    assert _calculate_temporal_resolution(gappy) is None
+
+
+@pytest.mark.parametrize("calendar", ["julian", "standard"])
+def test_calculate_temporal_resolution_mid_year(calendar):
+    """Leap years make mid-year steps 365 or 366 days; infer_freq gives up."""
+    starts = xr.date_range(
+        "1921-01-01", periods=5, freq="YS", calendar=calendar, use_cftime=True
+    )
+    yearly = xr.DataArray([s + timedelta(days=182) for s in starts], dims="time")
+    assert _calculate_temporal_resolution(yearly) == "P1Y"
+
+
+def test_calculate_temporal_resolution_mid_month_datetime64():
+    monthly = xr.DataArray(
+        xr.CFTimeIndex(_mid_month(36, "standard")).to_datetimeindex(time_unit="ns"),
+        dims="time",
+    )
+    assert _calculate_temporal_resolution(monthly) == "P1M"
 
 
 def test_calculate_temporal_resolution_edge_cases():
