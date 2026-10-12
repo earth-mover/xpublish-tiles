@@ -267,7 +267,7 @@ def summaries():
         "request_id", default=None
     )
     with config.set(
-        summary_writer=lambda summary: written.append((summary, request_id.get()))
+        log_summary_writer=lambda summary: written.append((summary, request_id.get()))
     ):
         yield written, request_id
 
@@ -298,13 +298,13 @@ async def test_raising_summary_writer_keeps_the_response(restore_logging):
             pass
         return "png"
 
-    with config.set(summary_writer=_raise_on_summary):
+    with config.set(log_summary_writer=_raise_on_summary):
         assert await endpoint() == "png"
 
 
 async def test_resetting_the_writer_restores_stdout(capsys, summaries, restore_logging):
     setup_logging(logging.INFO)
-    with config.set(summary_writer=None):
+    with config.set(log_summary_writer=None):
         await _endpoint()
     assert capsys.readouterr().out.startswith("tile 4/4/10 (total: ")
     assert summaries[0] == []

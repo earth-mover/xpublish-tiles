@@ -33,7 +33,7 @@ config = donfig.Config(
             "minzoom_polar_cutoff": 85.0511,
             # Callable[[str], None] that gets each request's summary block; None writes
             # to stdout. It runs in the request's context, so it can read contextvars.
-            "summary_writer": None,
+            "log_summary_writer": None,
         }
     ],
     paths=[],

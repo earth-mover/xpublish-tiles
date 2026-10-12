@@ -66,7 +66,7 @@ def _write_summary_to_stdout(summary: str) -> None:
 
 
 def _get_summary_writer() -> SummaryWriter:
-    return config.get("summary_writer") or _write_summary_to_stdout
+    return config.get("log_summary_writer") or _write_summary_to_stdout
 
 
 def record_wait(key: str, duration_ms: float) -> None:
