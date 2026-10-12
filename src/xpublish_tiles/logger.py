@@ -5,6 +5,7 @@ Logging setup and shared logger for the xpublish_tiles package.
 import contextlib
 import contextvars
 import copy
+import dataclasses
 import functools
 import inspect
 import logging
@@ -31,6 +32,8 @@ class LogAccumulator:
         # pool threads of one request write here concurrently
         self.stages: dict[str, float] = {}
         self.waits: dict[str, float] = {}
+        # wall ms of the whole request; set once the handler finishes
+        self.total_ms: float | None = None
         self._lock = threading.Lock()
 
     def add(self, totals: dict[str, float], key: str, duration_ms: float) -> None:
@@ -67,6 +70,28 @@ def _write_summary_to_stdout(summary: str) -> None:
 
 def _get_summary_writer() -> SummaryWriter:
     return config.get("log_summary_writer") or _write_summary_to_stdout
+
+
+@dataclasses.dataclass(frozen=True)
+class RequestTimings:
+    """Summed wall ms per `log_duration` key and per wait for one request."""
+
+    stages: dict[str, float]
+    waits: dict[str, float]
+    total_ms: float | None
+
+
+def request_timings() -> RequestTimings | None:
+    """Timings of the request in progress, or None outside one; `total_ms` is set inside a `log_summary_writer` call."""
+    accumulator = _context_accumulator.get()
+    if accumulator is None:
+        return None
+    with accumulator._lock:
+        return RequestTimings(
+            stages=dict(accumulator.stages),
+            waits=dict(accumulator.waits),
+            total_ms=accumulator.total_ms,
+        )
 
 
 def record_wait(key: str, duration_ms: float) -> None:
@@ -332,6 +357,7 @@ def with_accumulated_logs(
                 raise
             finally:
                 total_ms = (time.perf_counter() - start_time) * 1000
+                accumulator.total_ms = total_ms
                 try:
                     if span is not None:
                         _write_root_span(span, accumulator, total_ms, status)
