@@ -17,6 +17,7 @@ from typing import Any
 import structlog
 
 from xpublish_tiles import telemetry
+from xpublish_tiles.config import config
 
 
 class LogAccumulator:
@@ -55,6 +56,17 @@ _context_accumulator: contextvars.ContextVar[LogAccumulator | None] = (
 
 # Lock to serialize the final flush so concurrent requests don't interleave
 _flush_lock = threading.Lock()
+
+SummaryWriter = Callable[[str], None]
+
+
+def _write_summary_to_stdout(summary: str) -> None:
+    sys.stdout.write(summary + "\n\n")  # Empty line after each request
+    sys.stdout.flush()
+
+
+def _get_summary_writer() -> SummaryWriter:
+    return config.get("log_summary_writer") or _write_summary_to_stdout
 
 
 def record_wait(key: str, duration_ms: float) -> None:
@@ -349,14 +361,18 @@ def with_accumulated_logs(
                         for log_entry in accumulator.logs:
                             rendered = console_renderer(None, None, log_entry)
                             lines.append(f"   {rendered}")
-                        lines.append("")  # Empty line after each request
-                        output = "\n".join(lines) + "\n"
+                        summary = "\n".join(lines)
 
                         # Single atomic write under a lock so concurrent
                         # requests don't interleave their log blocks.
                         with _flush_lock:
-                            sys.stdout.write(output)
-                            sys.stdout.flush()
+                            try:
+                                _get_summary_writer()(summary)
+                            except Exception:
+                                # raising inside `finally` would replace the response
+                                logger.warning(
+                                    "writing the request summary failed", exc_info=True
+                                )
                 finally:
                     _context_accumulator.reset(accumulator_token)
 
