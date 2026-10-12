@@ -6,11 +6,11 @@ import time
 import pytest
 
 from xpublish_tiles import lib, telemetry
+from xpublish_tiles.config import config
 from xpublish_tiles.lib import async_run
 from xpublish_tiles.logger import (
     log_duration,
     record_wait,
-    set_summary_writer,
     setup_logging,
     with_accumulated_logs,
 )
@@ -266,9 +266,10 @@ def summaries():
     request_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
         "request_id", default=None
     )
-    set_summary_writer(lambda summary: written.append((summary, request_id.get())))
-    yield written, request_id
-    set_summary_writer(None)
+    with config.set(
+        summary_writer=lambda summary: written.append((summary, request_id.get()))
+    ):
+        yield written, request_id
 
 
 async def test_summary_writer_replaces_stdout(capsys, summaries, restore_logging):
@@ -290,24 +291,21 @@ def _raise_on_summary(summary: str) -> None:
 
 async def test_raising_summary_writer_keeps_the_response(restore_logging):
     setup_logging(logging.INFO)
-    set_summary_writer(_raise_on_summary)
-    try:
 
-        @with_accumulated_logs(log_message_fn=lambda: "tile")
-        async def endpoint():
-            with log_duration("render", key="render"):
-                pass
-            return "png"
+    @with_accumulated_logs(log_message_fn=lambda: "tile")
+    async def endpoint():
+        with log_duration("render", key="render"):
+            pass
+        return "png"
 
+    with config.set(summary_writer=_raise_on_summary):
         assert await endpoint() == "png"
-    finally:
-        set_summary_writer(None)
 
 
 async def test_resetting_the_writer_restores_stdout(capsys, summaries, restore_logging):
     setup_logging(logging.INFO)
-    set_summary_writer(None)
-    await _endpoint()
+    with config.set(summary_writer=None):
+        await _endpoint()
     assert capsys.readouterr().out.startswith("tile 4/4/10 (total: ")
     assert summaries[0] == []
 

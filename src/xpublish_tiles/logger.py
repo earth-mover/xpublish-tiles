@@ -17,6 +17,7 @@ from typing import Any
 import structlog
 
 from xpublish_tiles import telemetry
+from xpublish_tiles.config import config
 
 
 class LogAccumulator:
@@ -64,14 +65,8 @@ def _write_summary_to_stdout(summary: str) -> None:
     sys.stdout.flush()
 
 
-_summary_writer: SummaryWriter = _write_summary_to_stdout
-
-
-def set_summary_writer(writer: SummaryWriter | None) -> None:
-    """Route each request's summary block to `writer`; None restores stdout."""
-    # The writer runs in the request's context, so it can read the caller's contextvars.
-    global _summary_writer
-    _summary_writer = writer if writer is not None else _write_summary_to_stdout
+def _get_summary_writer() -> SummaryWriter:
+    return config.get("summary_writer") or _write_summary_to_stdout
 
 
 def record_wait(key: str, duration_ms: float) -> None:
@@ -372,7 +367,7 @@ def with_accumulated_logs(
                         # requests don't interleave their log blocks.
                         with _flush_lock:
                             try:
-                                _summary_writer(summary)
+                                _get_summary_writer()(summary)
                             except Exception:
                                 # raising inside `finally` would replace the response
                                 logger.warning(

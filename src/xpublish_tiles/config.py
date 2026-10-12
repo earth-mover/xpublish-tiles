@@ -31,6 +31,9 @@ config = donfig.Config(
             # degrees; minzoom ignores geographic-grid tiles poleward of this (Web
             # Mercator limit, so WebMercatorQuad is unaffected)
             "minzoom_polar_cutoff": 85.0511,
+            # Callable[[str], None] that gets each request's summary block; None writes
+            # to stdout. It runs in the request's context, so it can read contextvars.
+            "summary_writer": None,
         }
     ],
     paths=[],
