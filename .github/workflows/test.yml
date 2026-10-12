@@ -34,6 +34,15 @@ jobs:
       - name: Install the project
         run: uv sync --locked --dev
 
+      - name: Cache xarray tutorial data
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/xarray_tutorial_data
+          key: xarray-tutorial-data-v1
+
+      - name: Prefetch xarray tutorial data
+        run: uv run python -c "import xarray as xr; xr.tutorial.load_dataset('air_temperature')"
+
       - name: Run Type Checker
         if: matrix.shard == 1
         run: uv run ty check src/ tests/
