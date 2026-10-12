@@ -9,8 +9,10 @@ from xpublish_tiles import lib, telemetry
 from xpublish_tiles.config import config
 from xpublish_tiles.lib import async_run
 from xpublish_tiles.logger import (
+    RequestTimings,
     log_duration,
     record_wait,
+    request_timings,
     setup_logging,
     with_accumulated_logs,
 )
@@ -310,7 +312,24 @@ async def test_resetting_the_writer_restores_stdout(capsys, summaries, restore_l
     assert summaries[0] == []
 
 
+async def test_summary_writer_reads_request_timings(restore_logging):
+    setup_logging(logging.INFO)
+    seen: list[RequestTimings | None] = []
+    with config.set(log_summary_writer=lambda summary: seen.append(request_timings())):
+        assert await _keyed_endpoint() == "tile"
+
+    (timings,) = seen
+    assert timings is not None
+    assert timings.stages.keys() == {"load", "render"}
+    assert timings.stages["load"] >= 10
+    assert timings.stages["render"] >= 20
+    assert timings.total_ms is not None
+    assert timings.total_ms >= timings.stages["load"] + timings.stages["render"]
+    assert timings.waits.keys() == {"thread_pool"}
+
+
 def test_no_request_context_is_a_noop():
     with log_duration("outside", key="render"):
         pass
     record_wait("thread_pool", 1.0)
+    assert request_timings() is None
