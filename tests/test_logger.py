@@ -284,9 +284,13 @@ async def test_summary_writer_replaces_stdout(capsys, summaries, restore_logging
     assert seen_id == "req-1"
 
 
+def _raise_on_summary(summary: str) -> None:
+    raise RuntimeError("writer bug")
+
+
 async def test_raising_summary_writer_keeps_the_response(restore_logging):
     setup_logging(logging.INFO)
-    set_summary_writer(lambda summary: _raise_name())
+    set_summary_writer(_raise_on_summary)
     try:
 
         @with_accumulated_logs(log_message_fn=lambda: "tile")
