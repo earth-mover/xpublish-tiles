@@ -417,6 +417,19 @@ Settings can be configured via environment variables or config files. The async 
 7. `XPUBLISH_TILES_DEFAULT_PAD: int` - how much to pad a selection on either side
 8. `XPUBLISH_TILES_GRID_CACHE_MAX_SIZE: int` - maximum number of grid systems to cache (default: 16). **Note:** This must be set via environment variable before importing the module, as the cache is initialized at import time.
 
+## Logging
+
+### Request summary
+At log level `info` or `debug`, each request logs one summary line: `<request> (total: Nms)`.
+
+The summary block goes to stdout by default. To route it through your own logging, set the `log_summary_writer` config option to a `Callable[[str], None]`. The writer gets the block as one string and runs in the request's context, so it can read your [`contextvars`](https://docs.python.org/3/library/contextvars.html) (a request id, for example).
+
+```python
+from xpublish_tiles.config import config
+
+config.set(log_summary_writer=lambda summary: my_logger.info(summary))
+```
+
 ### Datadog stage timings
 Install the `datadog` extra (`pip install "xpublish-tiles[datadog]"`) to write per-request timings to the root span of the request's ddtrace trace. Without ddtrace, nothing is written.
 
@@ -424,8 +437,6 @@ Install the `datadog` extra (`pip install "xpublish-tiles[datadog]"`) to write p
 - `tiles.wait_ms.thread_pool`: time spent waiting for a thread-pool slot.
 - `tiles.total_ms`: request wall time.
 - `tiles.status` tag: `ok`, `error` or `cancelled`.
-
-At log level `info` or `debug`, each request also logs one summary line: `<request> (total: Nms)`.
 
 ## Performance Notes
 
