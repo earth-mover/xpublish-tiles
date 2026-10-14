@@ -739,6 +739,9 @@ def test_apply_query_integral_float_selector_on_int_coord():
     with pytest.raises(IndexingError, match=r"could not interpret '1995\.5'"):
         apply_query(ds, variables=["v"], selectors={"year": "1995.5"})
 
+    with pytest.raises(IndexingError, match=r"could not interpret 'abc'"):
+        apply_query(ds, variables=["v"], selectors={"year": "abc"})
+
 
 def test_apply_query_selectors_method_nearest():
     hrrr = HRRR.create().reindex(

@@ -301,6 +301,19 @@ async def test_extract_dataset_extents_numeric_regular_int():
         assert type(value) is int
 
 
+async def test_extract_dataset_extents_numeric_descending_unsigned():
+    """Unsigned steps must not wrap around on a descending axis."""
+    years = np.arange(2020, 1989, -5, dtype="uint16")
+    extents = await extract_dataset_extents(_axis_dataset("year", years), "v")
+    assert extents["year"]["resolution"] == 5
+
+
+async def test_extract_dataset_extents_numeric_single_value():
+    extents = await extract_dataset_extents(_axis_dataset("level", np.array([10.0])), "v")
+    assert extents["level"]["values"] == [10.0]
+    assert "resolution" not in extents["level"]
+
+
 async def test_extract_dataset_extents_numeric_long_regular_float():
     levels = np.linspace(0, 1, 101)
     extents = await extract_dataset_extents(_axis_dataset("level", levels), "v")

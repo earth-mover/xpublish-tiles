@@ -1,3 +1,4 @@
+import numpy as np
 import pyproj
 import pytest
 from pyproj.aoi import BBox
@@ -5,6 +6,7 @@ from pyproj.aoi import BBox
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     TILE_MATRIX_SETS,
+    _nominal_resolution,
     extract_tile_bbox_and_crs,
     get_tile_matrix_set,
     get_tile_matrix_set_summary,
@@ -242,3 +244,18 @@ class TestGenericTileMatrixFunctions:
         assert -web_mercator_bound <= bbox.south <= web_mercator_bound
         assert -web_mercator_bound <= bbox.east <= web_mercator_bound
         assert -web_mercator_bound <= bbox.north <= web_mercator_bound
+
+
+@pytest.mark.parametrize(
+    "seconds",
+    [
+        pytest.param([0, 0, 0, 0], id="zero-median"),
+        pytest.param([0, 1, 4], id="no-step-near-median"),
+        pytest.param([0, 0.1, 0.2, 0.3], id="sub-second-step"),
+    ],
+)
+def test_nominal_resolution_none(seconds):
+    values = np.datetime64("2024-01-01", "ns") + (np.array(seconds) * 1e9).astype(
+        "timedelta64[ns]"
+    )
+    assert _nominal_resolution(values) is None
