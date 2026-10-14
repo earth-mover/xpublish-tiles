@@ -211,6 +211,8 @@ async def test_extract_dataset_extents_repeating_intervals_datetime_gap():
         "R10/2020-01-01T00:00:00/P1D",
         "R6/2020-01-15T00:00:00/P1D",
     ]
+    # Exact runs win over a nominal step.
+    assert "resolution" not in extents["time"]
 
 
 async def test_extract_dataset_extents_repeating_intervals_trailing_point():
@@ -235,6 +237,40 @@ async def test_extract_dataset_extents_no_repeating_intervals():
     extents = await extract_dataset_extents(ds, "v")
     assert "values" not in extents["time"]
     assert "resolution" not in extents["time"]
+
+
+def _jittered_scans(jitter_s: float) -> pd.DatetimeIndex:
+    """GOES-style scan stamps: 10 min apart with jitter, outage gaps and a few odd steps."""
+    rng = np.random.default_rng(0)
+    slots = np.arange(2000.0)
+    slots = slots[(slots < 500) | (slots >= 530)]  # 5 h outage
+    slots = slots[slots != 1200]  # one missed scan
+    slots = np.sort(np.concatenate([slots, [700.5, 1500.76]]))  # off-grid scans
+    seconds = slots * 600 + rng.uniform(-jitter_s, jitter_s, len(slots))
+    return pd.DatetimeIndex(
+        np.datetime64("2024-01-01T00:05:06", "ns")
+        + (seconds * 1e9).astype("timedelta64[ns]")
+    )
+
+
+async def test_extract_dataset_extents_nominal_resolution():
+    """A jittered axis with too many runs gets its nominal step as resolution."""
+    ds = _axis_dataset(
+        "t", _jittered_scans(jitter_s=0.7), {"axis": "T", "standard_name": "time"}
+    )
+    extents = await extract_dataset_extents(ds, "v")
+    assert extents["t"]["resolution"] == "PT10M"
+    assert "values" not in extents["t"]
+
+
+async def test_extract_dataset_extents_no_nominal_resolution():
+    """Jitter larger than the tolerance gives no resolution."""
+    ds = _axis_dataset(
+        "t", _jittered_scans(jitter_s=30), {"axis": "T", "standard_name": "time"}
+    )
+    extents = await extract_dataset_extents(ds, "v")
+    assert "resolution" not in extents["t"]
+    assert "values" not in extents["t"]
 
 
 async def test_extract_dataset_extents_empty():

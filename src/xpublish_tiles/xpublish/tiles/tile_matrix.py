@@ -271,6 +271,33 @@ def _repeating_intervals(
     ]
 
 
+NOMINAL_STEP_MIN_FRACTION = 0.99
+NOMINAL_STEP_RTOL = 0.01
+
+
+def _nominal_resolution(values: np.ndarray) -> str | None:
+    """Median step, rounded to whole seconds, as an ISO 8601 duration.
+
+    For jittered stamps that defeat ``infer_freq`` and repeating intervals (GOES
+    scans: 600 s ± 1 s with outage gaps). At least ``NOMINAL_STEP_MIN_FRACTION`` of
+    steps must be within ``NOMINAL_STEP_RTOL`` of a whole multiple of it. Clients
+    select with ``nearest::``.
+    """
+    if len(values) < 3:
+        return None
+    steps = np.diff(values).astype("timedelta64[ns]").astype(np.int64)
+    step = round(float(np.median(steps)) / 1e9) * 1_000_000_000
+    if step <= 0:
+        return None
+    multiple = np.round(steps / step)
+    close = (multiple >= 1) & (
+        np.abs(steps - multiple * step) <= NOMINAL_STEP_RTOL * step
+    )
+    if close.mean() < NOMINAL_STEP_MIN_FRACTION:
+        return None
+    return timedelta_to_iso8601(np.timedelta64(step, "ns"))
+
+
 async def extract_dimension_extents(
     ds: xr.Dataset,
     name: Hashable,
@@ -352,6 +379,8 @@ async def extract_dimension_extents(
                 repeating = _repeating_intervals(
                     values, timedelta_to_iso8601, timedelta_to_iso8601
                 )
+            if resolution is None and repeating is None:
+                resolution = _nominal_resolution(values)
         elif np.issubdtype(values.dtype, np.datetime64):
             dim_type = DimensionType.TEMPORAL
             # Convert datetime to ISO strings - only get first and last values for extent
@@ -369,6 +398,8 @@ async def extract_dimension_extents(
                 repeating = _repeating_intervals(
                     values, lambda v: pd.Timestamp(v).isoformat(), timedelta_to_iso8601
                 )
+            if resolution is None and repeating is None:
+                resolution = _nominal_resolution(values)
         elif isinstance(values[0], cftime.datetime):
             # Non-standard calendars decode to cftime objects, not datetime64.
             dim_type = DimensionType.TEMPORAL
