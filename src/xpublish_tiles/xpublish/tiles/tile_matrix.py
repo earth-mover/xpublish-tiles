@@ -14,6 +14,7 @@ import pyproj
 import pyproj.aoi
 
 import xarray as xr
+from xpublish_tiles.config import config
 from xpublish_tiles.grids import GridSystem, guess_grid_system
 from xpublish_tiles.lib import TileTooBigError, async_run, cf_get, timedelta_to_iso8601
 from xpublish_tiles.logger import logger
@@ -232,9 +233,6 @@ def get_all_tile_matrix_set_ids() -> list[str]:
     return list(TILE_MATRIX_SETS.keys())
 
 
-MAX_REPEATING_INTERVALS = 16
-
-
 def _repeating_intervals(
     values: np.ndarray,
     fmt_value: Callable[[Any], str],
@@ -244,7 +242,7 @@ def _repeating_intervals(
 
     One interval per maximal run of constant step, as OGC API EDR ``extent.values``.
     The jump between runs is not a step of either run (GFS ``lead_time``:
-    0-120 h hourly, then 123-384 h 3-hourly). None past ``MAX_REPEATING_INTERVALS``.
+    0-120 h hourly, then 123-384 h 3-hourly). None past the ``max_repeating_intervals`` option.
     """
     n = len(values)
     if n < 2:
@@ -261,7 +259,7 @@ def _repeating_intervals(
     is_end = candidate & ((idx - chain_start) % 2 == 0)
     is_end[-1] = True
     ends = np.flatnonzero(is_end)
-    if len(ends) > MAX_REPEATING_INTERVALS:
+    if len(ends) > config.get("max_repeating_intervals"):
         return None
     starts = np.concatenate([[0], ends[:-1] + 1])
     zero = values[0] - values[0]
@@ -271,29 +269,50 @@ def _repeating_intervals(
     ]
 
 
-NOMINAL_STEP_MIN_FRACTION = 0.99
-NOMINAL_STEP_RTOL = 0.01
+def _numeric_resolution(values: np.ndarray) -> int | float | None:
+    """The absolute step when every step is equal (floats: to rounding), else None."""
+    if len(values) < 2:
+        return None
+    steps = np.diff(values)
+    if np.issubdtype(steps.dtype, np.integer):
+        regular = bool(np.all(steps == steps[0]))
+    else:
+        regular = bool(np.allclose(steps, steps[0], rtol=1e-6, atol=0))
+    if not regular or steps[0] == 0:
+        return None
+    return abs(steps[0].item())
 
 
 def _nominal_resolution(values: np.ndarray) -> str | None:
-    """Median step, rounded to whole seconds, as an ISO 8601 duration.
+    """Mean step over whole multiples, rounded to whole seconds, as an ISO 8601 duration.
 
     For jittered stamps that defeat ``infer_freq`` and repeating intervals (GOES
-    scans: 600 s ± 1 s with outage gaps). At least ``NOMINAL_STEP_MIN_FRACTION`` of
-    steps must be within ``NOMINAL_STEP_RTOL`` of a whole multiple of it. Clients
-    select with ``nearest::``.
+    scans: 600 s ± 1 s with outage gaps). The ``nominal_step_min_fraction`` and
+    ``nominal_step_rtol`` options set how many steps must be near a whole multiple
+    of it. Clients select with ``nearest::``.
     """
     if len(values) < 3:
         return None
     steps = np.diff(values).astype("timedelta64[ns]").astype(np.int64)
-    step = round(float(np.median(steps)) / 1e9) * 1_000_000_000
+    rtol = config.get("nominal_step_rtol")
+
+    def near_multiples(step: float) -> tuple[np.ndarray, np.ndarray]:
+        multiple = np.round(steps / step)
+        close = (multiple >= 1) & (np.abs(steps - multiple * step) <= rtol * step)
+        return multiple, close
+
+    median = float(np.median(steps))
+    if median <= 0:
+        return None
+    # A median off by 1 s drifts ~1 day over 10^5 steps; the mean over multiples does not.
+    multiple, close = near_multiples(median)
+    if not close.any():
+        return None
+    step = round(steps[close].sum() / multiple[close].sum() / 1e9) * 1_000_000_000
     if step <= 0:
         return None
-    multiple = np.round(steps / step)
-    close = (multiple >= 1) & (
-        np.abs(steps - multiple * step) <= NOMINAL_STEP_RTOL * step
-    )
-    if close.mean() < NOMINAL_STEP_MIN_FRACTION:
+    _, close = near_multiples(step)
+    if close.mean() < config.get("nominal_step_min_fraction"):
         return None
     return timedelta_to_iso8601(np.timedelta64(step, "ns"))
 
@@ -413,15 +432,18 @@ async def extract_dimension_extents(
                     values, lambda v: v.isoformat(), timedelta_to_iso8601
                 )
         elif np.issubdtype(values.dtype, np.number):
-            # Numeric coordinates
-            extent = [float(values.min()), float(values.max())]
+            # ``.item()`` keeps ints as JSON ints, so clients can echo them back.
+            extent = [values.min().item(), values.max().item()]
             if len(values) <= max_actual_values:
-                actual_values = values
-            if len(values) > 1:
-                numeric = values
-                if np.issubdtype(values.dtype, np.unsignedinteger):
-                    numeric = values.astype(np.int64)
-                resolution = float(np.abs(np.diff(numeric)).min())
+                actual_values = values.tolist()
+            numeric = values
+            if np.issubdtype(values.dtype, np.unsignedinteger):
+                numeric = values.astype(np.int64)
+            resolution = _numeric_resolution(numeric)
+            if resolution is None and actual_values is None:
+                repeating = _repeating_intervals(
+                    numeric, lambda v: str(v.item()), lambda v: str(v.item())
+                )
         else:
             extent = [str(values[0]), str(values[-1])]
             if len(values) <= max_actual_values:

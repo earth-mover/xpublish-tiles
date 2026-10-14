@@ -1004,6 +1004,13 @@ def _parse_timedelta(value: str) -> np.timedelta64:
     return parsed.to_timedelta64()
 
 
+def _is_integral_float(value: str) -> bool:
+    try:
+        return float(value).is_integer()
+    except ValueError:
+        return False
+
+
 def _cast_selector(coord: xr.DataArray, name: Hashable, value: str) -> Any:
     """Cast a string selector to ``coord``'s dtype.
 
@@ -1053,6 +1060,9 @@ def _cast_selector(coord: xr.DataArray, name: Hashable, value: str) -> Any:
                 raise IndexingError(
                     f"Invalid value for {name!r}: could not interpret {value!r} as a datetime."
                 ) from None
+        elif coord.dtype.kind in "iu" and _is_integral_float(value):
+            # A client that echoes a JSON number may send ``1995.0``.
+            return coord.dtype.type(int(float(value)))
         else:
             logger.warning(
                 "Failed to cast selector",

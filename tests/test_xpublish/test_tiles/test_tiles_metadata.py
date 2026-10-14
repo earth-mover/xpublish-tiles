@@ -113,11 +113,13 @@ async def test_extract_dataset_extents():
     assert "interval" in elevation_extent
     assert "units" in elevation_extent
     assert "description" in elevation_extent
-    assert "resolution" in elevation_extent
-    assert elevation_extent["interval"] == [0.0, 500.0]
+    assert elevation_extent["interval"] == [0, 500]
+    assert all(type(v) is int for v in elevation_extent["interval"])
     assert elevation_extent["units"] == "meters"
     assert elevation_extent["description"] == "Height above ground"
-    assert elevation_extent["resolution"] == 100.0  # Min step size
+    # Irregular steps: exact values, no resolution
+    assert elevation_extent["values"] == [0, 100, 500]
+    assert "resolution" not in elevation_extent
 
     # Categorical: every value, no meaningless [first, last] interval
     scenario_extent = extents["scenario"]
@@ -199,6 +201,10 @@ async def test_extract_dataset_extents_repeating_intervals_lead_time():
     assert "resolution" not in extents["lead_time"]
     assert extents["lead_time"]["values"] == ["R121/PT0S/PT1H", "R88/P5DT3H/PT3H"]
 
+    with config.set(max_repeating_intervals=1):
+        extents = await extract_dataset_extents(_axis_dataset("lead_time", lead), "v")
+    assert "values" not in extents["lead_time"]
+
 
 async def test_extract_dataset_extents_repeating_intervals_datetime_gap():
     time = pd.DatetimeIndex(
@@ -229,7 +235,7 @@ async def test_extract_dataset_extents_no_repeating_intervals():
     assert extents["time"]["resolution"] == "PT1H"
     assert "values" not in extents["time"]
 
-    # 40 distinct gaps → more runs than MAX_REPEATING_INTERVALS
+    # 40 distinct gaps → more runs than the max_repeating_intervals option
     irregular = pd.DatetimeIndex(
         np.cumsum(np.arange(1, 41)).astype("timedelta64[h]") + np.datetime64("2020-01-01")
     )
@@ -271,6 +277,45 @@ async def test_extract_dataset_extents_no_nominal_resolution():
     extents = await extract_dataset_extents(ds, "v")
     assert "resolution" not in extents["t"]
     assert "values" not in extents["t"]
+
+    with config.set(nominal_step_rtol=0.1):
+        extents = await extract_dataset_extents(ds, "v")
+    assert extents["t"]["resolution"] == "PT10M"
+
+
+async def test_extract_dataset_extents_numeric_regular_int():
+    """Integer years keep int types and get their exact step."""
+    years = np.arange(1990, 2021, 5, dtype="int32")
+    extents = await extract_dataset_extents(_axis_dataset("year", years), "v")
+    year = extents["year"]
+    assert year["interval"] == [1990, 2020]
+    assert year["values"] == [1990, 1995, 2000, 2005, 2010, 2015, 2020]
+    assert year["resolution"] == 5
+    assert year["default"] == 2020
+    for value in [
+        *year["interval"],
+        *year["values"],
+        year["resolution"],
+        year["default"],
+    ]:
+        assert type(value) is int
+
+
+async def test_extract_dataset_extents_numeric_long_regular_float():
+    levels = np.linspace(0, 1, 101)
+    extents = await extract_dataset_extents(_axis_dataset("level", levels), "v")
+    assert extents["level"]["interval"] == [0.0, 1.0]
+    assert extents["level"]["resolution"] == pytest.approx(0.01)
+    assert "values" not in extents["level"]
+
+
+async def test_extract_dataset_extents_numeric_repeating_intervals():
+    """Long irregular numeric axes use EDR repeating intervals, as vertical extents do."""
+    levels = np.concatenate([np.arange(0, 30), np.arange(30, 90, 2)])
+    extents = await extract_dataset_extents(_axis_dataset("level", levels), "v")
+    assert extents["level"]["interval"] == [0, 88]
+    assert extents["level"]["values"] == ["R31/0/1", "R29/32/2"]
+    assert "resolution" not in extents["level"]
 
 
 async def test_extract_dataset_extents_empty():
