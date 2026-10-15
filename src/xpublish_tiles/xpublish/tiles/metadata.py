@@ -190,10 +190,8 @@ async def extract_dataset_extents(
             extent_dict = {"values": dim.values}
         else:
             extent_dict = {"interval": dim.extent}
-            # Numeric axes also list their exact values; temporal axes never do.
-            if dim.values is not None and isinstance(
-                next(iter(dim.extent), None), int | float
-            ):
+            # Short numeric and temporal axes also list their exact values.
+            if dim.values is not None:
                 extent_dict["values"] = dim.values
         if dim.resolution is not None:
             extent_dict["resolution"] = dim.resolution

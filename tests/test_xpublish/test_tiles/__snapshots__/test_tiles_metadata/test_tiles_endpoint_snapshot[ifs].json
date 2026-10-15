@@ -17,7 +17,58 @@
                 "PT0S",
                 "P2D"
               ],
-              "resolution": "PT1H"
+              "resolution": "PT1H",
+              "values": [
+                "PT0S",
+                "PT1H",
+                "PT2H",
+                "PT3H",
+                "PT4H",
+                "PT5H",
+                "PT6H",
+                "PT7H",
+                "PT8H",
+                "PT9H",
+                "PT10H",
+                "PT11H",
+                "PT12H",
+                "PT13H",
+                "PT14H",
+                "PT15H",
+                "PT16H",
+                "PT17H",
+                "PT18H",
+                "PT19H",
+                "PT20H",
+                "PT21H",
+                "PT22H",
+                "PT23H",
+                "P1D",
+                "P1DT1H",
+                "P1DT2H",
+                "P1DT3H",
+                "P1DT4H",
+                "P1DT5H",
+                "P1DT6H",
+                "P1DT7H",
+                "P1DT8H",
+                "P1DT9H",
+                "P1DT10H",
+                "P1DT11H",
+                "P1DT12H",
+                "P1DT13H",
+                "P1DT14H",
+                "P1DT15H",
+                "P1DT16H",
+                "P1DT17H",
+                "P1DT18H",
+                "P1DT19H",
+                "P1DT20H",
+                "P1DT21H",
+                "P1DT22H",
+                "P1DT23H",
+                "P2D"
+              ]
             },
             "time": {
               "default": "2000-01-02T00:00:00",
@@ -26,7 +77,8 @@
                 "2000-01-02T00:00:00"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "2000-01-01T00:00:00",
+                "2000-01-02T00:00:00"
               ]
             }
           },
@@ -2129,7 +2181,58 @@
                 "PT0S",
                 "P2D"
               ],
-              "resolution": "PT1H"
+              "resolution": "PT1H",
+              "values": [
+                "PT0S",
+                "PT1H",
+                "PT2H",
+                "PT3H",
+                "PT4H",
+                "PT5H",
+                "PT6H",
+                "PT7H",
+                "PT8H",
+                "PT9H",
+                "PT10H",
+                "PT11H",
+                "PT12H",
+                "PT13H",
+                "PT14H",
+                "PT15H",
+                "PT16H",
+                "PT17H",
+                "PT18H",
+                "PT19H",
+                "PT20H",
+                "PT21H",
+                "PT22H",
+                "PT23H",
+                "P1D",
+                "P1DT1H",
+                "P1DT2H",
+                "P1DT3H",
+                "P1DT4H",
+                "P1DT5H",
+                "P1DT6H",
+                "P1DT7H",
+                "P1DT8H",
+                "P1DT9H",
+                "P1DT10H",
+                "P1DT11H",
+                "P1DT12H",
+                "P1DT13H",
+                "P1DT14H",
+                "P1DT15H",
+                "P1DT16H",
+                "P1DT17H",
+                "P1DT18H",
+                "P1DT19H",
+                "P1DT20H",
+                "P1DT21H",
+                "P1DT22H",
+                "P1DT23H",
+                "P2D"
+              ]
             },
             "time": {
               "default": "2000-01-02T00:00:00",
@@ -2138,7 +2241,8 @@
                 "2000-01-02T00:00:00"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "2000-01-01T00:00:00",
+                "2000-01-02T00:00:00"
               ]
             }
           },
@@ -4199,7 +4303,58 @@
                 "PT0S",
                 "P2D"
               ],
-              "resolution": "PT1H"
+              "resolution": "PT1H",
+              "values": [
+                "PT0S",
+                "PT1H",
+                "PT2H",
+                "PT3H",
+                "PT4H",
+                "PT5H",
+                "PT6H",
+                "PT7H",
+                "PT8H",
+                "PT9H",
+                "PT10H",
+                "PT11H",
+                "PT12H",
+                "PT13H",
+                "PT14H",
+                "PT15H",
+                "PT16H",
+                "PT17H",
+                "PT18H",
+                "PT19H",
+                "PT20H",
+                "PT21H",
+                "PT22H",
+                "PT23H",
+                "P1D",
+                "P1DT1H",
+                "P1DT2H",
+                "P1DT3H",
+                "P1DT4H",
+                "P1DT5H",
+                "P1DT6H",
+                "P1DT7H",
+                "P1DT8H",
+                "P1DT9H",
+                "P1DT10H",
+                "P1DT11H",
+                "P1DT12H",
+                "P1DT13H",
+                "P1DT14H",
+                "P1DT15H",
+                "P1DT16H",
+                "P1DT17H",
+                "P1DT18H",
+                "P1DT19H",
+                "P1DT20H",
+                "P1DT21H",
+                "P1DT22H",
+                "P1DT23H",
+                "P2D"
+              ]
             },
             "time": {
               "default": "2000-01-02T00:00:00",
@@ -4208,7 +4363,8 @@
                 "2000-01-02T00:00:00"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "2000-01-01T00:00:00",
+                "2000-01-02T00:00:00"
               ]
             }
           },
@@ -6199,7 +6355,58 @@
                 "PT0S",
                 "P2D"
               ],
-              "resolution": "PT1H"
+              "resolution": "PT1H",
+              "values": [
+                "PT0S",
+                "PT1H",
+                "PT2H",
+                "PT3H",
+                "PT4H",
+                "PT5H",
+                "PT6H",
+                "PT7H",
+                "PT8H",
+                "PT9H",
+                "PT10H",
+                "PT11H",
+                "PT12H",
+                "PT13H",
+                "PT14H",
+                "PT15H",
+                "PT16H",
+                "PT17H",
+                "PT18H",
+                "PT19H",
+                "PT20H",
+                "PT21H",
+                "PT22H",
+                "PT23H",
+                "P1D",
+                "P1DT1H",
+                "P1DT2H",
+                "P1DT3H",
+                "P1DT4H",
+                "P1DT5H",
+                "P1DT6H",
+                "P1DT7H",
+                "P1DT8H",
+                "P1DT9H",
+                "P1DT10H",
+                "P1DT11H",
+                "P1DT12H",
+                "P1DT13H",
+                "P1DT14H",
+                "P1DT15H",
+                "P1DT16H",
+                "P1DT17H",
+                "P1DT18H",
+                "P1DT19H",
+                "P1DT20H",
+                "P1DT21H",
+                "P1DT22H",
+                "P1DT23H",
+                "P2D"
+              ]
             },
             "time": {
               "default": "2000-01-02T00:00:00",
@@ -6208,7 +6415,8 @@
                 "2000-01-02T00:00:00"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "2000-01-01T00:00:00",
+                "2000-01-02T00:00:00"
               ]
             }
           },
@@ -8290,7 +8498,58 @@
                 "PT0S",
                 "P2D"
               ],
-              "resolution": "PT1H"
+              "resolution": "PT1H",
+              "values": [
+                "PT0S",
+                "PT1H",
+                "PT2H",
+                "PT3H",
+                "PT4H",
+                "PT5H",
+                "PT6H",
+                "PT7H",
+                "PT8H",
+                "PT9H",
+                "PT10H",
+                "PT11H",
+                "PT12H",
+                "PT13H",
+                "PT14H",
+                "PT15H",
+                "PT16H",
+                "PT17H",
+                "PT18H",
+                "PT19H",
+                "PT20H",
+                "PT21H",
+                "PT22H",
+                "PT23H",
+                "P1D",
+                "P1DT1H",
+                "P1DT2H",
+                "P1DT3H",
+                "P1DT4H",
+                "P1DT5H",
+                "P1DT6H",
+                "P1DT7H",
+                "P1DT8H",
+                "P1DT9H",
+                "P1DT10H",
+                "P1DT11H",
+                "P1DT12H",
+                "P1DT13H",
+                "P1DT14H",
+                "P1DT15H",
+                "P1DT16H",
+                "P1DT17H",
+                "P1DT18H",
+                "P1DT19H",
+                "P1DT20H",
+                "P1DT21H",
+                "P1DT22H",
+                "P1DT23H",
+                "P2D"
+              ]
             },
             "time": {
               "default": "2000-01-02T00:00:00",
@@ -8299,7 +8558,8 @@
                 "2000-01-02T00:00:00"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "2000-01-01T00:00:00",
+                "2000-01-02T00:00:00"
               ]
             }
           },
@@ -10275,7 +10535,58 @@
                 "PT0S",
                 "P2D"
               ],
-              "resolution": "PT1H"
+              "resolution": "PT1H",
+              "values": [
+                "PT0S",
+                "PT1H",
+                "PT2H",
+                "PT3H",
+                "PT4H",
+                "PT5H",
+                "PT6H",
+                "PT7H",
+                "PT8H",
+                "PT9H",
+                "PT10H",
+                "PT11H",
+                "PT12H",
+                "PT13H",
+                "PT14H",
+                "PT15H",
+                "PT16H",
+                "PT17H",
+                "PT18H",
+                "PT19H",
+                "PT20H",
+                "PT21H",
+                "PT22H",
+                "PT23H",
+                "P1D",
+                "P1DT1H",
+                "P1DT2H",
+                "P1DT3H",
+                "P1DT4H",
+                "P1DT5H",
+                "P1DT6H",
+                "P1DT7H",
+                "P1DT8H",
+                "P1DT9H",
+                "P1DT10H",
+                "P1DT11H",
+                "P1DT12H",
+                "P1DT13H",
+                "P1DT14H",
+                "P1DT15H",
+                "P1DT16H",
+                "P1DT17H",
+                "P1DT18H",
+                "P1DT19H",
+                "P1DT20H",
+                "P1DT21H",
+                "P1DT22H",
+                "P1DT23H",
+                "P2D"
+              ]
             },
             "time": {
               "default": "2000-01-02T00:00:00",
@@ -10284,7 +10595,8 @@
                 "2000-01-02T00:00:00"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "2000-01-01T00:00:00",
+                "2000-01-02T00:00:00"
               ]
             }
           },
@@ -12316,7 +12628,58 @@
                 "PT0S",
                 "P2D"
               ],
-              "resolution": "PT1H"
+              "resolution": "PT1H",
+              "values": [
+                "PT0S",
+                "PT1H",
+                "PT2H",
+                "PT3H",
+                "PT4H",
+                "PT5H",
+                "PT6H",
+                "PT7H",
+                "PT8H",
+                "PT9H",
+                "PT10H",
+                "PT11H",
+                "PT12H",
+                "PT13H",
+                "PT14H",
+                "PT15H",
+                "PT16H",
+                "PT17H",
+                "PT18H",
+                "PT19H",
+                "PT20H",
+                "PT21H",
+                "PT22H",
+                "PT23H",
+                "P1D",
+                "P1DT1H",
+                "P1DT2H",
+                "P1DT3H",
+                "P1DT4H",
+                "P1DT5H",
+                "P1DT6H",
+                "P1DT7H",
+                "P1DT8H",
+                "P1DT9H",
+                "P1DT10H",
+                "P1DT11H",
+                "P1DT12H",
+                "P1DT13H",
+                "P1DT14H",
+                "P1DT15H",
+                "P1DT16H",
+                "P1DT17H",
+                "P1DT18H",
+                "P1DT19H",
+                "P1DT20H",
+                "P1DT21H",
+                "P1DT22H",
+                "P1DT23H",
+                "P2D"
+              ]
             },
             "time": {
               "default": "2000-01-02T00:00:00",
@@ -12325,7 +12688,8 @@
                 "2000-01-02T00:00:00"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "2000-01-01T00:00:00",
+                "2000-01-02T00:00:00"
               ]
             }
           },
@@ -14379,7 +14743,58 @@
                 "PT0S",
                 "P2D"
               ],
-              "resolution": "PT1H"
+              "resolution": "PT1H",
+              "values": [
+                "PT0S",
+                "PT1H",
+                "PT2H",
+                "PT3H",
+                "PT4H",
+                "PT5H",
+                "PT6H",
+                "PT7H",
+                "PT8H",
+                "PT9H",
+                "PT10H",
+                "PT11H",
+                "PT12H",
+                "PT13H",
+                "PT14H",
+                "PT15H",
+                "PT16H",
+                "PT17H",
+                "PT18H",
+                "PT19H",
+                "PT20H",
+                "PT21H",
+                "PT22H",
+                "PT23H",
+                "P1D",
+                "P1DT1H",
+                "P1DT2H",
+                "P1DT3H",
+                "P1DT4H",
+                "P1DT5H",
+                "P1DT6H",
+                "P1DT7H",
+                "P1DT8H",
+                "P1DT9H",
+                "P1DT10H",
+                "P1DT11H",
+                "P1DT12H",
+                "P1DT13H",
+                "P1DT14H",
+                "P1DT15H",
+                "P1DT16H",
+                "P1DT17H",
+                "P1DT18H",
+                "P1DT19H",
+                "P1DT20H",
+                "P1DT21H",
+                "P1DT22H",
+                "P1DT23H",
+                "P2D"
+              ]
             },
             "time": {
               "default": "2000-01-02T00:00:00",
@@ -14388,7 +14803,8 @@
                 "2000-01-02T00:00:00"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "2000-01-01T00:00:00",
+                "2000-01-02T00:00:00"
               ]
             }
           },
@@ -16442,7 +16858,58 @@
                 "PT0S",
                 "P2D"
               ],
-              "resolution": "PT1H"
+              "resolution": "PT1H",
+              "values": [
+                "PT0S",
+                "PT1H",
+                "PT2H",
+                "PT3H",
+                "PT4H",
+                "PT5H",
+                "PT6H",
+                "PT7H",
+                "PT8H",
+                "PT9H",
+                "PT10H",
+                "PT11H",
+                "PT12H",
+                "PT13H",
+                "PT14H",
+                "PT15H",
+                "PT16H",
+                "PT17H",
+                "PT18H",
+                "PT19H",
+                "PT20H",
+                "PT21H",
+                "PT22H",
+                "PT23H",
+                "P1D",
+                "P1DT1H",
+                "P1DT2H",
+                "P1DT3H",
+                "P1DT4H",
+                "P1DT5H",
+                "P1DT6H",
+                "P1DT7H",
+                "P1DT8H",
+                "P1DT9H",
+                "P1DT10H",
+                "P1DT11H",
+                "P1DT12H",
+                "P1DT13H",
+                "P1DT14H",
+                "P1DT15H",
+                "P1DT16H",
+                "P1DT17H",
+                "P1DT18H",
+                "P1DT19H",
+                "P1DT20H",
+                "P1DT21H",
+                "P1DT22H",
+                "P1DT23H",
+                "P2D"
+              ]
             },
             "time": {
               "default": "2000-01-02T00:00:00",
@@ -16451,7 +16918,8 @@
                 "2000-01-02T00:00:00"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "2000-01-01T00:00:00",
+                "2000-01-02T00:00:00"
               ]
             }
           },
@@ -18498,7 +18966,58 @@
                 "PT0S",
                 "P2D"
               ],
-              "resolution": "PT1H"
+              "resolution": "PT1H",
+              "values": [
+                "PT0S",
+                "PT1H",
+                "PT2H",
+                "PT3H",
+                "PT4H",
+                "PT5H",
+                "PT6H",
+                "PT7H",
+                "PT8H",
+                "PT9H",
+                "PT10H",
+                "PT11H",
+                "PT12H",
+                "PT13H",
+                "PT14H",
+                "PT15H",
+                "PT16H",
+                "PT17H",
+                "PT18H",
+                "PT19H",
+                "PT20H",
+                "PT21H",
+                "PT22H",
+                "PT23H",
+                "P1D",
+                "P1DT1H",
+                "P1DT2H",
+                "P1DT3H",
+                "P1DT4H",
+                "P1DT5H",
+                "P1DT6H",
+                "P1DT7H",
+                "P1DT8H",
+                "P1DT9H",
+                "P1DT10H",
+                "P1DT11H",
+                "P1DT12H",
+                "P1DT13H",
+                "P1DT14H",
+                "P1DT15H",
+                "P1DT16H",
+                "P1DT17H",
+                "P1DT18H",
+                "P1DT19H",
+                "P1DT20H",
+                "P1DT21H",
+                "P1DT22H",
+                "P1DT23H",
+                "P2D"
+              ]
             },
             "time": {
               "default": "2000-01-02T00:00:00",
@@ -18507,7 +19026,8 @@
                 "2000-01-02T00:00:00"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "2000-01-01T00:00:00",
+                "2000-01-02T00:00:00"
               ]
             }
           },
@@ -20554,7 +21074,58 @@
                 "PT0S",
                 "P2D"
               ],
-              "resolution": "PT1H"
+              "resolution": "PT1H",
+              "values": [
+                "PT0S",
+                "PT1H",
+                "PT2H",
+                "PT3H",
+                "PT4H",
+                "PT5H",
+                "PT6H",
+                "PT7H",
+                "PT8H",
+                "PT9H",
+                "PT10H",
+                "PT11H",
+                "PT12H",
+                "PT13H",
+                "PT14H",
+                "PT15H",
+                "PT16H",
+                "PT17H",
+                "PT18H",
+                "PT19H",
+                "PT20H",
+                "PT21H",
+                "PT22H",
+                "PT23H",
+                "P1D",
+                "P1DT1H",
+                "P1DT2H",
+                "P1DT3H",
+                "P1DT4H",
+                "P1DT5H",
+                "P1DT6H",
+                "P1DT7H",
+                "P1DT8H",
+                "P1DT9H",
+                "P1DT10H",
+                "P1DT11H",
+                "P1DT12H",
+                "P1DT13H",
+                "P1DT14H",
+                "P1DT15H",
+                "P1DT16H",
+                "P1DT17H",
+                "P1DT18H",
+                "P1DT19H",
+                "P1DT20H",
+                "P1DT21H",
+                "P1DT22H",
+                "P1DT23H",
+                "P2D"
+              ]
             },
             "time": {
               "default": "2000-01-02T00:00:00",
@@ -20563,7 +21134,8 @@
                 "2000-01-02T00:00:00"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "2000-01-01T00:00:00",
+                "2000-01-02T00:00:00"
               ]
             }
           },
@@ -22617,7 +23189,58 @@
                 "PT0S",
                 "P2D"
               ],
-              "resolution": "PT1H"
+              "resolution": "PT1H",
+              "values": [
+                "PT0S",
+                "PT1H",
+                "PT2H",
+                "PT3H",
+                "PT4H",
+                "PT5H",
+                "PT6H",
+                "PT7H",
+                "PT8H",
+                "PT9H",
+                "PT10H",
+                "PT11H",
+                "PT12H",
+                "PT13H",
+                "PT14H",
+                "PT15H",
+                "PT16H",
+                "PT17H",
+                "PT18H",
+                "PT19H",
+                "PT20H",
+                "PT21H",
+                "PT22H",
+                "PT23H",
+                "P1D",
+                "P1DT1H",
+                "P1DT2H",
+                "P1DT3H",
+                "P1DT4H",
+                "P1DT5H",
+                "P1DT6H",
+                "P1DT7H",
+                "P1DT8H",
+                "P1DT9H",
+                "P1DT10H",
+                "P1DT11H",
+                "P1DT12H",
+                "P1DT13H",
+                "P1DT14H",
+                "P1DT15H",
+                "P1DT16H",
+                "P1DT17H",
+                "P1DT18H",
+                "P1DT19H",
+                "P1DT20H",
+                "P1DT21H",
+                "P1DT22H",
+                "P1DT23H",
+                "P2D"
+              ]
             },
             "time": {
               "default": "2000-01-02T00:00:00",
@@ -22626,7 +23249,8 @@
                 "2000-01-02T00:00:00"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "2000-01-01T00:00:00",
+                "2000-01-02T00:00:00"
               ]
             }
           },
@@ -24673,7 +25297,58 @@
                 "PT0S",
                 "P2D"
               ],
-              "resolution": "PT1H"
+              "resolution": "PT1H",
+              "values": [
+                "PT0S",
+                "PT1H",
+                "PT2H",
+                "PT3H",
+                "PT4H",
+                "PT5H",
+                "PT6H",
+                "PT7H",
+                "PT8H",
+                "PT9H",
+                "PT10H",
+                "PT11H",
+                "PT12H",
+                "PT13H",
+                "PT14H",
+                "PT15H",
+                "PT16H",
+                "PT17H",
+                "PT18H",
+                "PT19H",
+                "PT20H",
+                "PT21H",
+                "PT22H",
+                "PT23H",
+                "P1D",
+                "P1DT1H",
+                "P1DT2H",
+                "P1DT3H",
+                "P1DT4H",
+                "P1DT5H",
+                "P1DT6H",
+                "P1DT7H",
+                "P1DT8H",
+                "P1DT9H",
+                "P1DT10H",
+                "P1DT11H",
+                "P1DT12H",
+                "P1DT13H",
+                "P1DT14H",
+                "P1DT15H",
+                "P1DT16H",
+                "P1DT17H",
+                "P1DT18H",
+                "P1DT19H",
+                "P1DT20H",
+                "P1DT21H",
+                "P1DT22H",
+                "P1DT23H",
+                "P2D"
+              ]
             },
             "time": {
               "default": "2000-01-02T00:00:00",
@@ -24682,7 +25357,8 @@
                 "2000-01-02T00:00:00"
               ],
               "values": [
-                "R2/2000-01-01T00:00:00/P1D"
+                "2000-01-01T00:00:00",
+                "2000-01-02T00:00:00"
               ]
             }
           },

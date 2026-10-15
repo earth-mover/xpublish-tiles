@@ -106,7 +106,11 @@ async def test_extract_dataset_extents():
     assert time_extent["interval"][0] == "2023-01-01T00:00:00"
     assert time_extent["interval"][1] == "2023-01-01T02:00:00"
     assert time_extent["resolution"] == "PT1H"  # Hourly
-    assert "values" not in time_extent  # only categorical dimensions list values
+    assert time_extent["values"] == [
+        "2023-01-01T00:00:00",
+        "2023-01-01T01:00:00",
+        "2023-01-01T02:00:00",
+    ]
 
     # Check elevation extent
     elevation_extent = extents["elevation"]
@@ -168,7 +172,7 @@ async def test_extract_dataset_extents_cftime_monthly():
     assert extents["time"]["interval"] == ["1921-01-16T12:00:00", "1925-12-16T12:00:00"]
     assert extents["time"]["resolution"] == "P1M"
     assert extents["time"]["default"] == "1925-12-16T12:00:00"
-    assert "values" not in extents["time"]  # only categorical dimensions list values
+    assert "values" not in extents["time"]  # 60 values > max_actual_values
     assert "interval" not in extents["member_id"]
     assert extents["member_id"]["values"] == [f"r{i}i1p1f1" for i in range(1, 31)]
 
@@ -208,23 +212,24 @@ async def test_extract_dataset_extents_repeating_intervals_lead_time():
 
 async def test_extract_dataset_extents_repeating_intervals_datetime_gap():
     time = pd.DatetimeIndex(
-        list(pd.date_range("2020-01-01", "2020-01-10", freq="D"))
-        + list(pd.date_range("2020-01-15", "2020-01-20", freq="D"))
+        list(pd.date_range("2020-01-01", periods=40, freq="D"))
+        + list(pd.date_range("2020-02-15", periods=20, freq="D"))
     )
     ds = _axis_dataset("time", time, {"axis": "T", "standard_name": "time"})
     extents = await extract_dataset_extents(ds, "v")
     assert extents["time"]["values"] == [
-        "R10/2020-01-01T00:00:00/P1D",
-        "R6/2020-01-15T00:00:00/P1D",
+        "R40/2020-01-01T00:00:00/P1D",
+        "R20/2020-02-15T00:00:00/P1D",
     ]
     # Exact runs win over a nominal step.
     assert "resolution" not in extents["time"]
 
 
 async def test_extract_dataset_extents_repeating_intervals_trailing_point():
-    lead = np.array([0, 1, 2, 10], dtype="timedelta64[h]").astype("timedelta64[ns]")
+    hours = np.append(np.arange(60), 70)
+    lead = hours.astype("timedelta64[h]").astype("timedelta64[ns]")
     extents = await extract_dataset_extents(_axis_dataset("lead_time", lead), "v")
-    assert extents["lead_time"]["values"] == ["R3/PT0S/PT1H", "R1/PT10H/PT0S"]
+    assert extents["lead_time"]["values"] == ["R60/PT0S/PT1H", "R1/P2DT22H/PT0S"]
 
 
 async def test_extract_dataset_extents_no_repeating_intervals():
@@ -235,14 +240,36 @@ async def test_extract_dataset_extents_no_repeating_intervals():
     assert extents["time"]["resolution"] == "PT1H"
     assert "values" not in extents["time"]
 
-    # 40 distinct gaps → more runs than the max_repeating_intervals option
+    # 60 distinct gaps → more runs than the max_repeating_intervals option
     irregular = pd.DatetimeIndex(
-        np.cumsum(np.arange(1, 41)).astype("timedelta64[h]") + np.datetime64("2020-01-01")
+        np.cumsum(np.arange(1, 61)).astype("timedelta64[h]") + np.datetime64("2020-01-01")
     )
     ds = _axis_dataset("time", irregular, {"axis": "T", "standard_name": "time"})
     extents = await extract_dataset_extents(ds, "v")
     assert "values" not in extents["time"]
     assert "resolution" not in extents["time"]
+
+
+async def test_extract_dataset_extents_short_irregular_temporal():
+    """Short irregular temporal axes list their exact values, not runs or a nominal step."""
+    time = pd.DatetimeIndex(["2020-01-01", "2020-01-03", "2020-01-04", "2020-02-11"])
+    ds = _axis_dataset("time", time, {"axis": "T", "standard_name": "time"})
+    extents = await extract_dataset_extents(ds, "v")
+    assert extents["time"]["interval"] == ["2020-01-01T00:00:00", "2020-02-11T00:00:00"]
+    assert extents["time"]["values"] == [t.isoformat() for t in time]
+    assert "resolution" not in extents["time"]
+
+    lead = np.array([0, 1, 2, 10], dtype="timedelta64[h]").astype("timedelta64[ns]")
+    extents = await extract_dataset_extents(_axis_dataset("lead_time", lead), "v")
+    assert extents["lead_time"]["values"] == ["PT0S", "PT1H", "PT2H", "PT10H"]
+    assert "resolution" not in extents["lead_time"]
+
+    cf_time = xr.date_range(
+        "2000-01-01", periods=4, freq="D", calendar="noleap", use_cftime=True
+    )[[0, 1, 3]]
+    ds = _axis_dataset("time", cf_time, {"axis": "T", "standard_name": "time"})
+    extents = await extract_dataset_extents(ds, "v")
+    assert extents["time"]["values"] == [t.isoformat() for t in cf_time]
 
 
 def _jittered_scans(jitter_s: float) -> pd.DatetimeIndex:

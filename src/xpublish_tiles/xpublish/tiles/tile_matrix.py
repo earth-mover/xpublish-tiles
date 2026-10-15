@@ -394,11 +394,11 @@ async def extract_dimension_extents(
                 actual_values = [timedelta_to_iso8601(value) for value in values]
             if len(values) > 1:
                 resolution = _calculate_temporal_resolution(coord)
-            if resolution is None:
+            if resolution is None and actual_values is None:
                 repeating = _repeating_intervals(
                     values, timedelta_to_iso8601, timedelta_to_iso8601
                 )
-            if resolution is None and repeating is None:
+            if resolution is None and repeating is None and actual_values is None:
                 resolution = _nominal_resolution(values)
         elif np.issubdtype(values.dtype, np.datetime64):
             dim_type = DimensionType.TEMPORAL
@@ -413,11 +413,11 @@ async def extract_dimension_extents(
                 ]
             if len(values) > 1:
                 resolution = _calculate_temporal_resolution(coord)
-            if resolution is None:
+            if resolution is None and actual_values is None:
                 repeating = _repeating_intervals(
                     values, lambda v: pd.Timestamp(v).isoformat(), timedelta_to_iso8601
                 )
-            if resolution is None and repeating is None:
+            if resolution is None and repeating is None and actual_values is None:
                 resolution = _nominal_resolution(values)
         elif isinstance(values[0], cftime.datetime):
             # Non-standard calendars decode to cftime objects, not datetime64.
@@ -427,7 +427,7 @@ async def extract_dimension_extents(
                 actual_values = [value.isoformat() for value in values]
             if len(values) > 1:
                 resolution = _calculate_temporal_resolution(coord)
-            if resolution is None:
+            if resolution is None and actual_values is None:
                 repeating = _repeating_intervals(
                     values, lambda v: v.isoformat(), timedelta_to_iso8601
                 )
