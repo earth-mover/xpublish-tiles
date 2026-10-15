@@ -356,6 +356,28 @@ async def test_geostationary_data(tile, tms, png_snapshot, pytestconfig):
     )
 
 
+def _geostationary_categorical() -> xr.Dataset:
+    ds = GEOSTATIONARY.create()
+    codes = np.digitize(ds.foo.values, [-0.5, 0.0, 0.5]).astype(np.float32)
+    attrs = {
+        "grid_mapping": ds.foo.attrs["grid_mapping"],
+        "flag_values": [0, 1, 2, 3],
+        "flag_meanings": "low mid_low mid_high high",
+    }
+    return ds.assign(foo=ds.foo.copy(data=codes).assign_attrs(attrs))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tile,tms", as_pytestparams(GEOSTATIONARY_TILES))
+async def test_geostationary_categorical_data(tile, tms, png_snapshot, monkeypatch):
+    # the per-quad scan of 2D coords costs minutes per tile on a full disk
+    monkeypatch.setattr(dsh.Canvas, "quadmesh", None)
+    result = await pipeline(_geostationary_categorical(), create_query_params(tile, tms))
+    assert_render_matches_snapshot(
+        result, png_snapshot, tile=tile, tms=tms, skip_transparency_check=True
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tile,tms", as_pytestparams(GEOSTATIONARY_TILES))
 async def test_geostationary_quadmesh_coords_finite(tile, tms, monkeypatch):

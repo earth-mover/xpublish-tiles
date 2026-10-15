@@ -409,13 +409,14 @@ def _geos_point(vy0, vz0, rg, rp2, c, lon0, mercator, scale):
     k = (rg - np.sqrt(det)) / a_
     vx = rg - k
     vy = vy0 * k
-    lam = np.arctan2(vy, vx) + lon0
+    # vx > 0 on the visible side, so arctan matches arctan2 at half the cost.
+    lam = np.arctan(vy / vx) + lon0
     # PROJ's adjlon
     if np.abs(lam) >= M_PI + 1e-12:
         lam += M_PI
         lam -= M_2_PI * np.floor(lam / M_2_PI)
         lam -= M_PI
-    tan_phi = vz0 * k / (rp2 * np.hypot(vx, vy))
+    tan_phi = vz0 * k / (rp2 * np.sqrt(vx * vx + vy * vy))
     if mercator:
         return scale * lam, scale * np.arcsinh(tan_phi)
     return scale * lam, scale * np.arctan(tan_phi)
