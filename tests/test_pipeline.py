@@ -723,6 +723,26 @@ def test_apply_query_timedelta_selector_errors():
             apply_query(hrrr, variables=["foo"], selectors={"step": value})
 
 
+def test_apply_query_integral_float_selector_on_int_coord():
+    """Clients that echo a JSON number as ``1995.0`` still select an int coordinate."""
+    ds = xr.Dataset(
+        {"v": (("year", "lat", "lon"), np.arange(70.0).reshape(7, 2, 5))},
+        coords={
+            "year": ("year", np.arange(1990, 2021, 5, dtype="int32")),
+            "lat": ("lat", [0.0, 1.0], {"axis": "Y", "standard_name": "latitude"}),
+            "lon": ("lon", np.arange(5.0), {"axis": "X", "standard_name": "longitude"}),
+        },
+    )
+    actual = apply_query(ds, variables=["v"], selectors={"year": "1995.0"})
+    xr.testing.assert_equal(actual["v"].da, ds.v.sel(year=1995))
+
+    with pytest.raises(IndexingError, match=r"could not interpret '1995\.5'"):
+        apply_query(ds, variables=["v"], selectors={"year": "1995.5"})
+
+    with pytest.raises(IndexingError, match=r"could not interpret 'abc'"):
+        apply_query(ds, variables=["v"], selectors={"year": "abc"})
+
+
 def test_apply_query_selectors_method_nearest():
     hrrr = HRRR.create().reindex(
         time=pd.date_range("2018-01-01", "2018-01-02", freq="6h")

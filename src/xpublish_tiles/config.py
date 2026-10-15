@@ -34,6 +34,14 @@ config = donfig.Config(
             # Callable[[str], None] that gets each request's summary block; None writes
             # to stdout. It runs in the request's context, so it can read contextvars.
             "log_summary_writer": None,
+            # /tiles/ extents: an axis with more constant-step runs gets no repeating
+            # intervals (OGC API EDR ``R<count>/<start>/<step>`` values)
+            "max_repeating_intervals": 16,
+            # /tiles/ extents: a jittered time axis gets its median step as a nominal
+            # resolution if this fraction of steps is within ``nominal_step_rtol`` of
+            # a whole multiple of it
+            "nominal_step_min_fraction": 0.99,
+            "nominal_step_rtol": 0.01,
         }
     ],
     paths=[],

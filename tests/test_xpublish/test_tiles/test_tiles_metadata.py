@@ -106,18 +106,24 @@ async def test_extract_dataset_extents():
     assert time_extent["interval"][0] == "2023-01-01T00:00:00"
     assert time_extent["interval"][1] == "2023-01-01T02:00:00"
     assert time_extent["resolution"] == "PT1H"  # Hourly
-    assert "values" not in time_extent  # only categorical dimensions list values
+    assert time_extent["values"] == [
+        "2023-01-01T00:00:00",
+        "2023-01-01T01:00:00",
+        "2023-01-01T02:00:00",
+    ]
 
     # Check elevation extent
     elevation_extent = extents["elevation"]
     assert "interval" in elevation_extent
     assert "units" in elevation_extent
     assert "description" in elevation_extent
-    assert "resolution" in elevation_extent
-    assert elevation_extent["interval"] == [0.0, 500.0]
+    assert elevation_extent["interval"] == [0, 500]
+    assert all(type(v) is int for v in elevation_extent["interval"])
     assert elevation_extent["units"] == "meters"
     assert elevation_extent["description"] == "Height above ground"
-    assert elevation_extent["resolution"] == 100.0  # Min step size
+    # Irregular steps: exact values, no resolution
+    assert elevation_extent["values"] == [0, 100, 500]
+    assert "resolution" not in elevation_extent
 
     # Categorical: every value, no meaningless [first, last] interval
     scenario_extent = extents["scenario"]
@@ -166,7 +172,7 @@ async def test_extract_dataset_extents_cftime_monthly():
     assert extents["time"]["interval"] == ["1921-01-16T12:00:00", "1925-12-16T12:00:00"]
     assert extents["time"]["resolution"] == "P1M"
     assert extents["time"]["default"] == "1925-12-16T12:00:00"
-    assert "values" not in extents["time"]  # only categorical dimensions list values
+    assert "values" not in extents["time"]  # 60 values > max_actual_values
     assert "interval" not in extents["member_id"]
     assert extents["member_id"]["values"] == [f"r{i}i1p1f1" for i in range(1, 31)]
 
@@ -199,24 +205,31 @@ async def test_extract_dataset_extents_repeating_intervals_lead_time():
     assert "resolution" not in extents["lead_time"]
     assert extents["lead_time"]["values"] == ["R121/PT0S/PT1H", "R88/P5DT3H/PT3H"]
 
+    with config.set(max_repeating_intervals=1):
+        extents = await extract_dataset_extents(_axis_dataset("lead_time", lead), "v")
+    assert "values" not in extents["lead_time"]
+
 
 async def test_extract_dataset_extents_repeating_intervals_datetime_gap():
     time = pd.DatetimeIndex(
-        list(pd.date_range("2020-01-01", "2020-01-10", freq="D"))
-        + list(pd.date_range("2020-01-15", "2020-01-20", freq="D"))
+        list(pd.date_range("2020-01-01", periods=40, freq="D"))
+        + list(pd.date_range("2020-02-15", periods=20, freq="D"))
     )
     ds = _axis_dataset("time", time, {"axis": "T", "standard_name": "time"})
     extents = await extract_dataset_extents(ds, "v")
     assert extents["time"]["values"] == [
-        "R10/2020-01-01T00:00:00/P1D",
-        "R6/2020-01-15T00:00:00/P1D",
+        "R40/2020-01-01T00:00:00/P1D",
+        "R20/2020-02-15T00:00:00/P1D",
     ]
+    # Exact runs win over a nominal step.
+    assert "resolution" not in extents["time"]
 
 
 async def test_extract_dataset_extents_repeating_intervals_trailing_point():
-    lead = np.array([0, 1, 2, 10], dtype="timedelta64[h]").astype("timedelta64[ns]")
+    hours = np.append(np.arange(60), 70)
+    lead = hours.astype("timedelta64[h]").astype("timedelta64[ns]")
     extents = await extract_dataset_extents(_axis_dataset("lead_time", lead), "v")
-    assert extents["lead_time"]["values"] == ["R3/PT0S/PT1H", "R1/PT10H/PT0S"]
+    assert extents["lead_time"]["values"] == ["R60/PT0S/PT1H", "R1/P2DT22H/PT0S"]
 
 
 async def test_extract_dataset_extents_no_repeating_intervals():
@@ -227,14 +240,122 @@ async def test_extract_dataset_extents_no_repeating_intervals():
     assert extents["time"]["resolution"] == "PT1H"
     assert "values" not in extents["time"]
 
-    # 40 distinct gaps → more runs than MAX_REPEATING_INTERVALS
+    # 60 distinct gaps → more runs than the max_repeating_intervals option
     irregular = pd.DatetimeIndex(
-        np.cumsum(np.arange(1, 41)).astype("timedelta64[h]") + np.datetime64("2020-01-01")
+        np.cumsum(np.arange(1, 61)).astype("timedelta64[h]") + np.datetime64("2020-01-01")
     )
     ds = _axis_dataset("time", irregular, {"axis": "T", "standard_name": "time"})
     extents = await extract_dataset_extents(ds, "v")
     assert "values" not in extents["time"]
     assert "resolution" not in extents["time"]
+
+
+async def test_extract_dataset_extents_short_irregular_temporal():
+    """Short irregular temporal axes list their exact values, not runs or a nominal step."""
+    time = pd.DatetimeIndex(["2020-01-01", "2020-01-03", "2020-01-04", "2020-02-11"])
+    ds = _axis_dataset("time", time, {"axis": "T", "standard_name": "time"})
+    extents = await extract_dataset_extents(ds, "v")
+    assert extents["time"]["interval"] == ["2020-01-01T00:00:00", "2020-02-11T00:00:00"]
+    assert extents["time"]["values"] == [t.isoformat() for t in time]
+    assert "resolution" not in extents["time"]
+
+    lead = np.array([0, 1, 2, 10], dtype="timedelta64[h]").astype("timedelta64[ns]")
+    extents = await extract_dataset_extents(_axis_dataset("lead_time", lead), "v")
+    assert extents["lead_time"]["values"] == ["PT0S", "PT1H", "PT2H", "PT10H"]
+    assert "resolution" not in extents["lead_time"]
+
+    cf_time = xr.date_range(
+        "2000-01-01", periods=4, freq="D", calendar="noleap", use_cftime=True
+    )[[0, 1, 3]]
+    ds = _axis_dataset("time", cf_time, {"axis": "T", "standard_name": "time"})
+    extents = await extract_dataset_extents(ds, "v")
+    assert extents["time"]["values"] == [t.isoformat() for t in cf_time]
+
+
+def _jittered_scans(jitter_s: float) -> pd.DatetimeIndex:
+    """GOES-style scan stamps: 10 min apart with jitter, outage gaps and a few odd steps."""
+    rng = np.random.default_rng(0)
+    slots = np.arange(2000.0)
+    slots = slots[(slots < 500) | (slots >= 530)]  # 5 h outage
+    slots = slots[slots != 1200]  # one missed scan
+    slots = np.sort(np.concatenate([slots, [700.5, 1500.76]]))  # off-grid scans
+    seconds = slots * 600 + rng.uniform(-jitter_s, jitter_s, len(slots))
+    return pd.DatetimeIndex(
+        np.datetime64("2024-01-01T00:05:06", "ns")
+        + (seconds * 1e9).astype("timedelta64[ns]")
+    )
+
+
+async def test_extract_dataset_extents_nominal_resolution():
+    """A jittered axis with too many runs gets its nominal step as resolution."""
+    ds = _axis_dataset(
+        "t", _jittered_scans(jitter_s=0.7), {"axis": "T", "standard_name": "time"}
+    )
+    extents = await extract_dataset_extents(ds, "v")
+    assert extents["t"]["resolution"] == "PT10M"
+    assert "values" not in extents["t"]
+
+
+async def test_extract_dataset_extents_no_nominal_resolution():
+    """Jitter larger than the tolerance gives no resolution."""
+    ds = _axis_dataset(
+        "t", _jittered_scans(jitter_s=30), {"axis": "T", "standard_name": "time"}
+    )
+    extents = await extract_dataset_extents(ds, "v")
+    assert "resolution" not in extents["t"]
+    assert "values" not in extents["t"]
+
+    with config.set(nominal_step_rtol=0.1):
+        extents = await extract_dataset_extents(ds, "v")
+    assert extents["t"]["resolution"] == "PT10M"
+
+
+async def test_extract_dataset_extents_numeric_regular_int():
+    """Integer years keep int types and get their exact step."""
+    years = np.arange(1990, 2021, 5, dtype="int32")
+    extents = await extract_dataset_extents(_axis_dataset("year", years), "v")
+    year = extents["year"]
+    assert year["interval"] == [1990, 2020]
+    assert year["values"] == [1990, 1995, 2000, 2005, 2010, 2015, 2020]
+    assert year["resolution"] == 5
+    assert year["default"] == 2020
+    for value in [
+        *year["interval"],
+        *year["values"],
+        year["resolution"],
+        year["default"],
+    ]:
+        assert type(value) is int
+
+
+async def test_extract_dataset_extents_numeric_descending_unsigned():
+    """Unsigned steps must not wrap around on a descending axis."""
+    years = np.arange(2020, 1989, -5, dtype="uint16")
+    extents = await extract_dataset_extents(_axis_dataset("year", years), "v")
+    assert extents["year"]["resolution"] == 5
+
+
+async def test_extract_dataset_extents_numeric_single_value():
+    extents = await extract_dataset_extents(_axis_dataset("level", np.array([10.0])), "v")
+    assert extents["level"]["values"] == [10.0]
+    assert "resolution" not in extents["level"]
+
+
+async def test_extract_dataset_extents_numeric_long_regular_float():
+    levels = np.linspace(0, 1, 101)
+    extents = await extract_dataset_extents(_axis_dataset("level", levels), "v")
+    assert extents["level"]["interval"] == [0.0, 1.0]
+    assert extents["level"]["resolution"] == pytest.approx(0.01)
+    assert "values" not in extents["level"]
+
+
+async def test_extract_dataset_extents_numeric_repeating_intervals():
+    """Long irregular numeric axes use EDR repeating intervals, as vertical extents do."""
+    levels = np.concatenate([np.arange(0, 30), np.arange(30, 90, 2)])
+    extents = await extract_dataset_extents(_axis_dataset("level", levels), "v")
+    assert extents["level"]["interval"] == [0, 88]
+    assert extents["level"]["values"] == ["R31/0/1", "R29/32/2"]
+    assert "resolution" not in extents["level"]
 
 
 async def test_extract_dataset_extents_empty():
