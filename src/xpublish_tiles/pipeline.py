@@ -21,6 +21,7 @@ from xpublish_tiles.grids import (
     Curvilinear,
     FacetedGridSystem,
     FacetedIndexer,
+    Geostationary,
     GridMetadata,
     GridSystem,
     GridSystem2D,
@@ -1246,7 +1247,10 @@ async def subset_to_bbox(
         if grid.crs.is_geographic:
             west = west - 360 if west > east else west
 
-        input_bbox = round_bbox(BBox(west=west, south=south, east=east, north=north))
+        input_bbox = BBox(west=west, south=south, east=east, north=north)
+        if isinstance(grid, Geostationary):
+            input_bbox = grid.include_limb(input_bbox, bbox, crs)
+        input_bbox = round_bbox(input_bbox)
 
         if input_bbox.west > input_bbox.east:
             raise ValueError(f"Invalid Bbox after transformation: {input_bbox!r}")

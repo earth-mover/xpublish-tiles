@@ -19,7 +19,11 @@ from xpublish_tiles.lib import (
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import DatashaderRenderer, register_renderer
-from xpublish_tiles.render.kernels import footprint_mode, offdisk_quad_mask
+from xpublish_tiles.render.kernels import (
+    footprint_mode,
+    offdisk_quad_mask,
+    scattered_footprint_mode,
+)
 from xpublish_tiles.types import (
     ContinuousData,
     DiscreteData,
@@ -144,6 +148,21 @@ def _apply_out_of_range_colors(
     return Image.fromarray(img_array, mode="RGBA")
 
 
+def mask_offdisk_quads(data: xr.DataArray, grid: Geostationary) -> xr.DataArray:
+    xcoord, ycoord = data[grid.X], data[grid.Y]
+    if xcoord.ndim != 2:
+        return data
+    # Transformation of points near the edge of the disk is undefined
+    # and corrupts the rendering. Mask them out but only for
+    # Geostationary to avoid the perf hit.
+    bad = offdisk_quad_mask(np.asarray(xcoord.data), np.asarray(ycoord.data))
+    data = data.where(xr.DataArray(~bad, dims=xcoord.dims))
+    fx, fy = fill_nonfinite_nearest(np.asarray(xcoord.data), np.asarray(ycoord.data))
+    return data.assign_coords(
+        {grid.X: xcoord.copy(data=fx), grid.Y: ycoord.copy(data=fy)}
+    )
+
+
 def nearest_on_uniform_grid_quadmesh(
     da: xr.DataArray, Xdim: str, Ydim: str
 ) -> xr.DataArray:
@@ -257,6 +276,65 @@ def rasterize_categorical_rectilinear(
     )
 
 
+MAX_SCATTERED_COUNTS = 2**24
+
+
+def _counts_table(datatype: DiscreteData) -> tuple[np.int64, int]:
+    values = np.asarray(datatype.values, dtype=np.float64)
+    offset = np.int64(np.floor(values.min()))
+    return offset, int(np.floor(values.max())) - int(offset) + 1
+
+
+def _fits_scattered_counts(datatype: DiscreteData, width: int, height: int) -> bool:
+    _, counts_span = _counts_table(datatype)
+    return width * height * counts_span <= MAX_SCATTERED_COUNTS
+
+
+def rasterize_categorical_scattered(
+    da: xr.DataArray,
+    grid: GridSystem2D,
+    *,
+    datatype: DiscreteData,
+    bbox,
+    width: int,
+    height: int,
+) -> xr.DataArray:
+    """Rasterize categorical data on 2D X/Y coordinates by footprint mode."""
+    offset, counts_span = _counts_table(datatype)
+    # The kernel treats both axes alike, so walk the coordinates in memory order.
+    xcoord = da[grid.X]
+    source = np.ascontiguousarray(da.transpose(*xcoord.dims).data)
+    x = np.asarray(xcoord.data, dtype=np.float64)
+    y = np.asarray(da[grid.Y].transpose(*xcoord.dims).data, dtype=np.float64)
+
+    out = np.empty((height, width), dtype=np.float64)
+    scattered_footprint_mode(
+        source,
+        x,
+        y,
+        bbox.west,
+        bbox.south,
+        width / (bbox.east - bbox.west),
+        height / (bbox.north - bbox.south),
+        counts_span,
+        offset,
+        out,
+    )
+
+    xc = bbox.west + (bbox.east - bbox.west) * (np.arange(width) + 0.5) / width
+    yc = bbox.south + (bbox.north - bbox.south) * (np.arange(height) + 0.5) / height
+    return xr.DataArray(
+        out,
+        dims=(grid.Ydim, grid.Xdim),
+        coords={grid.Xdim: xc, grid.Ydim: yc},
+        attrs={
+            "res": (xc[1] - xc[0], yc[0] - yc[1]),
+            "x_range": (bbox.west, bbox.east),
+            "y_range": (bbox.south, bbox.north),
+        },
+    )
+
+
 @register_renderer
 class DatashaderRasterRenderer(DatashaderRenderer):
     def validate(self, context: dict[str, "RenderContext"]):
@@ -298,21 +376,14 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                 if isinstance(grid, Curvilinear):
                     # FIXME: we'll need to track Xdim, Ydim explicitly no dims: tuple[str]
                     raise NotImplementedError
-                # Lock is only used when tbb is not available (e.g., macOS)
-                with NUMBA_THREADING_LOCK:
-                    if data[grid.X].ndim == 2 or data[grid.Y].ndim == 2:
-                        # 2D coords: nearest-neighbour resample to a uniform grid
-                        # so the pixel -> cell map factors into 1D index maps.
-                        with log_duration(
-                            f"nearest neighbour regridding (discrete) {data.shape}",
-                            logger,
-                            key="regrid",
-                        ):
-                            data = nearest_on_uniform_grid_quadmesh(data, grid.X, grid.Y)
+                two_d = data[grid.X].ndim == 2 or data[grid.Y].ndim == 2
+                if two_d and _fits_scattered_counts(context.datatype, width, height):
                     with log_duration(
-                        f"render (discrete) {data.shape} mode", logger, key="render"
+                        f"render (discrete) {data.shape} scattered mode",
+                        logger,
+                        key="render",
                     ):
-                        mesh = rasterize_categorical_rectilinear(
+                        mesh = rasterize_categorical_scattered(
                             data,
                             grid,
                             datatype=context.datatype,
@@ -320,23 +391,36 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                             width=width,
                             height=height,
                         )
+                else:
+                    if two_d and isinstance(grid, Geostationary):
+                        data = mask_offdisk_quads(data, grid)
+                    # Lock is only used when tbb is not available (e.g., macOS)
+                    with NUMBA_THREADING_LOCK:
+                        if two_d:
+                            # 2D coords: nearest-neighbour resample to a uniform grid
+                            # so the pixel -> cell map factors into 1D index maps.
+                            with log_duration(
+                                f"nearest neighbour regridding (discrete) {data.shape}",
+                                logger,
+                                key="regrid",
+                            ):
+                                data = nearest_on_uniform_grid_quadmesh(
+                                    data, grid.X, grid.Y
+                                )
+                        with log_duration(
+                            f"render (discrete) {data.shape} mode", logger, key="render"
+                        ):
+                            mesh = rasterize_categorical_rectilinear(
+                                data,
+                                grid,
+                                datatype=context.datatype,
+                                bbox=context.bbox,
+                                width=width,
+                                height=height,
+                            )
             else:
-                data = maybe_cast_data(context.da)
                 if isinstance(grid, Geostationary):
-                    xcoord, ycoord = data[grid.X], data[grid.Y]
-                    # Transformation of points near the edge of the disk is undefined
-                    # and corrupts the rendering. Mask them out but only for
-                    # Geostationary to avoid the perf hit.
-                    bad = offdisk_quad_mask(
-                        np.asarray(xcoord.data), np.asarray(ycoord.data)
-                    )
-                    data = data.where(xr.DataArray(~bad, dims=xcoord.dims))
-                    fx, fy = fill_nonfinite_nearest(
-                        np.asarray(xcoord.data), np.asarray(ycoord.data)
-                    )
-                    data = data.assign_coords(
-                        {grid.X: xcoord.copy(data=fx), grid.Y: ycoord.copy(data=fy)}
-                    )
+                    data = mask_offdisk_quads(data, grid)
                 with log_duration(
                     f"render (continuous) {data.shape} quadmesh",
                     logger,
