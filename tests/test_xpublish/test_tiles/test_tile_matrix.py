@@ -1,13 +1,20 @@
+import time
+from types import SimpleNamespace
+from typing import cast
+
 import numpy as np
 import pyproj
 import pytest
 from pyproj.aoi import BBox
 
+from xpublish_tiles.grids import GridSystem
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
+    MAX_DISTINCT_CRS,
     TILE_MATRIX_SET_SUMMARIES,
     TILE_MATRIX_SETS,
     _nominal_resolution,
     extract_tile_bbox_and_crs,
+    get_default_tile_matrix_set,
     get_tile_matrix_set,
     get_tile_matrix_set_summary,
     get_web_mercator_quad,
@@ -259,3 +266,58 @@ def test_nominal_resolution_none(seconds):
         "timedelta64[ns]"
     )
     assert _nominal_resolution(values) is None
+
+
+def _grids(*crss: pyproj.CRS) -> list[GridSystem]:
+    return [cast(GridSystem, SimpleNamespace(crs=crs)) for crs in crss]
+
+
+ALL_TMS = list(TILE_MATRIX_SETS)
+
+
+@pytest.mark.parametrize(
+    ("crs", "expected"),
+    [
+        ("EPSG:3035", "EuropeanETRS89_LAEAQuad"),
+        ("EPSG:2193", "NZTM2000Quad"),
+        ("EPSG:5041", "UPSArcticWGS84Quad"),
+        ("EPSG:3857", "WebMercatorQuad"),
+        ("EPSG:4326", "WorldCRS84Quad"),
+        ("OGC:CRS84", "WorldCRS84Quad"),
+        ("EPSG:32618", None),
+    ],
+)
+def test_default_tile_matrix_set_matches_data_crs(crs: str, expected: str | None) -> None:
+    grids = _grids(pyproj.CRS.from_user_input(crs))
+    assert get_default_tile_matrix_set(grids, ALL_TMS) == expected
+
+
+def test_default_tile_matrix_set_needs_the_tms_to_be_available() -> None:
+    grids = _grids(pyproj.CRS.from_epsg(3035))
+    assert get_default_tile_matrix_set(grids, ["WebMercatorQuad"]) is None
+
+
+def test_default_tile_matrix_set_equal_crs_objects() -> None:
+    grids = _grids(pyproj.CRS.from_epsg(3035), pyproj.CRS.from_epsg(3035))
+    assert get_default_tile_matrix_set(grids, ALL_TMS) == "EuropeanETRS89_LAEAQuad"
+
+
+@pytest.mark.parametrize(
+    "grids",
+    [
+        [],
+        _grids(pyproj.CRS.from_epsg(3035), pyproj.CRS.from_epsg(2193)),
+        _grids(*(pyproj.CRS.from_epsg(3035) for _ in range(MAX_DISTINCT_CRS + 1))),
+    ],
+    ids=["no-grids", "mixed-crs", "too-many-distinct-crs"],
+)
+def test_no_default_tile_matrix_set(grids: list[GridSystem]) -> None:
+    assert get_default_tile_matrix_set(grids, ALL_TMS) is None
+
+
+def test_default_tile_matrix_set_many_variables_on_one_grid_is_cheap() -> None:
+    crs = pyproj.CRS.from_epsg(3035)
+    grids = _grids(*([crs] * 100_000))
+    start = time.perf_counter()
+    assert get_default_tile_matrix_set(grids, ALL_TMS) == "EuropeanETRS89_LAEAQuad"
+    assert time.perf_counter() - start < 1

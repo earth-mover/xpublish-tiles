@@ -64,6 +64,7 @@ from xpublish_tiles.xpublish.tiles.tile_matrix import (
     MinZoomSource,
     extract_tile_bbox_and_crs,
     get_all_tile_matrix_set_ids,
+    get_default_tile_matrix_set,
 )
 from xpublish_tiles.xpublish.tiles.types import (
     TILES_FILTERED_QUERY_PARAMS,
@@ -242,8 +243,16 @@ class TilesPlugin(Plugin):
                 ]
             )
             tilesets = [ts for ts in tileset_results if ts is not None]
+            default_tms = get_default_tile_matrix_set(
+                (var_grids[name] for name in layer_extents),
+                (
+                    t
+                    for t, ts in zip(supported_tms, tileset_results, strict=True)
+                    if ts is not None
+                ),
+            )
 
-            return TilesetsList(tilesets=tilesets)
+            return TilesetsList(tilesets=tilesets, defaultTileMatrixSet=default_tms)
 
         @router.get("/legend")
         @with_accumulated_logs(

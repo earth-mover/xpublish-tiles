@@ -1200,6 +1200,18 @@ class TilesetsList(BaseModel):
             }
         ),
     ] = None
+    defaultTileMatrixSet: Annotated[
+        str | None,
+        Field(
+            json_schema_extra={
+                "description": (
+                    "Tile matrix set in the data's own CRS, so clients can skip "
+                    "reprojection. Omitted when the variables use different CRSs "
+                    "or no tile matrix set matches."
+                ),
+            }
+        ),
+    ] = None
 
 
 class TilesLandingPage(BaseModel):

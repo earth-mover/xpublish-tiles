@@ -1,6 +1,7 @@
 """Tile matrix set definitions for OGC Tiles API"""
 
-from collections.abc import Callable, Hashable
+import functools
+from collections.abc import Callable, Hashable, Iterable
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -231,6 +232,49 @@ def get_tile_matrix_limits(tms_id: str, zoom_levels: range) -> list[TileMatrixSe
 def get_all_tile_matrix_set_ids() -> list[str]:
     """Get list of all available tile matrix set IDs."""
     return list(TILE_MATRIX_SETS.keys())
+
+
+# Square quads with one tile at zoom 0 come first: web maps can draw those in their own CRS.
+DEFAULT_TMS_PREFERENCE = (
+    "EuropeanETRS89_LAEAQuad",
+    "NZTM2000Quad",
+    "UPSArcticWGS84Quad",
+    "UPSAntarcticWGS84Quad",
+    "WorldMercatorWGS84Quad",
+    "WebMercatorQuad",
+    "WorldCRS84Quad",
+    "WGS1984Quad",
+)
+MAX_DISTINCT_CRS = 8
+
+
+@functools.cache
+def _tms_crs(tms_id: str) -> pyproj.CRS:
+    return pyproj.CRS.from_wkt(morecantile.tms.get(tms_id).crs.to_wkt())
+
+
+def _single_crs(grids: Iterable[GridSystem]) -> pyproj.CRS | None:
+    distinct = list({id(grid.crs): grid.crs for grid in grids}.values())
+    if not distinct or len(distinct) > MAX_DISTINCT_CRS:
+        return None
+    first, *rest = distinct
+    return first if all(first.equals(crs) for crs in rest) else None
+
+
+def get_default_tile_matrix_set(
+    grids: Iterable[GridSystem], tms_ids: Iterable[str]
+) -> str | None:
+    """Pick the tile matrix set whose CRS matches the data's CRS, if the data has one CRS."""
+    crs = _single_crs(grids)
+    if crs is None:
+        return None
+    available = set(tms_ids)
+    ordered = [t for t in DEFAULT_TMS_PREFERENCE if t in available] + sorted(
+        available - set(DEFAULT_TMS_PREFERENCE)
+    )
+    return next(
+        (t for t in ordered if crs.equals(_tms_crs(t), ignore_axis_order=True)), None
+    )
 
 
 def _repeating_intervals(
