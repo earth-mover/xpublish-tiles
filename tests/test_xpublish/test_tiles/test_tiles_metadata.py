@@ -17,6 +17,7 @@ from xpublish_tiles.lib import VariableNotFoundError
 from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
     ERA5,
+    EU3035,
     FVCOM,
     GEOSTATIONARY,
     GEOZARR_MULTISCALE,
@@ -1332,3 +1333,21 @@ def test_tiles_list_skips_unrenderable_tms():
     }
     assert "WebMercatorQuad" in tms_ids
     assert "CanadianNAD83_LCC" not in tms_ids
+
+
+@pytest.mark.parametrize(
+    ("fixture", "expected"),
+    [
+        pytest.param(EU3035, "EuropeanETRS89_LAEAQuad", id="eu3035"),
+        pytest.param(HRRR, None, id="hrrr"),
+    ],
+)
+def test_tiles_endpoint_default_tile_matrix_set(fixture, expected):
+    ds = fixture.create()
+    rest = xpublish.Rest({fixture.name: ds}, plugins={"tiles": TilesPlugin()})
+    response = TestClient(rest.app).get(f"/datasets/{fixture.name}/tiles/")
+    assert response.status_code == 200
+    body = response.json()
+    assert body.get("defaultTileMatrixSet") == expected
+    if expected is not None:
+        assert any(ts["links"][0]["href"].endswith(expected) for ts in body["tilesets"])
