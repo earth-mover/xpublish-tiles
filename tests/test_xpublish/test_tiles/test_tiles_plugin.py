@@ -73,11 +73,11 @@ def test_tilesets_list_endpoint(xpublish_client):
     assert "minTileRow" in limit
     assert limit["minTileRow"] == 0
     assert "maxTileRow" in limit
-    assert limit["maxTileRow"] == 359
+    assert limit["maxTileRow"] == 179
     assert "minTileCol" in limit
     assert limit["minTileCol"] == 0
     assert "maxTileCol" in limit
-    assert limit["maxTileCol"] == 179
+    assert limit["maxTileCol"] == 359
 
     # Check layers if present
     if tileset.get("layers"):

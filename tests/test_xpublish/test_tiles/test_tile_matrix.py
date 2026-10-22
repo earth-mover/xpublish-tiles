@@ -15,6 +15,7 @@ from xpublish_tiles.xpublish.tiles.tile_matrix import (
     _nominal_resolution,
     extract_tile_bbox_and_crs,
     get_default_tile_matrix_set,
+    get_tile_matrix_limits,
     get_tile_matrix_set,
     get_tile_matrix_set_summary,
     get_web_mercator_quad,
@@ -321,3 +322,19 @@ def test_default_tile_matrix_set_many_variables_on_one_grid_is_cheap() -> None:
     start = time.perf_counter()
     assert get_default_tile_matrix_set(grids, ALL_TMS) == "EuropeanETRS89_LAEAQuad"
     assert time.perf_counter() - start < 1
+
+
+@pytest.mark.parametrize(
+    ("tms_id", "zoom", "rows", "cols"),
+    [
+        ("WorldCRS84Quad", 0, (0, 0), (0, 1)),
+        ("WorldCRS84Quad", 2, (0, 3), (0, 7)),
+        ("WebMercatorQuad", 2, (0, 3), (0, 3)),
+    ],
+)
+def test_tile_matrix_limits_rows_and_cols(
+    tms_id: str, zoom: int, rows: tuple[int, int], cols: tuple[int, int]
+) -> None:
+    (limit,) = get_tile_matrix_limits(tms_id, range(zoom, zoom + 1))
+    assert (limit.minTileRow, limit.maxTileRow) == rows
+    assert (limit.minTileCol, limit.maxTileCol) == cols

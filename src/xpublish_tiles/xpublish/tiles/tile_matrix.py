@@ -220,10 +220,10 @@ def get_tile_matrix_limits(tms_id: str, zoom_levels: range) -> list[TileMatrixSe
         limits.append(
             TileMatrixSetLimit(
                 tileMatrix=str(z),
-                minTileRow=minmax["x"]["min"],
-                maxTileRow=minmax["x"]["max"],
-                minTileCol=minmax["y"]["min"],
-                maxTileCol=minmax["y"]["max"],
+                minTileRow=minmax["y"]["min"],
+                maxTileRow=minmax["y"]["max"],
+                minTileCol=minmax["x"]["min"],
+                maxTileCol=minmax["x"]["max"],
             )
         )
     return limits
