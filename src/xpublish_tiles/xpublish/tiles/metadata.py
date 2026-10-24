@@ -10,6 +10,7 @@ import xarray as xr
 from xarray import Dataset
 from xpublish_tiles.grids import (
     CubedSphere,
+    Features,
     GridSystem,
     Healpix,
     Polar,
@@ -47,7 +48,7 @@ _ALLOWED_STYLES_CACHE: dict[str, list[str]] = {}
 
 def grid_styles(grid: GridSystem) -> list[str]:
     """Style IDs that can render ``grid``; the first is the default."""
-    if isinstance(grid, (Healpix, CubedSphere)):
+    if isinstance(grid, (Healpix, CubedSphere, Features)):
         return ["polygons"]
     if isinstance(grid, Polar):
         return ["raster"]

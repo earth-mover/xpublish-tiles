@@ -1,8 +1,8 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from functools import partial
+from functools import cache, partial
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -2616,6 +2616,115 @@ NATIVE_AT_ROOT_MULTISCALE = Dataset(
 )
 
 
+@cache
+def _feature_geoms() -> list:
+    import shapely
+
+    y = np.linspace(0, 10, 200)
+    edge = np.column_stack([10 + 0.5 * np.sin(y), y])
+    west = shapely.Polygon([(0, 0), *edge, (0, 10)])
+    east = shapely.Polygon([*edge, (20, 10), (20, 0)])
+    return [
+        shapely.box(-100, 30, -90, 40),
+        shapely.Polygon(
+            shapely.box(-80, 30, -60, 50).exterior.coords,
+            [shapely.box(-75, 35, -65, 45).exterior.coords],
+        ),
+        shapely.MultiPolygon(
+            [shapely.box(-50, 30, -45, 35), shapely.box(-40, 30, -35, 35)]
+        ),
+        shapely.Polygon([(175, 50), (-175, 50), (-175, 60), (175, 60)]),
+        west,
+        east,
+    ]
+
+
+def __getattr__(name: str) -> Any:
+    # (test only) FEATURE_GEOMS is built lazily: shapely is an optional dependency.
+    if name == "FEATURE_GEOMS":
+        return _feature_geoms()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def features_polygons(
+    *,
+    dims: tuple[Dim, ...],
+    dtype: npt.DTypeLike,
+    attrs: dict[str, Any],
+    encoding: Literal["cf", "xvec"] = "cf",
+) -> xr.Dataset:
+    """Polygon features along one dim: square, hole, multipolygon, antimeridian
+    crosser, and two neighbours sharing a curved edge."""
+    time_dim, feature_dim = dims
+    n_time, n_feature = time_dim.size, feature_dim.size
+    time = pd.date_range("2000-01-01", periods=n_time)
+    foo = (10 * (np.arange(n_feature)[None, :] + 1) + np.arange(n_time)[:, None]).astype(
+        dtype
+    )
+    bar = np.arange(n_feature)
+    ds = xr.Dataset(
+        {
+            "foo": ((time_dim.name, feature_dim.name), foo),
+            "bar": ((feature_dim.name,), bar),
+        },
+        coords={time_dim.name: time},
+    )
+    geoms = _feature_geoms()
+    if encoding == "xvec":
+        import xvec  # noqa: F401
+
+        ds = ds.assign_coords({feature_dim.name: geoms})
+        ds = ds.xvec.set_geom_indexes(feature_dim.name, crs=4326)
+    else:
+        import cf_xarray.geometry
+
+        cf_geoms = cf_xarray.geometry.shapely_to_cf(
+            xr.DataArray(np.array(geoms, copy=True), dims=feature_dim.name)
+        )
+        crs = pyproj.CRS.from_epsg(4326)
+        spatial_ref = xr.DataArray(0, attrs={**crs.to_cf(), "crs_wkt": crs.to_wkt()})
+        ds = xr.merge([ds, cf_geoms]).assign_coords(spatial_ref=spatial_ref)
+        ds["geometry_container"].attrs["grid_mapping"] = "spatial_ref"
+        for name in ("foo", "bar"):
+            ds[name].attrs.update(
+                geometry="geometry_container", grid_mapping="spatial_ref"
+            )
+        structural = [
+            n
+            for n in (
+                "crd_x",
+                "crd_y",
+                "node_count",
+                "part_node_count",
+                "interior_ring",
+                "x",
+                "y",
+            )
+            if n in ds.variables
+        ]
+        ds = ds.set_coords(structural)
+    ds.attrs.update(attrs)
+    return ds
+
+
+FEATURES_POLYGONS = Dataset(
+    name="features_polygons",
+    dims=(
+        Dim(name="time", size=3, chunk_size=3, data=None),
+        Dim(name="feature", size=6, chunk_size=6, data=None),
+    ),
+    dtype=np.float32,
+    setup=features_polygons,
+)
+
+FEATURES_POLYGONS_XVEC = Dataset(
+    name="features_polygons_xvec",
+    dims=FEATURES_POLYGONS.dims,
+    dtype=np.float32,
+    setup=partial(features_polygons, encoding="xvec"),
+)
+
+
 # Lookup dictionary for all available datasets
 DATASET_LOOKUP = {
     "hrrr": HRRR,
@@ -2649,6 +2758,8 @@ DATASET_LOOKUP = {
     "regional_healpix_na": REGIONAL_HEALPIX_NA,
     "geozarr_multiscale": GEOZARR_MULTISCALE,
     "native_at_root_multiscale": NATIVE_AT_ROOT_MULTISCALE,
+    "features_polygons": FEATURES_POLYGONS,
+    "features_polygons_xvec": FEATURES_POLYGONS_XVEC,
 }
 
 

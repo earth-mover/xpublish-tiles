@@ -27,6 +27,7 @@ WEBMERC_TMS = morecantile.tms.get("WebMercatorQuad")
 WGS84_TMS = morecantile.tms.get("WorldMercatorWGS84Quad")
 # EuropeanETRS89_LAEAQuad TMS for ETRS89 LAEA CRS
 ETRS89_TMS = morecantile.tms.get("EuropeanETRS89_LAEAQuad")
+CRS84_TMS = morecantile.tms.get("WorldCRS84Quad")
 
 # WebMercator tiles - regular cases
 WEBMERC_TILES_REGULAR = [
@@ -454,6 +455,31 @@ UTM50S_HIRES_BENCHMARK_TILES = [
 # fmt: on
 
 TILES = WEBMERC_TILES + WGS84_TILES + ETRS89_TILES
+
+FEATURES_TILES = [
+    TileTestParam(tile=Tile(x=0, y=0, z=0), tms=WEBMERC_TMS, name="features_webmerc_z0"),
+    TileTestParam(
+        tile=Tile(x=4, y=6, z=4), tms=WEBMERC_TMS, name="features_webmerc_hole"
+    ),
+    TileTestParam(
+        tile=Tile(x=7, y=2, z=3), tms=WEBMERC_TMS, name="features_webmerc_am_east"
+    ),
+    TileTestParam(
+        tile=Tile(x=0, y=2, z=3), tms=WEBMERC_TMS, name="features_webmerc_am_west"
+    ),
+    TileTestParam(
+        tile=Tile(x=33, y=31, z=6), tms=WEBMERC_TMS, name="features_webmerc_shared_edge"
+    ),
+    TileTestParam(tile=Tile(x=0, y=0, z=0), tms=CRS84_TMS, name="features_crs84_z0"),
+    TileTestParam(tile=Tile(x=9, y=4, z=4), tms=CRS84_TMS, name="features_crs84_hole"),
+    TileTestParam(
+        tile=Tile(x=15, y=1, z=3), tms=CRS84_TMS, name="features_crs84_am_east"
+    ),
+    TileTestParam(tile=Tile(x=0, y=1, z=3), tms=CRS84_TMS, name="features_crs84_am_west"),
+    TileTestParam(
+        tile=Tile(x=67, y=30, z=6), tms=CRS84_TMS, name="features_crs84_shared_edge"
+    ),
+]
 
 # (tile, id) pairs; wrapped in pytest.param by the tests (no runtime pytest dep)
 HEALPIX_CUBE_TILES = [

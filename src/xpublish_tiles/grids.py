@@ -63,6 +63,7 @@ from xpublish_tiles.utils import (
 )
 
 if TYPE_CHECKING:
+    import shapely
     from xdggs.healpix import HealpixIndex
 
 GRID_DETECTION_LOCK = threading.Lock()
@@ -116,6 +117,17 @@ class HealpixIndexer:
 
 
 @dataclass
+class GeometryIndexer:
+    """Positions on the feature dim selected by Features.sel."""
+
+    indices: np.ndarray
+
+    @property
+    def is_empty(self) -> bool:
+        return self.indices.size == 0
+
+
+@dataclass
 class HealpixCubeIndexer(HealpixIndexer):
     """One face rectangle of a (face, y, x) HEALPix cube; ``indices`` are positions in the gathered cell dim."""
 
@@ -143,7 +155,7 @@ class FacetedIndexer:
 
 # Union type for a single slicer entry returned by GridSystem.sel().
 # Each dim maps to a list of these (see DimSlicers / Slicers below).
-Slicer = slice | Fill | UgridIndexer | HealpixIndexer | FacetedIndexer
+Slicer = slice | Fill | UgridIndexer | HealpixIndexer | FacetedIndexer | GeometryIndexer
 DimSlicers = list[Slicer]
 Slicers = dict[str, DimSlicers]
 
@@ -2928,6 +2940,190 @@ class Triangular(GridSystem1D):
         )
 
 
+@dataclass(init=False, kw_only=True, eq=False)
+class Features(GridSystem1D):
+    """Vector data cube: polygon features along one dimension.
+
+    ``geometries`` holds the features in the [0, 360) longitude form when they
+    cross the antimeridian (``crossing``), else as given (wrapped to [-180, 180)
+    for geographic CRS).
+
+    A ring edge longer than 180° in longitude counts as an antimeridian crossing,
+    so densify a sparse polygon wider than 180° (e.g. a 4-vertex box from -100° to +100°).
+    """
+
+    crs: CRS
+    bbox: BBox
+    X: str
+    Y: str
+    dim: str
+    geometries: np.ndarray
+    crossing: np.ndarray
+    counts: np.ndarray
+    lon_spans_globe: bool
+    indexes: tuple[xr.Index, ...] = ()
+    alternates: tuple[GridMetadata, ...] = ()
+    npoints_per_geometry: int = 1
+    structural_names: frozenset[str]
+    dXmin: float = 0
+    dYmin: float = 0
+    _strtree: "shapely.STRtree" = field(repr=False)
+
+    def __init__(
+        self,
+        *,
+        crs: CRS,
+        X: str,
+        Y: str,
+        dim: str,
+        geometries: np.ndarray,
+        structural_names: frozenset[str] = frozenset(),
+    ):
+        import shapely
+
+        self.crs = crs
+        self.X, self.Y = X, Y
+        self.dim = dim
+        self.structural_names = structural_names
+        self.indexes = ()
+        self.alternates = ()
+        self.Z = None
+        self._bbox_xform_cache = {}
+
+        geometries = np.array(geometries, dtype=object, copy=True)
+        if crs.is_geographic:
+            geometries = shapely.transform(geometries, _wrap_longitude)
+            crossing = _crossing_features(geometries)
+        else:
+            crossing = np.zeros(geometries.shape, dtype=bool)
+        xmin, ymin, xmax, ymax = shapely.total_bounds(geometries)
+        self.lon_spans_globe = bool(crs.is_geographic and (xmax - xmin) > 350)
+        if crossing.any():
+            self.bbox = BBox(west=-180, east=180, south=ymin, north=ymax)
+            geometries = geometries.copy()
+            geometries[crossing] = shapely.transform(
+                geometries[crossing], _shift_longitude_to_360
+            )
+        else:
+            self.bbox = BBox(west=xmin, east=xmax, south=ymin, north=ymax)
+        # datashader fills by nonzero winding: holes must turn against the shell.
+        # Orient after the [0, 360) shift, where crossing rings are planar-continuous.
+        self.geometries = shapely.orient_polygons(geometries)
+        self.crossing = crossing
+        self.counts = shapely.get_num_coordinates(geometries)
+        self._strtree = shapely.STRtree(self.geometries)
+
+    def vertex_count(self, indices: np.ndarray) -> int:
+        return int(self.counts[indices].sum())
+
+    @property
+    def strtree(self) -> "shapely.STRtree":
+        return self._strtree
+
+    @staticmethod
+    def dim_of(ds: xr.Dataset, name: str) -> str:
+        """Geometry dim of an xvec coordinate or a CF geometry container."""
+        var = ds[name]
+        if "geometry_type" in var.attrs:
+            # CF point containers may omit node_count: one node per feature.
+            ref = var.attrs.get("node_count") or var.attrs["node_coordinates"].split()[0]
+            return str(ds[ref].dims[0])
+        (dim,) = var.dims
+        return str(dim)
+
+    @staticmethod
+    def structural_names_of(ds: xr.Dataset, name: str) -> frozenset[str]:
+        """The CF container and every variable it names; empty for xvec."""
+        attrs = ds[name].attrs
+        if "geometry_type" not in attrs:
+            return frozenset()
+        names = {name}
+        for attr in (
+            "node_count",
+            "part_node_count",
+            "interior_ring",
+            "node_coordinates",
+            "coordinates",
+        ):
+            names.update(attrs.get(attr, "").split())
+        return frozenset(names)
+
+    def is_structural_variable(self, var: xr.DataArray) -> bool:
+        return super().is_structural_variable(var) or str(var.name) in (
+            self.structural_names
+        )
+
+    def sel(self, *, bbox: BBox) -> Slicers:
+        import shapely
+
+        boxes = [bbox]
+        if self.crs.is_geographic:
+            # crossing features are stored in [0, 360)
+            boxes.append(BBox(bbox.west + 360, bbox.south, bbox.east + 360, bbox.north))
+            if bbox.east > 180:
+                boxes.append(
+                    BBox(bbox.west - 360, bbox.south, bbox.east - 360, bbox.north)
+                )
+        query = np.array([shapely.box(b.west, b.south, b.east, b.north) for b in boxes])
+        hits = self.strtree.query(query, predicate="intersects")
+        indices = np.unique(hits[1]).astype(np.intp)
+        return {self.dim: [GeometryIndexer(indices)]}
+
+    @classmethod
+    def from_dataset(cls, ds: xr.Dataset, crs: CRS, Xname: str, Yname: str) -> Self:
+        container = ds[Xname]
+        if "geometry_type" in container.attrs:
+            _, cf_geometry = _import_cf_geometry()
+            geometries = cf_geometry.cf_to_shapely(ds, container=Xname).values
+        else:
+            geometries = container.values
+        return cls(
+            crs=crs,
+            X=Xname,
+            Y=Yname,
+            dim=cls.dim_of(ds, Xname),
+            geometries=geometries,
+            structural_names=cls.structural_names_of(ds, Xname),
+        )
+
+
+def _import_cf_geometry() -> tuple[Any, Any]:
+    try:
+        import cf_xarray.geometry as cf_geometry
+        import shapely
+    except ImportError as e:
+        raise ImportError(
+            "CF geometry containers require shapely; install `xpublish-tiles[vector]`."
+        ) from e
+    return shapely, cf_geometry
+
+
+def _wrap_longitude(coords: np.ndarray) -> np.ndarray:
+    coords = coords.copy()
+    x = coords[:, 0]
+    coords[:, 0] = np.where((x < -180) | (x > 180), ((x + 180) % 360) - 180, x)
+    return coords
+
+
+def _shift_longitude_to_360(coords: np.ndarray) -> np.ndarray:
+    coords = coords.copy()
+    coords[:, 0] = np.where(coords[:, 0] < 0, coords[:, 0] + 360, coords[:, 0])
+    return coords
+
+
+def _crossing_features(geometries: np.ndarray) -> np.ndarray:
+    """A feature crosses when a ring has consecutive vertices > 180 degrees apart in longitude."""
+    import shapely
+
+    parts, part_geom = shapely.get_parts(geometries, return_index=True)
+    rings, ring_part = shapely.get_rings(parts, return_index=True)
+    coords, vertex_ring = shapely.get_coordinates(rings, return_index=True)
+    jump = (vertex_ring[1:] == vertex_ring[:-1]) & (np.abs(np.diff(coords[:, 0])) > 180)
+    crossing = np.zeros(geometries.shape, dtype=bool)
+    crossing[part_geom[ring_part[vertex_ring[1:][jump]]]] = True
+    return crossing
+
+
 def _healpix_ellipsoid(info) -> Any:
     # xdggs has no public ellipsoid serializer; HealpixInfo._format_ellipsoid is gone in 0.7.
     return info.to_dict().get("ellipsoid", "sphere")
@@ -3959,10 +4155,86 @@ def _detect_grid_metadata(
     return GridMetadata(X=Xname, Y=Yname, crs=mapping.crs, grid_cls=grid_cls)
 
 
+def find_geometry(ds: xr.Dataset) -> str | None:
+    """Name of the first xvec geometry coordinate or CF geometry container. Imports nothing."""
+    for name, index in ds.xindexes.items():
+        if (
+            type(index).__name__ == "GeometryIndex"
+            and type(index).__module__.startswith("xvec")
+            and ds[name].ndim == 1
+        ):
+            return str(name)
+    for name, var in ds.variables.items():
+        if "geometry_type" in var.attrs:
+            return str(name)
+    return None
+
+
+def detect_features(ds: xr.Dataset) -> GridMetadata | None:
+    """Detect a vector data cube: an xvec geometry coordinate or a CF geometry container.
+
+    Raises ``UnsupportedGridError`` for a non-polygonal or CRS-less xvec coordinate.
+    A CF container that is not polygonal or has no CRS is not ``Features``.
+    """
+    name = find_geometry(ds)
+    if name is None:
+        return None
+    if "geometry_type" in ds[name].attrs:
+        try:
+            return features_metadata(ds, name)
+        except UnsupportedGridError:
+            return None
+    return features_metadata(ds, name)
+
+
+def features_metadata(ds: xr.Dataset, name: str) -> GridMetadata:
+    """``Features`` metadata for the geometry ``name``.
+
+    Raises ``UnsupportedGridError`` for non-polygonal geometries or no CRS.
+    """
+    container = ds[name]
+    if "geometry_type" not in container.attrs:
+        index = ds.xindexes[name]
+        return _features_metadata_from_xvec(ds, name, index)
+    return _features_metadata_from_cf(ds, name)
+
+
+def _features_metadata_from_xvec(ds: xr.Dataset, name: str, index: Any) -> GridMetadata:
+    import shapely
+
+    if index.crs is None:
+        raise UnsupportedGridError(f"Geometry coordinate {name!r} has no CRS.")
+    if not np.isin(shapely.get_type_id(ds[name].values), (3, 6)).all():
+        raise UnsupportedGridError(
+            f"Geometry coordinate {name!r} has non-polygonal geometries."
+        )
+    return GridMetadata(X=name, Y=name, crs=index.crs, grid_cls=Features)
+
+
+def _features_metadata_from_cf(ds: xr.Dataset, name: str) -> GridMetadata:
+    container = ds[name]
+    geometry_type = container.attrs["geometry_type"]
+    if geometry_type != "polygon":
+        raise UnsupportedGridError(
+            f"CF geometry container {name!r} has unsupported geometry_type "
+            f"{geometry_type!r}; only 'polygon' is supported."
+        )
+    mappings = _guess_grid_mappings_and_crs(ds)
+    grid_mapping = container.attrs.get("grid_mapping")
+    mapping = next(
+        (m for m in mappings if m.grid_mapping_var_name == grid_mapping),
+        mappings[0] if mappings else None,
+    )
+    if mapping is None or mapping.crs is None:
+        raise UnsupportedGridError(f"CF geometry container {name!r} has no CRS.")
+    return GridMetadata(X=name, Y=name, crs=mapping.crs, grid_cls=Features)
+
+
 def guess_grid_metadata(
     ds: xr.Dataset,
     *,
     all_mappings: list[GridMappingInfo] | None = None,
+    detect_vector: bool = True,
 ) -> GridMetadata | None:
     """Return ``GridMetadata`` for ``ds``'s primary grid mapping, or ``None``
     if no CRS can be detected from attributes alone.
@@ -3973,7 +4245,13 @@ def guess_grid_metadata(
 
     Pass ``all_mappings`` to reuse a previously computed
     ``_guess_grid_mappings_and_crs(ds)`` result and avoid recomputing it.
+
+    ``detect_vector=False`` skips ``Features`` detection, for callers that
+    handle vector data cubes separately.
     """
+    if detect_vector and (features_meta := detect_features(ds)) is not None:
+        return features_meta
+
     cube_dims = find_healpix_cube_dims(ds)
     if cube_dims is not None:
         return GridMetadata(
@@ -4022,7 +4300,9 @@ def _guess_grid_for_dataset(ds: xr.Dataset) -> GridSystem:
     Raises RuntimeError to indicate that we might try again.
     """
     all_mappings = _guess_grid_mappings_and_crs(ds)
-    primary_grid_metadata = guess_grid_metadata(ds, all_mappings=all_mappings)
+    primary_grid_metadata = guess_grid_metadata(
+        ds, all_mappings=all_mappings, detect_vector=False
+    )
     if primary_grid_metadata is None:
         raise UnsupportedGridError("CRS/grid system not detected")
     extra: dict[str, Any] = {}
@@ -4234,6 +4514,21 @@ def _detect_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
     )
     if is_ugrid_var:
         cf_sub = ds
+
+    geometry = find_geometry(ds)
+    if geometry is not None and Features.dim_of(ds, geometry) in ds[name].dims:
+        features_meta = features_metadata(ds, geometry)
+        grid = Features.from_dataset(
+            ds, features_meta.crs, features_meta.X, features_meta.Y
+        )
+        var = cf_get(ds, name)
+        grid.Z = _guess_z_dimension(var, exclude_dims=grid.dims_for(var))
+        _validate_grid_dims(grid, var)
+        return grid
+    if geometry is not None:
+        # The geometry's node coordinates must not be mistaken for a point cloud.
+        structural = Features.structural_names_of(ds, geometry) | {geometry}
+        ds = ds.drop_vars(list(structural & set(ds.variables) - {str(name)}))
 
     try:
         meta = guess_grid_metadata(cf_sub)

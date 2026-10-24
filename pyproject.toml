@@ -67,11 +67,15 @@ healpix = [
     "xdggs>=0.5.0",
     "healpix-geo>=0.0.10",
 ]
+vector = [
+    "xvec>=0.5.2",
+    "shapely>=2.1",
+]
 datadog = [
     "ddtrace>=3.0",
 ]
 complete = [
-    "xpublish-tiles[healpix]",
+    "xpublish-tiles[healpix,vector]",
 ]
 testing = [
     "pytest>=8.4.1",
@@ -98,7 +102,7 @@ dev = [
     "dask",
     "ipython>=9.4.0",
     "ipykernel>=6.29.0",
-    "xpublish-tiles[testing,healpix]",
+    "xpublish-tiles[testing,healpix,vector]",
     "coiled>=1.118.3",
     "memray>=1.18.0",
     "py-spy>=0.4.1",

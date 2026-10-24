@@ -17,6 +17,7 @@ from pyproj.aoi import BBox
 import xarray as xr
 from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
+    Features,
     GridSystem,
     GridSystem1D,
     GridSystem2D,
@@ -259,6 +260,10 @@ def _compute_min_zoom(
         selection = tile_selection(tile, worst_case=worst_case)
         if selection is None:
             return True
+        if isinstance(grid, Features) and grid.vertex_count(
+            selection[1][grid.dim][0].indices
+        ) > config.get("max_renderable_vertices"):
+            return False
         return check_data_is_renderable_size(
             selection[1], da, grid, alternate, style=style
         )
@@ -294,6 +299,15 @@ def _compute_min_zoom(
         tiles, worst_case = tiles_to_check(zoom)
         tile = next(t for t in tiles if not tile_renderable(t, worst_case=worst_case))
         bbox, slicers = tile_selection(tile, worst_case=worst_case)
+        if isinstance(grid, Features):
+            nverts = grid.vertex_count(slicers[grid.dim][0].indices)
+            limit = config.get("max_renderable_vertices")
+            if nverts > limit:
+                return (
+                    f"No zoom level of {tms.id} is renderable for this data: tile "
+                    f"{tile.z}/{tile.x}/{tile.y} at maxzoom needs {nverts} vertices, "
+                    f"over max_renderable_vertices {limit}."
+                )
         nbytes = estimated_render_bytes(slicers, da, grid, alternate, style=style)
         budget = config.get("max_renderable_size")
         chunks = _chunk_sizes(da)
@@ -354,7 +368,7 @@ def get_min_zoom(
     xpublish_id : str | None
         Optional dataset identifier for caching. When provided,
         results are cached per (xpublish_id, spatial_dims, tms.id, style,
-        max_renderable_size, minzoom_polar_cutoff).
+        max_renderable_size, minzoom_polar_cutoff, max_renderable_vertices).
 
     Returns
     -------
@@ -370,6 +384,7 @@ def get_min_zoom(
             # config that changes the answer
             config.get("max_renderable_size"),
             config.get("minzoom_polar_cutoff"),
+            config.get("max_renderable_vertices"),
         )
     else:
         cache_key = None

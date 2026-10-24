@@ -47,6 +47,8 @@ from xpublish_tiles.projections import (
 from xpublish_tiles.utils import NUMBA_PARALLEL
 
 if TYPE_CHECKING:
+    from spatialpandas.geometry import MultiPolygonArray, PolygonArray
+
     from xpublish_tiles.grids import (
         DimSlicers,
         GridMetadata,
@@ -769,7 +771,7 @@ def apply_default_pad(slicers, da, grid):
 
     Parameters
     ----------
-    slicers : dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]
+    slicers : dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer | GeometryIndexer]]
         Raw slicers from grid.sel()
     da : xr.DataArray
         Data array (for dimension sizes)
@@ -778,7 +780,7 @@ def apply_default_pad(slicers, da, grid):
 
     Returns
     -------
-    dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]
+    dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer | GeometryIndexer]]
         Slicers with default_pad applied
     """
     default_padders = [
@@ -808,7 +810,7 @@ def slicers_to_pad_instruction(slicers, datatype) -> dict[str, Any]:
     return pad_kwargs
 
 
-def polygons_from_rings(rings: np.ndarray):
+def polygons_from_rings(rings: np.ndarray) -> "PolygonArray":
     """Build a spatialpandas PolygonArray from a ``(N, M, 2)`` rings buffer.
 
     Each row is one polygon with M vertices (including the closing vertex).
@@ -839,6 +841,68 @@ def polygons_from_rings(rings: np.ndarray):
     poly_offsets = np.arange(n + 1, dtype=np.int32)
     polys = pa.ListArray.from_arrays(pa.array(poly_offsets), rings_arr)
     return PolygonArray(polys)
+
+
+def unwrap_seam_vertices(x: np.ndarray, verts: np.ndarray, *, width: float) -> None:
+    """Move the vertices ``verts`` with negative x by ``+width``, in place."""
+    neg = x[verts] < 0
+    x[verts[neg]] += width
+
+
+def features_to_multipolygons(
+    geoms: np.ndarray,
+    crossing: np.ndarray,
+    transformer: pyproj.Transformer,
+) -> tuple["MultiPolygonArray", np.ndarray]:
+    """Transform source-CRS geometries to a MultiPolygonArray and their
+    source positions; crossing geometries are unwrapped and copied by
+    ∓width, as in fix_healpix_discontinuity."""
+    import pyarrow as pa
+    import shapely
+    from shapely import GeometryType
+    from spatialpandas.geometry import MultiPolygonArray
+
+    idx = np.flatnonzero(crossing)
+    k, n = idx.size, len(geoms)
+    # new writable array: to_ragged_array fails on read-only mixed-type input
+    geoms = np.concatenate([geoms, geoms[idx], geoms[idx]])
+    src = np.concatenate([np.arange(n), idx, idx])
+
+    geom_type, coords, offsets = shapely.to_ragged_array(geoms)
+    if geom_type == GeometryType.POLYGON:
+        offsets = (*offsets, np.arange(len(geoms) + 1))
+    elif geom_type != GeometryType.MULTIPOLYGON:
+        raise ValueError(f"Expected polygon geometries; got {geom_type!r}.")
+    ring_offsets, part_offsets, geom_offsets = offsets
+
+    x, y = transformer.transform(coords[:, 0], coords[:, 1])
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+
+    if k:
+        left, _, right, _ = transformer.transform_bounds(-180, -90, 180, 90)
+        width = abs(right - left)
+        part_geom = np.repeat(np.arange(len(geoms)), np.diff(geom_offsets))
+        ring_geom = np.repeat(part_geom, np.diff(part_offsets))
+        vert_geom = np.repeat(ring_geom, np.diff(ring_offsets))
+        seam = np.concatenate([crossing, np.ones(2 * k, dtype=bool)])
+        unwrap_seam_vertices(x, np.flatnonzero(seam[vert_geom]), width=width)
+        x[(vert_geom >= n) & (vert_geom < n + k)] -= width
+        x[vert_geom >= n + k] += width
+
+    flat = np.empty(2 * x.size, dtype=np.float64)
+    flat[0::2], flat[1::2] = x, y
+    inner = pa.Array.from_buffers(pa.float64(), flat.size, [None, pa.py_buffer(flat)], 0)
+    rings_arr = pa.ListArray.from_arrays(
+        pa.array(2 * np.asarray(ring_offsets, dtype=np.int32)), inner
+    )
+    parts_arr = pa.ListArray.from_arrays(
+        pa.array(np.asarray(part_offsets, dtype=np.int32)), rings_arr
+    )
+    multis = pa.ListArray.from_arrays(
+        pa.array(np.asarray(geom_offsets, dtype=np.int32)), parts_arr
+    )
+    return MultiPolygonArray(multis), src
 
 
 @numba.njit(nogil=True, cache=True, boundscheck=False)
@@ -1099,12 +1163,12 @@ def _get_indexer_size(
     sl: "Slicer", dim_size: int | None = None, chunk: int | None = None
 ) -> int:
     """Elements an indexer selects, or with ``chunk`` the elements it decompresses."""
-    from xpublish_tiles.grids import HealpixIndexer, UgridIndexer
+    from xpublish_tiles.grids import GeometryIndexer, HealpixIndexer, UgridIndexer
 
     if isinstance(sl, Fill | UgridIndexer):
         # padding / an explicit vertex list: nothing to round out to
         return sl.size
-    if isinstance(sl, HealpixIndexer):
+    if isinstance(sl, GeometryIndexer | HealpixIndexer):
         if isinstance(sl.indices, np.ndarray):
             if chunk is None:
                 return int(sl.indices.size)
@@ -1140,6 +1204,8 @@ def _iter_subset_shapes(
     from xpublish_tiles.grids import (
         FacetedGridSystem,
         FacetedIndexer,
+        Features,
+        GeometryIndexer,
         Healpix,
         HealpixCube,
         HealpixCubeIndexer,
@@ -1160,6 +1226,12 @@ def _iter_subset_shapes(
         # Xdim == Ydim == the cell dim; the 2-D path below would square it
         for ix in slicers[grid.dim]:
             yield (_get_indexer_size(ix, da.sizes[grid.dim], chunks.get(grid.dim)),)
+        return
+
+    if isinstance(grid, Features):
+        for ix in slicers[grid.dim]:
+            assert isinstance(ix, GeometryIndexer)
+            yield (ix.indices.size,)
         return
 
     if isinstance(grid, Triangular):
@@ -1270,7 +1342,7 @@ def check_data_is_renderable_size(
 
     Parameters
     ----------
-    slicers : dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]
+    slicers : dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer | GeometryIndexer]]
         Slicers for data selection
     da : xr.DataArray
         Data array (only metadata used, no data loaded)
