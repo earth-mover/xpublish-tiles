@@ -57,6 +57,7 @@ from xpublish_tiles.lib import (
     max_render_shape,
     normalize_slicers,
     pad_slicers,
+    polygons_from_rings,
     round_bbox,
     sum_tuples,
     timedelta_to_iso8601,
@@ -73,6 +74,7 @@ from xpublish_tiles.types import (
     ContinuousData,
     DataType,
     DiscreteData,
+    GeometryArray,
     NullRenderContext,
     OutputBBox,
     OutputCRS,
@@ -1581,8 +1583,8 @@ async def _transform_polygon_patch(
     bbox: OutputBBox,
     output_crs: OutputCRS,
     out_width: float | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Transform one patch into ``(rings, values_1d)`` for the polygons style.
+) -> tuple[GeometryArray, np.ndarray]:
+    """Transform one patch into ``(polygons, values_1d)`` for the polygons style.
 
     Dispatches by patch grid type: GridSystem2D goes through the shared
     cell-corners → transform → corners-to-rings core; Triangular/Healpix share
@@ -1609,7 +1611,7 @@ async def _transform_polygon_patch(
             is_polar_cap=is_polar_cap,
             out_width=out_width,
         )
-        return rings, values
+        return polygons_from_rings(rings), values
 
     # Triangular / Healpix polygon path. Corners come from the grid, not the
     # DataArray: face-located UGRID variables carry no node coords.
@@ -1658,10 +1660,10 @@ async def _transform_polygon_patch(
             # Node-located: one value per face for the polygons.
             values = await async_run(grid.nodes_to_faces, subset.values, ugrid_indexer)
 
-    cell_rings = grid.corners_to_rings(newX.data, newY.data, ugrid_indexer=ugrid_indexer)
+    rings = grid.corners_to_rings(newX.data, newY.data, ugrid_indexer=ugrid_indexer)
     # (N,) or (band, N): the cell dim trails an RGB band dim.
     values = np.asarray(values)
-    return cell_rings, values.reshape(*values.shape[:-1], -1)
+    return polygons_from_rings(rings), values.reshape(*values.shape[:-1], -1)
 
 
 async def _transform_raster_patch(
@@ -1754,7 +1756,7 @@ async def transform_for_render(
 
     Iterates over ``context.patches`` uniformly: a non-faceted grid carries one
     patch, a FacetedGridSystem carries one per overlapping face. The polygons
-    path concatenates rings/values across patches. The raster path requires a
+    path concatenates geometry arrays and values across patches. The raster path requires a
     single patch (faceted-raster is rejected upstream).
     """
     result: dict[str, PopulatedRenderContext | NullRenderContext] = {}
@@ -1780,28 +1782,20 @@ async def transform_for_render(
                 out_left, _, out_right, _ = out_tx.transform_bounds(-180, -90, 180, 90)
                 out_width = abs(out_right - out_left)
 
-            rings_list: list[np.ndarray] = []
+            geoms_list: list[GeometryArray] = []
             values_list: list[np.ndarray] = []
             for patch in context.patches:
-                rings, values = await _transform_polygon_patch(
+                geoms, values = await _transform_polygon_patch(
                     patch, bbox=bbox, output_crs=crs, out_width=out_width
                 )
-                rings_list.append(rings)
+                geoms_list.append(geoms)
                 values_list.append(values)
 
-            # Different patches may emit different ring widths (polar-cap
-            # patches widen to M=6 to carry the pole-edge split; equatorial
-            # cubed-sphere faces stay at M=5). Pad each by repeating the
-            # closing vertex so that they are all a consistent size.
-            # DC: if this ends up being a performance concern we could
-            #     pass `rings_list` to the renderer where we convert each
-            #     member of the list to a PolygonArray and then concatenate there.
-            max_m = max(r.shape[1] for r in rings_list)
-            for i, r in enumerate(rings_list):
-                if r.shape[1] < max_m:
-                    pad = np.repeat(r[:, -1:, :], max_m - r.shape[1], axis=1)
-                    rings_list[i] = np.concatenate([r, pad], axis=1)
-            cell_rings = np.concatenate(rings_list, axis=0)
+            polygons = (
+                geoms_list[0]
+                if len(geoms_list) == 1
+                else type(geoms_list[0])._concat_same_type(geoms_list)
+            )
 
             values_out = np.concatenate(values_list, axis=-1)
             dims = ["cell"]
@@ -1815,7 +1809,7 @@ async def transform_for_render(
                 bbox=bbox,
                 patches=context.patches,
                 da=da_out,
-                cell_rings=cell_rings,
+                polygons=polygons,
             )
             continue
 

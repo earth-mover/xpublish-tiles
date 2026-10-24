@@ -8,6 +8,7 @@ import numba
 import numpy as np
 import pyproj
 import pyproj.aoi
+from spatialpandas.geometry import MultiPolygonArray, PolygonArray
 
 import xarray as xr
 from xpublish_tiles.config import config
@@ -26,6 +27,7 @@ InputCRS = NewType("InputCRS", pyproj.CRS)
 OutputCRS = NewType("OutputCRS", pyproj.CRS)
 InputBBox = NewType("InputBBox", pyproj.aoi.BBox)
 OutputBBox = NewType("OutputBBox", pyproj.aoi.BBox)
+GeometryArray = PolygonArray | MultiPolygonArray
 
 
 class ImageFormat(enum.StrEnum):
@@ -183,7 +185,7 @@ class RenderContext(ABC):
 
 @dataclass
 class NullRenderContext(RenderContext):
-    cell_rings: None = None
+    polygons: None = None
 
     def maybe_rewrite_to_rectilinear(
         self, *, width: int, height: int, logger=None
@@ -221,7 +223,7 @@ class PopulatedRenderContext(RenderContext):
     patches: list[Patch] = field(default_factory=list)
     # Set by transform_for_render for the renderer:
     da: xr.DataArray | None = None
-    cell_rings: np.ndarray | None = None
+    polygons: GeometryArray | None = None
 
     @property
     def ugrid_indexer(self) -> UgridIndexer | None:
@@ -240,7 +242,7 @@ class PopulatedRenderContext(RenderContext):
         grid = self.grid
         bbox = self.bbox
 
-        if self.cell_rings is not None:
+        if self.polygons is not None:
             return self
         if data is None:
             return self
