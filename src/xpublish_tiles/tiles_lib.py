@@ -18,9 +18,9 @@ import xarray as xr
 from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
     GridSystem,
+    GridSystem1D,
     GridSystem2D,
     RasterAffine,
-    Triangular,
 )
 from xpublish_tiles.lib import (
     TileTooBigError,
@@ -134,7 +134,7 @@ def get_max_zoom(grid: GridSystem, tms: morecantile.TileMatrixSet) -> int:
     int
         Maximum appropriate zoom level for this grid
     """
-    if isinstance(grid, Triangular):
+    if isinstance(grid, GridSystem1D):
         # no dXmin, dYmin defined, punt for now
         return tms.maxzoom
     ll_box = BBox(
