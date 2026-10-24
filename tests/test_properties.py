@@ -7,6 +7,8 @@ import morecantile
 import numpy as np
 import numpy.testing as npt
 import pytest
+import shapely
+import xvec  # noqa: F401
 from hypothesis import (
     assume,
     given,
@@ -23,11 +25,17 @@ import xarray as xr
 from tests import create_query_params
 from xpublish_tiles import config
 from xpublish_tiles.grids import Rectilinear
-from xpublish_tiles.lib import TileTooBigError, check_transparent_pixels
+from xpublish_tiles.lib import (
+    TileTooBigError,
+    check_transparent_pixels,
+    features_to_multipolygons,
+)
 from xpublish_tiles.pipeline import pipeline
+from xpublish_tiles.projections import transformer_from_crs
 from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
     EU3035_HIRES,
+    FEATURES_POLYGONS_XVEC,
     HRRR,
     HRRR_MULTIPLE,
     REDGAUSS_N320,
@@ -65,10 +73,10 @@ def global_rectilinear_datasets(
     # Generate dimensions between 100 and 1000 to ensure sufficient coverage
     # Smaller datasets may have gaps when projected
     # Prioritize sizes that exercise coarsening
-    size_st = st.one_of(
-        st.sampled_from([i for i in [256, 512, 1024, 2048] if i < maxsize]),
-        st.integers(min_value=100, max_value=maxsize),
-    )
+    pow2_sizes = [i for i in [256, 512, 1024, 2048] if i < maxsize]
+    size_st = st.integers(min_value=min(100, maxsize), max_value=maxsize)
+    if pow2_sizes:
+        size_st = st.one_of(st.sampled_from(pow2_sizes), size_st)
     nlat = draw(size_st)
     nlon = draw(size_st)
 
@@ -842,3 +850,124 @@ def test_roll_invariance(
         rolled_flat,
         err_msg=f"Data differs for bbox={bbox}, roll_amount={roll_amount}",
     )
+
+
+SEAM_WIDTH = 2 * 20037508.342789244
+SEAM_TRANSFORMER = transformer_from_crs(CRS(4326), CRS(3857))
+
+
+def _cell_edges(centers: np.ndarray) -> np.ndarray:
+    """Cell edges from centers: midpoints inside, half a step beyond the ends."""
+    mid = (centers[1:] + centers[:-1]) / 2
+    return np.concatenate(
+        [
+            [centers[0] - (mid[0] - centers[0])],
+            mid,
+            [centers[-1] + (centers[-1] - mid[-1])],
+        ]
+    )
+
+
+def features_from_rectilinear(ds: xr.Dataset) -> xr.Dataset:
+    """(test only) One box feature per cell, values stacked to a ``cell`` dim."""
+    lat_edges = _cell_edges(ds.latitude.values)
+    lon_edges = _cell_edges(ds.longitude.values)
+    lat_lo, lat_hi = (
+        np.minimum(lat_edges[:-1], lat_edges[1:]),
+        np.maximum(lat_edges[:-1], lat_edges[1:]),
+    )
+    lon_lo, lon_hi = lon_edges[:-1], lon_edges[1:]
+    boxes = shapely.box(
+        lon_lo[None, :], lat_lo[:, None], lon_hi[None, :], lat_hi[:, None]
+    ).ravel()
+    stacked = (
+        ds.load()
+        .stack(cell=("latitude", "longitude"), create_index=False)
+        .drop_vars(["latitude", "longitude"])
+        .assign_coords(cell=boxes)
+        .xvec.set_geom_indexes("cell", crs=4326)
+    )
+    stacked.attrs["_xpublish_id"] = str(uuid.uuid4())
+    return stacked
+
+
+@pytest.mark.asyncio
+@given(
+    data=st.data(),
+    rect=global_rectilinear_datasets(allow_categorical=False, maxsize=64, perturb=False),
+)
+@settings(max_examples=10, deadline=None)
+async def test_features_rectilinear_equivalency(data, rect):
+    # Pole rows give cells with infinite Web Mercator y; Rectilinear polygons mis-render
+    # pole-touching WebMercatorQuad tiles then (same on main), so drop them.
+    # A cell edge on a pixel edge can flip up to 8 pixels (observed) in a tile's edge rows.
+    rect = rect.isel(latitude=slice(1, -1))
+    features = features_from_rectilinear(rect)
+    for _ in range(5):
+        tile, tms = data.draw(tile_and_tms())
+        query = create_query_params(tile, tms, style="polygons")
+        expected = np.asarray(Image.open(await pipeline(rect, query)))
+        actual = np.asarray(Image.open(await pipeline(features, query)))
+        npt.assert_array_equal(actual[1:-1], expected[1:-1], err_msg=f"{tms.id} {tile}")
+        edge_diff = (actual[[0, -1]] != expected[[0, -1]]).any(axis=-1).sum()
+        assert edge_diff <= 16, f"{edge_diff} edge pixels differ for {tms.id} {tile}"
+
+
+@pytest.mark.asyncio
+@given(data=st.data())
+@settings(max_examples=10, deadline=None)
+async def test_features_longitude_shift_invariance(data):
+    original = FEATURES_POLYGONS_XVEC.create()
+    original.attrs["_xpublish_id"] = str(uuid.uuid4())
+    geoms = original["feature"].values
+    shifted = original.assign_coords(
+        feature=shapely.transform(geoms, lambda c: c + [360.0, 0.0])
+    ).xvec.set_geom_indexes("feature", crs=4326)
+    shifted.attrs["_xpublish_id"] = str(uuid.uuid4())
+
+    for _ in range(5):
+        tile, tms = data.draw(tile_and_tms())
+        query = create_query_params(tile, tms, style="polygons", colorscalerange=(0, 70))
+        expected = np.asarray(Image.open(await pipeline(original, query)))
+        actual = np.asarray(Image.open(await pipeline(shifted, query)))
+        npt.assert_array_equal(actual, expected, err_msg=f"{tms.id} {tile}")
+
+
+@st.composite
+def seam_boxes(draw: DrawFn) -> tuple[shapely.Polygon, bool]:
+    """(test only) A box in build-time form: crossing ones lie in [0, 360)."""
+    south = draw(st.floats(-80, 70))
+    north = draw(st.floats(south + 1, 80))
+    crossing = draw(st.booleans())
+    if crossing:
+        west = draw(st.floats(20, 179))
+        east = draw(st.floats(181, min(west + 170, 359)))
+    else:
+        west = draw(st.floats(-180, 10))
+        east = draw(st.floats(west + 1, min(west + 170, 180)))
+    return shapely.box(west, south, east, north), crossing
+
+
+@given(boxes=st.lists(seam_boxes(), min_size=1, max_size=8))
+@settings(max_examples=100, deadline=None)
+def test_features_seam_properties(boxes):
+    geoms = np.array([b for b, _ in boxes], dtype=object)
+    crossing = np.array([c for _, c in boxes])
+    polys, src = features_to_multipolygons(geoms, crossing, SEAM_TRANSFORMER)
+
+    assert len(src) == len(polys)
+    bounds = polys.bounds
+    assert ((bounds[:, 2] - bounds[:, 0]) < SEAM_WIDTH / 2).all()
+    for i, is_crossing in enumerate(crossing):
+        assert (src == i).sum() == (3 if is_crossing else 1)
+        xmin, ymin, xmax, ymax = geoms[i].bounds
+        (x0, x1), (y0, y1) = SEAM_TRANSFORMER.transform([xmin, xmax], [ymin, ymax])
+        if is_crossing:
+            x0, x1 = (x + SEAM_WIDTH if x < 0 else x for x in (x0, x1))
+        main = bounds[np.flatnonzero(src == i)[0]]
+        npt.assert_allclose(main, [x0, y0, x1, y1], atol=1e-6)
+        if is_crossing:
+            _, left, right = (bounds[src == i][k] for k in range(3))
+            shift = np.array([SEAM_WIDTH, 0, SEAM_WIDTH, 0])
+            npt.assert_allclose(left, main - shift, atol=1e-6)
+            npt.assert_allclose(right, main + shift, atol=1e-6)

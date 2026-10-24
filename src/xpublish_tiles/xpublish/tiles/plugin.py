@@ -12,8 +12,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from xpublish import Dependencies, Plugin, hookimpl
 
-from xarray import DataTree
+from xarray import Dataset, DataTree
 from xpublish_tiles.grids import (
+    Features,
     GridSystem,
     detect_grids,
     guess_grid_system,
@@ -77,6 +78,25 @@ from xpublish_tiles.xpublish.tiles.types import (
     TileSetMetadata,
     TilesetsList,
 )
+
+
+def _default_style(grid: GridSystem) -> tuple[str, str]:
+    return (
+        ("polygons", "default") if isinstance(grid, Features) else ("raster", "default")
+    )
+
+
+def _resolve_style(
+    style: tuple[str, str] | None, dataset: Dataset, name: str
+) -> tuple[str, str]:
+    """Explicit style, else the grid's default. Detection errors fall back to raster; the pipeline reports them."""
+    if style is not None:
+        return style
+    try:
+        grid = guess_grid_system(dataset, name)
+    except (VariableNotFoundError, UnsupportedGridError):
+        return ("raster", "default")
+    return _default_style(grid)
 
 
 class TilesPlugin(Plugin):
@@ -280,8 +300,9 @@ class TilesPlugin(Plugin):
                 )
 
             datatype = _infer_datatype(dataset[var_name])
-            style = query.style[0] if query.style else "raster"
-            variant = query.style[1] if query.style else "default"
+            style, variant = await async_run(
+                _resolve_style, query.style, dataset, var_name
+            )
 
             from xpublish_tiles.render import RenderRegistry
 
@@ -448,8 +469,7 @@ class TilesPlugin(Plugin):
                 0
             ]  # drop 'tilejson.json'
 
-            style = query.style[0] if query.style else "raster"
-            variant = query.style[1] if query.style else "default"
+            style, variant = query.style or _default_style(bounds_grid)
 
             colorscalerange = (
                 ",".join(map(format_number_for_url, query.colorscalerange))
@@ -629,8 +649,9 @@ class TilesPlugin(Plugin):
                 dataset = datatree.to_dataset()
                 resolution_level = None
 
-            style = query.style[0] if query.style else "raster"
-            variant = query.style[1] if query.style else "default"
+            style, variant = await async_run(
+                _resolve_style, query.style, dataset, query.variables[0]
+            )
 
             # Extract dimension selectors from query parameters
             selectors = {}

@@ -14,6 +14,7 @@ import pandas as pd
 import pydantic
 import pyproj
 from pyproj.aoi import BBox
+from spatialpandas.geometry import MultiPolygonArray
 
 import xarray as xr
 from xpublish_tiles.config import config
@@ -21,6 +22,8 @@ from xpublish_tiles.grids import (
     Curvilinear,
     FacetedGridSystem,
     FacetedIndexer,
+    Features,
+    GeometryIndexer,
     GridMetadata,
     GridSystem,
     GridSystem2D,
@@ -53,6 +56,7 @@ from xpublish_tiles.lib import (
     cf_get,
     coarsen_mean_pad,
     decompressed_size_bytes,
+    features_to_multipolygons,
     get_data_load_semaphore,
     max_render_shape,
     normalize_slicers,
@@ -63,6 +67,7 @@ from xpublish_tiles.lib import (
     timedelta_to_iso8601,
     transform_coordinates,
     unwrap,
+    unwrap_seam_vertices,
     validate_colormap_for_datatype,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
@@ -377,6 +382,13 @@ def apply_slicers(
         # patch.da is already the face rectangle
         subsets = [ds]
         concat_dim = grid.Ydim
+    elif isinstance(grid, Features):
+        subsets = [
+            ds.isel({grid.dim: sl.indices})
+            for sl in slicers[grid.dim]
+            if isinstance(sl, GeometryIndexer)
+        ]
+        concat_dim = grid.dim
     elif isinstance(grid, Healpix):
         subsets = [
             ds.isel({grid.dim: sl.indices})
@@ -656,8 +668,7 @@ def fix_healpix_discontinuity(
         # cell is self-consistent. Vectorized over all seam cells (no per-cell
         # loop).
         am_verts = (am_idxs[:, None] * 4 + np.arange(4)).ravel()
-        neg = x_data[am_verts] < 0
-        x_data[am_verts[neg]] += width
+        unwrap_seam_vertices(x_data, am_verts, width=width)
     else:
         fix_triangular_discontinuity(x_data, [am_idxs], transformer, bbox=bbox)
 
@@ -1309,8 +1320,12 @@ async def subset_to_bbox(
                 for ix in indexers
             )
         else:
+            if isinstance(grid, Features) and style != "polygons":
+                raise ValueError(
+                    f"Features only supports style='polygons'; got {style!r}."
+                )
             array.datatype.validate_ndim(array.da)
-            if min(array.da.shape) < 2:
+            if not isinstance(grid, Features) and min(array.da.shape) < 2:
                 raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
 
             if not bbox_overlap(input_bbox, grid.bbox, grid.crs.is_geographic):
@@ -1324,8 +1339,9 @@ async def subset_to_bbox(
                 slicers = await async_run(grid.sel, bbox=input_bbox)
 
             # ugly; figure out how to get rid of this
-            if isinstance(grid, Healpix) and all(
-                isinstance(s, HealpixIndexer) and s.is_empty for s in slicers[grid.dim]
+            if isinstance(grid, Healpix | Features) and all(
+                isinstance(s, HealpixIndexer | GeometryIndexer) and s.is_empty
+                for s in slicers[grid.dim]
             ):
                 result[var_name] = NullRenderContext()
                 continue
@@ -1350,11 +1366,13 @@ async def subset_to_bbox(
             alternate = grid.pick_alternate_grid(crs, coarsen_factors=coarsen_factors)
 
             # Note: These are handled specially inside apply_slicers.
-            patch_indexer: UgridIndexer | HealpixIndexer | None = None
+            patch_indexer: UgridIndexer | HealpixIndexer | GeometryIndexer | None = None
             if isinstance(grid, Triangular):
                 patch_indexer = cast(UgridIndexer, next(iter(slicers[grid.Xdim])))
             elif isinstance(grid, Healpix):
                 patch_indexer = cast(HealpixIndexer, next(iter(slicers[grid.dim])))
+            elif isinstance(grid, Features):
+                patch_indexer = cast(GeometryIndexer, next(iter(slicers[grid.dim])))
 
             patches.append(
                 Patch(
@@ -1577,6 +1595,29 @@ async def _transform_one_grid_polygons(
     return rings, values
 
 
+async def _transform_features_patch(
+    patch: Patch, *, output_crs: OutputCRS
+) -> tuple[MultiPolygonArray, np.ndarray]:
+    """Transform one Features patch into ``(polygons, values)``."""
+    grid = patch.grid
+    assert isinstance(grid, Features) and isinstance(patch.indexer, GeometryIndexer)
+    idx = patch.indexer.indices
+    nverts = grid.vertex_count(idx)
+    limit = config.get("max_renderable_vertices")
+    if nverts > limit:
+        raise TileTooBigError(
+            f"Tile needs {nverts} vertices, over max_renderable_vertices {limit}."
+        )
+    polys, src = await async_run(
+        features_to_multipolygons,
+        grid.geometries[idx],
+        grid.crossing[idx],
+        transformer_from_crs(grid.crs, output_crs),
+    )
+    values = np.asarray(patch.da.isel({grid.dim: src}).values)
+    return polys, values
+
+
 async def _transform_polygon_patch(
     patch: Patch,
     *,
@@ -1597,6 +1638,9 @@ async def _transform_polygon_patch(
     grid = patch.grid
     subset = patch.da
     source_crs = patch.source_crs
+
+    if isinstance(grid, Features):
+        return await _transform_features_patch(patch, output_crs=output_crs)
 
     if isinstance(grid, GridSystem2D):
         is_polar_cap = isinstance(grid, Curvilinear) and grid.is_polar_cap
@@ -1791,6 +1835,11 @@ async def transform_for_render(
                 geoms_list.append(geoms)
                 values_list.append(values)
 
+            if len({type(g) for g in geoms_list}) > 1:
+                raise TypeError(
+                    "Cannot concatenate mixed geometry arrays across patches: "
+                    f"{sorted({type(g).__name__ for g in geoms_list})}."
+                )
             polygons = (
                 geoms_list[0]
                 if len(geoms_list) == 1

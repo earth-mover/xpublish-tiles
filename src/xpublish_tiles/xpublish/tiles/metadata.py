@@ -10,6 +10,7 @@ import xarray as xr
 from xarray import Dataset
 from xpublish_tiles.grids import (
     CubedSphere,
+    Features,
     GridSystem,
     Healpix,
     Polar,
@@ -65,7 +66,7 @@ def allowed_styles(
 
     result = ["raster", "polygons"]
     grids = var_grids.values()
-    if any(isinstance(grid, (Healpix, CubedSphere)) for grid in grids):
+    if any(isinstance(grid, (Healpix, CubedSphere, Features)) for grid in grids):
         result = ["polygons"]
     elif any(isinstance(grid, Polar) for grid in grids):
         result = ["raster"]

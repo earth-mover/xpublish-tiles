@@ -16,6 +16,7 @@ from xpublish_tiles.config import config
 from xpublish_tiles.lib import TileTooBigError
 from xpublish_tiles.testing.datasets import (
     EU3035,
+    FEATURES_POLYGONS,
     GEOZARR_MULTISCALE,
     IFS,
     NATIVE_AT_ROOT_MULTISCALE,
@@ -1571,3 +1572,28 @@ def test_rgb_style_not_advertised_without_band_dim():
     client = TestClient(rest.app)
     styles = client.get("/datasets/ifs/tiles/WebMercatorQuad").json()["styles"]
     assert not any(s["id"].endswith("/rgb") for s in styles)
+
+
+def test_features_default_style_is_polygons():
+    rest = xpublish.Rest(
+        {"features": FEATURES_POLYGONS.create()}, plugins={"tiles": TilesPlugin()}
+    )
+    client = TestClient(rest.app)
+    r = client.get(
+        "/datasets/features/tiles/WebMercatorQuad/0/0/0"
+        "?variables=foo&width=256&height=256&colorscalerange=0,100"
+    )
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "image/png"
+    Image.open(io.BytesIO(r.content)).verify()
+
+    r = client.get(
+        "/datasets/features/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=foo&width=256&height=256"
+    )
+    assert r.status_code == 200, r.text
+    (url,) = r.json()["tiles"]
+    assert "style=polygons/default" in url
+
+    r = client.get("/datasets/features/tiles/legend?variables=foo&colorscalerange=0,100")
+    assert r.status_code == 200, r.text

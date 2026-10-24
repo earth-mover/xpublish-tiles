@@ -1,14 +1,14 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15' and platform_machine == 'ARM64' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and platform_machine == 'ARM64' and sys_platform == 'win32'",
     "python_full_version >= '3.15' and platform_machine != 'ARM64' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and platform_machine != 'ARM64' and sys_platform == 'win32'",
     "python_full_version >= '3.15' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.14.*' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.14.*' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version == '3.13.*' and platform_machine == 'ARM64' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and platform_machine != 'ARM64' and sys_platform == 'win32'",
@@ -5194,7 +5194,9 @@ dependencies = [
 [package.optional-dependencies]
 complete = [
     { name = "healpix-geo" },
+    { name = "shapely" },
     { name = "xdggs" },
+    { name = "xvec" },
 ]
 datadog = [
     { name = "ddtrace" },
@@ -5215,6 +5217,10 @@ testing = [
     { name = "syrupy" },
     { name = "titiler" },
 ]
+vector = [
+    { name = "shapely" },
+    { name = "xvec" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -5231,7 +5237,7 @@ dev = [
     { name = "py-spy" },
     { name = "ruff" },
     { name = "ty" },
-    { name = "xpublish-tiles", extra = ["healpix", "testing"] },
+    { name = "xpublish-tiles", extra = ["healpix", "testing", "vector"] },
 ]
 
 [package.metadata]
@@ -5267,6 +5273,8 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32.5" },
     { name = "scikit-image", specifier = ">=0.25.2" },
     { name = "scikit-image", marker = "extra == 'testing'", specifier = ">=0.25.2" },
+    { name = "shapely", marker = "extra == 'complete'", specifier = ">=2.1" },
+    { name = "shapely", marker = "extra == 'vector'", specifier = ">=2.1" },
     { name = "spatialpandas", specifier = ">=0.5" },
     { name = "structlog", specifier = ">=24.4.0" },
     { name = "syrupy", marker = "extra == 'testing'", specifier = ">=4.9.1" },
@@ -5278,9 +5286,11 @@ requires-dist = [
     { name = "xdggs", marker = "extra == 'complete'", specifier = ">=0.5.0" },
     { name = "xdggs", marker = "extra == 'healpix'", specifier = ">=0.5.0" },
     { name = "xpublish", specifier = ">=0.5.0" },
+    { name = "xvec", marker = "extra == 'complete'", specifier = ">=0.5.2" },
+    { name = "xvec", marker = "extra == 'vector'", specifier = ">=0.5.2" },
     { name = "zarr", specifier = ">=3.1.2" },
 ]
-provides-extras = ["complete", "datadog", "healpix", "testing"]
+provides-extras = ["complete", "datadog", "healpix", "testing", "vector"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -5297,7 +5307,23 @@ dev = [
     { name = "py-spy", specifier = ">=0.4.1" },
     { name = "ruff", specifier = ">=0.12.4" },
     { name = "ty", specifier = ">=0.0.1a15" },
-    { name = "xpublish-tiles", extras = ["testing", "healpix"] },
+    { name = "xpublish-tiles", extras = ["testing", "healpix", "vector"] },
+]
+
+[[package]]
+name = "xvec"
+version = "0.5.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cf-xarray" },
+    { name = "pyproj" },
+    { name = "shapely" },
+    { name = "xarray" },
+    { name = "xproj" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6d/38/d45c4bf760f3c46621631b48ae0af7583747022051bc318a51cb87a9ea75/xvec-0.5.2.tar.gz", hash = "sha256:f62334066fa0a85a51732361170bb050ae9106ffababb6afbb2301a3f7ee9a04", size = 2520054, upload-time = "2025-11-22T21:08:11.993Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9e/b4/b3161f856c704938d69c10680abaaf4a24783fa58a9f95590f2a0b63dd09/xvec-0.5.2-py3-none-any.whl", hash = "sha256:757243b9ad8d66922111b16f51d157560cf11916fe790a20b9e955a44efb8e8d", size = 784751, upload-time = "2025-11-22T21:08:10.188Z" },
 ]
 
 [[package]]
