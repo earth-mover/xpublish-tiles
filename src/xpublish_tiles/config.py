@@ -19,6 +19,8 @@ config = donfig.Config(
             "default_pad": 2,
             # in bytes; ~10,000 * 10,000 float64 pixels; takes the pipeline ~ 1s
             "max_renderable_size": 1024**3,
+            # vertices summed over the features of one Features tile (provisional)
+            "max_renderable_vertices": 5_000_000,
             "max_pixel_factor": 3,  # coarsen down to this many input grid cells per output pixel
             "async_load": True,
             "async_load_timeout_per_tile": 20,  # seconds; None to disable

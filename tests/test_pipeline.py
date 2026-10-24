@@ -397,6 +397,22 @@ async def test_fill_nonfinite_nearest_concurrent_in_executor():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("time_index", [0, 2])
+async def test_features_data(
+    features_dataset_and_tile, time_index, png_snapshot, pytestconfig
+):
+    ds, tile, tms = features_dataset_and_tile
+    ds = ds.isel(time=[time_index])
+    query = create_query_params(tile, tms, style="polygons", colorscalerange=(10, 62))
+    result = await pipeline(ds, query)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(
+        result, png_snapshot, tile=tile, tms=tms, skip_transparency_check=True
+    )
+
+
+@pytest.mark.asyncio
 async def test_radar_data(radar_dataset_and_tile, png_snapshot, pytestconfig):
     ds, tile, tms = radar_dataset_and_tile
     query_params = create_query_params(tile, tms)
