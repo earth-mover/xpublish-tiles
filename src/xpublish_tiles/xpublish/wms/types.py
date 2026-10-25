@@ -143,8 +143,8 @@ class WMSGetMapQuery(WMSBaseQuery):
         validation_alias=AliasChoices("layername", "layers", "query_layers"),
     )
     styles: tuple[str, str] | None = Field(
-        ("raster", "default"),
-        description="Style to use for the query. Defaults to raster/default. Default may be replaced by the name of any colormap available to matplotlibs",
+        None,
+        description="Style to use for the query, as `{style}/{variant}`. Defaults to `polygons/default` for HEALPix and cubed-sphere grids, and `raster/default` otherwise. The variant may be the name of any matplotlib colormap.",
     )
     crs: CRSParam = Field(
         "EPSG:4326",
@@ -218,10 +218,7 @@ class WMSGetMapQuery(WMSBaseQuery):
     @field_validator("styles", mode="before")
     @classmethod
     def validate_style(cls, v: str | None) -> tuple[str, str] | None:
-        valid_style = validate_style(v)
-        if valid_style is None:
-            return ("raster", "default")
-        return valid_style
+        return validate_style(v)
 
     @field_validator("format", mode="before")
     @classmethod
@@ -352,9 +349,9 @@ class WMSGetLegendGraphicQuery(WMSBaseQuery):
         None,
         description="Color for values below the min of colorscalerange. Accepted values: 'extend' (use min palette color), 'transparent', hex color (#RRGGBB or #RRGGBBAA), or named color.",
     )
-    styles: tuple[str, str] = Field(
-        ("raster", "default"),
-        description="Style to use for the query. Defaults to raster/default. Default may be replaced by the name of any colormap defined by matplotlibs defaults",
+    styles: tuple[str, str] | None = Field(
+        None,
+        description="Style to use for the query, as `{style}/{variant}`. Defaults to `polygons/default` for HEALPix and cubed-sphere grids, and `raster/default` otherwise. The variant may be the name of any matplotlib colormap.",
     )
     format: ImageFormat = Field(
         ImageFormat.PNG,
@@ -436,7 +433,7 @@ class WMSQuery(RootModel):
         width: int,
         height: int,
         bbox: str | BBox | None = None,
-        styles: str | tuple[str, str] = ("raster", "default"),
+        styles: str | tuple[str, str] | None = None,
         crs: Literal["EPSG:4326", "EPSG:3857", "CRS:84"] = "EPSG:4326",
         time: str | None = None,
         elevation: str | None = None,
@@ -478,7 +475,7 @@ class WMSQuery(RootModel):
         colorscalerange: str | tuple[float, float],
         vertical: bool = False,
         autoscale: bool = False,
-        styles: str | tuple[str, str] = ("raster", "default"),
+        styles: str | tuple[str, str] | None = None,
     ) -> None: ...
 
     def __init__(self, **data: Any) -> None:
