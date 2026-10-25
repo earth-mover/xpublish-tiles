@@ -21,7 +21,9 @@ from xpublish_tiles.lib import (
     IndexingError,
     MissingParameterError,
     TileTooBigError,
+    UnsupportedStyleError,
     VariableNotFoundError,
+    async_run,
 )
 from xpublish_tiles.logger import get_context_logger, with_accumulated_logs
 from xpublish_tiles.multiscale import get_dataset, get_resolution_level
@@ -29,6 +31,7 @@ from xpublish_tiles.pipeline import _infer_datatype, pipeline
 from xpublish_tiles.projections import transformer_from_crs
 from xpublish_tiles.render import RenderRegistry
 from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
+from xpublish_tiles.xpublish.tiles.metadata import resolve_style
 from xpublish_tiles.xpublish.wms.types import (
     WMS_FILTERED_QUERY_PARAMS,
     WMSGetCapabilitiesQuery,
@@ -247,8 +250,7 @@ async def handle_get_map(
             if vertical_name:
                 selectors[vertical_name[0]] = query.elevation
 
-    style = query.styles[0] if query.styles else "raster"
-    variant = query.styles[1] if query.styles else "default"
+    style, variant = await async_run(resolve_style, query.styles, dataset, query.layers)
 
     render_params = QueryParams(
         variables=[query.layers],  # TODO: Support multiple layers
@@ -291,6 +293,11 @@ async def handle_get_map(
         status_code = 422
         detail = f"Missing parameter: {e!s}."
         get_context_logger().error("MissingParameterError", exc_info=e)
+    except UnsupportedStyleError as e:
+        status_code = 422
+        detail = f"Unsupported style: {e!s}"
+        code = "StyleNotDefined"
+        get_context_logger().error("UnsupportedStyleError", exc_info=e)
     except ColormapError as e:
         status_code = 422
         detail = f"Invalid colormap: {e!s}"
@@ -344,7 +351,7 @@ async def handle_get_legend_graphic(
         )
 
     datatype = _infer_datatype(dataset[query.layer])
-    style, variant = query.styles
+    style, variant = await async_run(resolve_style, query.styles, dataset, query.layer)
     renderer = RenderRegistry.get(style)()
 
     attrs = dataset[query.layer].attrs

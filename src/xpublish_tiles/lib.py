@@ -239,6 +239,12 @@ class MissingParameterError(Exception):
     pass
 
 
+class UnsupportedStyleError(ValueError):
+    """Raised when the requested style cannot render the variable's grid."""
+
+    pass
+
+
 class ColormapError(ValueError):
     """Raised when a custom colormap is invalid for the data being rendered."""
 

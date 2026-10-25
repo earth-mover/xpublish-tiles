@@ -14,7 +14,9 @@ from xpublish_tiles.grids import (
     Healpix,
     Polar,
     detect_grids,
+    guess_grid_system,
 )
+from xpublish_tiles.lib import UnsupportedGridError, VariableNotFoundError
 from xpublish_tiles.logger import logger
 from xpublish_tiles.pipeline import has_rgb_bands
 from xpublish_tiles.render import RGB_VARIANT, RenderRegistry
@@ -43,6 +45,32 @@ from xpublish_tiles.xpublish.tiles.types import (
 _ALLOWED_STYLES_CACHE: dict[str, list[str]] = {}
 
 
+def grid_styles(grid: GridSystem) -> list[str]:
+    """Style IDs that can render ``grid``; the first is the default."""
+    if isinstance(grid, (Healpix, CubedSphere)):
+        return ["polygons"]
+    if isinstance(grid, Polar):
+        return ["raster"]
+    return ["raster", "polygons"]
+
+
+def default_style(grid: GridSystem) -> tuple[str, str]:
+    return (grid_styles(grid)[0], "default")
+
+
+def resolve_style(
+    style: tuple[str, str] | None, dataset: Dataset, name: str
+) -> tuple[str, str]:
+    """Explicit style, else the grid's default. Detection errors fall back to raster; the pipeline reports them."""
+    if style is not None:
+        return style
+    try:
+        grid = guess_grid_system(dataset, name)
+    except (VariableNotFoundError, UnsupportedGridError):
+        return ("raster", "default")
+    return default_style(grid)
+
+
 def allowed_styles(
     dataset: Dataset | None = None,
     *,
@@ -63,12 +91,13 @@ def allowed_styles(
     if var_grids is None:
         var_grids = detect_grids(dataset)
 
-    result = ["raster", "polygons"]
-    grids = var_grids.values()
-    if any(isinstance(grid, (Healpix, CubedSphere)) for grid in grids):
+    per_grid = [grid_styles(grid) for grid in var_grids.values()]
+    if ["polygons"] in per_grid:
         result = ["polygons"]
-    elif any(isinstance(grid, Polar) for grid in grids):
+    elif ["raster"] in per_grid:
         result = ["raster"]
+    else:
+        result = ["raster", "polygons"]
 
     if xpublish_id is not None:
         _ALLOWED_STYLES_CACHE[xpublish_id] = result
