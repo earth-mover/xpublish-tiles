@@ -1,10 +1,13 @@
 import io
+import json
 import sys
 
 import datashader as dsh
 import morecantile
 import numpy as np
 import numpy.testing as npt
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 import shapely
 import spatialpandas
@@ -17,6 +20,7 @@ from pyproj.aoi import BBox
 import xarray as xr
 from tests import create_query_params
 from xpublish_tiles import config
+from xpublish_tiles.cli.main import open_geoparquet
 from xpublish_tiles.grids import (
     Features,
     GeometryIndexer,
@@ -44,6 +48,35 @@ from xpublish_tiles.tiles_lib import get_min_zoom
 
 W = 2 * 20037508.342789244
 T = transformer_from_crs(CRS(4326), CRS(3857))
+
+
+def test_open_geoparquet(tmp_path):
+    n = len(FEATURE_GEOMS)
+    table = pa.table(
+        {
+            "geometry": shapely.to_wkb(np.array(FEATURE_GEOMS, dtype=object)),
+            "value": np.arange(n, dtype=np.float64),
+            "count": np.arange(n, dtype=np.int64),
+            "name": [f"f{i}" for i in range(n)],
+        }
+    )
+    geo = {
+        "version": "1.0.0",
+        "primary_column": "geometry",
+        "columns": {"geometry": {"encoding": "WKB", "geometry_types": []}},
+    }
+    table = table.replace_schema_metadata({"geo": json.dumps(geo)})
+    path = tmp_path / "features.parquet"
+    pq.write_table(table, path)
+
+    ds = open_geoparquet(str(path))
+    assert ds.attrs["_xpublish_id"] == f"geoparquet+file:{path}"
+    assert set(ds.data_vars) == {"value", "count"}
+    assert ds["name"].dims == ("feature",)
+    grid = guess_grid_system(ds, "value")
+    assert isinstance(grid, Features)
+    assert grid.crs == CRS("OGC:CRS84")
+    assert grid.bbox == BBox(west=-180, east=180, south=0, north=60)
 
 
 @pytest.mark.parametrize("fixture", [FEATURES_POLYGONS, FEATURES_POLYGONS_XVEC])

@@ -10,6 +10,7 @@ import time
 import warnings
 
 import cf_xarray  # noqa: F401
+import pyproj
 import uvicorn
 import xpublish
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,6 +60,54 @@ def create_onecrs_dataset(ds: xr.Dataset) -> xr.Dataset:
         ds = ds.drop_vars(coords_to_drop)
     # Set grid_mapping to just spatial_ref
     ds["foo"].attrs["grid_mapping"] = "spatial_ref"
+    return ds
+
+
+def open_geoparquet(path: str) -> xr.Dataset:
+    """Read a GeoParquet file as a vector data cube along a ``feature`` dim.
+
+    Numeric columns become data variables; other columns become coordinates.
+    """
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+        import shapely
+        import xvec  # noqa: F401
+    except ImportError as e:
+        raise ImportError(
+            "GeoParquet requires xvec and shapely; install `xpublish-tiles[vector]`."
+        ) from e
+
+    table = pq.read_table(path)
+    geo = json.loads(table.schema.metadata[b"geo"])
+    geom_col = geo["primary_column"]
+    geom_meta = geo["columns"][geom_col]
+    if geom_meta.get("encoding", "WKB").upper() != "WKB":
+        raise ValueError(
+            f"Only WKB geometry encoding is supported; got {geom_meta['encoding']!r}."
+        )
+    # GeoParquet: a missing ``crs`` key means OGC:CRS84; ``null`` means unknown.
+    if "crs" not in geom_meta:
+        crs = pyproj.CRS("OGC:CRS84")
+    elif geom_meta["crs"] is None:
+        raise ValueError(f"GeoParquet column {geom_col!r} has an undefined CRS.")
+    else:
+        crs = pyproj.CRS.from_json_dict(geom_meta["crs"])
+
+    geoms = shapely.from_wkb(table.column(geom_col).to_numpy(zero_copy_only=False))
+    data_vars, coords = {}, {}
+    for name in table.column_names:
+        if name == geom_col:
+            continue
+        col = table.column(name)
+        values = ("feature", col.to_numpy(zero_copy_only=False))
+        if pa.types.is_integer(col.type) or pa.types.is_floating(col.type):
+            data_vars[name] = values
+        else:
+            coords[name] = values
+    ds = xr.Dataset(data_vars, coords={"feature": geoms, **coords})
+    ds = ds.xvec.set_geom_indexes("feature", crs=crs)
+    ds.attrs["_xpublish_id"] = f"geoparquet+file:{path}"
     return ds
 
 
@@ -190,6 +239,8 @@ def get_dataset_for_name(
             ds.attrs["_xpublish_id"] = xpublish_id
         except Exception as e:
             raise ValueError(f"Error loading zarr dataset from '{zarr_path}': {e}") from e
+    elif name.startswith("geoparquet+file://"):
+        ds = open_geoparquet(name.removeprefix("geoparquet+file://"))
     elif name.startswith("netcdf+file://"):
         nc_path = name.removeprefix("netcdf+file://")
 
@@ -568,7 +619,7 @@ def main():
         "--dataset",
         type=str,
         default="global",
-        help="Dataset to serve (default: global). Options: global, air, hrrr, para, eu3035, ifs, curvilinear, sentinel, global-6km, xarray://<tutorial_name> (loads xarray tutorial dataset), local://<group_name> (loads group from /tmp/tiles-icechunk/), local:///custom/path::<group_name> (loads group from custom icechunk repo), icechunk+file:///path/to/repo (loads icechunk repo from local filesystem, use --group to specify group), zarr+file:///path/to/zarr (loads zarr store from local filesystem, use --group to specify group), netcdf+file:///path/to/file.nc (loads NetCDF file from local filesystem, use --group to specify group), or an arraylake dataset name",
+        help="Dataset to serve (default: global). Options: global, air, hrrr, para, eu3035, ifs, curvilinear, sentinel, global-6km, xarray://<tutorial_name> (loads xarray tutorial dataset), local://<group_name> (loads group from /tmp/tiles-icechunk/), local:///custom/path::<group_name> (loads group from custom icechunk repo), icechunk+file:///path/to/repo (loads icechunk repo from local filesystem, use --group to specify group), zarr+file:///path/to/zarr (loads zarr store from local filesystem, use --group to specify group), netcdf+file:///path/to/file.nc (loads NetCDF file from local filesystem, use --group to specify group), geoparquet+file:///path/to/file.parquet (loads a GeoParquet file as a vector data cube along a `feature` dim), or an arraylake dataset name",
     )
     parser.add_argument(
         "--branch",
