@@ -285,6 +285,10 @@ ALL_TMS = list(TILE_MATRIX_SETS)
         ("EPSG:3857", "WebMercatorQuad"),
         ("EPSG:4326", "WorldCRS84Quad"),
         ("OGC:CRS84", "WorldCRS84Quad"),
+        ("EPSG:4269", "WorldCRS84Quad"),  # NAD83
+        ("EPSG:4258", "WorldCRS84Quad"),  # ETRS89
+        ("EPSG:4301", None),  # Tokyo, Bessel ellipsoid
+        ("EPSG:4230", None),  # ED50, International 1924 ellipsoid
         ("EPSG:32618", None),
     ],
 )
