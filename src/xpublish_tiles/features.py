@@ -69,6 +69,9 @@ def split_at_antimeridian(geometries: np.ndarray) -> np.ndarray:
     return out
 
 
+# We choose to split geometries at the antimeridian and store them as multipolygons.
+# Since these geometries are (cached) coordinates, and the selection stuff will handle it
+# easily, we do it upfront instead of fixing the wraps at render-time.
 def features_to_multipolygons(
     geoms: np.ndarray,
     transformer: pyproj.Transformer,
