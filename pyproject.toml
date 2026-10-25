@@ -64,7 +64,6 @@ packages = ["src/xpublish_tiles"]
 
 [project.optional-dependencies]
 healpix = [
-    "xdggs>=0.5.0",
     "healpix-geo>=0.0.10",
 ]
 vector = [

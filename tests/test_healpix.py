@@ -1,9 +1,15 @@
+import pathlib
+import subprocess
+import sys
+
 import healpix_geo.nested as hpn
 import numpy as np
 import pytest
 from pyproj.aoi import BBox
 
 from xpublish_tiles.grids import (
+    Healpix,
+    HealpixBase,
     HealpixCube,
     HealpixCubeIndexer,
     UnsupportedGridError,
@@ -12,6 +18,7 @@ from xpublish_tiles.grids import (
     guess_grid_system,
 )
 from xpublish_tiles.healpix import (
+    HealpixGridInfo,
     antimeridian_cells,
     bbox_cell_ids,
     coarse_level,
@@ -22,6 +29,7 @@ from xpublish_tiles.healpix import (
 from xpublish_tiles.testing.datasets import (
     GLOBAL_HEALPIX_CUBE_L3,
     GLOBAL_HEALPIX_CUBE_L5,
+    GLOBAL_HEALPIX_L3,
     _create_global_healpix,
 )
 
@@ -284,3 +292,70 @@ def test_cube_equals():
 def test_antimeridian_cells_read_only():
     with pytest.raises(ValueError):
         antimeridian_cells(3)[0] = 0
+
+
+def test_healpix_class_hierarchy():
+    cube = HealpixCube(face_dim="face", Ydim="y", Xdim="x", level=3)
+    assert isinstance(cube, HealpixBase)
+    # siblings: the cube is not a 1-D Healpix
+    assert not isinstance(cube, Healpix)
+    grid = guess_grid_system(GLOBAL_HEALPIX_L3.create(), "foo")
+    assert isinstance(grid, Healpix)
+    assert isinstance(grid, HealpixBase)
+
+
+def test_grid_info_validation():
+    for level in (30, -1):
+        with pytest.raises(ValueError, match="level"):
+            HealpixGridInfo(level=level)
+    with pytest.raises(ValueError, match="indexing_scheme"):
+        HealpixGridInfo(level=3, indexing_scheme="zuniq")  # ty: ignore[invalid-argument-type]
+    level = HealpixGridInfo(level=np.int64(3)).level  # ty: ignore[invalid-argument-type]
+    assert type(level) is int and level == 3
+
+
+@pytest.mark.parametrize("scheme", ["nested", "ring"])
+def test_cell_ids2geographic_matches_healpix_geo(scheme):
+    import healpix_geo
+
+    ids = np.arange(12 * 4**3, dtype=np.uint64)
+    lon, lat = HealpixGridInfo(level=3, indexing_scheme=scheme).cell_ids2geographic(ids)
+    ref = getattr(healpix_geo, scheme).healpix_to_lonlat(ids, depth=3, ellipsoid="sphere")
+    np.testing.assert_array_equal(lon, ref[0])
+    np.testing.assert_array_equal(lat, ref[1])
+
+
+def test_from_dataset_renamed_grid_mapping():
+    ds = GLOBAL_HEALPIX_L3.create().rename_vars({"healpix": "crs"})
+    ds["foo"].attrs["grid_mapping"] = "crs"
+    grid = guess_grid_system(ds, "foo")
+    assert isinstance(grid, Healpix)
+    assert grid.grid_info.level == 3
+
+
+def test_healpix_cube_grid_info():
+    cube = HealpixCube(face_dim="face", Ydim="y", Xdim="x", level=3)
+    assert cube.grid_info == HealpixGridInfo(level=3)
+    assert cube.level == 3
+
+
+def test_no_xdggs_import():
+    # subprocess: other test modules may import xdggs into this interpreter
+    code = """
+import asyncio, sys
+from morecantile import Tile
+from tests import create_query_params
+from xpublish_tiles.pipeline import pipeline
+from xpublish_tiles.testing.datasets import GLOBAL_HEALPIX_CUBE_L3, GLOBAL_HEALPIX_L3
+from xpublish_tiles.testing.tiles import WEBMERC_TMS
+
+for ds in (GLOBAL_HEALPIX_L3.create(), GLOBAL_HEALPIX_CUBE_L3.create()):
+    q = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style="polygons")
+    asyncio.run(pipeline(ds, q))
+assert "xdggs" not in sys.modules, "xdggs was imported"
+"""
+    root = pathlib.Path(__file__).parent.parent
+    proc = subprocess.run(
+        [sys.executable, "-c", code], cwd=root, capture_output=True, text=True
+    )
+    assert proc.returncode == 0, proc.stderr[-2000:]

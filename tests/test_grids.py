@@ -356,7 +356,7 @@ def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> Non
     elif expected is HEALPIX_SENTINEL:
         assert isinstance(actual, Healpix)
         assert actual.dim == "cell_ids"
-        level = actual.index.grid_info.level
+        level = actual.grid_info.level
         if actual.cell_ids.size == 12 * 4**level:
             assert actual.bbox == BBox(west=-180, south=-90, east=180, north=90)
         else:

@@ -2,7 +2,6 @@ import asyncio
 import contextlib
 import datetime
 import io
-import math
 from collections.abc import Hashable, Iterable, Mapping
 from dataclasses import dataclass
 from functools import partial
@@ -28,6 +27,7 @@ from xpublish_tiles.grids import (
     GridSystem,
     GridSystem2D,
     Healpix,
+    HealpixBase,
     HealpixCube,
     HealpixCubeIndexer,
     HealpixIndexer,
@@ -58,6 +58,7 @@ from xpublish_tiles.lib import (
     coarsen_mean_pad,
     decompressed_size_bytes,
     get_data_load_semaphore,
+    max_polygon_cells,
     max_render_shape,
     normalize_slicers,
     pad_slicers,
@@ -339,7 +340,7 @@ def apply_slicers(
     # cube coords are synthetic: corners come from the indexer's cell ids
     pick = [] if isinstance(grid, HealpixCube) else [alternate.X, alternate.Y]
     # For Healpix, also keep the cell_ids coordinate
-    if isinstance(grid, Healpix) and not isinstance(grid, HealpixCube):
+    if isinstance(grid, Healpix):
         pick.append(grid.cell_ids_name)
     if isinstance(grid, Triangular):
         # Face-located vars don't inherit node X/Y as coords (different dim);
@@ -1308,7 +1309,7 @@ async def subset_to_bbox(
             indexers = await async_run(
                 grid.select,
                 input_bbox,
-                max_cells=math.prod(max_shape),
+                max_cells=max_polygon_cells(max_shape),
                 mercator_stretch=is_mercator_like(crs),
                 allow_coarsen=allow_coarsen,
             )
@@ -1473,7 +1474,7 @@ def _fix_discontinuity(
             newX.data, [anti["pos"], anti["neg"]], transformer, bbox=bbox
         )
         return newX, newY, slice(None)
-    if isinstance(grid, Healpix):
+    if isinstance(grid, HealpixBase):
         assert hp_indexer is not None
         x_aug, y_aug, cell_idx = fix_healpix_discontinuity(
             newX.data,
@@ -1677,7 +1678,7 @@ async def _transform_polygon_patch(
             assert isinstance(patch.indexer, UgridIndexer)
             anti = patch.indexer.antimeridian_vertices
             has_discontinuity = anti["pos"].size > 0 or anti["neg"].size > 0
-        elif isinstance(grid, Healpix):
+        elif isinstance(grid, HealpixBase):
             assert isinstance(patch.indexer, HealpixIndexer)
             has_discontinuity = bool(patch.indexer.antimeridian_mask.any())
 
@@ -1701,7 +1702,7 @@ async def _transform_polygon_patch(
         style="polygons",
     )
 
-    if isinstance(grid, Healpix):
+    if isinstance(grid, HealpixBase):
         values = subset.isel({grid.dim: healpix_cell_indexer}).values
     else:
         assert isinstance(grid, Triangular) and ugrid_indexer is not None
@@ -1749,7 +1750,7 @@ async def _transform_raster_patch(
             assert isinstance(patch.indexer, UgridIndexer)
             anti = patch.indexer.antimeridian_vertices
             has_discontinuity = anti["pos"].size > 0 or anti["neg"].size > 0
-        elif isinstance(grid, Healpix):
+        elif isinstance(grid, HealpixBase):
             assert isinstance(patch.indexer, HealpixIndexer)
             has_discontinuity = bool(patch.indexer.antimeridian_mask.any())
         else:
