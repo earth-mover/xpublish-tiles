@@ -405,6 +405,25 @@ async def test_geostationary_metres_matches_radians(tile, tms, pytestconfig):
     )[0]
 
 
+def test_geostationary_height_from_crs():
+    # Metre coords with only crs_wkt on the grid mapping: height comes from the CRS.
+    ds = GEOSTATIONARY.create()
+    h = ds.goes_imager_projection.attrs["perspective_point_height"]
+    wkt = CRS.from_cf(ds.goes_imager_projection.attrs).to_wkt()
+    metres = ds.assign_coords(
+        x=(ds.x * h).assign_attrs(ds.x.attrs, units="m"),
+        y=(ds.y * h).assign_attrs(ds.y.attrs, units="m"),
+    )
+    metres.goes_imager_projection.attrs = {
+        "grid_mapping_name": "geostationary",
+        "crs_wkt": wkt,
+    }
+    metres.attrs["_xpublish_id"] = "geostationary-metres-wkt"
+    grid = guess_grid_system(metres, "foo")
+    assert isinstance(grid, Geostationary)
+    assert grid.height == h
+
+
 def _offdisk_coords(seed: int) -> tuple[np.ndarray, np.ndarray]:
     rng = np.random.default_rng(seed)
     x, y = rng.uniform(-1, 1, (2, 40, 30))

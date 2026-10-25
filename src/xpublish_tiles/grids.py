@@ -2090,21 +2090,15 @@ class Geostationary(Rectilinear):
         Xname: str,
         Yname: str,
     ) -> "Geostationary":
-        gm_name = next(
-            (
-                name
-                for name in ds.cf.grid_mapping_names.get("geostationary", [])
-                if "perspective_point_height" in ds[name].attrs
-            ),
-            None,
-        )
-        if gm_name is None:
+        # Grid-mapping attrs win; the CRS ("Satellite Height" in WKT) is the fallback.
+        gm_attrs = crs.to_cf()
+        for name in ds.cf.grid_mapping_names.get("geostationary", []):
+            gm_attrs.update(ds[name].attrs)
+        if "perspective_point_height" not in gm_attrs:
             raise UnsupportedGridError(
-                "Geostationary grid mapping has no 'perspective_point_height' "
-                "attribute; cannot convert scan-angle (radian) coordinates to "
-                "projection metres."
+                "Geostationary grid mapping and CRS have no satellite height "
+                "('perspective_point_height'); cannot find the visible disk."
             )
-        gm_attrs = ds[gm_name].attrs
         h = float(gm_attrs["perspective_point_height"])
         lon0 = float(gm_attrs.get("longitude_of_projection_origin", 0.0))
         scale = h if ds[Xname].attrs.get("units") in RADIAN_UNITS else 1.0
