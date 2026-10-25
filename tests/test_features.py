@@ -14,13 +14,18 @@ import spatialpandas
 import xvec  # noqa: F401
 from morecantile import Tile
 from PIL import Image
+from pyiceberg.catalog.sql import SqlCatalog
 from pyproj import CRS
 from pyproj.aoi import BBox
 
 import xarray as xr
 from tests import create_query_params
 from xpublish_tiles import config
-from xpublish_tiles.cli.main import open_geoparquet
+from xpublish_tiles.cli.main import (
+    get_dataset_for_name,
+    open_geoparquet,
+    open_iceberg_features,
+)
 from xpublish_tiles.grids import (
     Features,
     GeometryIndexer,
@@ -50,7 +55,8 @@ W = 2 * 20037508.342789244
 T = transformer_from_crs(CRS(4326), CRS(3857))
 
 
-def test_open_geoparquet(tmp_path):
+def _feature_table() -> tuple[pa.Table, dict]:
+    """(test only) Arrow table of FEATURE_GEOMS as WKB, plus its GeoParquet ``geo`` metadata."""
     n = len(FEATURE_GEOMS)
     table = pa.table(
         {
@@ -65,18 +71,61 @@ def test_open_geoparquet(tmp_path):
         "primary_column": "geometry",
         "columns": {"geometry": {"encoding": "WKB", "geometry_types": []}},
     }
-    table = table.replace_schema_metadata({"geo": json.dumps(geo)})
-    path = tmp_path / "features.parquet"
-    pq.write_table(table, path)
+    return table, geo
 
-    ds = open_geoparquet(str(path))
-    assert ds.attrs["_xpublish_id"] == f"geoparquet+file:{path}"
+
+def _check_feature_dataset(ds: xr.Dataset) -> None:
+    """(test only) Asserts for a dataset built from ``_feature_table``."""
     assert set(ds.data_vars) == {"value", "count"}
     assert ds["name"].dims == ("feature",)
     grid = guess_grid_system(ds, "value")
     assert isinstance(grid, Features)
     assert grid.crs == CRS("OGC:CRS84")
     assert grid.bbox == BBox(west=-180, east=180, south=0, north=60)
+
+
+def _iceberg_table(tmp_path, properties: dict[str, str]):
+    """(test only) ``_feature_table`` written to a local SQLite Iceberg catalog."""
+    catalog = SqlCatalog(
+        "local",
+        uri=f"sqlite:///{tmp_path}/catalog.db",
+        warehouse=f"file://{tmp_path}",
+    )
+    catalog.create_namespace("ns")
+    arrow, _ = _feature_table()
+    table = catalog.create_table("ns.t", arrow.schema, properties=properties)
+    table.append(arrow)
+    return table
+
+
+def test_open_geoparquet(tmp_path):
+    table, geo = _feature_table()
+    table = table.replace_schema_metadata({"geo": json.dumps(geo)})
+    path = tmp_path / "features.parquet"
+    pq.write_table(table, path)
+
+    ds = open_geoparquet(str(path))
+    assert ds.attrs["_xpublish_id"] == f"geoparquet+file:{path}"
+    _check_feature_dataset(ds)
+
+
+def test_open_iceberg_features(tmp_path):
+    _, geo = _feature_table()
+    table = _iceberg_table(tmp_path, {"geo": json.dumps(geo)})
+    ds = open_iceberg_features(table, "arraylake+table:o/ns.t")
+    assert ds.attrs["_xpublish_id"] == "arraylake+table:o/ns.t"
+    _check_feature_dataset(ds)
+
+
+def test_open_iceberg_features_needs_geo(tmp_path):
+    table = _iceberg_table(tmp_path, {})
+    with pytest.raises(ValueError, match="no 'geo' property"):
+        open_iceberg_features(table, "arraylake+table:o/ns.t")
+
+
+def test_arraylake_table_rejects_branch():
+    with pytest.raises(ValueError, match="--branch"):
+        get_dataset_for_name("arraylake+table://o/ns.t", branch="dev")
 
 
 @pytest.mark.parametrize("fixture", [FEATURES_POLYGONS, FEATURES_POLYGONS_XVEC])
