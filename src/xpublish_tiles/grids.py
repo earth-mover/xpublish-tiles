@@ -2147,6 +2147,33 @@ class Geostationary(Rectilinear):
         self._bbox_xform_cache[target_crs] = bounds
         return bounds
 
+    def include_limb(self, input_bbox: BBox, output_bbox: BBox, output_crs: CRS) -> BBox:
+        """Grow ``input_bbox`` to cover the disk limb where the limb lies in ``output_bbox``.
+
+        ``transform_bounds`` samples only the bbox edges, so it misses a limb inside the tile.
+        """
+        _, _, cpx, cpy = self._limb_cardinals()
+        theta = np.linspace(0.0, 2 * np.pi, 1441)
+        # just inside the limb, where the inverse transform is still finite
+        px = cpx[0] * np.cos(theta) * (1 - 1e-6)
+        py = cpy[2] * np.sin(theta) * (1 - 1e-6)
+        to_output = transformer_from_crs(crs_from=self.crs, crs_to=output_crs)
+        ox, oy = to_output.transform(px, py)
+        inside = (
+            (output_bbox.west <= ox)
+            & (ox <= output_bbox.east)
+            & (output_bbox.south <= oy)
+            & (oy <= output_bbox.north)
+        )
+        if not inside.any():
+            return input_bbox
+        return BBox(
+            west=min(input_bbox.west, float(px[inside].min())),
+            south=min(input_bbox.south, float(py[inside].min())),
+            east=max(input_bbox.east, float(px[inside].max())),
+            north=max(input_bbox.north, float(py[inside].max())),
+        )
+
     def _limb_cardinals(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Geographic and projection coords of the visible disk's N/S/E/W limb.
 
