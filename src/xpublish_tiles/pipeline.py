@@ -1615,13 +1615,12 @@ async def _transform_features_patch(
         raise TileTooBigError(
             f"Tile needs {nverts} vertices, over max_renderable_vertices {limit}."
         )
-    polys, src = await async_run(
+    polys = await async_run(
         features_to_multipolygons,
         grid.geometries[idx],
-        grid.crossing[idx],
         transformer_from_crs(grid.crs, output_crs),
     )
-    values = np.asarray(patch.da.isel({grid.dim: src}).values)
+    values = np.asarray(patch.da.values)
     return polys, values
 
 

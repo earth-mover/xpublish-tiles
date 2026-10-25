@@ -25,9 +25,8 @@ import xarray as xr
 from xarray.core.indexing import IndexSelResult
 from xpublish_tiles.config import config
 from xpublish_tiles.features import (
-    crossing_features,
     import_cf_geometry,
-    shift_longitude_to_360,
+    split_at_antimeridian,
     wrap_longitude,
 )
 from xpublish_tiles.healpix import (
@@ -2950,9 +2949,8 @@ class Triangular(GridSystem1D):
 class Features(GridSystem1D):
     """Vector data cube: polygon features along one dimension.
 
-    ``geometries`` holds the features in the [0, 360) longitude form when they
-    cross the antimeridian (``crossing``), else as given (wrapped to [-180, 180)
-    for geographic CRS).
+    Geographic longitudes are wrapped to [-180, 180], and a feature that crosses
+    the antimeridian is split at 180° into parts on both sides.
 
     A ring edge longer than 180° in longitude counts as an antimeridian crossing,
     so densify a sparse polygon wider than 180° (e.g. a 4-vertex box from -100° to +100°).
@@ -2964,7 +2962,6 @@ class Features(GridSystem1D):
     Y: str
     dim: str
     geometries: np.ndarray
-    crossing: np.ndarray
     counts: np.ndarray
     lon_spans_globe: bool
     indexes: tuple[xr.Index, ...] = ()
@@ -2999,23 +2996,12 @@ class Features(GridSystem1D):
         geometries = np.array(geometries, dtype=object, copy=True)
         if crs.is_geographic:
             geometries = shapely.transform(geometries, wrap_longitude)
-            crossing = crossing_features(geometries)
-        else:
-            crossing = np.zeros(geometries.shape, dtype=bool)
+            geometries = split_at_antimeridian(geometries)
         xmin, ymin, xmax, ymax = shapely.total_bounds(geometries)
         self.lon_spans_globe = bool(crs.is_geographic and (xmax - xmin) > 350)
-        if crossing.any():
-            self.bbox = BBox(west=-180, east=180, south=ymin, north=ymax)
-            geometries = geometries.copy()
-            geometries[crossing] = shapely.transform(
-                geometries[crossing], shift_longitude_to_360
-            )
-        else:
-            self.bbox = BBox(west=xmin, east=xmax, south=ymin, north=ymax)
+        self.bbox = BBox(west=xmin, east=xmax, south=ymin, north=ymax)
         # datashader fills by nonzero winding: holes must turn against the shell.
-        # Orient after the [0, 360) shift, where crossing rings are planar-continuous.
         self.geometries = shapely.orient_polygons(geometries)
-        self.crossing = crossing
         self.counts = shapely.get_num_coordinates(geometries)
         self._strtree = shapely.STRtree(self.geometries)
 
@@ -3064,11 +3050,14 @@ class Features(GridSystem1D):
 
         boxes = [bbox]
         if self.crs.is_geographic:
-            # crossing features are stored in [0, 360)
-            boxes.append(BBox(bbox.west + 360, bbox.south, bbox.east + 360, bbox.north))
+            # the query box may extend past ±180; features lie in [-180, 180]
             if bbox.east > 180:
                 boxes.append(
                     BBox(bbox.west - 360, bbox.south, bbox.east - 360, bbox.north)
+                )
+            if bbox.west < -180:
+                boxes.append(
+                    BBox(bbox.west + 360, bbox.south, bbox.east + 360, bbox.north)
                 )
         query = np.array([shapely.box(b.west, b.south, b.east, b.north) for b in boxes])
         hits = self.strtree.query(query, predicate="intersects")

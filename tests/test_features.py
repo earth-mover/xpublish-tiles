@@ -26,7 +26,7 @@ from xpublish_tiles.cli.main import (
     open_geoparquet,
     open_iceberg_features,
 )
-from xpublish_tiles.features import features_to_multipolygons
+from xpublish_tiles.features import features_to_multipolygons, split_at_antimeridian
 from xpublish_tiles.grids import (
     Features,
     GeometryIndexer,
@@ -137,9 +137,19 @@ def test_detect_features(fixture):
     grid = guess_grid_system(ds, "foo")
     assert isinstance(grid, Features)
     assert grid.dim == "feature"
-    assert grid.crossing.tolist() == [False, False, False, True, False, False]
+    _assert_split(grid.geometries[3])
+    assert (shapely.get_num_geometries(grid.geometries[[0, 1, 4, 5]]) == 1).all()
     assert grid.bbox == BBox(west=-180, east=180, south=0, north=60)
     assert not grid.is_structural_variable(ds["foo"])
+
+
+def _assert_split(geom) -> None:
+    """(test only) ``geom`` is split at 180°: parts on both sides, all in [-180, 180]."""
+    parts = shapely.get_parts(geom)
+    bounds = shapely.bounds(parts)
+    assert len(parts) >= 2
+    assert bounds[:, 0].min() == -180 and bounds[:, 2].max() == 180
+    assert (bounds[:, 0] >= -180).all() and (bounds[:, 2] <= 180).all()
 
 
 def test_detect_features_cf_without_geometry_attr():
@@ -171,7 +181,8 @@ def test_features_crossing_ignores_wide_feature():
     ds.attrs["_xpublish_id"] = "features-wide"
     grid = guess_grid_system(ds, "foo")
     assert isinstance(grid, Features)
-    assert grid.crossing.tolist() == [False, True]
+    assert shapely.get_num_geometries(grid.geometries[0]) == 1
+    _assert_split(grid.geometries[1])
 
 
 def test_features_point_geometry_unsupported():
@@ -230,7 +241,7 @@ def test_features_presplit_multipolygon_not_crossing():
     ds.attrs["_xpublish_id"] = "features-presplit"
     grid = guess_grid_system(ds, "foo")
     assert isinstance(grid, Features)
-    assert grid.crossing.tolist() == [False]
+    assert shapely.get_num_geometries(grid.geometries[0]) == 2
     assert grid.bbox == BBox(west=-180, east=180, south=50, north=55)
     assert shapely.total_bounds(grid.geometries).tolist() == [-180, 50, 180, 55]
 
@@ -278,21 +289,21 @@ def test_unwrap_seam_vertices():
     assert x.tolist() == [10.0, 90.0, 5.0, -5.0]
 
 
-def test_features_to_multipolygons_no_crossing():
+def test_features_to_multipolygons():
     g = np.array([shapely.box(0, 0, 10, 10)], dtype=object)
-    polys, src = features_to_multipolygons(g, np.array([False]), T)
-    assert src.tolist() == [0] and len(polys) == 1
+    polys = features_to_multipolygons(g, T)
+    assert len(polys) == 1
+    (x0, x1), (y0, y1) = T.transform([0, 10], [0, 10])
+    npt.assert_allclose(polys.bounds[0], [x0, y0, x1, y1])
 
 
-def test_features_to_multipolygons_crossing_copies():
-    g = np.array([shapely.box(175, 50, 185, 60)], dtype=object)  # build-time shifted form
-    polys, src = features_to_multipolygons(g, np.array([True]), T)
-    assert src.tolist() == [0, 0, 0]
-    b = polys.bounds  # (3, 4): xmin, ymin, xmax, ymax
-    assert (b[:, 2] - b[:, 0] < W / 2).all()
-    assert b[0, 0] > 0
-    npt.assert_allclose(b[1, [0, 2]], b[0, [0, 2]] - W)
-    npt.assert_allclose(b[2, [0, 2]], b[0, [0, 2]] + W)
+def test_split_at_antimeridian():
+    crosser = shapely.Polygon([(175, 50), (-175, 50), (-175, 60), (175, 60)])
+    other = shapely.box(0, 0, 10, 10)
+    split = split_at_antimeridian(np.array([crosser, other], dtype=object))
+    _assert_split(split[0])
+    npt.assert_allclose(shapely.area(split[0]), 100)
+    assert shapely.equals(split[1], other)
 
 
 async def test_features_vertex_limit_raises():
@@ -338,15 +349,19 @@ def test_features_crossing_hole_oriented_and_empty():
     ds.attrs["_xpublish_id"] = "features-crossing-hole"
     grid = guess_grid_system(ds, "foo")
     assert isinstance(grid, Features)
-    assert grid.crossing.tolist() == [True]
     (geom,) = grid.geometries
-    assert geom.exterior.is_ccw != geom.interiors[0].is_ccw
+    _assert_split(geom)
+    for part in shapely.get_parts(geom):
+        assert all(part.exterior.is_ccw != ring.is_ccw for ring in part.interiors)
 
-    polys, src = features_to_multipolygons(
-        grid.geometries, grid.crossing, transformer_from_crs(CRS(4326), CRS(4326))
+    polys = features_to_multipolygons(
+        grid.geometries, transformer_from_crs(CRS(4326), CRS(4326))
     )
-    gdf = spatialpandas.GeoDataFrame({"geometry": polys, "data": np.ones(src.size)})
-    cvs = dsh.Canvas(plot_width=40, plot_height=40, x_range=(170, 190), y_range=(40, 60))
+    gdf = spatialpandas.GeoDataFrame({"geometry": polys, "data": np.ones(1)})
+    cvs = dsh.Canvas(plot_width=40, plot_height=40, x_range=(-180, 180), y_range=(40, 60))
     agg = cvs.polygons(gdf, "geometry", agg=dsh.mean("data"))
-    assert np.isnan(agg.sel(x=176.5, y=50, method="nearest").item())
-    assert agg.sel(x=172, y=50, method="nearest").item() == 1
+    east = dsh.Canvas(plot_width=40, plot_height=40, x_range=(170, 180), y_range=(40, 60))
+    agg_east = east.polygons(gdf, "geometry", agg=dsh.mean("data"))
+    assert np.isnan(agg_east.sel(x=176.5, y=50, method="nearest").item())
+    assert agg_east.sel(x=172, y=50, method="nearest").item() == 1
+    assert agg.sel(x=-175, y=50, method="nearest").item() == 1

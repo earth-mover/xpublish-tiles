@@ -5,8 +5,6 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pyproj
 
-from xpublish_tiles.lib import unwrap_seam_vertices
-
 if TYPE_CHECKING:
     from spatialpandas.geometry import MultiPolygonArray
 
@@ -48,24 +46,37 @@ def crossing_features(geometries: np.ndarray) -> np.ndarray:
     return crossing
 
 
+def split_at_antimeridian(geometries: np.ndarray) -> np.ndarray:
+    """Split each feature that crosses 180° into parts on both sides, all in [-180, 180]."""
+    import shapely
+
+    crossing = crossing_features(geometries)
+    if not crossing.any():
+        return geometries
+    # In [0, 360) a crossing ring is continuous; cut it at 180 and move the east part back.
+    shifted = shapely.transform(geometries[crossing], shift_longitude_to_360)
+    west = shapely.clip_by_rect(shifted, 0, -90, 180, 90)
+    east = shapely.transform(
+        shapely.clip_by_rect(shifted, 180, -90, 360, 90),
+        lambda c: c - np.array([360.0, 0.0]),
+    )
+    out = geometries.copy()
+    out[crossing] = shapely.union(west, east)
+    return out
+
+
 def features_to_multipolygons(
     geoms: np.ndarray,
-    crossing: np.ndarray,
     transformer: pyproj.Transformer,
-) -> tuple["MultiPolygonArray", np.ndarray]:
-    """Transform source-CRS geometries to a MultiPolygonArray and their
-    source positions; crossing geometries are unwrapped and copied by
-    ∓width, as in fix_healpix_discontinuity."""
+) -> "MultiPolygonArray":
+    """Transform source-CRS geometries to a MultiPolygonArray."""
     import pyarrow as pa
     import shapely
     from shapely import GeometryType
     from spatialpandas.geometry import MultiPolygonArray
 
-    idx = np.flatnonzero(crossing)
-    k, n = idx.size, len(geoms)
     # new writable array: to_ragged_array fails on read-only mixed-type input
-    geoms = np.concatenate([geoms, geoms[idx], geoms[idx]])
-    src = np.concatenate([np.arange(n), idx, idx])
+    geoms = np.array(geoms, dtype=object, copy=True)
 
     geom_type, coords, offsets = shapely.to_ragged_array(geoms)
     if geom_type == GeometryType.POLYGON:
@@ -77,17 +88,6 @@ def features_to_multipolygons(
     x, y = transformer.transform(coords[:, 0], coords[:, 1])
     x = np.asarray(x, dtype=np.float64)
     y = np.asarray(y, dtype=np.float64)
-
-    if k:
-        left, _, right, _ = transformer.transform_bounds(-180, -90, 180, 90)
-        width = abs(right - left)
-        part_geom = np.repeat(np.arange(len(geoms)), np.diff(geom_offsets))
-        ring_geom = np.repeat(part_geom, np.diff(part_offsets))
-        vert_geom = np.repeat(ring_geom, np.diff(ring_offsets))
-        seam = np.concatenate([crossing, np.ones(2 * k, dtype=bool)])
-        unwrap_seam_vertices(x, np.flatnonzero(seam[vert_geom]), width=width)
-        x[(vert_geom >= n) & (vert_geom < n + k)] -= width
-        x[vert_geom >= n + k] += width
 
     flat = np.empty(2 * x.size, dtype=np.float64)
     flat[0::2], flat[1::2] = x, y
@@ -101,4 +101,4 @@ def features_to_multipolygons(
     multis = pa.ListArray.from_arrays(
         pa.array(np.asarray(geom_offsets, dtype=np.int32)), parts_arr
     )
-    return MultiPolygonArray(multis), src
+    return MultiPolygonArray(multis)
