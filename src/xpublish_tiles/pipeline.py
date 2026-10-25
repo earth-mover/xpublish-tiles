@@ -44,6 +44,7 @@ from xpublish_tiles.lib import (
     MissingParameterError,
     PadDimension,
     TileTooBigError,
+    UnsupportedStyleError,
     VariableNotFoundError,
     _chunk_sizes,
     _iter_subset_shapes,
@@ -1261,7 +1262,7 @@ async def subset_to_bbox(
 
         if isinstance(grid, FacetedGridSystem):
             if style != "polygons":
-                raise ValueError(
+                raise UnsupportedStyleError(
                     f"FacetedGridSystem (e.g. cubed sphere) only supports style='polygons'; got {style!r}."
                 )
             slicers = grid.sel(bbox=input_bbox)
@@ -1284,7 +1285,7 @@ async def subset_to_bbox(
                 )
         elif isinstance(grid, HealpixCube):
             if style != "polygons":
-                raise ValueError(
+                raise UnsupportedStyleError(
                     f"HealpixCube only supports style='polygons'; got {style!r}."
                 )
             allow_coarsen = not isinstance(array.datatype, DiscreteData)
@@ -1309,6 +1310,10 @@ async def subset_to_bbox(
                 for ix in indexers
             )
         else:
+            if isinstance(grid, Healpix) and style != "polygons":
+                raise UnsupportedStyleError(
+                    f"Healpix only supports style='polygons'; got {style!r}."
+                )
             array.datatype.validate_ndim(array.da)
             if min(array.da.shape) < 2:
                 raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")

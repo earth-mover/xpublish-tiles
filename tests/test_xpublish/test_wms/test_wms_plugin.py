@@ -9,7 +9,14 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import xarray as xr
-from xpublish_tiles.testing.datasets import EU3035, GEOZARR_MULTISCALE, RGB
+from xpublish_tiles.testing.datasets import (
+    CUBED_SPHERE,
+    EU3035,
+    GEOZARR_MULTISCALE,
+    GLOBAL_HEALPIX_CUBE_L3,
+    GLOBAL_HEALPIX_L3,
+    RGB,
+)
 from xpublish_tiles.xpublish.wms import WMSPlugin
 
 
@@ -605,3 +612,58 @@ def test_wms_getmap_rgb_variant():
     )
     assert legend.status_code == 422
     assert "has no legend" in legend.text
+
+
+POLYGONS_ONLY_DATASETS = [CUBED_SPHERE, GLOBAL_HEALPIX_L3, GLOBAL_HEALPIX_CUBE_L3]
+
+POLYGONS_ONLY_GETMAP = {
+    "service": "WMS",
+    "version": "1.3.0",
+    "request": "GetMap",
+    "layers": "foo",
+    "crs": "EPSG:3857",
+    "bbox": "-20037508,-20037508,20037508,20037508",
+    "width": 256,
+    "height": 256,
+    "colorscalerange": "0,100",
+}
+
+
+@pytest.fixture(params=POLYGONS_ONLY_DATASETS, ids=lambda d: d.name)
+def polygons_only_wms_client(request):
+    rest = xpublish.Rest({"polys": request.param.create()}, plugins={"wms": WMSPlugin()})
+    return TestClient(rest.app)
+
+
+def test_polygons_only_grid_wms_default_style(polygons_only_wms_client):
+    client = polygons_only_wms_client
+    response = client.get("/datasets/polys/wms", params=POLYGONS_ONLY_GETMAP)
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "image/png"
+    Image.open(io.BytesIO(response.content)).verify()
+
+    response = client.get(
+        "/datasets/polys/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetLegendGraphic",
+            "layer": "foo",
+            "width": 100,
+            "height": 300,
+            "colorscalerange": "0,100",
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "image/png"
+
+
+def test_polygons_only_grid_wms_raster_style_is_422(polygons_only_wms_client):
+    response = polygons_only_wms_client.get(
+        "/datasets/polys/wms",
+        params={**POLYGONS_ONLY_GETMAP, "styles": "raster/default"},
+    )
+    assert response.status_code == 422, response.text
+    assert "ServiceExceptionReport" in response.text
+    assert "StyleNotDefined" in response.text
+    assert "only supports style=" in response.text

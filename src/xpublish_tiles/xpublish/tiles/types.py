@@ -1264,9 +1264,9 @@ class TileQuery(BaseModel):
     style: Annotated[
         tuple[str, str] | None,
         Field(
-            default="raster/default",
+            default=None,
             json_schema_extra={
-                "description": "Style and variant to use for the tile, in the format `{style}/{variant}`. The variant is a matplotlib colormap name, `custom` (with the `colormap` parameter), or `rgb` for true-colour rendering of a variable with a `band` or `rgb` dimension of size 3 (R, G, B).",
+                "description": "Style and variant to use for the tile, in the format `{style}/{variant}`. Defaults to `polygons/default` for HEALPix and cubed-sphere grids, and `raster/default` otherwise. The variant is a matplotlib colormap name, `custom` (with the `colormap` parameter), or `rgb` for true-colour rendering of a variable with a `band` or `rgb` dimension of size 3 (R, G, B).",
             },
         ),
     ]
@@ -1355,10 +1355,7 @@ class TileQuery(BaseModel):
     @field_validator("style", mode="before")
     @classmethod
     def validate_style(cls, v: str | None) -> tuple[str, str] | None:
-        valid_style = validate_style(v)
-        if valid_style is None:
-            return ("raster", "default")
-        return valid_style
+        return validate_style(v)
 
     @field_validator("colorscalerange", mode="before")
     @classmethod
@@ -1601,9 +1598,9 @@ class LegendQuery(BaseModel):
     style: Annotated[
         tuple[str, str] | None,
         Field(
-            default="raster/default",
+            default=None,
             json_schema_extra={
-                "description": "Style and variant to use, in the format `{style}/{variant}`.",
+                "description": "Style and variant to use, in the format `{style}/{variant}`. Defaults to `polygons/default` for HEALPix and cubed-sphere grids, and `raster/default` otherwise.",
             },
         ),
     ]
@@ -1714,10 +1711,7 @@ class LegendQuery(BaseModel):
     @field_validator("style", mode="before")
     @classmethod
     def validate_style(cls, v: str | None) -> tuple[str, str] | None:
-        valid_style = validate_style(v)
-        if valid_style is None:
-            return ("raster", "default")
-        return valid_style
+        return validate_style(v)
 
     @field_validator("colorscalerange", mode="before")
     @classmethod
