@@ -2,6 +2,7 @@ import io
 from numbers import Number
 
 import datashader as dsh
+import datashader.transfer_functions as tf
 import numpy as np
 import spatialpandas
 from PIL import Image
@@ -21,19 +22,6 @@ from xpublish_tiles.types import (
 )
 
 
-def _dilate(mask: np.ndarray, width: int) -> np.ndarray:
-    """Grow 1px lines to ``width`` px with a square kernel; even widths lean to +x/+y."""
-    out = mask.copy()
-    h, w = mask.shape
-    span = range(-((width - 1) // 2), width // 2 + 1)
-    for dy in span:
-        for dx in span:
-            out[max(dy, 0) : h + min(dy, 0), max(dx, 0) : w + min(dx, 0)] |= mask[
-                max(-dy, 0) : h + min(-dy, 0), max(-dx, 0) : w + min(-dx, 0)
-            ]
-    return out
-
-
 def _render_edges(
     cvs: dsh.Canvas,
     geometry,
@@ -43,30 +31,31 @@ def _render_edges(
     edgewidth: int,
     band_dim: str | None,
 ) -> Image.Image | None:
-    """RGBA image of the boundaries of cells with valid data, on the fill's canvas."""
-    rgba = _range_color_to_rgba(edgecolor)
-    if rgba[3] == 0:
+    """Antialiased boundaries of cells with valid data, on the fill's canvas."""
+    r, g, b, a = _range_color_to_rgba(edgecolor)
+    if a == 0:
         return None
     valid = np.isfinite(data.values)
     if band_dim is not None:
         valid = valid.all(axis=data.get_axis_num(band_dim))
     if not valid.any():
         return None
+    # line_width > 0 antialiases; any() gives the coverage weight in [0, 1], and a
+    # single-colour cmap shades it to alpha = weight * a.
     agg = cvs.line(
         spatialpandas.GeoDataFrame({"geometry": geometry[valid].boundary}),
         geometry="geometry",
         agg=dsh.any(),
+        line_width=edgewidth,
     )
-    mask = agg.values
-    if edgewidth > 1:
-        mask = _dilate(mask, edgewidth)
-    yvals = agg.coords[agg.dims[0]].values
-    if yvals.size >= 2 and yvals[0] < yvals[-1]:
-        # Aggregates are y-up; images are top-down.
-        mask = mask[::-1]
-    out = np.zeros((*mask.shape, 4), dtype=np.uint8)
-    out[mask] = rgba
-    return Image.fromarray(out, mode="RGBA")
+    return tf.shade(
+        agg,
+        cmap=f"#{r:02x}{g:02x}{b:02x}",
+        alpha=a,
+        min_alpha=0,
+        how="linear",
+        span=[0, 1],
+    ).to_pil()
 
 
 @register_renderer

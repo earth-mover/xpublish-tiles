@@ -1727,8 +1727,8 @@ async def test_polygons_edges_on_cell_borders():
     """Edge pixels sit on fill colour changes; no lines on the tile border.
 
     Two random fields make equal colours across a cell border negligible.
-    Radius 2: where a border leaves the tile, the line pixel and the fill's
-    pixel-centre sample can be one pixel apart.
+    Radius 3: antialiased lines touch the pixels on both sides of a border, and
+    where a border leaves the tile the fill's colour change lies outside it.
     """
     ds = GLOBAL_HEALPIX_L3.create().compute()
     tile = Tile(x=1, y=1, z=2)
@@ -1745,15 +1745,16 @@ async def test_polygons_edges_on_cell_borders():
     fill = fills[-1]
     changed = (fill != edged).any(axis=-1)
     assert changed.any()
-    assert (edged[changed] == [255, 0, 0, 255]).all()
+    # Composited toward red.
+    assert (edged[changed][:, 0] >= fill[changed][:, 0]).all()
 
     h, w, _ = fill.shape
     differs = np.zeros((h, w), dtype=bool)
     for f in fills:
-        padded = np.pad(f, ((2, 2), (2, 2), (0, 0)), mode="edge")
-        for dy in range(-2, 3):
-            for dx in range(-2, 3):
-                shifted = padded[2 + dy : 2 + dy + h, 2 + dx : 2 + dx + w]
+        padded = np.pad(f, ((3, 3), (3, 3), (0, 0)), mode="edge")
+        for dy in range(-3, 4):
+            for dx in range(-3, 4):
+                shifted = padded[3 + dy : 3 + dy + h, 3 + dx : 3 + dx + w]
                 differs |= (shifted != f).any(axis=-1)
     assert not (changed & ~differs).any()
 
