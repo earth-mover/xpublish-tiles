@@ -17,6 +17,7 @@ from xpublish_tiles.lib import TileTooBigError
 from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
     EU3035,
+    FEATURES_POLYGONS,
     GEOZARR_MULTISCALE,
     GLOBAL_HEALPIX_CUBE_L3,
     GLOBAL_HEALPIX_L3,
@@ -1576,7 +1577,12 @@ def test_rgb_style_not_advertised_without_band_dim():
     assert not any(s["id"].endswith("/rgb") for s in styles)
 
 
-POLYGONS_ONLY_DATASETS = [CUBED_SPHERE, GLOBAL_HEALPIX_L3, GLOBAL_HEALPIX_CUBE_L3]
+POLYGONS_ONLY_DATASETS = [
+    FEATURES_POLYGONS,
+    CUBED_SPHERE,
+    GLOBAL_HEALPIX_L3,
+    GLOBAL_HEALPIX_CUBE_L3,
+]
 
 
 @pytest.fixture(params=POLYGONS_ONLY_DATASETS, ids=lambda d: d.name)

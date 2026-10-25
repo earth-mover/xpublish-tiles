@@ -67,11 +67,15 @@ healpix = [
     "xdggs>=0.5.0",
     "healpix-geo>=0.0.10",
 ]
+vector = [
+    "xvec>=0.5.2",
+    "shapely>=2.1",
+]
 datadog = [
     "ddtrace>=3.0",
 ]
 complete = [
-    "xpublish-tiles[healpix]",
+    "xpublish-tiles[healpix,vector]",
 ]
 testing = [
     "pytest>=8.4.1",
@@ -84,6 +88,7 @@ testing = [
     "pytest-randomly>=3.16.0",
     "scikit-image>=0.25.2",
     "titiler>=0.24.0",
+    "pyiceberg[sql-sqlite]>=0.12",
 ]
 
 [dependency-groups]
@@ -93,12 +98,12 @@ dev = [
     "pdbpp>=0.11.7",
     "netcdf4>=1.7.2",
     "pooch>=1.8.2",
-    "arraylake>=0.27",
+    "arraylake[iceberg]>=1.7",
     "icechunk",
     "dask",
     "ipython>=9.4.0",
     "ipykernel>=6.29.0",
-    "xpublish-tiles[testing,healpix]",
+    "xpublish-tiles[testing,healpix,vector]",
     "coiled>=1.118.3",
     "memray>=1.18.0",
     "py-spy>=0.4.1",

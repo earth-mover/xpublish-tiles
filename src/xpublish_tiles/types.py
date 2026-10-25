@@ -13,6 +13,7 @@ from spatialpandas.geometry import MultiPolygonArray, PolygonArray
 import xarray as xr
 from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
+    GeometryIndexer,
     GridMetadata,
     GridSystem,
     GridSystem2D,
@@ -208,7 +209,7 @@ class Patch:
     slicers: Slicers = field(default_factory=dict)
     coarsen_factors: dict[str, int] = field(default_factory=dict)
     alternate: GridMetadata | None = None
-    indexer: UgridIndexer | HealpixIndexer | None = None
+    indexer: UgridIndexer | HealpixIndexer | GeometryIndexer | None = None
 
     @property
     def source_crs(self):

@@ -18,6 +18,8 @@ from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
     ERA5,
     EU3035,
+    FEATURES_POLYGONS,
+    FEATURES_POLYGONS_XVEC,
     FVCOM,
     GEOSTATIONARY,
     GEOZARR_MULTISCALE,
@@ -1105,6 +1107,8 @@ def _normalize_for_snapshot(obj):
         pytest.param(FVCOM, id="fvcom"),
         pytest.param(RADAR, id="radar"),
         pytest.param(RGB, id="rgb"),
+        pytest.param(FEATURES_POLYGONS, id="features_polygons"),
+        pytest.param(FEATURES_POLYGONS_XVEC, id="features_polygons_xvec"),
     ],
 )
 def test_tiles_endpoint_snapshot(fixture, snapshot):
@@ -1138,6 +1142,8 @@ def test_tiles_endpoint_snapshot(fixture, snapshot):
         pytest.param(FVCOM, id="fvcom"),
         pytest.param(RADAR, id="radar"),
         pytest.param(RGB, id="rgb"),
+        pytest.param(FEATURES_POLYGONS, id="features_polygons"),
+        pytest.param(FEATURES_POLYGONS_XVEC, id="features_polygons_xvec"),
     ],
 )
 def test_tilejson_endpoint_snapshot(fixture, snapshot):

@@ -47,6 +47,8 @@ from xpublish_tiles.projections import (
 from xpublish_tiles.utils import NUMBA_PARALLEL
 
 if TYPE_CHECKING:
+    from spatialpandas.geometry import PolygonArray
+
     from xpublish_tiles.grids import (
         DimSlicers,
         GridMetadata,
@@ -769,7 +771,7 @@ def apply_default_pad(slicers, da, grid):
 
     Parameters
     ----------
-    slicers : dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]
+    slicers : dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer | GeometryIndexer]]
         Raw slicers from grid.sel()
     da : xr.DataArray
         Data array (for dimension sizes)
@@ -778,7 +780,7 @@ def apply_default_pad(slicers, da, grid):
 
     Returns
     -------
-    dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]
+    dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer | GeometryIndexer]]
         Slicers with default_pad applied
     """
     default_padders = [
@@ -808,7 +810,7 @@ def slicers_to_pad_instruction(slicers, datatype) -> dict[str, Any]:
     return pad_kwargs
 
 
-def polygons_from_rings(rings: np.ndarray):
+def polygons_from_rings(rings: np.ndarray) -> "PolygonArray":
     """Build a spatialpandas PolygonArray from a ``(N, M, 2)`` rings buffer.
 
     Each row is one polygon with M vertices (including the closing vertex).
@@ -839,6 +841,12 @@ def polygons_from_rings(rings: np.ndarray):
     poly_offsets = np.arange(n + 1, dtype=np.int32)
     polys = pa.ListArray.from_arrays(pa.array(poly_offsets), rings_arr)
     return PolygonArray(polys)
+
+
+def unwrap_seam_vertices(x: np.ndarray, verts: np.ndarray, *, width: float) -> None:
+    """Move the vertices ``verts`` with negative x by ``+width``, in place."""
+    neg = x[verts] < 0
+    x[verts[neg]] += width
 
 
 @numba.njit(nogil=True, cache=True, boundscheck=False)
@@ -1099,12 +1107,12 @@ def _get_indexer_size(
     sl: "Slicer", dim_size: int | None = None, chunk: int | None = None
 ) -> int:
     """Elements an indexer selects, or with ``chunk`` the elements it decompresses."""
-    from xpublish_tiles.grids import HealpixIndexer, UgridIndexer
+    from xpublish_tiles.grids import GeometryIndexer, HealpixIndexer, UgridIndexer
 
     if isinstance(sl, Fill | UgridIndexer):
         # padding / an explicit vertex list: nothing to round out to
         return sl.size
-    if isinstance(sl, HealpixIndexer):
+    if isinstance(sl, GeometryIndexer | HealpixIndexer):
         if isinstance(sl.indices, np.ndarray):
             if chunk is None:
                 return int(sl.indices.size)
@@ -1140,6 +1148,8 @@ def _iter_subset_shapes(
     from xpublish_tiles.grids import (
         FacetedGridSystem,
         FacetedIndexer,
+        Features,
+        GeometryIndexer,
         Healpix,
         HealpixCube,
         HealpixCubeIndexer,
@@ -1160,6 +1170,12 @@ def _iter_subset_shapes(
         # Xdim == Ydim == the cell dim; the 2-D path below would square it
         for ix in slicers[grid.dim]:
             yield (_get_indexer_size(ix, da.sizes[grid.dim], chunks.get(grid.dim)),)
+        return
+
+    if isinstance(grid, Features):
+        for ix in slicers[grid.dim]:
+            assert isinstance(ix, GeometryIndexer)
+            yield (ix.indices.size,)
         return
 
     if isinstance(grid, Triangular):
@@ -1270,7 +1286,7 @@ def check_data_is_renderable_size(
 
     Parameters
     ----------
-    slicers : dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer]]
+    slicers : dict[str, list[slice | Fill | UgridIndexer | HealpixIndexer | GeometryIndexer]]
         Slicers for data selection
     da : xr.DataArray
         Data array (only metadata used, no data loaded)

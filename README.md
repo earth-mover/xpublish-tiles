@@ -33,6 +33,7 @@ The goal of this project is to transform xarray datasets to raster, vector and o
 | HEALPix      | cell-index coordinate              | Nested indexing scheme, following [CF Conventions PR #605](https://github.com/cf-convention/cf-conventions/pull/605). | `polygons` only  |
 | Polar        | `azimuth[azimuth], range[range]`   | Radar sweeps ([WMO FM-301](https://community.wmo.int/activity-areas/wis/wmo-cf-extensions)), detected via `ray_azimuth_angle` / `projection_range_coordinate` standard names. | `raster` only    |
 | Geostationary | `x[x], y[y]` (scan angles, radians) | Fixed-grid scan angles with a CF `geostationary` grid mapping; `perspective_point_height` is required to convert scan angles to metres. | All              |
+| Vector data cube | `geometry[feature]`             | Polygon/MultiPolygon features along one dimension: an [xvec](https://xvec.readthedocs.io) `GeometryIndex`, or a CF geometry container (`geometry_type: polygon`). | `polygons` only  |
 
 Here `lat[lat]` means a coordinate variable named `lat` with one dimension named `lat`.
 
@@ -53,7 +54,7 @@ When serving a `DataTree` with multiple resolution levels, the appropriate level
 Two rendering styles are supported:
 
 - `raster` — cells are rasterized onto the output grid using [datashader's mesh rasterizers](https://datashader.org/api.html#datashader.Canvas.quadmesh) (`quadmesh` for rectilinear/curvilinear, `trimesh` for unstructured). Used for raster, rectilinear, curvilinear, and unstructured grids.
-- `polygons` — the mesh is passed to [datashader's polygon rasterizer](https://datashader.org/api.html#datashader.Canvas.polygons) as explicit polygon geometries, which rasterizes them onto the tile. This is the only style supported for HEALPix.
+- `polygons` — the mesh is passed to [datashader's polygon rasterizer](https://datashader.org/api.html#datashader.Canvas.polygons) as explicit polygon geometries, which rasterizes them onto the tile. This is the only style supported for HEALPix, cubed sphere, and vector data cubes.
 
 ### Categorical Data support
 
@@ -254,9 +255,11 @@ uv run xpublish-tiles [OPTIONS]
   - `zarr:///path/to/zarr/store`: Load standard Zarr store (use `--group` for nested groups)
   - `zarr+file:///path/to/zarr/store`: Alternative syntax for local Zarr stores (use `--group` for nested groups)
   - `netcdf+file:///path/to/file.nc`: Load local NetCDF file (use `--group` for groups)
+  - `geoparquet+file:///path/to/file.parquet`: Load a GeoParquet file as a vector data cube along a `feature` dimension (needs the `[vector]` extra)
   - `icechunk:///path/to/repo`: Load Icechunk repository (use `--group` for groups, `--branch` for branches)
   - `local://<dataset_name>`: Convenience alias for `icechunk:///tmp/tiles-icechunk --group <dataset_name>` (datasets created with `uv run pytest --setup`)
   - For Arraylake datasets: specify the dataset name in {arraylake_org}/{arraylake_dataset} format (requires Arraylake credentials)
+  - `arraylake+table://{arraylake_org}/{namespace}.{table}`: Load an Arraylake Iceberg table as a vector data cube. The table needs a `geo` property with GeoParquet metadata; `--branch` is not allowed.
 - `--branch BRANCH`: Branch to use for Arraylake, Icechunk, or local datasets (default: main)
 - `--group GROUP`: Group to use for Arraylake, Zarr, or Icechunk datasets (default: '')
 - `--cache`: Enable icechunk cache for Arraylake and local icechunk datasets (default: enabled)
@@ -318,6 +321,12 @@ xpublish-tiles --dataset icechunk:///path/to/icechunk/repo --group my_dataset
 
 # Serve Arraylake dataset with specific branch and group
 xpublish-tiles --dataset earthmover-public/aifs-outputs --branch main --group 2025-04-01/12z
+
+# Serve a GeoParquet file as a vector data cube
+xpublish-tiles --dataset geoparquet+file:///path/to/counties.parquet
+
+# Serve an Arraylake Iceberg table as a vector data cube
+xpublish-tiles --dataset arraylake+table://earthmover/tiger_line.tl_2021_us_county
 
 # Run benchmark with a specific dataset
 xpublish-tiles --dataset local://para_hires --spy
