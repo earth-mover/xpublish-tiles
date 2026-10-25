@@ -1161,6 +1161,7 @@ def _iter_subset_shapes(
         for ix in slicers[grid.dim]:
             assert isinstance(ix, HealpixCubeIndexer)
             yield (
+                _get_indexer_size(ix.faces, None, chunks.get(grid.face_dim)),
                 _get_indexer_size(ix.y, None, chunks.get(grid.Ydim)),
                 _get_indexer_size(ix.x, None, chunks.get(grid.Xdim)),
             )
@@ -1362,8 +1363,7 @@ def decompressed_size_bytes(
     if isinstance(grid, FacetedGridSystem):
         covered |= {str(d) for f in grid.faces for d in (f.Xdim, f.Ydim)}
     if isinstance(grid, HealpixCube):
-        # face stays uncovered: each face rectangle decompresses its whole face chunk
-        covered |= {grid.Ydim, grid.Xdim}
+        covered |= {grid.face_dim, grid.Ydim, grid.Xdim}
     for dim, chunk in chunks.items():
         if dim in covered:
             continue

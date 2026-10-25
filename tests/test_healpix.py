@@ -26,6 +26,7 @@ from xpublish_tiles.healpix import (
     mercator_polar_stretch,
     nested_to_fyx,
 )
+from xpublish_tiles.lib import decompressed_size_bytes
 from xpublish_tiles.testing.datasets import (
     GLOBAL_HEALPIX_CUBE_L3,
     GLOBAL_HEALPIX_CUBE_L5,
@@ -177,7 +178,7 @@ def test_cube_select_coarsen_and_gather():
     flat = _create_global_healpix(level=5, dtype=np.float64)["foo"].values
     expected = flat.reshape(-1, 16).mean(axis=1)  # nested children are contiguous
     for ix in indexers:
-        rect = ds["foo"].isel(time=-1, face=ix.face, y=ix.y, x=ix.x).load()
+        rect = ds["foo"].isel(time=-1, face=ix.faces, y=ix.y, x=ix.x).load()
         got = grid.gather(rect, ix)
         assert got.dims == (grid.dim,)
         np.testing.assert_allclose(
@@ -223,7 +224,7 @@ def test_cube_partial_bbox_gather(bbox, max_cells, coarsened):
     flat = _create_global_healpix(level=5, dtype=np.float64)["foo"].values
     expected = flat.reshape(-1, factor**2).mean(axis=1)
     for ix in indexers:
-        rect = ds["foo"].isel(time=-1, face=ix.face, y=ix.y, x=ix.x).load()
+        rect = ds["foo"].isel(time=-1, face=ix.faces, y=ix.y, x=ix.x).load()
         got = grid.gather(rect, ix)
         np.testing.assert_allclose(
             got.values, expected[ix.cell_ids.astype(np.int64)], atol=1e-12
@@ -271,14 +272,14 @@ def test_cube_select_globe_matches_generic_path():
     )
     assert len(fast) == len(slow) == 12
     for a, b in zip(fast, slow, strict=True):
-        assert (a.face, a.y, a.x, a.level, a.factor) == (
-            b.face,
+        assert (a.faces, a.y, a.x, a.level, a.factor) == (
+            b.faces,
             b.y,
             b.x,
             b.level,
             b.factor,
         )
-        for name in ("indices", "antimeridian_mask", "cell_ids", "ys", "xs"):
+        for name in ("indices", "antimeridian_mask", "cell_ids", "fs", "ys", "xs"):
             np.testing.assert_array_equal(getattr(a, name), getattr(b, name))
 
 
@@ -359,3 +360,46 @@ assert "xdggs" not in sys.modules, "xdggs was imported"
         [sys.executable, "-c", code], cwd=root, capture_output=True, text=True
     )
     assert proc.returncode == 0, proc.stderr[-2000:]
+
+
+_GLOBE = BBox(west=-180, south=-90, east=180, north=90)
+
+
+def test_merge_face_chunks_globe():
+    grid = HealpixCube(face_dim="face", Ydim="y", Xdim="x", level=3)
+    out = grid.select(_GLOBE, max_cells=10**9, chunks={"face": 2, "y": 8, "x": 8})
+    assert [ix.faces for ix in out] == [slice(f, f + 2) for f in range(0, 12, 2)]
+    for ix in out:
+        n = 4**3
+        np.testing.assert_array_equal(ix.fs, np.repeat([0, 1], n))
+        np.testing.assert_array_equal(
+            ix.cell_ids, np.arange(ix.faces.start * n, ix.faces.stop * n)
+        )
+
+
+def test_merge_face_chunks_face_chunk_1_is_noop():
+    grid = HealpixCube(face_dim="face", Ydim="y", Xdim="x", level=3)
+    out = grid.select(_GLOBE, max_cells=10**9, chunks={"face": 1, "y": 8, "x": 8})
+    assert [ix.faces for ix in out] == [slice(f, f + 1) for f in range(12)]
+
+
+def test_merge_face_chunks_different_rects_not_merged():
+    grid = HealpixCube(face_dim="face", Ydim="y", Xdim="x", level=5)
+    bbox = BBox(west=30, south=-10, east=60, north=10)  # faces 0, 4, 5, 8
+    plain = grid.select(bbox, max_cells=10**9)
+    # all faces share one face chunk, but y/x chunks of 1 keep rectangles exact
+    merged = grid.select(bbox, max_cells=10**9, chunks={"face": 12, "y": 1, "x": 1})
+    assert len(plain) >= 2
+    assert [ix.faces for ix in merged] == [ix.faces for ix in plain]
+
+
+def test_merge_face_chunks_halves_decompressed_size():
+    ds = GLOBAL_HEALPIX_CUBE_L3.create()
+    grid = guess_grid_system(ds, "foo")
+    assert isinstance(grid, HealpixCube)
+    chunks = {"time": 1, "face": 2, "y": 8, "x": 8}
+    da = ds["foo"].isel(time=0)
+    plain = grid.select(_GLOBE, max_cells=10**9)
+    merged = grid.select(_GLOBE, max_cells=10**9, chunks=chunks)
+    size = lambda ixs: decompressed_size_bytes({grid.dim: ixs}, da, grid, chunks=chunks)
+    assert size(merged) * 2 == size(plain)

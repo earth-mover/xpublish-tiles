@@ -3,7 +3,7 @@ import re
 import threading
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Hashable, Iterable
+from collections.abc import Callable, Hashable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, NamedTuple, Self, cast
 
@@ -129,14 +129,15 @@ class GeometryIndexer:
 
 @dataclass
 class HealpixCubeIndexer(HealpixIndexer):
-    """One face rectangle of a (face, y, x) HEALPix cube; ``indices`` are positions in the gathered cell dim."""
+    """One (face range, y, x) block of a HEALPix cube; ``indices`` are positions in the gathered cell dim."""
 
-    cell_ids: np.ndarray  # sorted uint64 nested ids at ``level``
+    cell_ids: np.ndarray  # uint64 nested ids at ``level``
     level: int
-    face: int
+    faces: slice  # contiguous faces read; slice(f, f + 1) for one face
     y: slice  # fine rows read
     x: slice  # fine cols read
     factor: int  # 2**k block size
+    fs: np.ndarray  # face of each cell, relative to faces.start
     ys: np.ndarray  # coarse row of each cell inside the rectangle
     xs: np.ndarray  # coarse col of each cell inside the rectangle
 
@@ -3376,6 +3377,59 @@ class FacetedGridSystem(GridSystem, ABC):
         return {self.face_dim: [FacetedIndexer(selections=selections)]}
 
 
+def merge_face_chunks(
+    indexers: list[HealpixCubeIndexer], *, face_chunk: int, y_chunk: int, x_chunk: int
+) -> list[HealpixCubeIndexer]:
+    """Merge faces that share a face chunk and the same chunk-aligned y/x rectangle.
+
+    Separate loads decompress a shared chunk once per face; one merged load
+    decompresses it once. Equal chunk-aligned rectangles mean the merge reads
+    no chunk that the separate loads did not.
+    """
+
+    def chunk_span(sl: slice, chunk: int) -> tuple[int, int]:
+        return sl.start // chunk, -(-sl.stop // chunk)
+
+    groups: dict[tuple, list[HealpixCubeIndexer]] = {}
+    for ix in indexers:
+        key = (
+            ix.faces.start // face_chunk,
+            chunk_span(ix.y, y_chunk),
+            chunk_span(ix.x, x_chunk),
+        )
+        groups.setdefault(key, []).append(ix)
+
+    out = []
+    for group in groups.values():
+        if len(group) == 1:
+            out.append(group[0])
+            continue
+        first = group[0]
+        f0 = min(ix.faces.start for ix in group)
+        y = slice(min(ix.y.start for ix in group), max(ix.y.stop for ix in group))
+        x = slice(min(ix.x.start for ix in group), max(ix.x.stop for ix in group))
+        # starts are multiples of factor, so coarse offsets shift by whole cells
+        dy = [ix.y.start // first.factor - y.start // first.factor for ix in group]
+        dx = [ix.x.start // first.factor - x.start // first.factor for ix in group]
+        n = sum(ix.cell_ids.size for ix in group)
+        out.append(
+            HealpixCubeIndexer(
+                indices=np.arange(n),
+                antimeridian_mask=np.concatenate([ix.antimeridian_mask for ix in group]),
+                cell_ids=np.concatenate([ix.cell_ids for ix in group]),
+                level=first.level,
+                faces=slice(f0, max(ix.faces.stop for ix in group)),
+                y=y,
+                x=x,
+                factor=first.factor,
+                fs=np.concatenate([ix.fs + ix.faces.start - f0 for ix in group]),
+                ys=np.concatenate([ix.ys + d for ix, d in zip(group, dy, strict=True)]),
+                xs=np.concatenate([ix.xs + d for ix, d in zip(group, dx, strict=True)]),
+            )
+        )
+    return out
+
+
 @dataclass(init=False, kw_only=True, eq=False)
 class HealpixCube(HealpixBase):
     """HEALPix stored as (face=12, y=nside, x=nside); xyf layout, nested ordering.
@@ -3438,7 +3492,9 @@ class HealpixCube(HealpixBase):
         max_cells: int,
         mercator_stretch: bool = True,
         allow_coarsen: bool = True,
+        chunks: Mapping[str, int] | None = None,
     ) -> list[HealpixCubeIndexer]:
+        """Per-face indexers; with ``chunks``, faces that share chunks load once."""
         level = (
             coarse_level(bbox, self.level, max_cells, mercator_stretch=mercator_stretch)
             if allow_coarsen
@@ -3447,7 +3503,21 @@ class HealpixCube(HealpixBase):
         factor = 2 ** (self.level - level)
         # `and`, not `or`: a full-width polar strip must still go through the budget
         if bbox.east - bbox.west >= 360 and bbox.north - bbox.south >= 180:
-            return self._select_globe(level, factor)
+            out = self._select_globe(level, factor)
+        else:
+            out = self._select_bbox(bbox, level, factor)
+        if not chunks:
+            return out
+        return merge_face_chunks(
+            out,
+            face_chunk=chunks.get(self.face_dim, 1),
+            y_chunk=chunks.get(self._Ydim, 1),
+            x_chunk=chunks.get(self._Xdim, 1),
+        )
+
+    def _select_bbox(
+        self, bbox: BBox, level: int, factor: int
+    ) -> list[HealpixCubeIndexer]:
         ids = bbox_cell_ids(bbox, level).astype(np.uint64)
         am = np.isin(ids, antimeridian_cells(level), assume_unique=True)
         f, yc, xc = nested_to_fyx(ids, level)
@@ -3466,10 +3536,11 @@ class HealpixCube(HealpixBase):
                     antimeridian_mask=am[m],
                     cell_ids=ids[m],
                     level=level,
-                    face=face,
+                    faces=slice(face, face + 1),
                     y=slice(y0 * factor, y1 * factor),
                     x=slice(x0 * factor, x1 * factor),
                     factor=factor,
+                    fs=np.zeros(m.stop - m.start, dtype=np.intp),
                     ys=yc[m] - y0,
                     xs=xc[m] - x0,
                 )
@@ -3489,10 +3560,11 @@ class HealpixCube(HealpixBase):
                 antimeridian_mask=am[face * n : (face + 1) * n],
                 cell_ids=np.arange(face * n, (face + 1) * n, dtype=np.uint64),
                 level=level,
-                face=face,
+                faces=slice(face, face + 1),
                 y=slice(0, side),
                 x=slice(0, side),
                 factor=factor,
+                fs=np.zeros(n, dtype=np.intp),
                 ys=ys,
                 xs=xs,
             )
@@ -3515,7 +3587,7 @@ class HealpixCube(HealpixBase):
         }
 
     def gather(self, da: xr.DataArray, indexer: HealpixCubeIndexer) -> xr.DataArray:
-        """Block-mean a loaded face rectangle by ``factor`` and gather the selected cells."""
+        """Block-mean a loaded (face, y, x) block by ``factor`` and gather the selected cells."""
         da = da.reset_coords(drop=True)
         if indexer.factor > 1:
             da = coarsen_mean_pad(
@@ -3523,6 +3595,7 @@ class HealpixCube(HealpixBase):
             )
         return da.isel(
             {
+                self.face_dim: xr.Variable(self.dim, indexer.fs),
                 self._Ydim: xr.Variable(self.dim, indexer.ys),
                 self._Xdim: xr.Variable(self.dim, indexer.xs),
             }

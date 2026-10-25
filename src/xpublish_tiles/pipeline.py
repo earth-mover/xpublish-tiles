@@ -1312,13 +1312,14 @@ async def subset_to_bbox(
                 max_cells=max_polygon_cells(max_shape),
                 mercator_stretch=is_mercator_like(crs),
                 allow_coarsen=allow_coarsen,
+                chunks=array.chunks,
             )
-            # one patch per face rectangle; [] falls through to NullRenderContext
+            # one patch per (face range, y, x) block; [] falls through to NullRenderContext
             patches.extend(
                 Patch(
                     grid=grid,
                     da=array.da.isel(
-                        {grid.face_dim: ix.face, grid.Ydim: ix.y, grid.Xdim: ix.x}
+                        {grid.face_dim: ix.faces, grid.Ydim: ix.y, grid.Xdim: ix.x}
                     ),
                     slicers={grid.dim: [ix]},
                     alternate=grid.to_metadata(),
