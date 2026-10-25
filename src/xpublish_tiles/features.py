@@ -1,23 +1,27 @@
-"""Helpers for the ``Features`` grid: vector data cubes of polygon features."""
+"""Helpers for the ``Features`` grid: vector data cubes of polygon features.
 
-from typing import TYPE_CHECKING, Any
+Needs the ``[vector]`` extra; import this module lazily from core code.
+"""
 
 import numpy as np
+import pyarrow as pa
 import pyproj
+from spatialpandas.geometry import MultiPolygonArray
 
-if TYPE_CHECKING:
-    from spatialpandas.geometry import MultiPolygonArray
+import xarray as xr
+
+try:
+    import cf_xarray.geometry as cf_geometry
+    import shapely
+    from shapely import GeometryType
+except ImportError as e:
+    raise ImportError(
+        "Vector data cubes require shapely; install `xpublish-tiles[vector]`."
+    ) from e
 
 
-def import_cf_geometry() -> tuple[Any, Any]:
-    try:
-        import cf_xarray.geometry as cf_geometry
-        import shapely
-    except ImportError as e:
-        raise ImportError(
-            "CF geometry containers require shapely; install `xpublish-tiles[vector]`."
-        ) from e
-    return shapely, cf_geometry
+def geometries_from_cf(ds: xr.Dataset, container: str) -> np.ndarray:
+    return cf_geometry.cf_to_shapely(ds, container=container).values
 
 
 def wrap_longitude(coords: np.ndarray) -> np.ndarray:
@@ -35,8 +39,6 @@ def shift_longitude_to_360(coords: np.ndarray) -> np.ndarray:
 
 def crossing_features(geometries: np.ndarray) -> np.ndarray:
     """A feature crosses when a ring has consecutive vertices > 180 degrees apart in longitude."""
-    import shapely
-
     parts, part_geom = shapely.get_parts(geometries, return_index=True)
     rings, ring_part = shapely.get_rings(parts, return_index=True)
     coords, vertex_ring = shapely.get_coordinates(rings, return_index=True)
@@ -48,8 +50,6 @@ def crossing_features(geometries: np.ndarray) -> np.ndarray:
 
 def split_at_antimeridian(geometries: np.ndarray) -> np.ndarray:
     """Split each feature that crosses 180° into parts on both sides, all in [-180, 180]."""
-    import shapely
-
     crossing = crossing_features(geometries)
     if not crossing.any():
         return geometries
@@ -68,13 +68,8 @@ def split_at_antimeridian(geometries: np.ndarray) -> np.ndarray:
 def features_to_multipolygons(
     geoms: np.ndarray,
     transformer: pyproj.Transformer,
-) -> "MultiPolygonArray":
+) -> MultiPolygonArray:
     """Transform source-CRS geometries to a MultiPolygonArray."""
-    import pyarrow as pa
-    import shapely
-    from shapely import GeometryType
-    from spatialpandas.geometry import MultiPolygonArray
-
     # new writable array: to_ragged_array fails on read-only mixed-type input
     geoms = np.array(geoms, dtype=object, copy=True)
 

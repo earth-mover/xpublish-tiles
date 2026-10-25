@@ -24,11 +24,6 @@ from pyproj.aoi import BBox
 import xarray as xr
 from xarray.core.indexing import IndexSelResult
 from xpublish_tiles.config import config
-from xpublish_tiles.features import (
-    import_cf_geometry,
-    split_at_antimeridian,
-    wrap_longitude,
-)
 from xpublish_tiles.healpix import (
     antimeridian_cells,
     bbox_cell_ids,
@@ -2995,6 +2990,8 @@ class Features(GridSystem1D):
 
         geometries = np.array(geometries, dtype=object, copy=True)
         if crs.is_geographic:
+            from xpublish_tiles.features import split_at_antimeridian, wrap_longitude
+
             geometries = shapely.transform(geometries, wrap_longitude)
             geometries = split_at_antimeridian(geometries)
         xmin, ymin, xmax, ymax = shapely.total_bounds(geometries)
@@ -3068,8 +3065,9 @@ class Features(GridSystem1D):
     def from_dataset(cls, ds: xr.Dataset, crs: CRS, Xname: str, Yname: str) -> Self:
         container = ds[Xname]
         if "geometry_type" in container.attrs:
-            _, cf_geometry = import_cf_geometry()
-            geometries = cf_geometry.cf_to_shapely(ds, container=Xname).values
+            from xpublish_tiles.features import geometries_from_cf
+
+            geometries = geometries_from_cf(ds, Xname)
         else:
             geometries = container.values
         return cls(

@@ -209,6 +209,8 @@ def _features_and_gridded(xpublish_id: str) -> xr.Dataset:
 def _block_shapely(monkeypatch):
     for module in ("shapely", "cf_xarray.geometry"):
         monkeypatch.setitem(sys.modules, module, None)
+    # force a fresh import so the module's import guard runs
+    monkeypatch.delitem(sys.modules, "xpublish_tiles.features", raising=False)
 
 
 def test_features_cf_without_shapely(monkeypatch):

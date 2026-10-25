@@ -18,7 +18,6 @@ from spatialpandas.geometry import MultiPolygonArray
 
 import xarray as xr
 from xpublish_tiles.config import config
-from xpublish_tiles.features import features_to_multipolygons
 from xpublish_tiles.grids import (
     Curvilinear,
     FacetedGridSystem,
@@ -1615,6 +1614,8 @@ async def _transform_features_patch(
         raise TileTooBigError(
             f"Tile needs {nverts} vertices, over max_renderable_vertices {limit}."
         )
+    from xpublish_tiles.features import features_to_multipolygons
+
     polys = await async_run(
         features_to_multipolygons,
         grid.geometries[idx],
