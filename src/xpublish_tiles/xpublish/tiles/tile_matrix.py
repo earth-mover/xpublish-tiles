@@ -246,6 +246,8 @@ DEFAULT_TMS_PREFERENCE = (
     "WGS1984Quad",
 )
 MAX_DISTINCT_CRS = 8
+# Snap for time-axis steps in repeating intervals.
+ONE_SECOND = np.timedelta64(1, "s")
 
 
 @functools.cache
@@ -301,17 +303,22 @@ def _repeating_intervals(
     values: np.ndarray,
     fmt_value: Callable[[Any], str],
     fmt_step: Callable[[Any], str],
+    quantum: np.timedelta64 | None = None,
 ) -> list[str] | None:
     """Describe a 1D axis as ISO 8601 repeating intervals ``R<count>/<start>/<step>``.
 
     One interval per maximal run of constant step, as OGC API EDR ``extent.values``.
     The jump between runs is not a step of either run (GFS ``lead_time``:
     0-120 h hourly, then 123-384 h 3-hourly). None past the ``max_repeating_intervals`` option.
+    ``quantum`` snaps steps to its multiples, so jitter does not split a run
+    (GOES-19 ABI scan starts: 300.0 s and 300.1 s).
     """
     n = len(values)
     if n < 2:
         return None
     steps = values[1:] - values[:-1]
+    if quantum is not None:
+        steps = np.round(steps / quantum).astype(np.int64) * quantum
     # Candidate end: the step changes here. A segment start is never an end, so within
     # each chain of consecutive candidates every second one, from the first, is an end.
     candidate = np.zeros(n, dtype=bool)
@@ -331,6 +338,15 @@ def _repeating_intervals(
         f"R{b - a + 1}/{fmt_value(values[a])}/{fmt_step(steps[a] if a < b else zero)}"
         for a, b in zip(starts, ends, strict=True)
     ]
+
+
+def _single_run_resolution(
+    repeating: list[str] | None,
+) -> tuple[str | None, list[str] | None]:
+    """One run spans the whole axis: send its step as ``resolution``, not as a run."""
+    if repeating is not None and len(repeating) == 1:
+        return repeating[0].rsplit("/", 1)[1], None
+    return None, repeating
 
 
 def _numeric_resolution(values: np.ndarray) -> int | float | None:
@@ -460,8 +476,9 @@ async def extract_dimension_extents(
                 resolution = _calculate_temporal_resolution(coord)
             if resolution is None and actual_values is None:
                 repeating = _repeating_intervals(
-                    values, timedelta_to_iso8601, timedelta_to_iso8601
+                    values, timedelta_to_iso8601, timedelta_to_iso8601, ONE_SECOND
                 )
+                resolution, repeating = _single_run_resolution(repeating)
             if resolution is None and repeating is None and actual_values is None:
                 resolution = _nominal_resolution(values)
         elif np.issubdtype(values.dtype, np.datetime64):
@@ -479,8 +496,12 @@ async def extract_dimension_extents(
                 resolution = _calculate_temporal_resolution(coord)
             if resolution is None and actual_values is None:
                 repeating = _repeating_intervals(
-                    values, lambda v: pd.Timestamp(v).isoformat(), timedelta_to_iso8601
+                    values,
+                    lambda v: pd.Timestamp(v).isoformat(),
+                    timedelta_to_iso8601,
+                    ONE_SECOND,
                 )
+                resolution, repeating = _single_run_resolution(repeating)
             if resolution is None and repeating is None and actual_values is None:
                 resolution = _nominal_resolution(values)
         elif isinstance(values[0], cftime.datetime):

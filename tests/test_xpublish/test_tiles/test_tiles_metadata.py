@@ -299,6 +299,19 @@ async def test_extract_dataset_extents_nominal_resolution():
     assert "values" not in extents["t"]
 
 
+async def test_extract_dataset_extents_nominal_resolution_few_runs():
+    """GOES-19 ABI: 300.0 s steps with two 300.1 s steps; every run's step is PT5M."""
+    steps = np.full(99, 300_000, dtype="int64")
+    steps[[13, 60]] = 300_100
+    time = pd.DatetimeIndex(
+        np.datetime64("2026-10-24T14:16:18.100", "ns")
+        + np.concatenate([[0], np.cumsum(steps)]).astype("timedelta64[ms]")
+    )
+    ds = _axis_dataset("t", time, {"axis": "T", "standard_name": "time"})
+    extents = await extract_dataset_extents(ds, "v")
+    assert extents["t"]["resolution"] == "PT5M"
+
+
 async def test_extract_dataset_extents_no_nominal_resolution():
     """Jitter larger than the tolerance gives no resolution."""
     ds = _axis_dataset(

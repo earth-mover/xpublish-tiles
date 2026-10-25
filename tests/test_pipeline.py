@@ -25,7 +25,11 @@ from src.xpublish_tiles.render.raster import nearest_on_uniform_grid_quadmesh
 from tests import NUMERIC_DTYPES, create_query_params
 from xarray.testing import assert_equal
 from xpublish_tiles import config
-from xpublish_tiles.grids import HealpixCube, guess_grid_system
+from xpublish_tiles.grids import (
+    Geostationary,
+    HealpixCube,
+    guess_grid_system,
+)
 from xpublish_tiles.lib import (
     THREAD_POOL_NUM_THREADS,
     AsyncLoadTimeoutError,
@@ -374,6 +378,50 @@ async def test_geostationary_quadmesh_coords_finite(tile, tms, monkeypatch):
     await pipeline(ds, create_query_params(tile, tms, colorscalerange=(-1.0, 1.0)))
     for xs, ys in seen:
         assert np.isfinite(xs).all() and np.isfinite(ys).all()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tile,tms", as_pytestparams(GEOSTATIONARY_TILES))
+async def test_geostationary_metres_matches_radians(tile, tms, pytestconfig):
+    # x/y stored in projection metres must take the Geostationary off-disk path too.
+    ds = GEOSTATIONARY.create()
+    h = ds.goes_imager_projection.attrs["perspective_point_height"]
+    metres = ds.assign_coords(
+        x=(ds.x * h).assign_attrs(ds.x.attrs, units="m"),
+        y=(ds.y * h).assign_attrs(ds.y.attrs, units="m"),
+    )
+    metres.attrs["_xpublish_id"] = "geostationary-metres"
+    assert isinstance(guess_grid_system(metres, "foo"), Geostationary)
+    query_params = create_query_params(tile, tms, colorscalerange=(-1.0, 1.0))
+    expected = await pipeline(ds, query_params)
+    actual = await pipeline(metres, query_params)
+    assert compare_image_buffers_with_debug(
+        expected,
+        actual,
+        test_name=f"test_geostationary_metres_matches_radians[{tile.z}/{tile.x}/{tile.y}]",
+        tile_info=(tile, tms),
+        debug_visual=pytestconfig.getoption("--debug-visual"),
+        debug_visual_save=pytestconfig.getoption("--debug-visual-save"),
+    )[0]
+
+
+def test_geostationary_height_from_crs():
+    # Metre coords with only crs_wkt on the grid mapping: height comes from the CRS.
+    ds = GEOSTATIONARY.create()
+    h = ds.goes_imager_projection.attrs["perspective_point_height"]
+    wkt = CRS.from_cf(ds.goes_imager_projection.attrs).to_wkt()
+    metres = ds.assign_coords(
+        x=(ds.x * h).assign_attrs(ds.x.attrs, units="m"),
+        y=(ds.y * h).assign_attrs(ds.y.attrs, units="m"),
+    )
+    metres.goes_imager_projection.attrs = {
+        "grid_mapping_name": "geostationary",
+        "crs_wkt": wkt,
+    }
+    metres.attrs["_xpublish_id"] = "geostationary-metres-wkt"
+    grid = guess_grid_system(metres, "foo")
+    assert isinstance(grid, Geostationary)
+    assert grid.height == h
 
 
 def _offdisk_coords(seed: int) -> tuple[np.ndarray, np.ndarray]:
