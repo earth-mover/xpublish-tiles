@@ -24,11 +24,11 @@ from pyproj.aoi import BBox
 import xarray as xr
 from tests import create_query_params
 from xpublish_tiles import config
+from xpublish_tiles.features import features_to_multipolygons
 from xpublish_tiles.grids import Rectilinear
 from xpublish_tiles.lib import (
     TileTooBigError,
     check_transparent_pixels,
-    features_to_multipolygons,
 )
 from xpublish_tiles.pipeline import pipeline
 from xpublish_tiles.projections import transformer_from_crs

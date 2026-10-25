@@ -47,7 +47,7 @@ from xpublish_tiles.projections import (
 from xpublish_tiles.utils import NUMBA_PARALLEL
 
 if TYPE_CHECKING:
-    from spatialpandas.geometry import MultiPolygonArray, PolygonArray
+    from spatialpandas.geometry import PolygonArray
 
     from xpublish_tiles.grids import (
         DimSlicers,
@@ -847,62 +847,6 @@ def unwrap_seam_vertices(x: np.ndarray, verts: np.ndarray, *, width: float) -> N
     """Move the vertices ``verts`` with negative x by ``+width``, in place."""
     neg = x[verts] < 0
     x[verts[neg]] += width
-
-
-def features_to_multipolygons(
-    geoms: np.ndarray,
-    crossing: np.ndarray,
-    transformer: pyproj.Transformer,
-) -> tuple["MultiPolygonArray", np.ndarray]:
-    """Transform source-CRS geometries to a MultiPolygonArray and their
-    source positions; crossing geometries are unwrapped and copied by
-    ∓width, as in fix_healpix_discontinuity."""
-    import pyarrow as pa
-    import shapely
-    from shapely import GeometryType
-    from spatialpandas.geometry import MultiPolygonArray
-
-    idx = np.flatnonzero(crossing)
-    k, n = idx.size, len(geoms)
-    # new writable array: to_ragged_array fails on read-only mixed-type input
-    geoms = np.concatenate([geoms, geoms[idx], geoms[idx]])
-    src = np.concatenate([np.arange(n), idx, idx])
-
-    geom_type, coords, offsets = shapely.to_ragged_array(geoms)
-    if geom_type == GeometryType.POLYGON:
-        offsets = (*offsets, np.arange(len(geoms) + 1))
-    elif geom_type != GeometryType.MULTIPOLYGON:
-        raise ValueError(f"Expected polygon geometries; got {geom_type!r}.")
-    ring_offsets, part_offsets, geom_offsets = offsets
-
-    x, y = transformer.transform(coords[:, 0], coords[:, 1])
-    x = np.asarray(x, dtype=np.float64)
-    y = np.asarray(y, dtype=np.float64)
-
-    if k:
-        left, _, right, _ = transformer.transform_bounds(-180, -90, 180, 90)
-        width = abs(right - left)
-        part_geom = np.repeat(np.arange(len(geoms)), np.diff(geom_offsets))
-        ring_geom = np.repeat(part_geom, np.diff(part_offsets))
-        vert_geom = np.repeat(ring_geom, np.diff(ring_offsets))
-        seam = np.concatenate([crossing, np.ones(2 * k, dtype=bool)])
-        unwrap_seam_vertices(x, np.flatnonzero(seam[vert_geom]), width=width)
-        x[(vert_geom >= n) & (vert_geom < n + k)] -= width
-        x[vert_geom >= n + k] += width
-
-    flat = np.empty(2 * x.size, dtype=np.float64)
-    flat[0::2], flat[1::2] = x, y
-    inner = pa.Array.from_buffers(pa.float64(), flat.size, [None, pa.py_buffer(flat)], 0)
-    rings_arr = pa.ListArray.from_arrays(
-        pa.array(2 * np.asarray(ring_offsets, dtype=np.int32)), inner
-    )
-    parts_arr = pa.ListArray.from_arrays(
-        pa.array(np.asarray(part_offsets, dtype=np.int32)), rings_arr
-    )
-    multis = pa.ListArray.from_arrays(
-        pa.array(np.asarray(geom_offsets, dtype=np.int32)), parts_arr
-    )
-    return MultiPolygonArray(multis), src
 
 
 @numba.njit(nogil=True, cache=True, boundscheck=False)

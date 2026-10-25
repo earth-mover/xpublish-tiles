@@ -24,6 +24,12 @@ from pyproj.aoi import BBox
 import xarray as xr
 from xarray.core.indexing import IndexSelResult
 from xpublish_tiles.config import config
+from xpublish_tiles.features import (
+    crossing_features,
+    import_cf_geometry,
+    shift_longitude_to_360,
+    wrap_longitude,
+)
 from xpublish_tiles.healpix import (
     antimeridian_cells,
     bbox_cell_ids,
@@ -2992,8 +2998,8 @@ class Features(GridSystem1D):
 
         geometries = np.array(geometries, dtype=object, copy=True)
         if crs.is_geographic:
-            geometries = shapely.transform(geometries, _wrap_longitude)
-            crossing = _crossing_features(geometries)
+            geometries = shapely.transform(geometries, wrap_longitude)
+            crossing = crossing_features(geometries)
         else:
             crossing = np.zeros(geometries.shape, dtype=bool)
         xmin, ymin, xmax, ymax = shapely.total_bounds(geometries)
@@ -3002,7 +3008,7 @@ class Features(GridSystem1D):
             self.bbox = BBox(west=-180, east=180, south=ymin, north=ymax)
             geometries = geometries.copy()
             geometries[crossing] = shapely.transform(
-                geometries[crossing], _shift_longitude_to_360
+                geometries[crossing], shift_longitude_to_360
             )
         else:
             self.bbox = BBox(west=xmin, east=xmax, south=ymin, north=ymax)
@@ -3073,7 +3079,7 @@ class Features(GridSystem1D):
     def from_dataset(cls, ds: xr.Dataset, crs: CRS, Xname: str, Yname: str) -> Self:
         container = ds[Xname]
         if "geometry_type" in container.attrs:
-            _, cf_geometry = _import_cf_geometry()
+            _, cf_geometry = import_cf_geometry()
             geometries = cf_geometry.cf_to_shapely(ds, container=Xname).values
         else:
             geometries = container.values
@@ -3085,43 +3091,6 @@ class Features(GridSystem1D):
             geometries=geometries,
             structural_names=cls.structural_names_of(ds, Xname),
         )
-
-
-def _import_cf_geometry() -> tuple[Any, Any]:
-    try:
-        import cf_xarray.geometry as cf_geometry
-        import shapely
-    except ImportError as e:
-        raise ImportError(
-            "CF geometry containers require shapely; install `xpublish-tiles[vector]`."
-        ) from e
-    return shapely, cf_geometry
-
-
-def _wrap_longitude(coords: np.ndarray) -> np.ndarray:
-    coords = coords.copy()
-    x = coords[:, 0]
-    coords[:, 0] = np.where((x < -180) | (x > 180), ((x + 180) % 360) - 180, x)
-    return coords
-
-
-def _shift_longitude_to_360(coords: np.ndarray) -> np.ndarray:
-    coords = coords.copy()
-    coords[:, 0] = np.where(coords[:, 0] < 0, coords[:, 0] + 360, coords[:, 0])
-    return coords
-
-
-def _crossing_features(geometries: np.ndarray) -> np.ndarray:
-    """A feature crosses when a ring has consecutive vertices > 180 degrees apart in longitude."""
-    import shapely
-
-    parts, part_geom = shapely.get_parts(geometries, return_index=True)
-    rings, ring_part = shapely.get_rings(parts, return_index=True)
-    coords, vertex_ring = shapely.get_coordinates(rings, return_index=True)
-    jump = (vertex_ring[1:] == vertex_ring[:-1]) & (np.abs(np.diff(coords[:, 0])) > 180)
-    crossing = np.zeros(geometries.shape, dtype=bool)
-    crossing[part_geom[ring_part[vertex_ring[1:][jump]]]] = True
-    return crossing
 
 
 def _healpix_ellipsoid(info) -> Any:

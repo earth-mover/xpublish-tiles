@@ -26,6 +26,7 @@ from xpublish_tiles.cli.main import (
     open_geoparquet,
     open_iceberg_features,
 )
+from xpublish_tiles.features import features_to_multipolygons
 from xpublish_tiles.grids import (
     Features,
     GeometryIndexer,
@@ -37,7 +38,6 @@ from xpublish_tiles.grids import (
 from xpublish_tiles.lib import (
     TileTooBigError,
     UnsupportedGridError,
-    features_to_multipolygons,
     unwrap_seam_vertices,
 )
 from xpublish_tiles.pipeline import bbox_overlap, pipeline

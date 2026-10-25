@@ -18,6 +18,7 @@ from spatialpandas.geometry import MultiPolygonArray
 
 import xarray as xr
 from xpublish_tiles.config import config
+from xpublish_tiles.features import features_to_multipolygons
 from xpublish_tiles.grids import (
     Curvilinear,
     FacetedGridSystem,
@@ -57,7 +58,6 @@ from xpublish_tiles.lib import (
     cf_get,
     coarsen_mean_pad,
     decompressed_size_bytes,
-    features_to_multipolygons,
     get_data_load_semaphore,
     max_render_shape,
     normalize_slicers,
