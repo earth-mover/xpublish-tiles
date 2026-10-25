@@ -1760,6 +1760,18 @@ async def test_polygons_edges_on_cell_borders():
 
 
 @pytest.mark.asyncio
+async def test_polygons_1px_edges_are_crisp():
+    """1px edges are not antialiased: every edge pixel is the full edge colour."""
+    ds = GLOBAL_HEALPIX_L3.create()
+    base = create_query_params(Tile(x=1, y=1, z=2), WEBMERC_TMS, style="polygons")
+    fill = _pixels(await pipeline(ds, base)).astype(int)
+    edged = _pixels(await pipeline(ds, replace(base, edgecolor="#ff0000"))).astype(int)
+    changed = (fill != edged).any(axis=-1)
+    assert changed.any()
+    assert (edged[changed] == [255, 0, 0, 255]).all()
+
+
+@pytest.mark.asyncio
 async def test_edgecolor_requires_polygons_style():
     ds = GLOBAL_HEALPIX_L3.create()
     query_params = create_query_params(

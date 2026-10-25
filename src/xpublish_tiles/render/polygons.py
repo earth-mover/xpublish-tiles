@@ -41,12 +41,12 @@ def _render_edges(
     if not valid.any():
         return None
     # line_width > 0 antialiases; any() gives the coverage weight in [0, 1], and a
-    # single-colour cmap shades it to alpha = weight * a.
+    # single-colour cmap shades it to alpha = weight * a. 1px stays crisp (line_width=0).
     agg = cvs.line(
         spatialpandas.GeoDataFrame({"geometry": geometry[valid].boundary}),
         geometry="geometry",
         agg=dsh.any(),
-        line_width=edgewidth,
+        line_width=0 if edgewidth == 1 else edgewidth,
     )
     return tf.shade(
         agg,
