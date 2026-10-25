@@ -2940,6 +2940,16 @@ class Triangular(GridSystem1D):
         )
 
 
+# CF geometry container attrs that name other variables.
+CF_GEOMETRY_REF_ATTRS = (
+    "node_count",
+    "part_node_count",
+    "interior_ring",
+    "node_coordinates",
+    "coordinates",
+)
+
+
 @dataclass(init=False, kw_only=True, eq=False)
 class Features(GridSystem1D):
     """Vector data cube: polygon features along one dimension.
@@ -3015,26 +3025,24 @@ class Features(GridSystem1D):
         var = ds[name]
         if "geometry_type" in var.attrs:
             # CF point containers may omit node_count: one node per feature.
-            ref = var.attrs.get("node_count") or var.attrs["node_coordinates"].split()[0]
-            return str(ds[ref].dims[0])
+            ref = cf_ref_attr(var, "node_count") or cf_ref_attr(var, "node_coordinates")
+            if ref is None:
+                raise ValueError(
+                    f"CF geometry container {name!r} has neither node_count nor node_coordinates."
+                )
+            return str(ds[ref.split()[0]].dims[0])
         (dim,) = var.dims
         return str(dim)
 
     @staticmethod
     def structural_names_of(ds: xr.Dataset, name: str) -> frozenset[str]:
         """The CF container and every variable it names; empty for xvec."""
-        attrs = ds[name].attrs
-        if "geometry_type" not in attrs:
+        var = ds[name]
+        if "geometry_type" not in var.attrs:
             return frozenset()
         names = {name}
-        for attr in (
-            "node_count",
-            "part_node_count",
-            "interior_ring",
-            "node_coordinates",
-            "coordinates",
-        ):
-            names.update(attrs.get(attr, "").split())
+        for attr in CF_GEOMETRY_REF_ATTRS:
+            names.update(str(cf_ref_attr(var, attr) or "").split())
         return frozenset(names)
 
     def is_structural_variable(self, var: xr.DataArray) -> bool:
@@ -4176,7 +4184,7 @@ def _features_metadata_from_cf(ds: xr.Dataset, name: str) -> GridMetadata:
             f"{geometry_type!r}; only 'polygon' is supported."
         )
     mappings = _guess_grid_mappings_and_crs(ds)
-    grid_mapping = container.attrs.get("grid_mapping")
+    grid_mapping = cf_ref_attr(container, "grid_mapping")
     mapping = next(
         (m for m in mappings if m.grid_mapping_var_name == grid_mapping),
         mappings[0] if mappings else None,

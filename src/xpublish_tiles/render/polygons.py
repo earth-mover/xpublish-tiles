@@ -16,6 +16,7 @@ from xpublish_tiles.render.raster import (
 )
 from xpublish_tiles.types import (
     ContinuousData,
+    DiscreteData,
     ImageFormat,
     RenderContext,
     RGBData,
@@ -135,7 +136,13 @@ class PolygonsRenderer(DatashaderRenderer):
                     gdf = spatialpandas.GeoDataFrame(
                         {"geometry": geometry, "data": data.values}
                     )
-                    mesh = cvs.polygons(gdf, "geometry", agg=dsh.mean("data"))
+                    # A mean of two flag codes is not a flag code.
+                    reduction = (
+                        dsh.first("data")
+                        if isinstance(context.datatype, DiscreteData)
+                        else dsh.mean("data")
+                    )
+                    mesh = cvs.polygons(gdf, "geometry", agg=reduction)
             except ValueError as e:
                 if "Geometry type combination is not supported" not in str(e):
                     raise
