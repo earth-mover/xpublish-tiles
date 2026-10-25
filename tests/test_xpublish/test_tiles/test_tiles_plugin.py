@@ -15,8 +15,11 @@ import xarray as xr
 from xpublish_tiles.config import config
 from xpublish_tiles.lib import TileTooBigError
 from xpublish_tiles.testing.datasets import (
+    CUBED_SPHERE,
     EU3035,
     GEOZARR_MULTISCALE,
+    GLOBAL_HEALPIX_CUBE_L3,
+    GLOBAL_HEALPIX_L3,
     IFS,
     NATIVE_AT_ROOT_MULTISCALE,
     REDGAUSS_N320,
@@ -1571,3 +1574,45 @@ def test_rgb_style_not_advertised_without_band_dim():
     client = TestClient(rest.app)
     styles = client.get("/datasets/ifs/tiles/WebMercatorQuad").json()["styles"]
     assert not any(s["id"].endswith("/rgb") for s in styles)
+
+
+POLYGONS_ONLY_DATASETS = [CUBED_SPHERE, GLOBAL_HEALPIX_L3, GLOBAL_HEALPIX_CUBE_L3]
+
+
+@pytest.fixture(params=POLYGONS_ONLY_DATASETS, ids=lambda d: d.name)
+def polygons_only_client(request):
+    rest = xpublish.Rest(
+        {"polys": request.param.create()}, plugins={"tiles": TilesPlugin()}
+    )
+    return TestClient(rest.app)
+
+
+def test_polygons_only_grid_default_style(polygons_only_client):
+    client = polygons_only_client
+    r = client.get(
+        "/datasets/polys/tiles/WebMercatorQuad/0/0/0"
+        "?variables=foo&width=256&height=256&colorscalerange=0,100"
+    )
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "image/png"
+    Image.open(io.BytesIO(r.content)).verify()
+
+    r = client.get(
+        "/datasets/polys/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=foo&width=256&height=256"
+    )
+    assert r.status_code == 200, r.text
+    (url,) = r.json()["tiles"]
+    assert "style=polygons/default" in url
+
+    r = client.get("/datasets/polys/tiles/legend?variables=foo&colorscalerange=0,100")
+    assert r.status_code == 200, r.text
+
+
+def test_polygons_only_grid_raster_style_is_422(polygons_only_client):
+    r = polygons_only_client.get(
+        "/datasets/polys/tiles/WebMercatorQuad/0/0/0"
+        "?variables=foo&style=raster/default&width=256&height=256&colorscalerange=0,100"
+    )
+    assert r.status_code == 422, r.text
+    assert "only supports style='polygons'" in r.json()["detail"]

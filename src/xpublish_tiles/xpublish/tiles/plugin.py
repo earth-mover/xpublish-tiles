@@ -26,6 +26,7 @@ from xpublish_tiles.lib import (
     MissingParameterError,
     TileTooBigError,
     UnsupportedGridError,
+    UnsupportedStyleError,
     VariableNotFoundError,
     async_run,
     cf_get,
@@ -54,9 +55,11 @@ from xpublish_tiles.utils import (
 from xpublish_tiles.xpublish.tiles.metadata import (
     create_tileset_for_tms,
     create_tileset_metadata,
+    default_style,
     extract_dataset_extents,
     extract_variable_bounding_box,
     get_styles,
+    resolve_style,
 )
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
@@ -280,8 +283,9 @@ class TilesPlugin(Plugin):
                 )
 
             datatype = _infer_datatype(dataset[var_name])
-            style = query.style[0] if query.style else "raster"
-            variant = query.style[1] if query.style else "default"
+            style, variant = await async_run(
+                resolve_style, query.style, dataset, var_name
+            )
 
             from xpublish_tiles.render import RenderRegistry
 
@@ -448,8 +452,7 @@ class TilesPlugin(Plugin):
                 0
             ]  # drop 'tilejson.json'
 
-            style = query.style[0] if query.style else "raster"
-            variant = query.style[1] if query.style else "default"
+            style, variant = query.style or default_style(bounds_grid)
 
             colorscalerange = (
                 ",".join(map(format_number_for_url, query.colorscalerange))
@@ -629,8 +632,9 @@ class TilesPlugin(Plugin):
                 dataset = datatree.to_dataset()
                 resolution_level = None
 
-            style = query.style[0] if query.style else "raster"
-            variant = query.style[1] if query.style else "default"
+            style, variant = await async_run(
+                resolve_style, query.style, dataset, query.variables[0]
+            )
 
             # Extract dimension selectors from query parameters
             selectors = {}
@@ -686,6 +690,11 @@ class TilesPlugin(Plugin):
                 bound_logger.error("InvalidCoordinateValues", exc_info=e)
                 status_code = 422
                 detail = f"Cannot render this grid: {e!s}"
+            except UnsupportedStyleError as e:
+                bound_logger = get_context_logger()
+                bound_logger.error("UnsupportedStyleError", exc_info=e)
+                status_code = 422
+                detail = f"Unsupported style: {e!s}"
             except ColormapError as e:
                 bound_logger = get_context_logger()
                 bound_logger.error("ColormapError", exc_info=e)
