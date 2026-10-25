@@ -2066,14 +2066,18 @@ class Rectilinear(RectilinearMixin, GridSystem):
             return False
 
 
+RADIAN_UNITS = {"rad", "radian", "radians"}
+
+
 @dataclass(kw_only=True, eq=False)
 class Geostationary(Rectilinear):
-    """Geostationary fixed-grid where 1D X/Y are scan angles in radians.
+    """Geostationary fixed-grid; 1D X/Y are scan angles in radians or projection metres.
 
-    The geostationary CRS works in metres, but the stored coordinates are scan angles.
+    The geostationary CRS works in metres; ``scale`` converts the stored coordinates.
     """
 
     scale: float
+    height: float
     semi_major: float
     semi_minor: float
     lon0: float
@@ -2103,7 +2107,8 @@ class Geostationary(Rectilinear):
         gm_attrs = ds[gm_name].attrs
         h = float(gm_attrs["perspective_point_height"])
         lon0 = float(gm_attrs.get("longitude_of_projection_origin", 0.0))
-        scaled = ds.assign_coords({Xname: ds[Xname] * h, Yname: ds[Yname] * h})
+        scale = h if ds[Xname].attrs.get("units") in RADIAN_UNITS else 1.0
+        scaled = ds.assign_coords({Xname: ds[Xname] * scale, Yname: ds[Yname] * scale})
         base = Rectilinear.from_dataset(scaled, crs, Xname, Yname)
         ellipsoid = base.crs.ellipsoid
         if ellipsoid is None:
@@ -2117,7 +2122,8 @@ class Geostationary(Rectilinear):
             bbox=base.bbox,
             indexes=base.indexes,
             Z=base.Z,
-            scale=h,
+            scale=scale,
+            height=h,
             semi_major=float(ellipsoid.semi_major_metre),
             semi_minor=float(ellipsoid.semi_minor_metre),
             lon0=lon0,
@@ -2170,7 +2176,7 @@ class Geostationary(Rectilinear):
         than forward-transforming the geographic points, since those sit exactly
         on the limb where the geos forward transform returns ``inf``.
         """
-        h = self.scale
+        h = self.height
         re = self.semi_major
         rp = self.semi_minor
         d = re + h
@@ -4102,9 +4108,7 @@ def _detect_grid_metadata(
             raise UnsupportedGridError("Rotated pole grids are not supported yet.")
         if X.dims == Y.dims:
             grid_cls = Triangular
-        elif mapping.grid_mapping.get(
-            "grid_mapping_name"
-        ) == "geostationary" and X.attrs.get("units") in {"rad", "radian", "radians"}:
+        elif mapping.grid_mapping.get("grid_mapping_name") == "geostationary":
             grid_cls = Geostationary
         else:
             grid_cls = Rectilinear
