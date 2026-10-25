@@ -453,6 +453,11 @@ class TilesPlugin(Plugin):
             ]  # drop 'tilejson.json'
 
             style, variant = query.style or default_style(bounds_grid)
+            if query.edgecolor is not None and style != "polygons":
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"'edgecolor' is only supported by the 'polygons' style, not {style!r}.",
+                )
 
             colorscalerange = (
                 ",".join(map(format_number_for_url, query.colorscalerange))
@@ -480,6 +485,9 @@ class TilesPlugin(Plugin):
                 url_template = (
                     f"{url_template}&abovemaxcolor={quote(query.abovemaxcolor)}"
                 )
+
+            if query.edgecolor:
+                url_template = f"{url_template}&edgecolor={quote(query.edgecolor)}&edgewidth={query.edgewidth}"
 
             # Append selectors
             if selectors:
@@ -659,6 +667,8 @@ class TilesPlugin(Plugin):
                 colormap=query.colormap,
                 abovemaxcolor=query.abovemaxcolor,
                 belowmincolor=query.belowmincolor,
+                edgecolor=query.edgecolor,
+                edgewidth=query.edgewidth,
             )
 
             try:

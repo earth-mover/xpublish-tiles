@@ -667,3 +667,46 @@ def test_polygons_only_grid_wms_raster_style_is_422(polygons_only_wms_client):
     assert "ServiceExceptionReport" in response.text
     assert "StyleNotDefined" in response.text
     assert "only supports style=" in response.text
+
+
+def test_polygons_wms_edgecolor(polygons_only_wms_client):
+    plain = polygons_only_wms_client.get(
+        "/datasets/polys/wms", params=POLYGONS_ONLY_GETMAP
+    )
+    edged = polygons_only_wms_client.get(
+        "/datasets/polys/wms",
+        params={**POLYGONS_ONLY_GETMAP, "edgecolor": "default", "edgewidth": 2},
+    )
+    assert plain.status_code == 200, plain.text
+    assert edged.status_code == 200, edged.text
+    assert plain.content != edged.content
+
+
+AIR_GETMAP = {
+    "service": "WMS",
+    "version": "1.3.0",
+    "request": "GetMap",
+    "layers": "air",
+    "crs": "EPSG:3857",
+    "bbox": "-8766409.899970, 5009377.085697, -7514065.628546, 6261721.357122",
+    "width": 256,
+    "height": 256,
+    "time": "2013-01-01T00:00:00",
+}
+
+
+@pytest.mark.parametrize(
+    "extra,match",
+    [
+        pytest.param(
+            {"styles": "raster/default", "edgecolor": "red"}, "edgecolor", id="raster"
+        ),
+        pytest.param({"edgecolor": "notacolor"}, "Invalid color", id="bad-color"),
+        pytest.param({"edgecolor": "red", "edgewidth": 0}, "edgewidth", id="width-0"),
+        pytest.param({"edgecolor": "red", "edgewidth": 6}, "edgewidth", id="width-6"),
+    ],
+)
+def test_wms_edgecolor_422(xpublish_client, extra, match):
+    response = xpublish_client.get("/datasets/air/wms", params={**AIR_GETMAP, **extra})
+    assert response.status_code == 422, response.text
+    assert match in response.text

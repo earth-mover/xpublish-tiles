@@ -22,6 +22,7 @@ from xpublish_tiles.validators import (
     validate_colormap,
     validate_colorscalerange,
     validate_crs,
+    validate_edge_color,
     validate_image_format,
     validate_range_color,
     validate_style,
@@ -187,6 +188,16 @@ class WMSGetMapQuery(WMSBaseQuery):
         None,
         description="Color for values below the min of colorscalerange. Accepted values: 'extend' (use min palette color), 'transparent', hex color (#RRGGBB or #RRGGBBAA), or named color.",
     )
+    edgecolor: str | None = Field(
+        None,
+        description="Draw polygon edges in this color. Only for the `polygons` style; off when absent. Accepted values: 'default' (#ffffff80, white at 50% alpha), 'transparent', hex color (#RRGGBB or #RRGGBBAA), or named color.",
+    )
+    edgewidth: int = Field(
+        1,
+        ge=1,
+        le=5,
+        description="Width of polygon edges in pixels, 1 to 5. Only used with `edgecolor`.",
+    )
     format: ImageFormat = Field(
         ImageFormat.PNG,
         description="The format of the image to return",
@@ -234,6 +245,11 @@ class WMSGetMapQuery(WMSBaseQuery):
     @classmethod
     def validate_belowmincolor(cls, v: str | None) -> str | None:
         return validate_range_color(v)
+
+    @field_validator("edgecolor", mode="before")
+    @classmethod
+    def validate_edgecolor(cls, v: str | None) -> str | None:
+        return validate_edge_color(v)
 
     @field_validator("bgcolor", mode="before")
     @classmethod
@@ -520,6 +536,8 @@ WMS_FILTERED_QUERY_PARAMS = {
     "colormap",
     "abovemaxcolor",
     "belowmincolor",
+    "edgecolor",
+    "edgewidth",
     "autoscale",
     "vertical",
     "item",

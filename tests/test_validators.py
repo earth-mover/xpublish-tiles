@@ -12,6 +12,7 @@ from xpublish_tiles.validators import (
     validate_colormap,
     validate_colorscalerange,
     validate_crs,
+    validate_edge_color,
     validate_image_format,
     validate_style,
 )
@@ -416,3 +417,24 @@ class TestCategoricalColormap:
         color_key = create_listed_colormap_from_dict(colormap_dict, flag_values)
         assert len(color_key) == 3
         assert color_key == {0: "#ff0000", 5: "#00ff00", 10: "#0000ff"}
+
+
+class TestValidateEdgeColor:
+    def test_none_input(self):
+        assert validate_edge_color(None) is None
+
+    @pytest.mark.parametrize("value", ["default", "DEFAULT", " default "])
+    def test_default_keyword(self, value):
+        assert validate_edge_color(value) == "#ffffff80"
+
+    @pytest.mark.parametrize(
+        "value,expected",
+        [("#FF000080", "#ff000080"), ("Black", "black"), ("transparent", "transparent")],
+    )
+    def test_colors(self, value, expected):
+        assert validate_edge_color(value) == expected
+
+    @pytest.mark.parametrize("value", ["extend", "notacolor", "#12"])
+    def test_invalid(self, value):
+        with pytest.raises(ValueError):
+            validate_edge_color(value)

@@ -32,6 +32,7 @@ from xpublish_tiles.lib import (
     IndexingError,
     InvalidCoordinateValues,
     MissingParameterError,
+    UnsupportedStyleError,
     VariableNotFoundError,
     async_run,
     check_transparent_pixels,
@@ -1689,3 +1690,79 @@ async def test_pipeline_writes_stage_metrics(fake_span):
     assert {f"tiles.stage_ms.{k}" for k in stages} <= fake_span.metrics.keys()
     assert {"tiles.total_ms", "tiles.wait_ms.thread_pool"} <= fake_span.metrics.keys()
     assert fake_span.tags == {"tiles.status": "ok"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "edgecolor,edgewidth",
+    [
+        pytest.param("#ffffff80", 1, id="default-1px"),
+        pytest.param("black", 3, id="black-3px"),
+    ],
+)
+async def test_polygons_edgecolor(edgecolor, edgewidth, png_snapshot, pytestconfig):
+    ds = GLOBAL_HEALPIX_L3.create().compute()
+    tile = Tile(x=1, y=1, z=2)
+    query_params = create_query_params(
+        tile, WEBMERC_TMS, style="polygons", edgecolor=edgecolor, edgewidth=edgewidth
+    )
+    result = await pipeline(ds, query_params)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(result, png_snapshot)
+
+
+@pytest.mark.asyncio
+async def test_polygons_edgecolor_rgb(png_snapshot):
+    tile = Tile(x=17, y=11, z=5)
+    query_params = create_query_params(
+        tile, WEBMERC_TMS, style="polygons", variant="rgb", edgecolor="#ffffff80"
+    )
+    result = await pipeline(RGB.create(), query_params)
+    assert_render_matches_snapshot(result, png_snapshot)
+
+
+@pytest.mark.asyncio
+async def test_polygons_edges_on_cell_borders():
+    """Edge pixels sit on fill colour changes; no lines on the tile border.
+
+    Two random fields make equal colours across a cell border negligible.
+    Radius 2: where a border leaves the tile, the line pixel and the fill's
+    pixel-centre sample can be one pixel apart.
+    """
+    ds = GLOBAL_HEALPIX_L3.create().compute()
+    tile = Tile(x=1, y=1, z=2)
+    base = create_query_params(
+        tile, WEBMERC_TMS, style="polygons", colorscalerange=(0, 1)
+    )
+    rng = np.random.default_rng(0)
+    fills = []
+    for _ in range(2):
+        ds["foo"].values = rng.random(ds.foo.shape)
+        fills.append(_pixels(await pipeline(ds, base)).astype(int))
+    edged = _pixels(await pipeline(ds, replace(base, edgecolor="#ff0000"))).astype(int)
+
+    fill = fills[-1]
+    changed = (fill != edged).any(axis=-1)
+    assert changed.any()
+    assert (edged[changed] == [255, 0, 0, 255]).all()
+
+    h, w, _ = fill.shape
+    differs = np.zeros((h, w), dtype=bool)
+    for f in fills:
+        padded = np.pad(f, ((2, 2), (2, 2), (0, 0)), mode="edge")
+        for dy in range(-2, 3):
+            for dx in range(-2, 3):
+                shifted = padded[2 + dy : 2 + dy + h, 2 + dx : 2 + dx + w]
+                differs |= (shifted != f).any(axis=-1)
+    assert not (changed & ~differs).any()
+
+
+@pytest.mark.asyncio
+async def test_edgecolor_requires_polygons_style():
+    ds = GLOBAL_HEALPIX_L3.create()
+    query_params = create_query_params(
+        Tile(x=0, y=0, z=0), WEBMERC_TMS, style="raster", edgecolor="#ffffff80"
+    )
+    with pytest.raises(UnsupportedStyleError, match="edgecolor"):
+        await pipeline(ds, query_params)

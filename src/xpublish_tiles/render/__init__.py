@@ -115,6 +115,8 @@ class Renderer(ABC):
         colormap: dict[str, str] | None = None,
         abovemaxcolor: str | None = None,
         belowmincolor: str | None = None,
+        edgecolor: str | None = None,
+        edgewidth: int = 1,
     ):
         pass
 

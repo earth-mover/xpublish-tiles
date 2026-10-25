@@ -276,6 +276,8 @@ class DatashaderRasterRenderer(DatashaderRenderer):
         colormap: dict[str, str] | None = None,
         abovemaxcolor: str | None = None,
         belowmincolor: str | None = None,
+        edgecolor: str | None = None,
+        edgewidth: int = 1,
     ):
         prepared = self._prepare_render(
             contexts,

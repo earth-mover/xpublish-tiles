@@ -1616,3 +1616,57 @@ def test_polygons_only_grid_raster_style_is_422(polygons_only_client):
     )
     assert r.status_code == 422, r.text
     assert "only supports style='polygons'" in r.json()["detail"]
+
+
+POLYS_TILE = (
+    "/datasets/polys/tiles/WebMercatorQuad/0/0/0"
+    "?variables=foo&width=256&height=256&colorscalerange=0,100"
+)
+
+
+def test_polygons_edgecolor(polygons_only_client):
+    plain = polygons_only_client.get(POLYS_TILE)
+    edged = polygons_only_client.get(f"{POLYS_TILE}&edgecolor=default&edgewidth=2")
+    assert plain.status_code == 200, plain.text
+    assert edged.status_code == 200, edged.text
+    assert plain.content != edged.content
+
+
+@pytest.mark.parametrize(
+    "extra,match",
+    [
+        pytest.param("&style=raster/default&edgecolor=red", "edgecolor", id="raster"),
+        pytest.param("&edgecolor=notacolor", "Invalid color", id="bad-color"),
+        pytest.param("&edgecolor=extend", "Invalid color", id="extend"),
+        pytest.param("&edgecolor=red&edgewidth=0", "edgewidth", id="width-0"),
+        pytest.param("&edgecolor=red&edgewidth=6", "edgewidth", id="width-6"),
+    ],
+)
+def test_edgecolor_422(xpublish_client, extra, match):
+    r = xpublish_client.get(
+        "/datasets/air/tiles/WebMercatorQuad/0/0/0"
+        f"?variables=air&width=256&height=256{extra}"
+    )
+    assert r.status_code == 422, r.text
+    assert match in r.text
+
+
+def test_tilejson_edgecolor(polygons_only_client):
+    r = polygons_only_client.get(
+        "/datasets/polys/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=foo&width=256&height=256&edgecolor=default&edgewidth=2"
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    (url,) = body["tiles"]
+    assert "edgecolor=%23ffffff80&edgewidth=2" in url
+    assert "edgecolor" not in body["legend"]
+
+
+def test_tilejson_edgecolor_raster_is_422(xpublish_client):
+    r = xpublish_client.get(
+        "/datasets/air/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=air&width=256&height=256&edgecolor=red"
+    )
+    assert r.status_code == 422, r.text
+    assert "edgecolor" in r.text
