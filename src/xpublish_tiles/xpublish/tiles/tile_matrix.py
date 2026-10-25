@@ -261,6 +261,28 @@ def _single_crs(grids: Iterable[GridSystem]) -> pyproj.CRS | None:
     return first if all(first.equals(crs) for crs in rest) else None
 
 
+def _is_wgs84_like_geographic(crs: pyproj.CRS) -> bool:
+    """2D lon/lat in degrees on the WGS84 or GRS80 ellipsoid (e.g. NAD83, ETRS89)."""
+    ellipsoid = crs.ellipsoid
+    return (
+        crs.is_geographic
+        and len(crs.axis_info) == 2
+        and all(axis.unit_name == "degree" for axis in crs.axis_info)
+        and crs.prime_meridian is not None
+        and crs.prime_meridian.longitude == 0
+        and ellipsoid is not None
+        and ellipsoid.semi_major_metre == 6378137
+        and abs(ellipsoid.inverse_flattening - 298.257223563) < 1e-5
+    )
+
+
+def _crs_matches(crs: pyproj.CRS, tms_crs: pyproj.CRS) -> bool:
+    # GRS80-based datums differ from WGS84 by ~1 m: close enough to pick a default.
+    return crs.equals(tms_crs, ignore_axis_order=True) or (
+        _is_wgs84_like_geographic(crs) and _is_wgs84_like_geographic(tms_crs)
+    )
+
+
 def get_default_tile_matrix_set(
     grids: Iterable[GridSystem], tms_ids: Iterable[str]
 ) -> str | None:
@@ -272,9 +294,7 @@ def get_default_tile_matrix_set(
     ordered = [t for t in DEFAULT_TMS_PREFERENCE if t in available] + sorted(
         available - set(DEFAULT_TMS_PREFERENCE)
     )
-    return next(
-        (t for t in ordered if crs.equals(_tms_crs(t), ignore_axis_order=True)), None
-    )
+    return next((t for t in ordered if _crs_matches(crs, _tms_crs(t))), None)
 
 
 def _repeating_intervals(
