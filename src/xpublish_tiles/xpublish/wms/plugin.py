@@ -267,6 +267,8 @@ async def handle_get_map(
         colormap=query.colormap,
         abovemaxcolor=query.abovemaxcolor,
         belowmincolor=query.belowmincolor,
+        edgecolor=query.edgecolor,
+        edgewidth=query.edgewidth,
     )
 
     status_code = 200

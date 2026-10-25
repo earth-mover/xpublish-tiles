@@ -2,18 +2,60 @@ import io
 from numbers import Number
 
 import datashader as dsh
+import datashader.transfer_functions as tf
+import numpy as np
 import spatialpandas
 from PIL import Image
 
+import xarray as xr
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import DatashaderRenderer, register_renderer
-from xpublish_tiles.render.raster import _apply_out_of_range_colors
+from xpublish_tiles.render.raster import (
+    _apply_out_of_range_colors,
+    _range_color_to_rgba,
+)
 from xpublish_tiles.types import (
     ContinuousData,
     ImageFormat,
     RenderContext,
     RGBData,
 )
+
+
+def _render_edges(
+    cvs: dsh.Canvas,
+    geometry,
+    data: xr.DataArray,
+    *,
+    edgecolor: str,
+    edgewidth: int,
+    band_dim: str | None,
+) -> Image.Image | None:
+    """Antialiased boundaries of cells with valid data, on the fill's canvas."""
+    r, g, b, a = _range_color_to_rgba(edgecolor)
+    if a == 0:
+        return None
+    valid = np.isfinite(data.values)
+    if band_dim is not None:
+        valid = valid.all(axis=data.get_axis_num(band_dim))
+    if not valid.any():
+        return None
+    # line_width > 0 antialiases; any() gives the coverage weight in [0, 1], and a
+    # single-colour cmap shades it to alpha = weight * a. 1px stays crisp (line_width=0).
+    agg = cvs.line(
+        spatialpandas.GeoDataFrame({"geometry": geometry[valid].boundary}),
+        geometry="geometry",
+        agg=dsh.any(),
+        line_width=0 if edgewidth == 1 else edgewidth,
+    )
+    return tf.shade(
+        agg,
+        cmap=f"#{r:02x}{g:02x}{b:02x}",
+        alpha=a,
+        min_alpha=0,
+        how="linear",
+        span=[0, 1],
+    ).to_pil()
 
 
 @register_renderer
@@ -34,6 +76,8 @@ class PolygonsRenderer(DatashaderRenderer):
         colormap: dict[str, str] | None = None,
         abovemaxcolor: str | None = None,
         belowmincolor: str | None = None,
+        edgecolor: str | None = None,
+        edgewidth: int = 1,
     ):
         prepared = self._prepare_render(
             contexts,
@@ -124,6 +168,20 @@ class PolygonsRenderer(DatashaderRenderer):
                     abovemaxcolor,
                     belowmincolor,
                 )
+        if edgecolor is not None:
+            with log_duration("render (polygon edges)", logger, key="render_edges"):
+                edges = _render_edges(
+                    cvs,
+                    geometry,
+                    data,
+                    edgecolor=edgecolor,
+                    edgewidth=edgewidth,
+                    band_dim=context.datatype.band_dim
+                    if isinstance(context.datatype, RGBData)
+                    else None,
+                )
+            if edges is not None:
+                im = Image.alpha_composite(im.convert("RGBA"), edges)
         with log_duration(f"encode {format}", logger, key="encode"):
             im.save(buffer, format=str(format))
 

@@ -829,6 +829,10 @@ def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool
 
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     rgb = query.variant == "rgb"
+    if query.edgecolor is not None and query.style != "polygons":
+        raise UnsupportedStyleError(
+            f"'edgecolor' is only supported by the 'polygons' style, not {query.style!r}."
+        )
     with log_duration("apply_query", key="query"):
         validated = await async_run(
             partial(
@@ -892,6 +896,8 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
             colormap=query.colormap,
             abovemaxcolor=query.abovemaxcolor,
             belowmincolor=query.belowmincolor,
+            edgecolor=query.edgecolor,
+            edgewidth=query.edgewidth,
         ),
     )
     buffer.seek(0)

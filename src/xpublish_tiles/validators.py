@@ -201,6 +201,25 @@ def validate_range_color(v: str | None) -> str | None:
         ) from None
 
 
+DEFAULT_EDGECOLOR = "#ffffff80"
+
+
+def validate_edge_color(v: str | None) -> str | None:
+    """Validate ``edgecolor``: a colour as for ``validate_range_color`` (no
+    ``extend``), or ``default`` for ``DEFAULT_EDGECOLOR``."""
+    if v is None:
+        return None
+    v_lower = v.lower().strip()
+    if v_lower == "default":
+        return DEFAULT_EDGECOLOR
+    if v_lower == "extend":
+        raise ValueError(
+            f"Invalid color value '{v}' for edgecolor. Must be 'default', "
+            "'transparent', a hex color (#RRGGBB or #RRGGBBAA), or a valid named color."
+        )
+    return validate_range_color(v_lower)
+
+
 def validate_color(v: str | None) -> str | None:
     """Validate a generic color string (hex, named, or 'transparent').
 
