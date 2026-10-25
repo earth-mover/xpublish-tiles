@@ -2623,8 +2623,26 @@ class Polar(GridSystem):
         )
 
 
+class GridSystem1D(GridSystem, ABC):
+    """A grid whose horizontal cells lie along one dimension."""
+
+    dim: str
+
+    @property
+    def Xdim(self) -> str:
+        return self.dim
+
+    @property
+    def Ydim(self) -> str:
+        return self.dim
+
+    @property
+    def dims(self) -> set[str]:
+        return {self.dim}
+
+
 @dataclass(init=False, kw_only=True, eq=False)
-class Triangular(GridSystem):
+class Triangular(GridSystem1D):
     crs: CRS
     bbox: BBox
 
@@ -2688,18 +2706,6 @@ class Triangular(GridSystem):
     @property
     def face_dim(self) -> str | None:
         return self.mesh.face_dim if self.mesh is not None else None
-
-    @property
-    def Xdim(self) -> str:
-        return self.dim
-
-    @property
-    def Ydim(self) -> str:
-        return self.dim
-
-    @property
-    def dims(self) -> set[str]:
-        return {self.dim}
 
     def dims_for(self, var: xr.DataArray) -> set[str]:
         """For UGRID, dispatch on ``var.attrs['location']`` if present,
@@ -3542,8 +3548,6 @@ def find_cubed_sphere_face_dim(
     return None
 
 
-# Type alias for 1D grid systems
-GridSystem1D = Triangular
 # Type alias for 2D grid systems that have X, Y, and crs attributes
 GridSystem2D = RasterAffine | Rectilinear | Curvilinear | Polar
 

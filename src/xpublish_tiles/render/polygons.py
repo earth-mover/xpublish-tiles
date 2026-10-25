@@ -5,7 +5,6 @@ import datashader as dsh
 import spatialpandas
 from PIL import Image
 
-from xpublish_tiles.lib import polygons_from_rings
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import DatashaderRenderer, register_renderer
 from xpublish_tiles.render.raster import _apply_out_of_range_colors
@@ -50,12 +49,12 @@ class PolygonsRenderer(DatashaderRenderer):
         context, cvs, variant = prepared
         logger = context_logger if context_logger is not None else get_context_logger()
 
-        if context.cell_rings is None:
+        if context.polygons is None:
             raise ValueError(
-                "Cell rings not found. Ensure transform_for_render was called with polygons style."
+                "Polygons not found. Ensure transform_for_render was called with polygons style."
             )
 
-        if len(context.cell_rings) == 0:
+        if len(context.polygons) == 0:
             logger.debug("No data")
             im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
             im.save(buffer, format=str(format))
@@ -64,7 +63,7 @@ class PolygonsRenderer(DatashaderRenderer):
         data = context.da
 
         with log_duration(f"render (polygons) {data.shape}", logger, key="render"):
-            geometry = polygons_from_rings(context.cell_rings)
+            geometry = context.polygons
             try:
                 if isinstance(context.datatype, RGBData):
                     # One pass over the geometry: `summary` aggregates all bands together.
