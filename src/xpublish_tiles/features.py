@@ -9,6 +9,8 @@ import pyproj
 from spatialpandas.geometry import MultiPolygonArray
 
 import xarray as xr
+from xpublish_tiles.grids import CF_GEOMETRY_REF_ATTRS
+from xpublish_tiles.utils import cf_ref_attr
 
 try:
     import cf_xarray.geometry as cf_geometry
@@ -21,7 +23,23 @@ except ImportError as e:
 
 
 def geometries_from_cf(ds: xr.Dataset, container: str) -> np.ndarray:
-    return cf_geometry.cf_to_shapely(ds, container=container).values
+    # cf_xarray reads the refs from attrs; decode_coords may have moved them to encoding.
+    var = ds[container]
+    refs = {
+        attr: value
+        for attr in CF_GEOMETRY_REF_ATTRS
+        if (value := cf_ref_attr(var, attr)) is not None
+    }
+    names = {n for value in refs.values() for n in str(value).split()}
+    # The CRS is read elsewhere; without it here cf_xarray warns about a missing ref.
+    attrs = {k: v for k, v in var.attrs.items() if k != "grid_mapping"}
+    sub = xr.Dataset(
+        {
+            container: ((), var.values, {**attrs, **refs}),
+            **{n: ds[n].variable for n in names},
+        }
+    )
+    return cf_geometry.cf_to_shapely(sub, container=container).values
 
 
 def wrap_longitude(coords: np.ndarray) -> np.ndarray:

@@ -19,6 +19,8 @@ from pyproj import CRS
 from pyproj.aoi import BBox
 
 import xarray as xr
+import zarr
+import zarr.storage
 from tests import create_query_params
 from xpublish_tiles import config
 from xpublish_tiles.cli.main import (
@@ -379,3 +381,51 @@ def test_features_crossing_hole_oriented_and_empty():
     assert np.isnan(agg_east.sel(x=176.5, y=50, method="nearest").item())
     assert agg_east.sel(x=172, y=50, method="nearest").item() == 1
     assert agg.sel(x=-175, y=50, method="nearest").item() == 1
+
+
+def test_detect_features_with_latlon_coords():
+    ds = FEATURES_POLYGONS.create()
+    n = ds.sizes["feature"]
+    ds = ds.assign_coords(
+        lat=("feature", np.linspace(0, 50, n), {"standard_name": "latitude"}),
+        lon=("feature", np.linspace(-170, 170, n), {"standard_name": "longitude"}),
+    )
+    ds.attrs["_xpublish_id"] = "features-latlon-coords"
+    assert isinstance(guess_grid_system(ds, "foo"), Features)
+
+
+def test_detect_features_cf_decode_coords_all():
+    ds = FEATURES_POLYGONS.create()
+    store = zarr.storage.MemoryStore()
+    ds.to_zarr(store, zarr_format=3, consolidated=False)
+    opened = xr.open_zarr(store, consolidated=False, decode_coords="all")
+    opened.attrs["_xpublish_id"] = "features-decode-coords-all"
+    grid = guess_grid_system(opened, "foo")
+    expected = guess_grid_system(ds, "foo")
+    assert isinstance(grid, Features) and isinstance(expected, Features)
+    assert shapely.equals(grid.geometries, expected.geometries).all()
+    assert grid.structural_names == expected.structural_names
+
+
+async def test_features_discrete_render_keeps_flag_values():
+    # Under a mean reduction the overlap averages flags 0 and 2 into flag 1.
+    geoms = [shapely.box(0, 0, 20, 20), shapely.box(10, 0, 30, 20)]
+    ds = xr.Dataset(coords={"feature": geoms}).xvec.set_geom_indexes("feature", crs=4326)
+    ds["foo"] = (
+        "feature",
+        np.array([0, 2], dtype=np.uint8),
+        {"flag_values": [0, 1, 2], "flag_meanings": "a b c"},
+    )
+    ds.attrs["_xpublish_id"] = "features-discrete-overlap"
+    colormap = {"0": "#ff0000", "1": "#00ff00", "2": "#0000ff"}
+    query = create_query_params(
+        Tile(x=0, y=0, z=0),
+        WEBMERC_TMS,
+        style="polygons",
+        variant="custom",
+        colormap=colormap,
+    )
+    result = await pipeline(ds, query)
+    rgba = np.asarray(Image.open(io.BytesIO(result.getvalue())).convert("RGBA"))
+    colors = {tuple(c) for c in rgba[rgba[..., 3] > 0][:, :3].tolist()}
+    assert colors == {(255, 0, 0), (0, 0, 255)}
