@@ -25,7 +25,6 @@ import xarray as xr
 from tests import create_query_params
 from xpublish_tiles import config
 from xpublish_tiles.features import (
-    shift_longitude_to_360,
     split_at_antimeridian,
     wrap_longitude,
 )
@@ -938,8 +937,9 @@ async def test_features_longitude_shift_invariance(data):
 
 
 @st.composite
-def seam_boxes(draw: DrawFn) -> tuple[shapely.Polygon, bool]:
-    """(test only) A box in source form; crossing ones wrap past 180 to negative longitudes."""
+def seam_boxes(draw: DrawFn) -> tuple[shapely.Polygon, bool, float]:
+    """(test only) A box in source form, crossing flag and planar area; crossing ones
+    wrap past 180 to negative longitudes."""
     south = draw(st.floats(-80, 70))
     north = draw(st.floats(south + 1, 80))
     crossing = draw(st.booleans())
@@ -950,20 +950,19 @@ def seam_boxes(draw: DrawFn) -> tuple[shapely.Polygon, bool]:
         west = draw(st.floats(-180, 10))
         east = draw(st.floats(west + 1, min(west + 170, 180)))
     box = shapely.box(west, south, east, north)
-    return shapely.transform(box, wrap_longitude), crossing
+    return shapely.transform(box, wrap_longitude), crossing, shapely.area(box)
 
 
 @given(boxes=st.lists(seam_boxes(), min_size=1, max_size=8))
 @settings(max_examples=100, deadline=None)
 def test_split_at_antimeridian_properties(boxes):
-    geoms = np.array([b for b, _ in boxes], dtype=object)
+    geoms = np.array([b for b, _, _ in boxes], dtype=object)
     split = split_at_antimeridian(geoms)
     bounds = shapely.bounds(split)
     assert (bounds[:, 0] >= -180).all() and (bounds[:, 2] <= 180).all()
-    for (box, crossing), out in zip(boxes, split, strict=True):
+    for (box, crossing, area), out in zip(boxes, split, strict=True):
         if crossing:
             assert shapely.get_num_geometries(out) == 2
-            shifted = shapely.transform(box, shift_longitude_to_360)
-            npt.assert_allclose(shapely.area(out), shapely.area(shifted), rtol=1e-9)
+            npt.assert_allclose(shapely.area(out), area, rtol=1e-9)
         else:
             assert shapely.equals(out, box)

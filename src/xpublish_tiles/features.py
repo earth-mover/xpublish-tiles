@@ -31,37 +31,41 @@ def wrap_longitude(coords: np.ndarray) -> np.ndarray:
     return coords
 
 
-def shift_longitude_to_360(coords: np.ndarray) -> np.ndarray:
-    coords = coords.copy()
-    coords[:, 0] = np.where(coords[:, 0] < 0, coords[:, 0] + 360, coords[:, 0])
-    return coords
-
-
-def crossing_features(geometries: np.ndarray) -> np.ndarray:
-    """A feature crosses when a ring has consecutive vertices > 180 degrees apart in longitude."""
-    parts, part_geom = shapely.get_parts(geometries, return_index=True)
-    rings, ring_part = shapely.get_rings(parts, return_index=True)
-    coords, vertex_ring = shapely.get_coordinates(rings, return_index=True)
-    jump = (vertex_ring[1:] == vertex_ring[:-1]) & (np.abs(np.diff(coords[:, 0])) > 180)
+def unwrap_longitude(geometries: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Unwrap each ring's longitudes (``np.unwrap``, period 360), and flag the
+    features that changed: a ring edge longer than 180° counts as a crossing."""
+    coords, vertex_geom = shapely.get_coordinates(geometries, return_index=True)
+    lengths = shapely.get_num_coordinates(
+        shapely.get_rings(shapely.get_parts(geometries))
+    )
+    starts = np.cumsum(lengths) - lengths
+    x = coords[:, 0]
+    offset = np.round((np.unwrap(x, period=360) - x) / 360) * 360
+    # np.unwrap runs across ring boundaries; restart each ring at its first vertex.
+    offset -= np.repeat(offset[starts], lengths)
     crossing = np.zeros(geometries.shape, dtype=bool)
-    crossing[part_geom[ring_part[vertex_ring[1:][jump]]]] = True
-    return crossing
+    crossing[vertex_geom[offset != 0]] = True
+    if not crossing.any():
+        return geometries, crossing
+    coords[:, 0] = x + offset
+    return shapely.set_coordinates(geometries.copy(), coords), crossing
 
 
 def split_at_antimeridian(geometries: np.ndarray) -> np.ndarray:
     """Split each feature that crosses 180° into parts on both sides, all in [-180, 180]."""
-    crossing = crossing_features(geometries)
+    unwrapped, crossing = unwrap_longitude(geometries)
     if not crossing.any():
         return geometries
-    # In [0, 360) a crossing ring is continuous; cut it at 180 and move the east part back.
-    shifted = shapely.transform(geometries[crossing], shift_longitude_to_360)
-    west = shapely.clip_by_rect(shifted, 0, -90, 180, 90)
-    east = shapely.transform(
-        shapely.clip_by_rect(shifted, 180, -90, 360, 90),
-        lambda c: c - np.array([360.0, 0.0]),
-    )
+    g = unwrapped[crossing]
+    pieces = [
+        shapely.transform(
+            shapely.clip_by_rect(g, west, -90, west + 360, 90),
+            lambda c, shift=shift: c + np.array([shift, 0.0]),
+        )
+        for west, shift in ((-540, 360), (-180, 0), (180, -360))
+    ]
     out = geometries.copy()
-    out[crossing] = shapely.union(west, east)
+    out[crossing] = shapely.union_all(np.stack(pieces), axis=0)
     return out
 
 

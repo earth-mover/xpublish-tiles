@@ -308,6 +308,18 @@ def test_split_at_antimeridian():
     assert shapely.equals(split[1], other)
 
 
+def test_split_at_antimeridian_crosses_0_and_180():
+    # -10° to 190°, sampled every 50°: the ring runs ...-10, 40, 90, 140, -170 (=190)...
+    box = shapely.segmentize(shapely.box(-10, 0, 190, 10), 50)
+    wrapped = shapely.transform(box, lambda c: np.where(c > 180, c - [360, 0], c))
+    (out,) = split_at_antimeridian(np.array([wrapped], dtype=object))
+    _assert_split(out)
+    npt.assert_allclose(shapely.area(out), 200 * 10)
+    for lon in (-5, 100, -175):
+        assert out.contains(shapely.Point(lon, 5))
+    assert not out.contains(shapely.Point(-100, 5))
+
+
 async def test_features_vertex_limit_raises():
     ds = FEATURES_POLYGONS.create()
     query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style="polygons")
