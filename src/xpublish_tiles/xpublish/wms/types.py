@@ -10,7 +10,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_core import core_schema
+from pydantic_core import PydanticCustomError, core_schema
 from pydantic_xml import BaseXmlModel, attr, element
 from pyproj import CRS
 from pyproj.aoi import BBox
@@ -362,14 +362,20 @@ class WMSGetFeatureInfoQuery(WMSBaseQuery):
                 else "application/prs.coverage+json"
             )
         elif self.info_format == "application/json" and self.request != "GetFeatureInfo":
-            raise ValueError(f"{self.request} returns CoverageJSON, not GeoJSON.")
+            raise PydanticCustomError(
+                "InvalidFormat",
+                "{request} returns CoverageJSON, not GeoJSON.",
+                {"request": self.request},
+            )
         return self
 
     @model_validator(mode="after")
     def validate_pixel_in_map(self):
         if self.x >= self.width or self.y >= self.height:
-            raise ValueError(
-                f"Pixel ({self.x}, {self.y}) is outside the {self.width}x{self.height} map."
+            raise PydanticCustomError(
+                "InvalidPoint",
+                "Pixel ({x}, {y}) is outside the {width}x{height} map.",
+                {"x": self.x, "y": self.y, "width": self.width, "height": self.height},
             )
         return self
 

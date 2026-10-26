@@ -474,11 +474,24 @@ def test_get_feature_info_outside_data(xpublish_client):
     assert response.json() == {"type": "FeatureCollection", "features": []}
 
 
-def test_get_feature_info_pixel_outside_map(xpublish_client):
-    response = xpublish_client.get(
-        "/datasets/air/wms", params={**GET_FEATURE_INFO_PARAMS, "i": 256}
-    )
+@pytest.mark.parametrize(
+    "extra, code",
+    [
+        pytest.param({"i": 256}, "InvalidPoint", id="pixel-outside-map"),
+        pytest.param({"j": None}, "InvalidPoint", id="missing-j"),
+        pytest.param({"info_format": "text/html"}, "InvalidFormat", id="info-format"),
+        pytest.param({"crs": "EPSG:999999"}, "InvalidCRS", id="crs"),
+        pytest.param({"request": "GetLegend"}, "OperationNotSupported", id="request"),
+    ],
+)
+def test_get_feature_info_invalid_parameter(xpublish_client, extra, code):
+    params = {
+        k: v for k, v in {**GET_FEATURE_INFO_PARAMS, **extra}.items() if v is not None
+    }
+    response = xpublish_client.get("/datasets/air/wms", params=params)
     assert response.status_code == 422
+    assert "ServiceExceptionReport" in response.text
+    assert f'code="{code}"' in response.text
 
 
 def test_get_feature_info_query_layers_wins_over_layers(xpublish_client):
@@ -554,6 +567,7 @@ def test_get_timeseries_rejects_geojson(xpublish_client):
         },
     )
     assert response.status_code == 422
+    assert 'code="InvalidFormat"' in response.text
 
 
 def test_get_timeseries_too_big(xpublish_client):

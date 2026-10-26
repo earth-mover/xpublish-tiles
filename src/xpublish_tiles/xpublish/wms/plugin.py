@@ -2,14 +2,17 @@
 
 import io
 import math
+from collections.abc import Callable, Coroutine
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Any
 
 import cf_xarray  # noqa: F401
 import morecantile
 import numpy as np
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
+from fastapi.routing import APIRoute
 from PIL import Image
 from pydantic_xml import BaseXmlModel
 from pyproj import CRS
@@ -93,6 +96,56 @@ def wms_exception(message: str, *, status_code: int, code: str | None = None) ->
     )
 
 
+# WMS 1.3.0 exception codes for invalid query parameters (Annex A / §7.4.5)
+FIELD_EXCEPTION_CODES = {
+    "crs": "InvalidCRS",
+    "format": "InvalidFormat",
+    "info_format": "InvalidFormat",
+    "i": "InvalidPoint",
+    "j": "InvalidPoint",
+    "x": "InvalidPoint",
+    "y": "InvalidPoint",
+}
+
+
+def _exception_code(error: dict) -> str | None:
+    if error["type"] == "union_tag_invalid":
+        return "OperationNotSupported"
+    if error["type"] in ("InvalidPoint", "InvalidFormat"):
+        return error["type"]
+    # loc is ("query", <request>, <field>, ...)
+    if len(error["loc"]) < 3:
+        return None
+    return FIELD_EXCEPTION_CODES.get(str(error["loc"][2]))
+
+
+def validation_exception(e: RequestValidationError) -> Response:
+    """Report invalid query parameters as a WMS ServiceExceptionReport."""
+    # pydantic reports each union branch of a custom type; keep the real failures
+    errors = [err for err in e.errors() if err["type"] != "is_instance_of"]
+    messages = [
+        f"{err['loc'][2]}: {err['msg']}" if len(err["loc"]) > 2 else err["msg"]
+        for err in errors
+    ]
+    code = next(filter(None, map(_exception_code, errors)), None)
+    return wms_exception("; ".join(dict.fromkeys(messages)), status_code=422, code=code)
+
+
+class WMSRoute(APIRoute):
+    """Return request validation errors as WMS exceptions rather than FastAPI JSON."""
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handler = super().get_route_handler()
+
+        async def route_handler(request: Request) -> Response:
+            try:
+                return await handler(request)
+            except RequestValidationError as e:
+                return validation_exception(e)
+
+        return route_handler
+
+
 class WMSPlugin(Plugin):
     name: str = "wms"
 
@@ -103,7 +156,9 @@ class WMSPlugin(Plugin):
     def dataset_router(self, deps: Dependencies):
         """Add wms routes to the dataset router"""
         router = APIRouter(
-            prefix=self.dataset_router_prefix, tags=self.dataset_router_tags
+            prefix=self.dataset_router_prefix,
+            tags=self.dataset_router_tags,
+            route_class=WMSRoute,
         )
 
         @router.get("", include_in_schema=False)
