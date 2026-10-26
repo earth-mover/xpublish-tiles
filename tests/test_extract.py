@@ -52,11 +52,16 @@ async def test_extract_points_matches_sel(air_dataset):
     x = np.array([-95.0, 0.0, 265.0, -160.0])
     y = np.array([45.0, 45.0, 45.0, 75.0])
     result = await extract_points(
-        air_dataset, variables=["air"], selectors={}, crs=WGS84, x=x, y=y
+        air_dataset,
+        variables=["air"],
+        selectors={"time": "2013-01-01T00:00:00"},
+        crs=WGS84,
+        x=x,
+        y=y,
     )
     # (0, 45) is outside the North America grid
     assert result[POINT_DIM].values.tolist() == [0, 2, 3]
-    expected = air_dataset.air.isel(time=-1).sel(
+    expected = air_dataset.air.sel(time="2013-01-01T00:00:00").sel(
         lon=[265.0, 265.0, 200.0], lat=[45.0, 45.0, 75.0], method="nearest"
     )
     npt.assert_array_equal(result.air.values, np.diag(expected.values))
@@ -75,19 +80,6 @@ async def test_extract_points_reprojects_query(air_dataset):
     npt.assert_array_equal(in_4326.air.values, in_3857.air.values)
 
 
-async def test_extract_points_applies_selectors(air_dataset):
-    result = await extract_points(
-        air_dataset,
-        variables=["air"],
-        selectors={"time": "2013-01-01T00:00:00"},
-        crs=WGS84,
-        x=np.array([-95.0]),
-        y=np.array([45.0]),
-    )
-    expected = air_dataset.air.sel(time="2013-01-01T00:00:00", lon=265.0, lat=45.0)
-    assert result.air.item() == expected.item()
-
-
 async def test_extract_points_unsupported_grid():
     ds = CURVILINEAR.create()
     with pytest.raises(PointQueryNotSupportedError, match="Curvilinear"):
@@ -99,19 +91,6 @@ async def test_extract_points_unsupported_grid():
             x=np.array([0.0]),
             y=np.array([0.0]),
         )
-
-
-async def test_extract_points_keeps_ranged_dims(air_dataset):
-    result = await extract_points(
-        air_dataset,
-        variables=["air"],
-        selectors={"time": "2013-01-01T00:00/2013-01-02T00:00"},
-        crs=WGS84,
-        x=np.array([-95.0, -120.0]),
-        y=np.array([45.0, 30.0]),
-        allow_ranges=True,
-    )
-    assert result.air.sizes == {"time": 5, POINT_DIM: 2}
 
 
 async def test_extract_points_too_big(air_dataset):
