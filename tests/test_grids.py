@@ -19,6 +19,7 @@ from pyproj.aoi import BBox
 
 import xarray as xr
 from tests import create_query_params
+from xpublish_tiles import grids as grids_module
 from xpublish_tiles.config import config
 from xpublish_tiles.grids import (
     _GRID_CACHE,
@@ -80,6 +81,7 @@ from xpublish_tiles.testing.datasets import (
     FORECAST,
     FVCOM,
     FVCOM_MACHIAS_BAY,
+    GEOSTATIONARY,
     GLOBAL_HEALPIX_CUBE_L3,
     GLOBAL_HEALPIX_L3,
     HRRR,
@@ -800,6 +802,42 @@ def test_guess_grid_system_curvilinear_loads_coords_in_place(tmp_path) -> None:
     guess_grid_system(ds, "foo")
     assert ds.lat.variable._in_memory
     assert ds.lon.variable._in_memory
+
+
+@pytest.mark.parametrize(
+    ("dataset", "axes"),
+    [(GEOSTATIONARY, ("x", "y")), (CURVILINEAR, ("lon", "lat"))],
+    ids=["geostationary", "curvilinear"],
+)
+def test_guess_grid_system_does_not_load_ancillary_variables(
+    tmp_path, dataset: Dataset, axes: tuple[str, str]
+) -> None:
+    """Grid detection loads only X/Y, not a flag on the same dims that ``ds.cf``
+    promotes from ``ancillary_variables`` (GOES ``DQF_C13`` for ``CMI_C13``)."""
+    src = dataset.create()
+    spatial_dims = src[axes[0]].dims if src[axes[0]].ndim == 2 else (axes[1], axes[0])
+    src["flag"] = xr.zeros_like(
+        src[spatial_dims[0]] * src[spatial_dims[1]], dtype=np.uint8
+    )
+    src["foo"].attrs["ancillary_variables"] = "flag"
+    path = tmp_path / "ancillary.zarr"
+    src.to_zarr(path, zarr_format=3)
+    ds = xr.open_zarr(path, chunks=None)
+    ds.attrs.pop("_xpublish_id", None)
+
+    loaded: list[set[str]] = []
+    real_load = grids_module.sync_load_async
+
+    def spy(obj: xr.Dataset | xr.DataArray) -> None:
+        loaded.append({str(name) for name in getattr(obj, "variables", [obj.name])})
+        real_load(obj)
+
+    with patch.object(grids_module, "sync_load_async", spy):
+        guess_grid_system(ds, "foo")
+
+    assert loaded
+    assert not any("flag" in names for names in loaded), loaded
+    assert all(ds[name].variable._in_memory for name in axes)
 
 
 def test_multiple_grid_mappings_detection() -> None:
