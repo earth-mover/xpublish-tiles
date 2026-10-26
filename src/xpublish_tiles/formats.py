@@ -63,24 +63,28 @@ def points_to_geojson(
 
 
 def _axis_name(result: xr.Dataset, name: Hashable) -> str:
-    """The CoverageJSON axis for coordinate ``name``: ``t``, ``z``, or itself."""
+    """The CoverageJSON axis for coordinate ``name``: ``t``, ``z``, or itself.
+
+    Without a CF T axis, any datetime coordinate is ``t``.
+    """
     axes = result.cf.axes
-    if name in axes.get("T", ()) or (
-        name in result.coords and result[name].dtype.kind == "M"
-    ):
+    if name in axes.get("T", ()):
         return "t"
     if name in axes.get("Z", ()):
         return "z"
+    if "T" not in axes and name in result.coords and result[name].dtype.kind == "M":
+        return "t"
     return str(name)
 
 
-def _domain_type(npoints: int, varying: set[str]) -> str | None:
+def _domain_type(npoints: int, varying: set[str], axes: set[str]) -> str | None:
     if npoints == 1:
         if varying <= {"t"}:
             return "PointSeries" if "t" in varying else "Point"
         if varying == {"z"}:
             return "VerticalProfile"
-    elif varying <= {"t"}:
+    # MultiPoint* put z in the composite tuples, not on its own axis
+    elif varying <= {"t"} and "z" not in axes:
         return "MultiPointSeries" if "t" in varying else "MultiPoint"
     return None
 
@@ -185,7 +189,8 @@ def points_to_covjson(
     dims = [d for d in result.dims if d != POINT_DIM]
     names: dict[Hashable, str] = {d: _axis_name(result, d) for d in dims}
     for name, coord in result.coords.items():
-        if coord.ndim == 0 and (axis := _axis_name(result, name)) in ("t", "z"):
+        axis = _axis_name(result, name)
+        if coord.ndim == 0 and axis in ("t", "z") and axis not in names.values():
             names[name] = axis
     for name, axis in names.items():
         values = (
@@ -207,7 +212,7 @@ def points_to_covjson(
 
     domain: dict[str, Any] = {"type": "Domain"}
     varying = {names[d] for d in dims}
-    if domain_type := _domain_type(points.size, varying):
+    if domain_type := _domain_type(points.size, varying, set(axes)):
         domain["domainType"] = domain_type
     domain |= {"axes": axes, "referencing": _referencing(result, names)}
     return {

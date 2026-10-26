@@ -481,6 +481,16 @@ def test_get_feature_info_pixel_outside_map(xpublish_client):
     assert response.status_code == 422
 
 
+def test_get_feature_info_query_layers_wins_over_layers(xpublish_client):
+    response = xpublish_client.get(
+        "/datasets/air/wms",
+        params={**GET_FEATURE_INFO_PARAMS, "layers": "air,nope", "query_layers": "air"},
+    )
+    assert response.status_code == 200
+    (feature,) = response.json()["features"]
+    assert "air" in feature["properties"]
+
+
 def test_get_feature_info_unknown_layer(xpublish_client):
     response = xpublish_client.get(
         "/datasets/air/wms", params={**GET_FEATURE_INFO_PARAMS, "query_layers": "nope"}

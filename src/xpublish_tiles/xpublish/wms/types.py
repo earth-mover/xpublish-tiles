@@ -305,8 +305,9 @@ class WMSGetFeatureInfoQuery(WMSBaseQuery):
         ...,
         description="Request type",
     )
+    # QUERY_LAYERS wins: clients also send the map's LAYERS, a superset.
     query_layers: str = Field(
-        validation_alias=AliasChoices("layername", "layers", "query_layers"),
+        validation_alias=AliasChoices("query_layers", "layername", "layers"),
     )
     time: str | None = Field(
         None,

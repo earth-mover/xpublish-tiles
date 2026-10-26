@@ -108,6 +108,30 @@ async def test_covjson_no_standard_domain(air_levels):
     assert sorted(covjson["ranges"]["air"]["axisNames"]) == ["t", "z"]
 
 
+async def test_covjson_time_axis_ignores_forecast_reference_time(air_dataset):
+    ds = air_dataset.assign_coords(
+        forecast_reference_time=(
+            (),
+            np.datetime64("2012-12-31T00:00"),
+            {"standard_name": "forecast_reference_time"},
+        )
+    )
+    result = await extract(ds, 1, time="2013-01-01T00:00/2013-01-01T06:00")
+    covjson = points_to_covjson(result, lon=LON, lat=LAT)
+    assert covjson["domain"]["axes"]["t"]["values"] == [
+        "2013-01-01T00:00:00",
+        "2013-01-01T06:00:00",
+    ]
+    assert covjson["ranges"]["air"]["shape"] == [2]
+
+
+async def test_covjson_multipoint_with_level_has_no_domain_type(air_levels):
+    result = await extract(air_levels, 3, level="850", time="2013-01-01T00:00")
+    domain = points_to_covjson(result, lon=LON, lat=LAT)["domain"]
+    assert "domainType" not in domain
+    assert domain["axes"]["z"] == {"values": [850.0]}
+
+
 async def test_covjson_no_points(air_dataset):
     result = await extract_points(
         air_dataset,
