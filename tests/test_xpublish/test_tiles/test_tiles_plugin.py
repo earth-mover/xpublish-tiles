@@ -1709,15 +1709,16 @@ def test_mvt_errors_are_not_rendered(xpublish_client):
     assert r.headers["content-type"] == "application/json"
 
 
-def test_tilejson_mvt(polygons_only_client):
-    r = polygons_only_client.get(
-        "/datasets/polys/tiles/WebMercatorQuad/tilejson.json"
-        "?variables=foo&width=256&height=256&f=mvt"
+def test_tilejson_mvt(xpublish_client):
+    # air defaults to raster; vector tiles default to polygons
+    r = xpublish_client.get(
+        "/datasets/air/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=air&width=256&height=256&f=mvt"
     )
     assert r.status_code == 200, r.text
     body = r.json()
     (url,) = body["tiles"]
     assert "f=mvt" in url and "style=polygons/default" in url
     assert body["vector_layers"] == [
-        {"id": "foo", "fields": {"value": "Number", "color": "String"}}
+        {"id": "air", "fields": {"value": "Number", "color": "String"}}
     ]
