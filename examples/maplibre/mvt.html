@@ -1,0 +1,207 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>Vector Tiles (MVT) - xpublish-tiles</title>
+        <meta
+            name="viewport"
+            content="initial-scale=1,maximum-scale=1,user-scalable=no"
+        />
+        <link
+            href="https://unpkg.com/maplibre-gl@5.1/dist/maplibre-gl.css"
+            rel="stylesheet"
+        />
+        <script src="https://unpkg.com/maplibre-gl@5.1/dist/maplibre-gl.js"></script>
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+                font-family: Arial, sans-serif;
+                font-size: 12px;
+            }
+            #map {
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                width: 100%;
+            }
+            #controls {
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                z-index: 1000;
+                background: white;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                padding: 8px 12px;
+                line-height: 1.8;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="map"></div>
+        <div id="controls">
+            <strong>Fill color</strong><br />
+            <label>
+                <input type="radio" name="color-mode" value="server" checked />
+                Server (<code>color</code> property)
+            </label><br />
+            <label>
+                <input type="radio" name="color-mode" value="client" />
+                Client (<code>value</code> property)
+            </label>
+            <select id="colormap" disabled>
+                <option>viridis</option>
+                <option>magma</option>
+                <option>RdBu_r</option>
+                <option>turbo</option>
+            </select>
+        </div>
+        <script>
+          // Override with query params, e.g. mvt.html?variables=pop_est&colorscalerange=0,1e9
+          const params = new URLSearchParams(window.location.search);
+          const SERVER_URL = params.get("server") ?? "http://localhost:8080";
+          const VARIABLE = params.get("variables") ?? "foo";
+          const COLORSCALERANGE = params.get("colorscalerange") ?? "10,62";
+          const TILEJSON_URL = `${SERVER_URL}/tiles/WebMercatorQuad/tilejson.json?variables=${VARIABLE}&colorscalerange=${COLORSCALERANGE}&f=mvt&width=512&height=512`;
+
+          // The legend's JSON stops become a MapLibre expression over each feature's
+          // `value`, so the client can restyle without fetching new tiles.
+          async function valueColorExpression(colormap) {
+            const resp = await fetch(
+              `${SERVER_URL}/tiles/legend?variables=${VARIABLE}&style=polygons/${colormap}&colorscalerange=${COLORSCALERANGE}&f=json`,
+            );
+            const legend = await resp.json();
+            if (legend.type === "discrete") {
+              return [
+                "match",
+                ["get", "value"],
+                ...legend.items.flatMap((item) => [item.value, item.color]),
+                "rgba(0,0,0,0)",
+              ];
+            }
+            return [
+              "interpolate",
+              ["linear"],
+              ["get", "value"],
+              ...legend.stops.flatMap((stop) => [stop.value, stop.color]),
+            ];
+          }
+
+          (async () => {
+            try {
+              const resp = await fetch(`${SERVER_URL}/tiles/`);
+              if (!resp.ok) {
+                throw new Error(`HTTP ${resp.status}`);
+              }
+            } catch (err) {
+              document.body.innerHTML = `<pre style="padding:1em;color:#b00">Tile server not reachable at ${SERVER_URL}/tiles/ (${err.message})</pre>`;
+              return;
+            }
+
+            const map = new maplibregl.Map({
+                container: "map",
+                style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+                zoom: 1.5,
+                center: [-60, 35],
+            });
+
+            map.on("load", () => {
+                map.addSource("mvt", { type: "vector", url: TILEJSON_URL });
+
+                // Each variable is its own layer in the tile, named after the variable.
+                map.addLayer({
+                    id: "mvt-fill",
+                    type: "fill",
+                    source: "mvt",
+                    "source-layer": VARIABLE,
+                    paint: {
+                        "fill-color": ["get", "color"],
+                        "fill-opacity": [
+                            "case",
+                            ["boolean", ["feature-state", "hover"], false],
+                            1,
+                            0.75,
+                        ],
+                    },
+                });
+                map.addLayer({
+                    id: "mvt-outline",
+                    type: "line",
+                    source: "mvt",
+                    "source-layer": VARIABLE,
+                    paint: {
+                        "line-color": "#ffffff",
+                        "line-width": [
+                            "case",
+                            ["boolean", ["feature-state", "hover"], false],
+                            3,
+                            1,
+                        ],
+                    },
+                });
+
+                const colormapSelect = document.getElementById("colormap");
+                const applyColors = async () => {
+                    const mode = document.querySelector(
+                        "input[name=color-mode]:checked",
+                    ).value;
+                    colormapSelect.disabled = mode !== "client";
+                    map.setPaintProperty(
+                        "mvt-fill",
+                        "fill-color",
+                        mode === "client"
+                            ? await valueColorExpression(colormapSelect.value)
+                            : ["get", "color"],
+                    );
+                };
+                document
+                    .querySelectorAll("input[name=color-mode]")
+                    .forEach((input) => input.addEventListener("change", applyColors));
+                colormapSelect.addEventListener("change", applyColors);
+
+                // Features grids give each feature an id, so feature-state works.
+                let hovered = null;
+                const setHover = (id) => {
+                    if (hovered !== null) {
+                        map.setFeatureState(
+                            { source: "mvt", sourceLayer: VARIABLE, id: hovered },
+                            { hover: false },
+                        );
+                    }
+                    hovered = id;
+                    if (hovered !== null) {
+                        map.setFeatureState(
+                            { source: "mvt", sourceLayer: VARIABLE, id: hovered },
+                            { hover: true },
+                        );
+                    }
+                };
+                map.on("mousemove", "mvt-fill", (e) => {
+                    map.getCanvas().style.cursor = "pointer";
+                    setHover(e.features[0].id ?? null);
+                });
+                map.on("mouseleave", "mvt-fill", () => {
+                    map.getCanvas().style.cursor = "";
+                    setHover(null);
+                });
+
+                map.on("click", "mvt-fill", (e) => {
+                    const feature = e.features[0];
+                    const { value, color } = feature.properties;
+                    new maplibregl.Popup()
+                        .setLngLat(e.lngLat)
+                        .setHTML(
+                            `<strong>${VARIABLE}</strong> feature ${feature.id ?? ""}<br/>` +
+                                `value: ${value}<br/>` +
+                                (color
+                                    ? `server color: <span style="background:${color}">&nbsp;&nbsp;&nbsp;</span> ${color}`
+                                    : ""),
+                        )
+                        .addTo(map);
+                });
+            });
+          })();
+        </script>
+    </body>
+</html>

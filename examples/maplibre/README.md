@@ -11,6 +11,17 @@ Then you can try the examples:
 * [MapLibre TileJSON](./tilejson.html)
 * [MapLibre WMS Tiles](./wms-tiled.html)
 
+## Vector Tile Examples
+
+Serve the synthetic vector data cube of polygon features:
+```
+uv run xpublish-tiles --dataset=local://features_polygons
+```
+
+* [MapLibre Vector Tiles (MVT)](./mvt.html): styles each feature by the server's `color` property, or recolors it in the browser from its `value` without fetching new tiles.
+
+Any GeoParquet file works too (`--dataset=geoparquet+file:///path/to/file.parquet`); pick the variable and color range with query parameters, e.g. `mvt.html?variables=pop_est&colorscalerange=0,1e9`.
+
 ## Categorical Examples
 
 *More Instructions to Come*
