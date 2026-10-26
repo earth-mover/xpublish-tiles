@@ -53,6 +53,21 @@ def render_error_image(
     return buffer
 
 
+def discrete_color_key(
+    datatype: DiscreteData, *, variant: str, colormap: dict[str, str] | None
+) -> dict:
+    """Flag value -> colour, from ``colormap``, the flag colours, or ``variant``."""
+    flag_values = datatype.values
+    if colormap is not None:
+        return create_listed_colormap_from_dict(colormap, flag_values)
+    if datatype.colors is not None:
+        return dict(zip(flag_values, datatype.colors, strict=True))
+    minv = min(flag_values)
+    maxv = max(flag_values)
+    cmap = mpl.colormaps.get_cmap(variant)
+    return {v: mcolors.to_hex(cmap((v - minv) / maxv)) for v in flag_values}
+
+
 class RenderRegistry:
     """Registry for renderer classes."""
 
@@ -292,25 +307,9 @@ class DatashaderRenderer(Renderer):
             return shaded.to_pil()
 
         elif isinstance(datatype, DiscreteData):
-            flag_values = datatype.values
-            kwargs: dict = {}
-            if colormap is not None:
-                kwargs["color_key"] = create_listed_colormap_from_dict(
-                    colormap, flag_values
-                )
-            elif datatype.colors is not None:
-                kwargs["color_key"] = dict(
-                    zip(datatype.values, datatype.colors, strict=True)
-                )
-            else:
-                minv = min(flag_values)
-                maxv = max(flag_values)
-                cmap = mpl.colormaps.get_cmap(variant)
-                kwargs["color_key"] = {
-                    v: mcolors.to_hex(cmap((v - minv) / maxv)) for v in flag_values
-                }
+            color_key = discrete_color_key(datatype, variant=variant, colormap=colormap)
             with np.errstate(invalid="ignore"):
-                shaded = tf.shade(mesh, how="linear", **kwargs)
+                shaded = tf.shade(mesh, how="linear", color_key=color_key)
             return shaded.to_pil()
 
         else:

@@ -4,7 +4,13 @@ import numpy as np
 from pyproj import CRS
 from pyproj.aoi import BBox
 
-from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
+from xpublish_tiles.types import (
+    ImageFormat,
+    OutputBBox,
+    OutputCRS,
+    QueryParams,
+    TileFormat,
+)
 
 NUMERIC_DTYPES = [
     np.int8,
@@ -34,6 +40,8 @@ def create_query_params(
     belowmincolor=None,
     edgecolor=None,
     edgewidth=1,
+    format: ImageFormat | TileFormat = ImageFormat.PNG,
+    variables=("foo",),
 ):
     """Create QueryParams instance using test tiles and TMS."""
     epsg_code = tms.crs.to_epsg()
@@ -51,7 +59,7 @@ def create_query_params(
     )
 
     return QueryParams(
-        variables=["foo"],
+        variables=list(variables),
         crs=OutputCRS(target_crs),
         bbox=OutputBBox(bbox),
         selectors={},
@@ -65,5 +73,5 @@ def create_query_params(
         belowmincolor=belowmincolor,
         edgecolor=edgecolor,
         edgewidth=edgewidth,
-        format=ImageFormat.PNG,
+        format=format,
     )

@@ -81,6 +81,7 @@ from xpublish_tiles.types import (
     DataType,
     DiscreteData,
     GeometryArray,
+    ImageFormat,
     NullRenderContext,
     OutputBBox,
     OutputCRS,
@@ -89,6 +90,7 @@ from xpublish_tiles.types import (
     QueryParams,
     RGBData,
     SelectionMethod,
+    TileFormat,
     ValidatedArray,
 )
 
@@ -840,9 +842,18 @@ def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool
 
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     rgb = query.variant == "rgb"
+    mvt = query.format == TileFormat.MVT
     if query.edgecolor is not None and query.style != "polygons":
         raise UnsupportedStyleError(
             f"'edgecolor' is only supported by the 'polygons' style, not {query.style!r}."
+        )
+    if mvt and query.style != "polygons":
+        raise UnsupportedStyleError(
+            f"Vector tiles need the 'polygons' style, not {query.style!r}."
+        )
+    if mvt and (rgb or query.edgecolor is not None):
+        raise UnsupportedStyleError(
+            "Vector tiles support neither the 'rgb' variant nor 'edgecolor'."
         )
     with log_duration("apply_query", key="query"):
         validated = await async_run(
@@ -879,6 +890,26 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
         subsets, bbox=query.bbox, crs=query.crs, style=renderer.style_id()
     )
 
+    if mvt:
+        from xpublish_tiles.render.mvt import render_mvt
+
+        buffer = io.BytesIO()
+        await async_run(
+            partial(
+                render_mvt,
+                subsets,
+                buffer=buffer,
+                variant=query.variant,
+                colorscalerange=query.colorscalerange,
+                colormap=query.colormap,
+                abovemaxcolor=query.abovemaxcolor,
+                belowmincolor=query.belowmincolor,
+                context_logger=context_logger,
+            )
+        )
+        buffer.seek(0)
+        return buffer
+
     tasks = [
         async_run(
             subset.maybe_rewrite_to_rectilinear,
@@ -902,7 +933,7 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
             height=query.height,
             variant=query.variant,
             colorscalerange=query.colorscalerange,
-            format=query.format,
+            format=ImageFormat(query.format),
             context_logger=context_logger,
             colormap=query.colormap,
             abovemaxcolor=query.abovemaxcolor,

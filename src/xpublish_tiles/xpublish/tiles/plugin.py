@@ -46,13 +46,14 @@ from xpublish_tiles.multiscale import (
 )
 from xpublish_tiles.pipeline import _infer_datatype, pipeline
 from xpublish_tiles.tiles_lib import get_min_zoom, grid_overlaps_tms
-from xpublish_tiles.types import ImageFormat, LegendFormat, QueryParams
+from xpublish_tiles.types import ImageFormat, LegendFormat, QueryParams, TileFormat
 from xpublish_tiles.utils import (
     format_number_for_url,
     normalize_tilejson_bounds,
     xarray_object_key,
 )
 from xpublish_tiles.xpublish.tiles.metadata import (
+    MVT_DEFAULT_STYLE,
     create_tileset_for_tms,
     create_tileset_metadata,
     default_style,
@@ -455,7 +456,12 @@ class TilesPlugin(Plugin):
                 0
             ]  # drop 'tilejson.json'
 
-            style, variant = query.style or default_style(bounds_grid)
+            if query.style is not None:
+                style, variant = query.style
+            elif query.f == TileFormat.MVT:
+                style, variant = MVT_DEFAULT_STYLE
+            else:
+                style, variant = default_style(bounds_grid)
             if query.edgecolor is not None and style != "polygons":
                 raise HTTPException(
                     status_code=422,
@@ -586,6 +592,12 @@ class TilesPlugin(Plugin):
                 minzoom=minzoom,
                 maxzoom=maxzoom,
                 legend=legend_url,
+                vector_layers=[
+                    {"id": name, "fields": {"value": "Number", "color": "String"}}
+                    for name in query.variables
+                ]
+                if query.f == TileFormat.MVT
+                else None,
             )
 
         @router.get("/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}")
@@ -645,9 +657,12 @@ class TilesPlugin(Plugin):
                 dataset = datatree.to_dataset()
                 resolution_level = None
 
-            style, variant = await async_run(
-                resolve_style, query.style, dataset, query.variables[0]
-            )
+            if query.f == TileFormat.MVT and query.style is None:
+                style, variant = MVT_DEFAULT_STYLE
+            else:
+                style, variant = await async_run(
+                    resolve_style, query.style, dataset, query.variables[0]
+                )
 
             # Extract dimension selectors from query parameters
             selectors = {}
@@ -727,7 +742,7 @@ class TilesPlugin(Plugin):
                 detail = "Internal server error."
 
             if status_code != 200:
-                if not query.render_errors:
+                if not query.render_errors or query.f == TileFormat.MVT:
                     raise HTTPException(status_code=status_code, detail=detail)
                 else:
                     # Use renderer's render_error method for all error types
@@ -738,13 +753,15 @@ class TilesPlugin(Plugin):
                         width=query.width,
                         height=query.height,
                         message=detail,
-                        format=query.f,
+                        format=ImageFormat(query.f),
                     )
 
             headers = {}
             if resolution_level is not None:
                 headers["X-Multiscale-Level"] = resolution_level
 
-            return Response(buffer.getbuffer(), media_type="image/png", headers=headers)
+            return Response(
+                buffer.getbuffer(), media_type=query.f.media_type, headers=headers
+            )
 
         return router

@@ -1,6 +1,6 @@
 """Tests for TileQuery model validation."""
 
-from xpublish_tiles.types import ImageFormat
+from xpublish_tiles.types import TileFormat
 from xpublish_tiles.xpublish.tiles.types import TileQuery
 
 
@@ -17,7 +17,7 @@ class TestTileQueryColormap:
             height=256,
             colorscalerange=None,
             style="raster/custom",  # type: ignore  # Pydantic converts string to tuple
-            f=ImageFormat.PNG,
+            f=TileFormat.PNG,
             render_errors=False,
             abovemaxcolor=None,
             belowmincolor=None,
@@ -34,7 +34,7 @@ class TestTileQueryColormap:
             colorscalerange=None,
             style=None,
             colormap=None,
-            f=ImageFormat.PNG,
+            f=TileFormat.PNG,
             render_errors=False,
             abovemaxcolor=None,
             belowmincolor=None,
@@ -56,7 +56,7 @@ class TestTileQueryColormap:
             width=256,
             height=256,
             colorscalerange=None,
-            f=ImageFormat.PNG,
+            f=TileFormat.PNG,
             render_errors=False,
             abovemaxcolor=None,
             belowmincolor=None,
@@ -73,7 +73,7 @@ class TestTileQueryColormap:
                 width=256,
                 height=256,
                 colorscalerange=None,
-                f=ImageFormat.PNG,
+                f=TileFormat.PNG,
                 render_errors=False,
                 abovemaxcolor=None,
                 belowmincolor=None,
@@ -88,7 +88,7 @@ class TestTileQueryColormap:
                 width=256,
                 height=256,
                 colorscalerange=None,
-                f=ImageFormat.PNG,
+                f=TileFormat.PNG,
                 render_errors=False,
                 abovemaxcolor=None,
                 belowmincolor=None,

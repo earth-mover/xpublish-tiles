@@ -36,6 +36,21 @@ class ImageFormat(enum.StrEnum):
     JPEG = enum.auto()
 
 
+MVT_MEDIA_TYPE = "application/vnd.mapbox-vector-tile"
+
+
+class TileFormat(enum.StrEnum):
+    """Output format for a tile: an image, or a Mapbox Vector Tile."""
+
+    PNG = enum.auto()
+    JPEG = enum.auto()
+    MVT = enum.auto()
+
+    @property
+    def media_type(self) -> str:
+        return MVT_MEDIA_TYPE if self is TileFormat.MVT else f"image/{self}"
+
+
 class LegendFormat(enum.StrEnum):
     """Output format for the legend endpoint."""
 
@@ -156,7 +171,7 @@ class QueryParams:
     width: int
     height: int
     variant: str
-    format: ImageFormat
+    format: ImageFormat | TileFormat
     colorscalerange: tuple[float, float] | None = None
     colormap: dict[str, str] | None = None
     abovemaxcolor: str | None = None

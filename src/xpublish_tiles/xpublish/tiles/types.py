@@ -6,17 +6,17 @@ from typing import Annotated, Any, Union
 import morecantile.models
 from pydantic import BaseModel, Field, field_validator
 
-from xpublish_tiles.types import ImageFormat, LegendFormat, OverviewSelectionStrategy
+from xpublish_tiles.types import LegendFormat, OverviewSelectionStrategy, TileFormat
 from xpublish_tiles.validators import (
     validate_color,
     validate_colormap,
     validate_colorscalerange,
     validate_edge_color,
-    validate_image_format,
     validate_legend_format,
     validate_overview_selection_strategy,
     validate_range_color,
     validate_style,
+    validate_tile_format,
 )
 
 
@@ -1292,11 +1292,11 @@ class TileQuery(BaseModel):
         ),
     ]
     f: Annotated[
-        ImageFormat,
+        TileFormat,
         Field(
             default="image/png",
             json_schema_extra={
-                "description": "Format of the tile image, in the format of `image/{png|jpeg}`",
+                "description": "Format of the tile: `image/{png|jpeg}`, or `application/vnd.mapbox-vector-tile` (shorthand `mvt`) for a Mapbox Vector Tile with one layer per variable whose features carry the data `value` and, when a colour scale is known, its `color`. Vector tiles use the `polygons` style, which is the default for them.",
             },
         ),
     ]
@@ -1385,8 +1385,8 @@ class TileQuery(BaseModel):
 
     @field_validator("f", mode="before")
     @classmethod
-    def validate_format(cls, v: str | None) -> ImageFormat:
-        return validate_image_format(v) or ImageFormat.PNG
+    def validate_format(cls, v: str | None) -> TileFormat:
+        return validate_tile_format(v) or TileFormat.PNG
 
     @field_validator("variables")
     @classmethod

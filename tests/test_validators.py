@@ -6,7 +6,7 @@ from xpublish_tiles.lib import (
     create_listed_colormap_from_dict,
     validate_colormap_for_datatype,
 )
-from xpublish_tiles.types import ContinuousData, DiscreteData, ImageFormat
+from xpublish_tiles.types import ContinuousData, DiscreteData, ImageFormat, TileFormat
 from xpublish_tiles.validators import (
     validate_bgcolor,
     validate_colormap,
@@ -15,6 +15,7 @@ from xpublish_tiles.validators import (
     validate_edge_color,
     validate_image_format,
     validate_style,
+    validate_tile_format,
 )
 
 
@@ -138,6 +139,27 @@ class TestValidateImageFormat:
             ValueError, match=r"image format gif is not valid. Options are: PNG, JPEG"
         ):
             validate_image_format("image/gif")
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("png", TileFormat.PNG),
+        ("image/jpeg", TileFormat.JPEG),
+        ("mvt", TileFormat.MVT),
+        ("pbf", TileFormat.MVT),
+        ("application/vnd.mapbox-vector-tile", TileFormat.MVT),
+        ("application/x-protobuf", TileFormat.MVT),
+        (None, None),
+    ],
+)
+def test_validate_tile_format(value, expected):
+    assert validate_tile_format(value) == expected
+
+
+def test_validate_tile_format_invalid():
+    with pytest.raises(ValueError, match=r"application/vnd\.mapbox-vector-tile"):
+        validate_tile_format("application/geo+json")
 
 
 class TestValidateStyle:

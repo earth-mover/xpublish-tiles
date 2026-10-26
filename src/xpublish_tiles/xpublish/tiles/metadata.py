@@ -55,6 +55,10 @@ def grid_styles(grid: GridSystem) -> list[str]:
     return ["raster", "polygons"]
 
 
+# Vector tiles carry the polygons-style geometry, whatever the grid's default.
+MVT_DEFAULT_STYLE = ("polygons", "default")
+
+
 def default_style(grid: GridSystem) -> tuple[str, str]:
     return (grid_styles(grid)[0], "default")
 
