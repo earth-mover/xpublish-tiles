@@ -160,6 +160,13 @@ DimSlicers = list[Slicer]
 Slicers = dict[str, DimSlicers]
 
 
+def _sync_load_coords(ds: xr.Dataset, *names: Hashable) -> None:
+    """Load only ``names`` in place. ``ds[[X, Y]]`` also keeps other coordinates on
+    those dims (e.g. ``ancillary_variables`` flags), and loading it reads them in full."""
+    subset = ds[list(names)]
+    sync_load_async(subset.drop_vars([c for c in subset.coords if c not in names]))
+
+
 def _face_slicers_are_empty(slicers: dict[str, list]) -> bool:
     """Return True if any dim in the slicers resolves to zero-size."""
     for slicer_list in slicers.values():
@@ -1955,7 +1962,7 @@ class Rectilinear(RectilinearMixin, GridSystem):
         Yname: str,
     ) -> "Rectilinear":
         """Create a Rectilinear grid from a dataset with cell-center adjusted bbox."""
-        sync_load_async(ds[[Xname, Yname]])
+        _sync_load_coords(ds, Xname, Yname)
         X = ds[Xname]
         Y = ds[Yname]
 
@@ -2325,7 +2332,7 @@ class Curvilinear(GridSystem):
         # here to avoid repeated allocations when transforming.
         # Materialize X and Y concurrently.
         # Write the float64 cast back so subsequent lookups skip the conversion.
-        sync_load_async(ds[[Xname, Yname]])
+        _sync_load_coords(ds, Xname, Yname)
         ds[Xname] = ds[Xname].astype(np.float64, copy=False)
         ds[Yname] = ds[Yname].astype(np.float64, copy=False)
         X = ds[Xname]
@@ -4498,7 +4505,7 @@ def _detect_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
         and meta.X in ds.variables
         and meta.Y in ds.variables
     ):
-        sync_load_async(ds[[meta.X, meta.Y]])
+        _sync_load_coords(ds, meta.X, meta.Y)
         # Refresh cf_sub — for UGRID stay on the full ds to keep mesh+connectivity.
         cf_sub = ds if is_ugrid_var else ds.cf[[name]]
 
