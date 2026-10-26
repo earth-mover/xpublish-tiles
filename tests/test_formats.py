@@ -132,6 +132,21 @@ async def test_covjson_multipoint_with_level_has_no_domain_type(air_levels):
     assert domain["axes"]["z"] == {"values": [850.0]}
 
 
+async def test_covjson_boolean_as_integer(air_dataset):
+    ds = air_dataset.assign(freezing=air_dataset.air < 273.15)
+    result = await extract_points(
+        ds,
+        variables=["freezing"],
+        selectors={"time": "2013-01-01T00:00"},
+        crs=WGS84,
+        x=np.array([-95.0]),
+        y=np.array([45.0]),
+    )
+    freezing = points_to_covjson(result, lon=LON, lat=LAT)["ranges"]["freezing"]
+    assert freezing["dataType"] == "integer"
+    assert freezing["values"] == [1]
+
+
 async def test_covjson_no_points(air_dataset):
     result = await extract_points(
         air_dataset,

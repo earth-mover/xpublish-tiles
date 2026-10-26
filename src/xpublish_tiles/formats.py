@@ -150,7 +150,8 @@ def _data_type(da: xr.DataArray) -> str:
     match da.dtype.kind:
         case "f":
             return "float"
-        case "i" | "u":
+        # CoverageJSON has no boolean dataType; booleans are encoded as 0/1
+        case "i" | "u" | "b":
             return "integer"
         case _:
             return "string"
@@ -207,7 +208,9 @@ def points_to_covjson(
             "dataType": _data_type(da),
             "axisNames": ["composite" if d == POINT_DIM else names[d] for d in da.dims],
             "shape": list(da.shape),
-            "values": json_values(da.values),
+            "values": json_values(
+                da.values.astype(np.uint8) if da.dtype.kind == "b" else da.values
+            ),
         }
 
     domain: dict[str, Any] = {"type": "Domain"}
