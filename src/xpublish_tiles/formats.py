@@ -62,19 +62,23 @@ def points_to_geojson(
     return {"type": "FeatureCollection", "features": features}
 
 
-def _axis_name(result: xr.Dataset, name: Hashable) -> str:
-    """The CoverageJSON axis for coordinate ``name``: ``t``, ``z``, or itself.
+def _axis_names(result: xr.Dataset) -> dict[Hashable, str]:
+    """CoverageJSON axis names for the non-point dims, plus scalar T/Z coordinates.
 
-    Without a CF T axis, any datetime coordinate is ``t``.
+    The CF T and Z coordinates are ``t`` and ``z`` (without a CF T axis, the first
+    datetime coordinate is ``t``), preferring dims over scalars. Every other dim
+    keeps its own name.
     """
-    axes = result.cf.axes
-    if name in axes.get("T", ()):
-        return "t"
-    if name in axes.get("Z", ()):
-        return "z"
-    if "T" not in axes and name in result.coords and result[name].dtype.kind == "M":
-        return "t"
-    return str(name)
+    cf_axes = result.cf.axes
+    datetimes = [n for n, c in result.coords.items() if c.dtype.kind == "M"]
+    names: dict[Hashable, str] = {d: str(d) for d in result.dims if d != POINT_DIM}
+    for axis, candidates in (
+        ("t", cf_axes.get("T", datetimes)),
+        ("z", cf_axes.get("Z", [])),
+    ):
+        if candidates:
+            names[min(candidates, key=lambda n: n not in result.dims)] = axis
+    return names
 
 
 def _domain_type(npoints: int, varying: set[str], axes: set[str]) -> str | None:
@@ -187,12 +191,7 @@ def points_to_covjson(
             }
         }
 
-    dims = [d for d in result.dims if d != POINT_DIM]
-    names: dict[Hashable, str] = {d: _axis_name(result, d) for d in dims}
-    for name, coord in result.coords.items():
-        axis = _axis_name(result, name)
-        if coord.ndim == 0 and axis in ("t", "z") and axis not in names.values():
-            names[name] = axis
+    names = _axis_names(result)
     for name, axis in names.items():
         values = (
             result[name].values
@@ -214,7 +213,7 @@ def points_to_covjson(
         }
 
     domain: dict[str, Any] = {"type": "Domain"}
-    varying = {names[d] for d in dims}
+    varying = {names[d] for d in result.dims if d != POINT_DIM}
     if domain_type := _domain_type(points.size, varying, set(axes)):
         domain["domainType"] = domain_type
     domain |= {"axes": axes, "referencing": _referencing(result, names)}

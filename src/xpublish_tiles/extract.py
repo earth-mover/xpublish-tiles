@@ -27,25 +27,28 @@ from xpublish_tiles.utils import cf_ref_attr
 POINT_DIM = "point"
 
 
-def locate_points(
+def locate_cells(
     array: ValidatedArray, *, crs: CRS, x: np.ndarray, y: np.ndarray
-) -> PointIndexers:
-    """Locate the points ``(x, y)``, given in ``crs``, on the array's grid."""
+) -> tuple[PointIndexers, np.ndarray]:
+    """The cells containing the points ``(x, y)``, given in ``crs``.
+
+    Returns the cells of the points that hit the grid, and those points'
+    positions in ``x``/``y``.
+    """
     grid = array.grid
     gx, gy = transformer_from_crs(crs_from=crs, crs_to=grid.crs).transform(x, y)
-    return grid.locate(np.asarray(gx), np.asarray(gy))
+    indexers = grid.locate(np.asarray(gx), np.asarray(gy))
+    (inside,) = np.nonzero(np.logical_and.reduce([i >= 0 for i in indexers.values()]))
+    return {dim: idx[inside] for dim, idx in indexers.items()}, inside
 
 
-def isel_points(array: ValidatedArray, indexers: PointIndexers) -> xr.DataArray:
-    """Lazily pick the located cells along a new ``point`` dim.
-
-    Points outside the grid are dropped; the ``point`` coordinate holds each kept
-    point's position in the request.
-    """
-    (inside,) = np.nonzero(next(iter(indexers.values())) >= 0)
+def isel_cells(
+    array: ValidatedArray, cells: PointIndexers, points: np.ndarray
+) -> xr.DataArray:
+    """Lazily pick ``cells`` along a new ``point`` dim, labelled with ``points``."""
     da = array.da.isel(
-        {dim: xr.Variable(POINT_DIM, idx[inside]) for dim, idx in indexers.items()}
-    ).assign_coords({POINT_DIM: inside})
+        {dim: xr.Variable(POINT_DIM, idx) for dim, idx in cells.items()}
+    ).assign_coords({POINT_DIM: points})
     return da.drop_vars(
         [
             name
@@ -61,8 +64,8 @@ def _chunk_span(size: int, chunk: int) -> int:
     return (-(-(size - 1) // chunk) + 1) * chunk
 
 
-def decompressed_bytes(array: ValidatedArray, indexers: PointIndexers) -> int:
-    """Upper bound on the bytes decompressed to read the located cells.
+def decompressed_bytes(array: ValidatedArray, cells: PointIndexers) -> int:
+    """Upper bound on the bytes decompressed to read ``cells``.
 
     Every distinct chunk the points fall in is read whole, along with the full
     chunk extent of every other dim, including dims a selector already dropped
@@ -70,14 +73,13 @@ def decompressed_bytes(array: ValidatedArray, indexers: PointIndexers) -> int:
     elements count.
     """
     da, chunks = array.da, array.chunks
-    (inside,) = np.nonzero(next(iter(indexers.values())) >= 0)
-    point_chunks = [chunks.get(dim, 1) for dim in indexers]
+    point_chunks = [chunks.get(dim, 1) for dim in cells]
     chunk_ids = np.stack(
-        [idx[inside] // c for idx, c in zip(indexers.values(), point_chunks, strict=True)]
+        [idx // c for idx, c in zip(cells.values(), point_chunks, strict=True)]
     )
     total = np.unique(chunk_ids, axis=1).shape[1] * math.prod(point_chunks)
     for dim, size in da.sizes.items():
-        if (name := str(dim)) not in indexers:
+        if (name := str(dim)) not in cells:
             total *= _chunk_span(size, chunks[name]) if name in chunks else size
     for dim, chunk in chunks.items():
         if dim not in da.dims:
@@ -126,9 +128,9 @@ async def extract_points(
     arrays = []
     total_bytes = 0
     for array in validated.values():
-        indexers = locate_points(array, crs=crs, x=x, y=y)
-        arrays.append(isel_points(array, indexers))
-        total_bytes += decompressed_bytes(array, indexers)
+        cells, points = locate_cells(array, crs=crs, x=x, y=y)
+        arrays.append(isel_cells(array, cells, points))
+        total_bytes += decompressed_bytes(array, cells)
     max_bytes = config.get("max_renderable_size")
     if total_bytes > max_bytes:
         raise RequestTooBigError(

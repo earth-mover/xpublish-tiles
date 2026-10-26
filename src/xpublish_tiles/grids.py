@@ -162,14 +162,6 @@ Slicers = dict[str, DimSlicers]
 PointIndexers = dict[str, np.ndarray]
 
 
-def _mark_outside(indexers: PointIndexers) -> PointIndexers:
-    """Set every dim to -1 for a point that is outside along any dim."""
-    outside = np.logical_or.reduce([idx < 0 for idx in indexers.values()])
-    for idx in indexers.values():
-        idx[outside] = -1
-    return indexers
-
-
 def _wrap_longitude(x: np.ndarray, west: float) -> np.ndarray:
     """Wrap longitudes into ``[west, west + 360)``."""
     return west + np.mod(np.asarray(x, dtype=np.float64) - west, 360.0)
@@ -1628,7 +1620,7 @@ class GridSystem(ABC):
         """Positions of the cells containing the points ``(x, y)``, in the grid CRS.
 
         Returns one integer array per grid dim, aligned with ``x`` and ``y``, for
-        pointwise ``isel``. A point outside the grid is ``-1`` in every array.
+        pointwise ``isel``. A point outside the grid is ``-1`` along at least one dim.
         """
         raise PointQueryNotSupportedError(
             f"Point queries are not supported on {type(self).__name__} grids."
@@ -1895,7 +1887,7 @@ class RasterAffine(RectilinearMixin, GridSystem):
             pos = np.floor(pos).astype(np.intp)
             pos[(pos < 0) | (pos >= size)] = -1
             indexers[dim] = pos
-        return _mark_outside(indexers)
+        return indexers
 
     def _get_edge_arrays(self) -> tuple[np.ndarray, np.ndarray]:
         """Return full 1D edge arrays (x_edges size nx+1, y_edges size ny+1)."""
@@ -2089,12 +2081,10 @@ class Rectilinear(RectilinearMixin, GridSystem):
         x_index, y_index = self.indexes[0], self.indexes[-1]
         if self.crs.is_geographic:
             x = _wrap_longitude(x, self.left_break)
-        return _mark_outside(
-            {
-                self.Xdim: x_index.index.get_indexer(x),
-                self.Ydim: y_index.index.get_indexer(y),
-            }
-        )
+        return {
+            self.Xdim: x_index.index.get_indexer(x),
+            self.Ydim: y_index.index.get_indexer(y),
+        }
 
     def _get_edge_arrays(self) -> tuple[np.ndarray, np.ndarray]:
         """Return full 1D edge arrays (x_edges size nx+1, y_edges size ny+1)."""
