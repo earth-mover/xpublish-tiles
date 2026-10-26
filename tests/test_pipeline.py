@@ -937,6 +937,85 @@ def test_apply_query_with_string_selectors():
     assert_equal(result["foo"].da, ds.foo.sel(band=1, band2="2", offset="1 hours"))
 
 
+@pytest.mark.parametrize(
+    "selector, expected",
+    [
+        # each end is an instant, not a whole day
+        ("2013-01-01/2013-01-02", slice("2013-01-01T00:00", "2013-01-02T00:00")),
+        ("../2013-01-01T12:00:00", slice(None, "2013-01-01T12:00:00")),
+        ("2014-12-31T06:00:00/..", slice("2014-12-31T06:00:00", None)),
+        ("../..", slice(None, None)),
+    ],
+)
+def test_apply_query_range_selector(air_dataset, selector, expected):
+    (validated,) = apply_query(
+        air_dataset, variables=["air"], selectors={"time": selector}, allow_ranges=True
+    ).values()
+    assert_equal(validated.da, air_dataset.air.sel(time=expected))
+
+
+def test_apply_query_range_selector_decreasing_coord(air_dataset):
+    """``air`` latitudes run north to south; a range is given low/high anyway."""
+    (validated,) = apply_query(
+        air_dataset,
+        variables=["air"],
+        selectors={"lat": "30/40"},
+        allow_ranges=True,
+    ).values()
+    assert validated.da.lat.values.tolist() == [40.0, 37.5, 35.0, 32.5, 30.0]
+    assert "time" not in validated.da.dims
+
+
+def test_apply_query_ranges_squeeze_other_dims(air_dataset):
+    ds = air_dataset.expand_dims(level=[1000.0, 850.0])
+    (validated,) = apply_query(
+        ds,
+        variables=["air"],
+        selectors={"time": "2013-01-01/2013-01-02"},
+        allow_ranges=True,
+    ).values()
+    assert set(validated.da.dims) == {"time", "lat", "lon"}
+
+
+def test_apply_query_no_squeeze(air_dataset):
+    ds = air_dataset.expand_dims(level=[1000.0, 850.0])
+    (validated,) = apply_query(
+        ds, variables=["air"], selectors={}, squeeze=False
+    ).values()
+    assert validated.da.sizes == ds.air.sizes
+
+
+@pytest.mark.parametrize(
+    "selector, kwargs, match",
+    [
+        ("2013-01-01/2013-01-02", {}, "not supported"),
+        ("nearest::2013-01-01/2013-01-02", {"allow_ranges": True}, "method"),
+        ("2020-01-01/2021-01-01", {"allow_ranges": True}, "No values"),
+        ("2013-01-01/2013-01-02/2013-01-03", {"allow_ranges": True}, "start/end"),
+    ],
+)
+def test_apply_query_range_selector_errors(air_dataset, selector, kwargs, match):
+    with pytest.raises(IndexingError, match=match):
+        apply_query(
+            air_dataset, variables=["air"], selectors={"time": selector}, **kwargs
+        )
+
+
+def test_apply_query_string_label_with_slash():
+    ds = xr.Dataset(
+        {"foo": (("model", "x", "y"), np.zeros((2, 3, 4)))},
+        coords={
+            "model": ["ecmwf/ifs", "noaa/gfs"],
+            "x": ("x", np.arange(3), {"axis": "X", "standard_name": "longitude"}),
+            "y": ("y", np.arange(4), {"axis": "Y", "standard_name": "latitude"}),
+        },
+    )
+    (validated,) = apply_query(
+        ds, variables=["foo"], selectors={"model": "noaa/gfs"}, allow_ranges=True
+    ).values()
+    assert validated.da.model.item() == "noaa/gfs"
+
+
 def test_datashader_nearest_regridding():
     ds = xr.Dataset(
         {"foo": (("x", "y"), np.arange(120).reshape(30, 4))},

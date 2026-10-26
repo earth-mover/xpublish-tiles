@@ -118,6 +118,21 @@ type CRSParam = Annotated[CRS, GetPydanticSchema(_crs_schema)]
 type BBoxParam = Annotated[BBox, GetPydanticSchema(_bbox_schema)]
 
 
+def interpret_bbox_axis_order[Q: "WMSGetMapQuery | WMSGetFeatureInfoQuery"](
+    query: Q,
+) -> Q:
+    """WMS 1.3.0 BBOX coordinates follow the CRS axis order, so north-first
+    CRSes like EPSG:4326 send miny,minx,maxy,maxx."""
+    if query.version == "1.3.0" and crs_is_north_first(query.crs):
+        query.bbox = BBox(
+            west=query.bbox.south,
+            south=query.bbox.west,
+            east=query.bbox.north,
+            north=query.bbox.east,
+        )
+    return query
+
+
 class WMSBaseQuery(BaseModel):
     service: Literal["WMS"] = Field(..., description="Service type. Must be WMS")
     version: Literal["1.1.1", "1.3.0"] = Field(
@@ -276,16 +291,7 @@ class WMSGetMapQuery(WMSBaseQuery):
 
     @model_validator(mode="after")
     def interpret_bbox_axis_order(self):
-        """WMS 1.3.0 BBOX coordinates follow the CRS axis order, so north-first
-        CRSes like EPSG:4326 send miny,minx,maxy,maxx."""
-        if self.version == "1.3.0" and crs_is_north_first(self.crs):
-            self.bbox = BBox(
-                west=self.bbox.south,
-                south=self.bbox.west,
-                east=self.bbox.north,
-                north=self.bbox.east,
-            )
-        return self
+        return interpret_bbox_axis_order(self)
 
 
 class WMSGetFeatureInfoQuery(WMSBaseQuery):
@@ -313,7 +319,7 @@ class WMSGetFeatureInfoQuery(WMSBaseQuery):
     crs: CRSParam = Field(
         "EPSG:4326",
         validate_default=True,
-        description="Coordinate reference system to use for the query. Currently only EPSG:4326 is supported for this request",
+        description="Coordinate reference system of the bbox. Default is EPSG:4326",
     )
     bbox: BBoxParam = Field(
         ...,
@@ -329,12 +335,46 @@ class WMSGetFeatureInfoQuery(WMSBaseQuery):
     )
     x: int = Field(
         ...,
-        description="The x coordinate of the point to query. This is the index of the point in the x dimension",
+        ge=0,
+        validation_alias=AliasChoices("i", "x"),
+        description="Pixel column of the point to query, from the left edge of the map (`I` in WMS 1.3.0, `X` in 1.1.1)",
     )
     y: int = Field(
         ...,
-        description="The y coordinate of the point to query. This is the index of the point in the y dimension",
+        ge=0,
+        validation_alias=AliasChoices("j", "y"),
+        description="Pixel row of the point to query, from the top edge of the map (`J` in WMS 1.3.0, `Y` in 1.1.1)",
     )
+    info_format: Literal["application/json", "application/prs.coverage+json"] | None = (
+        Field(
+            None,
+            description="Response format: GeoJSON (`application/json`, GetFeatureInfo only) or CoverageJSON (`application/prs.coverage+json`). Defaults to GeoJSON for GetFeatureInfo and CoverageJSON otherwise",
+        )
+    )
+
+    @model_validator(mode="after")
+    def default_info_format(self):
+        if self.info_format is None:
+            self.info_format = (
+                "application/json"
+                if self.request == "GetFeatureInfo"
+                else "application/prs.coverage+json"
+            )
+        elif self.info_format == "application/json" and self.request != "GetFeatureInfo":
+            raise ValueError(f"{self.request} returns CoverageJSON, not GeoJSON.")
+        return self
+
+    @model_validator(mode="after")
+    def validate_pixel_in_map(self):
+        if self.x >= self.width or self.y >= self.height:
+            raise ValueError(
+                f"Pixel ({self.x}, {self.y}) is outside the {self.width}x{self.height} map."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def interpret_bbox_axis_order(self):
+        return interpret_bbox_axis_order(self)
 
 
 class WMSGetLegendGraphicQuery(WMSBaseQuery):
@@ -545,6 +585,10 @@ WMS_FILTERED_QUERY_PARAMS = {
     "range",
     "x",
     "y",
+    "i",
+    "j",
+    "info_format",
+    "feature_count",
     "format",
     "show_label",
     "transparent",

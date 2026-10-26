@@ -7,19 +7,29 @@ from typing import Annotated
 
 import cf_xarray  # noqa: F401
 import morecantile
+import numpy as np
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from PIL import Image
 from pydantic_xml import BaseXmlModel
+from pyproj import CRS
 from xpublish import Dependencies, Plugin, hookimpl
 
 import xarray as xr
 from xarray import DataTree
+from xpublish_tiles.extract import extract_points
+from xpublish_tiles.formats import (
+    COVJSON_MEDIA_TYPE,
+    points_to_covjson,
+    points_to_geojson,
+)
 from xpublish_tiles.lib import (
     AsyncLoadTimeoutError,
     ColormapError,
     IndexingError,
     MissingParameterError,
+    PointQueryNotSupportedError,
+    RequestTooBigError,
     TileTooBigError,
     UnsupportedStyleError,
     VariableNotFoundError,
@@ -27,7 +37,7 @@ from xpublish_tiles.lib import (
 )
 from xpublish_tiles.logger import get_context_logger, with_accumulated_logs
 from xpublish_tiles.multiscale import get_dataset, get_resolution_level
-from xpublish_tiles.pipeline import _infer_datatype, pipeline
+from xpublish_tiles.pipeline import OPEN_RANGE, _infer_datatype, pipeline
 from xpublish_tiles.projections import transformer_from_crs
 from xpublish_tiles.render import RenderRegistry
 from xpublish_tiles.types import ImageFormat, OutputBBox, OutputCRS, QueryParams
@@ -45,6 +55,7 @@ from xpublish_tiles.xpublish.wms.types import (
 from xpublish_tiles.xpublish.wms.utils import create_capabilities_response
 
 WEB_MERCATOR_TMS = morecantile.tms.get("WebMercatorQuad")
+WGS84 = CRS.from_epsg(4326)
 
 WMS_VERSION = "1.3.0"
 WMS_NAMESPACE = "http://www.opengis.net/wms"
@@ -120,10 +131,8 @@ class WMSPlugin(Plugin):
                 case WMSGetMapQuery():
                     return await handle_get_map(request, wms_query.root, datatree)
                 case WMSGetFeatureInfoQuery():
-                    return wms_exception(
-                        "GetFeatureInfo is not yet implemented. Coming Soon!",
-                        status_code=501,
-                        code="OperationNotSupported",
+                    return await handle_get_feature_info(
+                        request, wms_query.root, datatree
                     )
                 case WMSGetLegendGraphicQuery():
                     return await handle_get_legend_graphic(
@@ -179,6 +188,134 @@ async def handle_get_capabilities(
         )
 
 
+def dimension_selectors(
+    request: Request,
+    query: WMSGetMapQuery | WMSGetFeatureInfoQuery,
+    dataset: xr.Dataset,
+) -> dict[str, str]:
+    """Dimension selectors from the query string, with WMS ``time``/``elevation``
+    mapped to the dataset's T/Z axes."""
+    selectors = {
+        name: value
+        for name, value in request.query_params.items()
+        if name not in WMS_FILTERED_QUERY_PARAMS and name in dataset.dims
+    }
+    if query.time or query.elevation:
+        cf_axes = dataset.cf.axes
+        if query.time and (time_name := cf_axes.get("T")):
+            selectors[time_name[0]] = query.time
+        if query.elevation and (vertical_name := cf_axes.get("Z")):
+            selectors[vertical_name[0]] = query.elevation
+    return selectors
+
+
+def describe_error(
+    e: Exception, *, layers: str, selectors: dict[str, str]
+) -> tuple[int, str, str | None]:
+    """Log ``e`` and map it to a WMS ``(status_code, detail, exception code)``."""
+    logger = get_context_logger()
+    match e:
+        case TileTooBigError():
+            detail = (
+                "GetMap request too big. Please request a smaller area or fewer pixels."
+            )
+            logger.error("TileTooBigError", message=detail)
+            return 413, detail, None
+        case VariableNotFoundError():
+            logger.error("VariableNotFoundError", exc_info=e)
+            return 422, f"Invalid layer name(s): {layers!r}.", "LayerNotDefined"
+        case IndexingError():
+            logger.error("IndexingError", exc_info=e)
+            return (
+                422,
+                f"Invalid dimension value: {selectors!r}. {e!s}",
+                "InvalidDimensionValue",
+            )
+        case MissingParameterError():
+            logger.error("MissingParameterError", exc_info=e)
+            return 422, f"Missing parameter: {e!s}.", None
+        case UnsupportedStyleError():
+            logger.error("UnsupportedStyleError", exc_info=e)
+            return 422, f"Unsupported style: {e!s}", "StyleNotDefined"
+        case ColormapError():
+            logger.error("ColormapError", exc_info=e)
+            return 422, f"Invalid colormap: {e!s}", None
+        case PointQueryNotSupportedError():
+            logger.error("PointQueryNotSupportedError", exc_info=e)
+            return 400, f"Layer {layers!r} is not queryable. {e!s}", "LayerNotQueryable"
+        case RequestTooBigError():
+            logger.error("RequestTooBigError", exc_info=e)
+            return 413, str(e), None
+        case AsyncLoadTimeoutError():
+            logger.error("AsyncLoadTimeoutError", exc_info=e)
+            return 504, "Data loading timed out.", None
+        case _:
+            logger.error("Exception", exc_info=e)
+            return 500, "Internal server error.", None
+
+
+def pixel_to_crs(query: WMSGetFeatureInfoQuery) -> tuple[float, float]:
+    """The centre of pixel ``(x, y)`` of the map, in the query CRS."""
+    bbox = query.bbox
+    x = bbox.west + (query.x + 0.5) * (bbox.east - bbox.west) / query.width
+    y = bbox.north - (query.y + 0.5) * (bbox.north - bbox.south) / query.height
+    return x, y
+
+
+# Series requests select the whole of this axis unless TIME/ELEVATION narrows it.
+SERIES_AXES = {"GetTimeseries": "T", "GetVerticalProfile": "Z"}
+
+
+async def handle_get_feature_info(
+    request: Request, query: WMSGetFeatureInfoQuery, datatree: DataTree
+) -> Response:
+    """Handle WMS GetFeatureInfo, GetTimeseries and GetVerticalProfile requests."""
+    if query.version != WMS_VERSION:
+        return wms_exception(
+            f"WMS version {query.version} is not supported for {query.request}; use version={WMS_VERSION}.",
+            status_code=400,
+        )
+
+    dataset = get_dataset(datatree)
+    selectors = dimension_selectors(request, query, dataset)
+    if axis := SERIES_AXES.get(query.request):
+        names = dataset.cf.axes.get(axis)
+        if not names:
+            return wms_exception(
+                f"{query.request} needs a dataset with a CF {axis} axis.",
+                status_code=400,
+                code="InvalidDimensionValue",
+            )
+        if selectors.get(names[0], "all") == "all":
+            selectors[names[0]] = OPEN_RANGE
+
+    covjson = query.info_format == COVJSON_MEDIA_TYPE
+    x, y = pixel_to_crs(query)
+    try:
+        result = await extract_points(
+            dataset,
+            variables=query.query_layers.split(","),
+            selectors=selectors,
+            crs=query.crs,
+            x=np.array([x]),
+            y=np.array([y]),
+            allow_ranges=covjson,
+        )
+    except Exception as e:
+        status_code, detail, code = describe_error(
+            e, layers=query.query_layers, selectors=selectors
+        )
+        return wms_exception(detail, status_code=status_code, code=code)
+
+    lon, lat = transformer_from_crs(query.crs, WGS84).transform(x, y)
+    if covjson:
+        return JSONResponse(
+            points_to_covjson(result, lon=[lon], lat=[lat]),
+            media_type=COVJSON_MEDIA_TYPE,
+        )
+    return JSONResponse(points_to_geojson(result, lon=[lon], lat=[lat]))
+
+
 def estimate_zoom(query: WMSGetMapQuery) -> int | None:
     """Approximate the WebMercatorQuad zoom matching the requested resolution,
     used to pick a multiscale overview level for GetMap."""
@@ -229,26 +366,7 @@ async def handle_get_map(
         dataset = datatree.to_dataset()
         resolution_level = None
 
-    # Extract dimension selectors from query parameters
-    selectors = {}
-    for param_name, param_value in request.query_params.items():
-        # Skip the standard tile query parameters
-        if param_name not in WMS_FILTERED_QUERY_PARAMS:
-            # Check if this parameter corresponds to a dataset dimension
-            if param_name in dataset.dims:
-                selectors[param_name] = param_value
-
-    # Special handling for time and vertical axes per wms spec
-    if query.time or query.elevation:
-        cf_axes = dataset.cf.axes
-        if query.time:
-            time_name = cf_axes.get("T", None)
-            if len(time_name):
-                selectors[time_name[0]] = query.time
-        if query.elevation:
-            vertical_name = cf_axes.get("Z", None)
-            if vertical_name:
-                selectors[vertical_name[0]] = query.elevation
+    selectors = dimension_selectors(request, query, dataset)
 
     style, variant = await async_run(resolve_style, query.styles, dataset, query.layers)
 
@@ -277,41 +395,10 @@ async def handle_get_map(
     buffer = io.BytesIO()
     try:
         buffer = await pipeline(dataset, render_params)
-    except TileTooBigError:
-        status_code = 413
-        detail = "GetMap request too big. Please request a smaller area or fewer pixels."
-        get_context_logger().error("TileTooBigError", message=detail)
-    except VariableNotFoundError as e:
-        status_code = 422
-        detail = f"Invalid layer name(s): {query.layers!r}."
-        code = "LayerNotDefined"
-        get_context_logger().error("VariableNotFoundError", exc_info=e)
-    except IndexingError as e:
-        status_code = 422
-        detail = f"Invalid dimension value: {selectors!r}. {e!s}"
-        code = "InvalidDimensionValue"
-        get_context_logger().error("IndexingError", exc_info=e)
-    except MissingParameterError as e:
-        status_code = 422
-        detail = f"Missing parameter: {e!s}."
-        get_context_logger().error("MissingParameterError", exc_info=e)
-    except UnsupportedStyleError as e:
-        status_code = 422
-        detail = f"Unsupported style: {e!s}"
-        code = "StyleNotDefined"
-        get_context_logger().error("UnsupportedStyleError", exc_info=e)
-    except ColormapError as e:
-        status_code = 422
-        detail = f"Invalid colormap: {e!s}"
-        get_context_logger().error("ColormapError", exc_info=e)
-    except AsyncLoadTimeoutError as e:
-        status_code = 504
-        detail = "Data loading timed out."
-        get_context_logger().error("AsyncLoadTimeoutError", exc_info=e)
     except Exception as e:
-        status_code = 500
-        detail = "Internal server error."
-        get_context_logger().error("Exception", exc_info=e)
+        status_code, detail, code = describe_error(
+            e, layers=query.layers, selectors=selectors
+        )
 
     if status_code != 200:
         match query.exceptions:

@@ -95,6 +95,10 @@ from xpublish_tiles.types import (
 # A dim with one of these names and size 3 holds R, G, B in that order.
 RGB_BAND_DIMS = ("band", "rgb")
 
+RANGE_SEPARATOR = "/"
+OPEN_RANGE_END = ".."
+OPEN_RANGE = f"{OPEN_RANGE_END}{RANGE_SEPARATOR}{OPEN_RANGE_END}"
+
 
 def _apply_polar_pole_split(
     rings: np.ndarray, *, axis: int, pole_lat_tol: float = 1e-3
@@ -1127,23 +1131,61 @@ def _describe_missing_label(
     return message + hint
 
 
+def _is_string_coord(coord: xr.DataArray) -> bool:
+    if coord.dtype.kind in "UST":
+        return True
+    return (
+        coord.dtype.kind == "O"
+        and coord.size > 0
+        and isinstance(coord.values.flat[0], str)
+    )
+
+
+def _select_range(ds: xr.Dataset, name: str, value: str) -> xr.Dataset:
+    """Select ``start/end`` along ``name``, inclusive; ``..`` leaves an end open."""
+    bounds = value.split(RANGE_SEPARATOR)
+    if len(bounds) != 2:
+        raise IndexingError(
+            f"Invalid range {value!r} for {name!r}: expected 'start/end'."
+        )
+    start, stop = (
+        None if bound in ("", OPEN_RANGE_END) else _cast_selector(ds[name], name, bound)
+        for bound in bounds
+    )
+    if name not in ds.indexes:
+        raise IndexingError(f"Cannot select a range along unindexed {name!r}.")
+    if ds.indexes[name].is_monotonic_decreasing:
+        start, stop = stop, start
+    selected = ds.sel({name: slice(start, stop)})
+    if selected.sizes[name] == 0:
+        raise IndexingError(f"No values of {name!r} in the range {value!r}.")
+    return selected
+
+
 def apply_query(
     ds: xr.Dataset,
     *,
     variables: list[str],
     selectors: dict[str, Any],
     rgb: bool = False,
+    squeeze: bool = True,
+    allow_ranges: bool = False,
 ) -> dict[str, ValidatedArray]:
     """
     This method does all automagic detection necessary for the rest of the pipeline to work.
 
-    With ``rgb``, the ``band``/``rgb`` dim of size 3 is kept and moved to the
-    front instead of being squeezed like other extra dims.
+    With ``squeeze``, non-spatial dims are reduced for rendering: Z to the level
+    nearest 0, the rest to their last element. With ``rgb``, the ``band``/``rgb``
+    dim of size 3 is kept and moved to the front instead.
+
+    With ``allow_ranges``, a selector may be a ``start/end`` range (``..`` for an
+    open end); the dims it selects are never squeezed.
     """
     validated: dict[str, ValidatedArray] = {}
     # Capture chunking up front: zarr chunks are positional, so they can only be
     # mapped to dim names while the array still has all its dims.
     chunks = {name: _chunk_sizes(ds[name]) for name in variables if name in ds}
+    ranged: set[str] = set()
     if selectors:
         # Apply selections serially to meet xarray limitations
         for name, value_str in selectors.items():
@@ -1161,6 +1203,19 @@ def apply_query(
                 method, value = parse_selector(str(value_str))
             except ValueError as e:
                 raise IndexingError(str(e)) from None
+
+            if RANGE_SEPARATOR in value and not _is_string_coord(ds[name]):
+                if not allow_ranges:
+                    raise IndexingError(
+                        f"Range selectors are not supported here; got {value!r} for {name!r}."
+                    )
+                if method is not None:
+                    raise IndexingError(
+                        f"Range selector {value!r} for {name!r} cannot take a method."
+                    )
+                ds = _select_range(ds, name, value)
+                ranged.add(name)
+                continue
 
             # If the value is not the same type as the variable, try to cast it
             typed_value = _cast_selector(ds[name], name, value)
@@ -1184,7 +1239,12 @@ def apply_query(
         grid = guess_grid_system(ds, name)
         # Read as detection did, so a Z that only `cf_get` promotes is selectable.
         array = cf_get(ds, name)
-        if grid.Z is not None and grid.Z in array.coords:
+        if (
+            squeeze
+            and grid.Z is not None
+            and grid.Z in array.coords
+            and grid.Z not in ranged
+        ):
             # This code assumes all datasets are ocean datasets :/
             if grid.Z not in array.xindexes:
                 array = array.set_xindex(grid.Z)
@@ -1223,7 +1283,8 @@ def apply_query(
             extra_dims.discard(band_dim)
         else:
             datatype = _infer_datatype(array)
-        if extra_dims:
+        extra_dims -= ranged
+        if squeeze and extra_dims:
             # Note: this will handle squeezing of label-based selection
             # along datetime coordinates
             array = array.isel(dict.fromkeys(extra_dims, -1))

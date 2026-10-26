@@ -269,6 +269,33 @@ def test_features_sel(bbox, expected):
     assert indexer.indices.tolist() == expected
 
 
+@pytest.mark.parametrize("fixture", [FEATURES_POLYGONS, FEATURES_POLYGONS_XVEC])
+def test_features_locate(fixture):
+    grid = guess_grid_system(fixture.create(), "foo")
+    assert isinstance(grid, Features)
+    inside = shapely.point_on_surface(grid.geometries)
+    x, y = shapely.get_x(inside), shapely.get_y(inside)
+    (positions,) = grid.locate(x, y).values()
+    assert positions.tolist() == list(range(len(FEATURE_GEOMS)))
+
+    points = {
+        "hole": (-70, 40),
+        "east of antimeridian": (-179, 55),
+        "west of antimeridian": (179, 55),
+        "wrapped": (181, 55),
+        "nothing": (0, -45),
+    }
+    x, y = np.array(list(points.values()), dtype=float).T
+    (positions,) = grid.locate(x, y).values()
+    assert dict(zip(points, positions.tolist(), strict=True)) == {
+        "hole": -1,
+        "east of antimeridian": 3,
+        "west of antimeridian": 3,
+        "wrapped": 3,
+        "nothing": -1,
+    }
+
+
 async def test_features_tile_with_no_feature_is_transparent():
     tile = Tile(x=6, y=7, z=4)
     tms = morecantile.tms.get("WebMercatorQuad")

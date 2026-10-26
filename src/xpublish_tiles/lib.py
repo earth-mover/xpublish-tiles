@@ -259,6 +259,18 @@ class AsyncLoadTimeoutError(Exception):
     pass
 
 
+class RequestTooBigError(Exception):
+    """Raised when a data request would decompress too much data."""
+
+    pass
+
+
+class PointQueryNotSupportedError(Exception):
+    """Raised when the variable's grid cannot locate points."""
+
+    pass
+
+
 def timedelta_to_iso8601(value: np.timedelta64 | pd.Timedelta) -> str:
     """Format a timedelta as an ISO 8601 duration (e.g. ``'P14DT17H'``).
 

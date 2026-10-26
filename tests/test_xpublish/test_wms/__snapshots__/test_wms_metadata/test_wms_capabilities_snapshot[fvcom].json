@@ -846,6 +846,24 @@
           }
         ]
       },
+      "get_feature_info": {
+        "dcp_type": {
+          "http": {
+            "get": {
+              "href": "http://testserver/datasets/fvcom/wms",
+              "type": "simple"
+            }
+          }
+        },
+        "formats": [
+          {
+            "format": "application/json"
+          },
+          {
+            "format": "application/prs.coverage+json"
+          }
+        ]
+      },
       "get_map": {
         "dcp_type": {
           "http": {

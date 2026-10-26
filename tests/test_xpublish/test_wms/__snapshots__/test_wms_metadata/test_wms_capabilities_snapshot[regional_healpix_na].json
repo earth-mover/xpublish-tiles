@@ -272,6 +272,24 @@
           }
         ]
       },
+      "get_feature_info": {
+        "dcp_type": {
+          "http": {
+            "get": {
+              "href": "http://testserver/datasets/regional_healpix_na/wms",
+              "type": "simple"
+            }
+          }
+        },
+        "formats": [
+          {
+            "format": "application/json"
+          },
+          {
+            "format": "application/prs.coverage+json"
+          }
+        ]
+      },
       "get_map": {
         "dcp_type": {
           "http": {
