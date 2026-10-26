@@ -24,6 +24,7 @@ from xpublish_tiles.testing.datasets import (
     GLOBAL_HEALPIX_L3,
     IFS,
     NATIVE_AT_ROOT_MULTISCALE,
+    RADAR,
     REDGAUSS_N320,
     RGB,
     create_global_dataset,
@@ -1722,3 +1723,59 @@ def test_tilejson_mvt(xpublish_client):
     assert body["vector_layers"] == [
         {"id": "air", "fields": {"value": "Number", "color": "String"}}
     ]
+
+
+def test_polygons_custom_colormap_png(polygons_only_client):
+    r = polygons_only_client.get(
+        f"{POLYS_TILE}&style=polygons/custom&colormap={CUSTOM_COLORMAP}"
+    )
+    assert r.status_code == 200, r.text
+    rgba = np.asarray(Image.open(io.BytesIO(r.content)).convert("RGBA"))
+    painted = rgba[rgba[..., 3] == 255][:, :3]
+    assert painted.size
+    assert (painted == painted[:, :1]).all()
+
+
+def test_polygons_custom_colormap_mvt(polygons_only_client):
+    r = polygons_only_client.get(
+        f"{POLYS_TILE}&style=polygons/custom&colormap={CUSTOM_COLORMAP}&f=mvt"
+    )
+    assert r.status_code == 200, r.text
+    features = mapbox_vector_tile.decode(r.content)["foo"]["features"]
+    colors = {f["properties"]["color"] for f in features}
+    assert colors
+    assert all(c[1:3] == c[3:5] == c[5:7] for c in colors)
+
+
+def test_vector_tileset_links_resolve(polygons_only_client):
+    base = "http://testserver/datasets/polys/tiles/"
+    tilesets = polygons_only_client.get(base).json()["tilesets"]
+    vector = next(
+        t
+        for t in tilesets
+        if t["dataType"] == "vector" and "WebMercatorQuad" in t["title"]
+    )
+    (self_link,) = (link for link in vector["links"] if link["rel"] == "self")
+    metadata_url = urllib.parse.urljoin(base, self_link["href"])
+    metadata = polygons_only_client.get(metadata_url).json()
+    assert metadata["dataType"] == "vector"
+    (item,) = (link for link in metadata["links"] if link["rel"] == "item")
+    assert item["type"] == MVT_MEDIA_TYPE
+
+    tile_url = urllib.parse.urljoin(metadata_url, item["href"]).format(
+        tileMatrix=0, tileRow=0, tileCol=0
+    )
+    r = polygons_only_client.get(f"{tile_url}&variables=foo&width=256&height=256")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == MVT_MEDIA_TYPE
+
+
+def test_vector_tileset_404_without_polygons():
+    rest = xpublish.Rest({"radar": RADAR.create()}, plugins={"tiles": TilesPlugin()})
+    r = TestClient(rest.app).get("/datasets/radar/tiles/vector/WebMercatorQuad")
+    assert r.status_code == 404, r.text
+
+
+def test_conformance_declares_mvt(xpublish_client):
+    conforms = xpublish_client.get("/tiles/conformance").json()["conformsTo"]
+    assert "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/mvt" in conforms

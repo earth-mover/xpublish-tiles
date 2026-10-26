@@ -22,6 +22,7 @@ from xpublish_tiles.logger import logger
 from xpublish_tiles.pipeline import has_rgb_bands
 from xpublish_tiles.render import RGB_VARIANT, RenderRegistry
 from xpublish_tiles.tiles_lib import grid_overlaps_tms
+from xpublish_tiles.types import MVT_MEDIA_TYPE
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
     TILE_MATRIX_SETS,
@@ -125,6 +126,16 @@ def get_styles(
     return styles
 
 
+def vector_styles(styles: list[Style]) -> list[Style]:
+    """The styles vector tiles can carry: the polygons style's, which has colormaps."""
+    style = MVT_DEFAULT_STYLE[0]
+    return [
+        s
+        for s in styles
+        if s.id.startswith(f"{style}/") and s.id != f"{style}/{RGB_VARIANT}"
+    ]
+
+
 def style_variants(renderer_cls, *, include_rgb: bool) -> list[str]:
     """Advertised variants; ``rgb`` leads when the dataset has colour bands."""
     variants = renderer_cls.supported_variants()
@@ -163,8 +174,10 @@ def _styles_for_renderer(style_id: str, include_rgb: bool) -> tuple[Style, ...]:
     return tuple(styles)
 
 
-def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSetMetadata:
-    """Create tileset metadata for a dataset and tile matrix set"""
+def create_tileset_metadata(
+    dataset: Dataset, tile_matrix_set_id: str, *, data_type: DataType = DataType.MAP
+) -> TileSetMetadata:
+    """Create map or vector tileset metadata for a dataset and tile matrix set"""
     # Get tile matrix set summary
     if tile_matrix_set_id not in TILE_MATRIX_SET_SUMMARIES:
         raise ValueError(f"Tile matrix set '{tile_matrix_set_id}' not found")
@@ -175,20 +188,37 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
     dataset_attrs = dataset.attrs
     title = dataset_attrs.get("title", "Dataset")
 
+    styles = get_styles(dataset)
+    tiles_href = f"./{tile_matrix_set_id}/{{tileMatrix}}/{{tileRow}}/{{tileCol}}"
+    if data_type == DataType.VECTOR:
+        styles = vector_styles(styles)
+        if not styles:
+            raise ValueError("This dataset has no vector tiles.")
+        # served from ./vector/{tms}, a level below the tiles
+        tile_link = Link(
+            href=f".{tiles_href}?f=mvt",
+            rel="item",
+            type=MVT_MEDIA_TYPE,
+            title="Vector tile",
+            templated=True,
+        )
+    else:
+        tile_link = Link(
+            href=tiles_href,
+            rel="item",
+            type="image/png",
+            title="Tile",
+            templated=True,
+        )
+
     # Create main tileset metadata
     return TileSetMetadata(
         title=f"{title} - {tile_matrix_set_id}",
         tileMatrixSetURI=tms_summary.uri,
         crs=tms_summary.crs,
-        dataType=DataType.MAP,
+        dataType=data_type,
         links=[
-            Link(
-                href=f"./{tile_matrix_set_id}/{{tileMatrix}}/{{tileRow}}/{{tileCol}}",
-                rel="item",
-                type="image/png",
-                title="Tile",
-                templated=True,
-            ),
+            tile_link,
             Link(
                 href=f"/tileMatrixSets/{tile_matrix_set_id}",
                 rel="http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
@@ -196,7 +226,7 @@ def create_tileset_metadata(dataset: Dataset, tile_matrix_set_id: str) -> TileSe
                 title=f"Definition of {tile_matrix_set_id}",
             ),
         ],
-        styles=get_styles(dataset),
+        styles=styles,
     )
 
 
@@ -372,8 +402,8 @@ async def create_tileset_for_tms(
     *,
     minzoom_sources: dict[str, MinZoomSource],
     cf_coords: dict | None = None,
-) -> TilesetSummary | None:
-    """Create a tileset summary for a specific tile matrix set
+) -> list[TilesetSummary]:
+    """Create the map tileset, and a vector one if any variable has polygons, for a TMS
 
     Args:
         dataset: xarray Dataset holding every variable in ``var_grids`` (finest level
@@ -390,17 +420,18 @@ async def create_tileset_for_tms(
             its coarsest overview for multiscale datasets)
 
     Returns:
-        TilesetSummary object if tile matrix set exists, None otherwise
+        The map tileset then, if any, the vector tileset; empty if this tile
+        matrix set can't tile the data
     """
     if tms_id not in TILE_MATRIX_SETS:
-        return None
+        return []
 
     # A projection that isn't defined over the data can't tile it, so the
     # tileset is not advertised at all.
     tms = morecantile.tms.get(tms_id)
     if not any(grid_overlaps_tms(grid, tms) for grid in var_grids.values()):
         logger.debug(f"skipping {tms_id}: does not cover the data")
-        return None
+        return []
 
     tms_summary = TILE_MATRIX_SET_SUMMARIES[tms_id]()
 
@@ -409,10 +440,11 @@ async def create_tileset_for_tms(
     min_zooms = await get_min_zooms(tms_id, minzoom_sources)
     if not min_zooms:
         logger.info(f"skipping {tms_id}: no renderable zoom for any variable")
-        return None
+        return []
 
     # Create layers for each renderable data variable
     layers = []
+    vector_layers = []
     for var_name in var_grids:
         if var_name not in layer_extents or var_name not in min_zooms:
             continue
@@ -424,7 +456,15 @@ async def create_tileset_for_tms(
         var_bounding_box = extract_variable_bounding_box(
             tms_summary.crs, grid=var_grids[var_name]
         )
-
+        tiles_href = (
+            f"./{tms_id}/{{tileMatrix}}/{{tileRow}}/{{tileCol}}?variables={var_name}"
+        )
+        legend_link = Link(
+            href=f"./legend?variables={var_name}",
+            rel="ogc-rel:legend",
+            type="image/png",
+            title=f"Legend for {var_name}",
+        )
         layer = Layer(
             id=var_name,
             title=str(var_data.attrs.get("long_name", var_name)),
@@ -434,28 +474,46 @@ async def create_tileset_for_tms(
             crs=tms_summary.crs,
             links=[
                 Link(
-                    href=f"./{tms_id}/{{tileMatrix}}/{{tileRow}}/{{tileCol}}?variables={var_name}",
+                    href=tiles_href,
                     rel="item",
                     type="image/png",
                     title=f"Tiles for {var_name}",
                     templated=True,
                 ),
-                Link(
-                    href=f"./legend?variables={var_name}",
-                    rel="ogc-rel:legend",
-                    type="image/png",
-                    title=f"Legend for {var_name}",
-                ),
+                legend_link,
             ],
             extents=extents,
             minTileMatrix=str(min_zooms[var_name]),
         )
         layers.append(layer)
+        if MVT_DEFAULT_STYLE[0] in grid_styles(var_grids[var_name]):
+            mvt_link = Link(
+                href=f"{tiles_href}&f=mvt",
+                rel="item",
+                type=MVT_MEDIA_TYPE,
+                title=f"Vector tiles for {var_name}",
+                templated=True,
+            )
+            vector_layers.append(
+                layer.model_copy(
+                    update={
+                        "dataType": DataType.VECTOR,
+                        "geometryDimension": 2,
+                        "links": [mvt_link, legend_link],
+                    }
+                )
+            )
 
     tileMatrixSetLimits = get_tile_matrix_limits(
         tms_id, range(max(min_zooms.values()), tms.maxzoom)
     )
 
+    tiling_scheme = Link(
+        href=f"/tileMatrixSets/{tms_id}",
+        rel="http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
+        type="application/json",
+        title=f"Definition of {tms_id}",
+    )
     tileset = TilesetSummary(
         title=f"{title} - {tms_id}",
         description=description or f"Tiles for {title} in {tms_id} projection",
@@ -469,12 +527,7 @@ async def create_tileset_for_tms(
                 type="application/json",
                 title=f"Tileset metadata for {tms_id}",
             ),
-            Link(
-                href=f"/tileMatrixSets/{tms_id}",
-                rel="http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
-                type="application/json",
-                title=f"Definition of {tms_id}",
-            ),
+            tiling_scheme,
         ],
         tileMatrixSetLimits=tileMatrixSetLimits,
         layers=layers if layers else None,
@@ -486,4 +539,26 @@ async def create_tileset_for_tms(
         mediaTypes=["image/png", "image/jpeg"],
         styles=styles,
     )
-    return tileset
+    styles_for_vector = vector_styles(styles)
+    if not (vector_layers and styles_for_vector):
+        return [tileset]
+    vector_tileset = tileset.model_copy(
+        update={
+            "title": f"{title} - {tms_id} - Vector",
+            "description": f"Vector tiles for {title} in {tms_id} projection",
+            "dataType": DataType.VECTOR,
+            "links": [
+                Link(
+                    href=f"./vector/{tms_id}",
+                    rel="self",
+                    type="application/json",
+                    title=f"Vector tileset metadata for {tms_id}",
+                ),
+                tiling_scheme,
+            ],
+            "layers": vector_layers,
+            "mediaTypes": [MVT_MEDIA_TYPE],
+            "styles": styles_for_vector,
+        }
+    )
+    return [tileset, vector_tileset]

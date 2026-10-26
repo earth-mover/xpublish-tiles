@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 from enum import Enum
+from functools import partial
 from typing import Annotated, Any
 from urllib.parse import quote
 
@@ -73,6 +74,7 @@ from xpublish_tiles.xpublish.tiles.tile_matrix import (
 from xpublish_tiles.xpublish.tiles.types import (
     TILES_FILTERED_QUERY_PARAMS,
     ConformanceDeclaration,
+    DataType,
     LegendQuery,
     TileJSON,
     TileMatrixSet,
@@ -105,6 +107,8 @@ class TilesPlugin(Plugin):
                     "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/core",
                     "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/tileset",
                     "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/tilesets-list",
+                    "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/png",
+                    "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/mvt",
                 ]
             )
 
@@ -248,14 +252,10 @@ class TilesPlugin(Plugin):
                     for tms_id in supported_tms
                 ]
             )
-            tilesets = [ts for ts in tileset_results if ts is not None]
+            tilesets = [ts for result in tileset_results for ts in result]
             default_tms = get_default_tile_matrix_set(
                 (var_grids[name] for name in layer_extents),
-                (
-                    t
-                    for t, ts in zip(supported_tms, tileset_results, strict=True)
-                    if ts is not None
-                ),
+                (t for t, ts in zip(supported_tms, tileset_results, strict=True) if ts),
             )
 
             return TilesetsList(tilesets=tilesets, defaultTileMatrixSet=default_tms)
@@ -354,6 +354,38 @@ class TilesPlugin(Plugin):
 
             media_type = "image/png" if query.f == LegendFormat.PNG else "image/jpeg"
             return Response(buffer.getvalue(), media_type=media_type)
+
+        @router.get(
+            "/vector/{tileMatrixSetId}",
+            response_model=TileSetMetadata,
+            response_model_exclude_none=True,
+        )
+        @with_accumulated_logs(
+            log_message_fn=lambda tileMatrixSetId, datatree: (
+                f"vector_tileset_metadata {tileMatrixSetId} {getattr(datatree, '_xpublish_id', 'unknown')}"
+            ),
+            context_fn=lambda tileMatrixSetId, datatree: {
+                "tileMatrixSetId": tileMatrixSetId,
+                "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
+            },
+        )
+        async def get_dataset_vector_tileset_metadata(
+            tileMatrixSetId: str,
+            datatree: DataTree = Depends(deps.datatree),
+        ):
+            """Get vector (MVT) tileset metadata for this dataset"""
+            dataset = get_dataset(datatree)
+            try:
+                return await async_run(
+                    partial(
+                        create_tileset_metadata,
+                        dataset,
+                        tileMatrixSetId,
+                        data_type=DataType.VECTOR,
+                    )
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=404, detail=str(e)) from e
 
         @router.get(
             "/{tileMatrixSetId}",

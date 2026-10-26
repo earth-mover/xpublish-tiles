@@ -180,6 +180,11 @@ class QueryParams:
     edgewidth: int = 1
 
     def get_renderer(self):
+        if self.format == TileFormat.MVT:
+            from xpublish_tiles.render.mvt import MVTRenderer
+
+            return MVTRenderer()
+
         from xpublish_tiles.render import RenderRegistry
 
         renderer_cls = RenderRegistry.get(self.style)

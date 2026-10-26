@@ -11,14 +11,17 @@ import xarray as xr
 from tests import create_query_params
 from xpublish_tiles.lib import UnsupportedStyleError
 from xpublish_tiles.pipeline import pipeline
+from xpublish_tiles.render import RenderRegistry
 from xpublish_tiles.render.mvt import (
     BUFFER,
     EXTENT,
+    MVTRenderer,
     _field,
     encode_geometries,
     encode_layer,
     prepare_geometries,
 )
+from xpublish_tiles.render.polygons import PolygonsRenderer
 from xpublish_tiles.testing.datasets import FEATURES_POLYGONS
 from xpublish_tiles.testing.tiles import WEBMERC_TMS
 from xpublish_tiles.types import TileFormat
@@ -46,6 +49,12 @@ def xvec_dataset(geoms, values, **attrs) -> xr.Dataset:
     ds = xr.Dataset(coords={"feature": geoms}).xvec.set_geom_indexes("feature", crs=4326)
     ds["foo"] = ("feature", np.asarray(values), attrs)
     return ds
+
+
+def test_mvt_renderer_is_chosen_by_format():
+    query = create_query_params(Z0, WEBMERC_TMS, style="polygons", format=TileFormat.MVT)
+    assert isinstance(query.get_renderer(), MVTRenderer)
+    assert RenderRegistry.get("polygons") is PolygonsRenderer
 
 
 def test_encode_layer_roundtrip():
@@ -91,6 +100,24 @@ def test_encode_layer_roundtrip():
         [[True], [True]],
         [[True]],
     ]
+
+
+def test_prepare_geometries_drops_clipped_slivers():
+    edge = EXTENT + BUFFER
+    crossing = shapely.box(edge - 100, 0, edge + 100, 100)
+    # touches the clip edge only along a line, which clipping leaves behind
+    touching = shapely.box(edge, 200, edge + 100, 300)
+    (clipped,) = prepare_geometries(
+        np.array([shapely.MultiPolygon([crossing, touching])])
+    )
+    assert shapely.equals(clipped, shapely.box(edge - 100, 0, edge, 100))
+
+
+def test_encode_layer_bool_values():
+    geoms = prepare_geometries(np.array([shapely.box(0, 0, 10, 10)] * 2))
+    raw = encode_layer("layer", encode_geometries(geoms), np.array([True, False]))
+    features = decode(_field(3, raw))["layer"]["features"]
+    assert [f["properties"]["value"] for f in features] == [True, False]
 
 
 async def test_features_mvt(features):
@@ -172,11 +199,10 @@ async def test_mvt_discrete_values_and_colors():
 
 
 async def test_mvt_drops_nan_features():
-    ds = xvec_dataset(
-        [shapely.box(0, 0, 20, 20), shapely.box(30, 0, 50, 20)], [1.0, np.nan]
-    )
-    feats = (await render(ds))["foo"]["features"]
+    boxes = [shapely.box(0, 0, 20, 20), shapely.box(30, 0, 50, 20)]
+    feats = (await render(xvec_dataset(boxes, [1.0, np.nan])))["foo"]["features"]
     assert [(f["id"], f["properties"]["value"]) for f in feats] == [(0, 1.0)]
+    assert await render(xvec_dataset(boxes, [np.nan, np.nan])) == {}
 
 
 async def test_mvt_layer_per_variable(features):

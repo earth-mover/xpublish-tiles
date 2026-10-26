@@ -81,7 +81,6 @@ from xpublish_tiles.types import (
     DataType,
     DiscreteData,
     GeometryArray,
-    ImageFormat,
     NullRenderContext,
     OutputBBox,
     OutputCRS,
@@ -890,26 +889,6 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
         subsets, bbox=query.bbox, crs=query.crs, style=renderer.style_id()
     )
 
-    if mvt:
-        from xpublish_tiles.render.mvt import render_mvt
-
-        buffer = io.BytesIO()
-        await async_run(
-            partial(
-                render_mvt,
-                subsets,
-                buffer=buffer,
-                variant=query.variant,
-                colorscalerange=query.colorscalerange,
-                colormap=query.colormap,
-                abovemaxcolor=query.abovemaxcolor,
-                belowmincolor=query.belowmincolor,
-                context_logger=context_logger,
-            )
-        )
-        buffer.seek(0)
-        return buffer
-
     tasks = [
         async_run(
             subset.maybe_rewrite_to_rectilinear,
@@ -933,7 +912,7 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
             height=query.height,
             variant=query.variant,
             colorscalerange=query.colorscalerange,
-            format=ImageFormat(query.format),
+            format=query.format,
             context_logger=context_logger,
             colormap=query.colormap,
             abovemaxcolor=query.abovemaxcolor,

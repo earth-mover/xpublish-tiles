@@ -21,16 +21,19 @@ from spatialpandas.geometry import MultiPolygonArray
 from xpublish_tiles.grids import Features, GeometryIndexer
 from xpublish_tiles.lib import apply_range_colors, create_colormap_from_dict
 from xpublish_tiles.logger import get_context_logger, log_duration
-from xpublish_tiles.render import DatashaderRenderer, discrete_color_key
+from xpublish_tiles.render import discrete_color_key
+from xpublish_tiles.render.polygons import PolygonsRenderer
 from xpublish_tiles.types import (
     ContinuousData,
     DataType,
     DiscreteData,
     GeometryArray,
+    ImageFormat,
     NullRenderContext,
     OutputBBox,
     PopulatedRenderContext,
     RenderContext,
+    TileFormat,
 )
 
 try:
@@ -143,8 +146,6 @@ def prepare_geometries(geoms: np.ndarray) -> np.ndarray:
 
 def encode_geometries(geoms: np.ndarray) -> list[bytes]:
     """Packed MVT polygon command streams, one per non-empty (multi)polygon."""
-    if geoms.size == 0:
-        return []
     geom_type, coords, offsets = shapely.to_ragged_array(geoms)
     if geom_type == GeometryType.POLYGON:
         ring_offsets, geom_offsets = offsets
@@ -251,7 +252,7 @@ def _value_messages(values: np.ndarray) -> tuple[list[bytes], np.ndarray]:
     elif values.dtype.kind == "i":
         messages = [b"\x30" + _varint((v << 1) ^ (v >> 63)) for v in uniques.tolist()]
     else:
-        messages = [_field(1, str(v).encode()) for v in uniques.tolist()]
+        raise TypeError(f"Cannot encode {values.dtype} values in a vector tile.")
     return messages, inverse
 
 
@@ -304,60 +305,76 @@ def _feature_ids(context: PopulatedRenderContext) -> np.ndarray | None:
     return patch.indexer.indices
 
 
-def render_mvt(
-    contexts: dict[str, RenderContext],
-    *,
-    buffer: io.BytesIO,
-    variant: str,
-    colorscalerange: tuple[Number, Number] | None = None,
-    colormap: dict[str, str] | None = None,
-    abovemaxcolor: str | None = None,
-    belowmincolor: str | None = None,
-    context_logger=None,
-) -> None:
-    """Write one MVT layer per variable with polygons in the tile to ``buffer``."""
-    logger = context_logger if context_logger is not None else get_context_logger()
-    if variant == "default":
-        variant = DatashaderRenderer.default_variant()
+class MVTRenderer(PolygonsRenderer):
+    """The polygons style's features, encoded as a Mapbox Vector Tile.
 
-    for name, context in contexts.items():
-        if isinstance(context, NullRenderContext):
-            continue
-        assert isinstance(context, PopulatedRenderContext)
-        assert context.polygons is not None and context.da is not None
-        if len(context.polygons) == 0:
-            continue
+    Chosen by ``f=mvt`` rather than by style, so it is not in the renderer
+    registry; its ``polygons`` style id selects the polygon geometry path.
+    """
 
-        with log_duration(
-            f"mvt geometry {len(context.polygons)}", logger, key="mvt_geometry"
-        ):
-            geoms = prepare_geometries(
-                _to_tile_geometries(context.polygons, context.bbox)
-            )
-        values = np.asarray(context.da.values)
-        keep = ~shapely.is_empty(geoms)
-        if values.dtype.kind == "f":
-            keep &= np.isfinite(values)
-        if not keep.any():
-            continue
+    def render(
+        self,
+        *,
+        contexts: dict[str, RenderContext],
+        buffer: io.BytesIO,
+        width: int,
+        height: int,
+        variant: str,
+        colorscalerange: tuple[Number, Number] | None = None,
+        format: ImageFormat | TileFormat = TileFormat.MVT,
+        context_logger=None,
+        colormap: dict[str, str] | None = None,
+        abovemaxcolor: str | None = None,
+        belowmincolor: str | None = None,
+        edgecolor: str | None = None,
+        edgewidth: int = 1,
+    ) -> None:
+        """Write one MVT layer per variable with polygons in the tile to ``buffer``."""
+        logger = context_logger if context_logger is not None else get_context_logger()
+        if variant == "default":
+            variant = self.default_variant()
 
-        values = values[keep]
-        ids = _feature_ids(context)
-        colors = feature_colors(
-            values,
-            context.datatype,
-            variant=variant,
-            colorscalerange=colorscalerange,
-            colormap=colormap,
-            abovemaxcolor=abovemaxcolor,
-            belowmincolor=belowmincolor,
-        )
-        with log_duration(f"encode mvt {keep.sum()}", logger, key="encode"):
-            layer = encode_layer(
-                str(name),
-                encode_geometries(geoms[keep]),
+        for name, context in contexts.items():
+            if isinstance(context, NullRenderContext):
+                continue
+            assert isinstance(context, PopulatedRenderContext)
+            assert context.polygons is not None and context.da is not None
+            if len(context.polygons) == 0:
+                continue
+
+            with log_duration(
+                f"mvt geometry {len(context.polygons)}", logger, key="mvt_geometry"
+            ):
+                geoms = prepare_geometries(
+                    _to_tile_geometries(context.polygons, context.bbox)
+                )
+            values = np.asarray(context.da.values)
+            keep = ~shapely.is_empty(geoms)
+            if values.dtype.kind == "f":
+                keep &= np.isfinite(values)
+            if not keep.any():
+                continue
+
+            values = values[keep]
+            ids = _feature_ids(context)
+            colors = feature_colors(
                 values,
-                colors=colors,
-                ids=None if ids is None else ids[keep],
+                context.datatype,
+                variant=variant,
+                colorscalerange=colorscalerange,
+                colormap=colormap,
+                abovemaxcolor=abovemaxcolor,
+                belowmincolor=belowmincolor,
             )
-            buffer.write(_field(3, layer))
+            with log_duration(f"encode mvt {keep.sum()}", logger, key="encode"):
+                layer = encode_layer(
+                    str(name),
+                    encode_geometries(geoms[keep]),
+                    values,
+                    colors=colors,
+                    ids=None if ids is None else ids[keep],
+                )
+                buffer.write(_field(3, layer))
+
+    def render_error(self, **kwargs):
+        raise NotImplementedError("Vector tiles report errors as HTTP errors.")

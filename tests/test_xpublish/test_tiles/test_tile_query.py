@@ -25,6 +25,20 @@ class TestTileQueryColormap:
         assert query.colormap == colormap
         assert query.style == ("raster", "custom")
 
+        query = TileQuery(
+            variables=["air"],
+            colormap=colormap,
+            style="polygons/custom",  # type: ignore
+            width=256,
+            height=256,
+            colorscalerange=None,
+            f=TileFormat.PNG,
+            render_errors=False,
+            abovemaxcolor=None,
+            belowmincolor=None,
+        )
+        assert query.style == ("polygons", "custom")
+
     def test_tile_query_colormap_validation_none(self):
         """Test that None colormap is handled correctly."""
         query = TileQuery(
@@ -65,7 +79,7 @@ class TestTileQueryColormap:
         assert query.style == ("raster", "custom")
 
         # Test that raster/default fails
-        with pytest.raises(ValidationError, match="must be 'raster/custom'"):
+        with pytest.raises(ValidationError, match="variant must be 'custom'"):
             TileQuery(
                 variables=["air"],
                 colormap=colormap,
@@ -80,7 +94,7 @@ class TestTileQueryColormap:
             )
 
         # Test that raster/viridis fails
-        with pytest.raises(ValidationError, match="must be 'raster/custom'"):
+        with pytest.raises(ValidationError, match="variant must be 'custom'"):
             TileQuery(
                 variables=["air"],
                 colormap=colormap,
