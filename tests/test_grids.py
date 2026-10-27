@@ -2428,3 +2428,37 @@ def test_polar_locate_sector_gap():
     npt.assert_array_equal(out[grid.Xdim], [-1, 45])
     npt.assert_array_equal(out[grid.Ydim], [-1, 10])
     _assert_polar_round_trip(ds)
+
+
+def _polar_ds_with_azimuth(azimuth, xpublish_id):
+    ds = RADAR.create().isel(azimuth=slice(0, azimuth.size))
+    ds = ds.assign_coords(azimuth=("azimuth", azimuth, ds.azimuth.attrs))
+    ds.attrs["_xpublish_id"] = xpublish_id
+    return ds
+
+
+def test_polar_locate_jittered_full_sweep():
+    jitter = np.random.default_rng(0).uniform(-0.3, 0.3, 360)
+    az = (np.arange(360) + jitter) % 360.0
+    ds = _polar_ds_with_azimuth(az, "polar_locate_jitter")
+    grid = cast(Polar, guess_grid_system(ds, "foo"))
+    index = grid.indexes[0]
+    r = np.full(360, index.range_m[10])
+    lon, lat = _polar_lonlat(grid, index.azimuth, r)
+    out = grid.locate(x=lon, y=lat)
+    npt.assert_array_equal(out[grid.Xdim], np.arange(360))
+    npt.assert_array_equal(out[grid.Ydim], np.full(360, 10))
+    lon, lat = _polar_lonlat(grid, [359.95, 0.05, 180.0], r[:3])
+    assert (grid.locate(x=lon, y=lat)[grid.Xdim] >= 0).all()
+
+
+def test_polar_locate_sector_across_north():
+    az = (np.arange(350, 371) % 360).astype(np.float64)
+    ds = _polar_ds_with_azimuth(az, "polar_locate_north_sector")
+    grid = cast(Polar, guess_grid_system(ds, "foo"))
+    index = grid.indexes[0]
+    r = index.range_m[10]
+    lon, lat = _polar_lonlat(grid, [180.0, 90.0, 355.0, 0.0, 9.0], [r] * 5)
+    out = grid.locate(x=lon, y=lat)
+    npt.assert_array_equal(out[grid.Xdim], [-1, -1, 5, 10, 19])
+    _assert_polar_round_trip(ds)

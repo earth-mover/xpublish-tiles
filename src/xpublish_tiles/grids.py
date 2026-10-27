@@ -925,19 +925,31 @@ class PolarIndex(xr.Index):
         )
 
     @cached_property
-    def _azimuth_lookup(self) -> tuple[np.ndarray, np.ndarray, float, float, bool]:
-        """(order, midpoint edges, origin, half spacing, full) for sorted rays.
+    def _azimuth_lookup(self) -> tuple[np.ndarray, np.ndarray, float, float, float, bool]:
+        """(order, midpoint edges, origin, half spacing, last ray, full).
 
-        Edges are relative to the first sorted ray, so the wrap sits at 360.
+        ``order`` sorts the rays circularly from the ray after the largest gap;
+        edges and ``last`` are relative to that origin ray.
         """
         order = np.argsort(self.azimuth)
         s = self.azimuth[order]
-        origin = float(s[0])
-        rel = s - origin
-        gaps = np.diff(np.append(rel, 360.0))
-        spacing = float(np.median(gaps[:-1])) if s.size > 1 else 1.0
-        full = bool(gaps.max() <= 1.5 * spacing)
-        return order, 0.5 * (rel[:-1] + rel[1:]), origin, 0.5 * spacing, full
+        n = s.size
+        gaps = np.diff(np.append(s, s[0] + 360.0))
+        k = int(np.argmax(gaps))
+        spacing = float(np.median(np.delete(gaps, k))) if n > 1 else 1.0
+        full = bool(gaps[k] <= 3.0 * spacing)
+        if not full:
+            order = np.roll(order, -(k + 1))
+        origin = float(self.azimuth[order[0]])
+        rel = (self.azimuth[order] - origin) % 360.0
+        return (
+            order,
+            0.5 * (rel[:-1] + rel[1:]),
+            origin,
+            0.5 * spacing,
+            float(rel[-1]),
+            full,
+        )
 
     def get_indexer(
         self, lon: np.ndarray, lat: np.ndarray
@@ -960,15 +972,15 @@ class PolarIndex(xr.Index):
         rng = np.searchsorted(edges, r, side="right") - 1
         rng_ok = finite & (r >= edges[0]) & (r < edges[-1])
 
-        order, mids, origin, half, full = self._azimuth_lookup
+        order, mids, origin, half, last, full = self._azimuth_lookup
         u = (az - origin) % 360.0
         pos = np.searchsorted(mids, u, side="right")
         if full:
-            wrap_mid = 0.5 * (self.azimuth[order[-1]] - origin + 360.0)
+            wrap_mid = 0.5 * (last + 360.0)
             pos = np.where(u >= wrap_mid, 0, pos)
             az_ok = finite
         else:
-            end = self.azimuth[order[-1]] - origin + half
+            end = last + half
             pos = np.where(u >= 360.0 - half, 0, pos)
             az_ok = finite & ((u < end) | (u >= 360.0 - half))
 
