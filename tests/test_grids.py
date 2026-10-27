@@ -97,6 +97,8 @@ from xpublish_tiles.testing.datasets import (
     REDGAUSS_N320,
     REGIONAL_HEALPIX_NA,
     SENTINEL2_NOCOORDS,
+    TRIPOLE_ANTIMERIDIAN,
+    TRIPOLE_GLOBAL_UNWRAPPED,
     UGRID_TRIANGLES,
     UTM33S_HIRES,
     UTM50S_HIRES,
@@ -2285,8 +2287,51 @@ def test_locate_nonfinite_misses(dataset):
 
 
 def test_locate_not_supported():
-    ds = CURVILINEAR.create()
-    grid = guess_grid_system(ds, next(iter(ds.data_vars)))
-    assert not grid.supports_locate
+    grid = guess_grid_system(CURVILINEAR.create(), "foo")
+    assert GridSystem.supports_locate is False
     with pytest.raises(PointQueryNotSupportedError):
-        grid.locate(x=np.array([0.0]), y=np.array([0.0]))
+        GridSystem.locate(grid, x=np.array([0.0]), y=np.array([0.0]))
+
+
+def test_curvilinear_locate_cell_centres():
+    ds = CURVILINEAR.create()
+    grid = guess_grid_system(ds, "foo")
+    lon = ds.lon.transpose(grid.Ydim, grid.Xdim).values
+    lat = ds.lat.transpose(grid.Ydim, grid.Xdim).values
+    rng = np.random.default_rng(0)
+    j, i = rng.integers(0, lon.shape[0], 50), rng.integers(0, lon.shape[1], 50)
+    out = grid.locate(x=lon[j, i], y=lat[j, i])
+    npt.assert_array_equal(out[grid.Ydim], j)
+    npt.assert_array_equal(out[grid.Xdim], i)
+    far = grid.locate(
+        x=np.array([lon[0, 0] + 180.0, np.nan]), y=np.array([lat[0, 0], 0.0])
+    )
+    assert (far[grid.Xdim] == -1).all()
+
+
+@pytest.mark.parametrize(
+    "dataset", [TRIPOLE_ANTIMERIDIAN, TRIPOLE_GLOBAL_UNWRAPPED], ids=lambda d: d.name
+)
+def test_curvilinear_locate_tripole(dataset):
+    ds = dataset.create()
+    grid = guess_grid_system(ds, "foo")
+    index = grid.indexes[0]
+    assert isinstance(index, CurvilinearCellIndex)
+    # cells of the Arctic cap overlap, so a centre may lie in a lower-numbered cell
+    nrows = index.tripolar_fold_row or int(0.9 * ds.sizes[grid.Ydim])
+    lon = ds.lon.transpose(grid.Ydim, grid.Xdim).values[:nrows]
+    lat = ds.lat.transpose(grid.Ydim, grid.Xdim).values[:nrows]
+    rng = np.random.default_rng(0)
+    j, i = rng.integers(0, lon.shape[0], 50), rng.integers(0, lon.shape[1], 50)
+    for shift in (-360.0, 0.0, 360.0):
+        out = grid.locate(x=lon[j, i] + shift, y=lat[j, i])
+        npt.assert_array_equal(out[grid.Ydim], j)
+        npt.assert_array_equal(out[grid.Xdim], i)
+
+
+def test_curvilinear_locate_polar_cap_raises():
+    grid = guess_grid_system(CUBED_SPHERE.create(), "foo")
+    assert isinstance(grid, CubedSphere)
+    cap = next(f for f in grid.faces if f.is_polar_cap)
+    with pytest.raises(PointQueryNotSupportedError, match="polar-cap"):
+        cap.locate(x=np.array([0.0]), y=np.array([89.0]))

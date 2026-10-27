@@ -1000,6 +1000,7 @@ def test_locate_equivalent_grids(data, rect):
         "rectilinear": (rect, {"longitude": xi, "latitude": yi}),
         "raster": (raster_from_rectilinear(rect), {"x": xi, "y": yi}),
         "features": (features_from_rectilinear(rect), {"cell": yi * lons.size + xi}),
+        "curvilinear": (curvilinear_from_rectilinear(rect), {"nlon": xi, "nlat": yi}),
     }
     for name, (ds, expected) in views.items():
         grid = guess_grid_system(ds, "foo")
@@ -1008,6 +1009,3 @@ def test_locate_equivalent_grids(data, rect):
         assert actual.keys() == expected.keys(), name
         for dim, positions in expected.items():
             npt.assert_array_equal(actual[dim], positions, err_msg=f"{name} {dim}")
-
-    curvi = curvilinear_from_rectilinear(rect)
-    assert not guess_grid_system(curvi, "foo").supports_locate

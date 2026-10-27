@@ -5,6 +5,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Hashable, Iterable
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, Self, cast
 
 import cachetools
@@ -51,6 +52,7 @@ from xpublish_tiles.lib import (
     sync_load_async,
     unwrap,
 )
+from xpublish_tiles.locate import locate_in_quads
 from xpublish_tiles.logger import get_context_logger, log_duration, logger
 from xpublish_tiles.projections import (
     aeqd_to_4326,
@@ -1091,6 +1093,22 @@ class CurvilinearCellIndex(xr.Index):
     def get_min_spacing(self) -> tuple[float, float]:
         """Get minimum spacing in X and Y directions."""
         return self._dXmin, self._dYmin
+
+    @cached_property
+    def locate_arrays(self) -> tuple[np.ndarray, ...]:
+        """``(corner_x, corner_y, cell_x_min, cell_x_max, cell_y_min, cell_y_max)`` as
+        float64 in ``(y, x)`` order, without the tripolar fold rows; built on first ``locate``."""
+        corners = (self.corner_x, self.corner_y)
+        cells = (self.cell_x_min, self.cell_x_max, self.cell_y_min, self.cell_y_max)
+        if self.yaxis == 1:
+            corners = tuple(a.T for a in corners)
+            cells = tuple(a.T for a in cells)
+        if self.tripolar_fold_row is not None:
+            corners = tuple(a[: self.tripolar_fold_row + 1] for a in corners)
+            cells = tuple(a[: self.tripolar_fold_row] for a in cells)
+        return tuple(
+            np.ascontiguousarray(a, dtype=np.float64) for a in (*corners, *cells)
+        )
 
     def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
         X, Y = self.X.data, self.Y.data
@@ -2260,6 +2278,7 @@ class Curvilinear(GridSystem):
     Ydim: str
     indexes: tuple[xr.Index, ...]
     Z: str | None = None
+    supports_locate: ClassVar[bool] = True
     lon_spans_globe: bool = field(init=False)
     dXmin: float = field(init=False)
     dYmin: float = field(init=False)
@@ -2482,6 +2501,38 @@ class Curvilinear(GridSystem):
         yslicers = [y_raw]  # Always a single slice
 
         return {self.Xdim: xslicers, self.Ydim: yslicers}
+
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        index = next(iter(self.indexes))
+        assert isinstance(index, CurvilinearCellIndex)
+        if index.is_polar_cap:
+            # TODO: test cap cells in the face's gnomonic tangent plane
+            raise PointQueryNotSupportedError(
+                "Point queries on polar-cap faces are not supported yet."
+            )
+        x = np.asarray(x, dtype=np.float64)
+        geographic = self.crs.is_geographic
+        if geographic:
+            x = normalize_longitude_deg(x, index.left_break)
+        corner_x, corner_y, cell_x_min, cell_x_max, cell_y_min, cell_y_max = (
+            index.locate_arrays
+        )
+        flat = locate_in_quads(
+            x,
+            y,
+            corner_x,
+            corner_y,
+            cell_x_min,
+            cell_x_max,
+            cell_y_min,
+            cell_y_max,
+            360.0 if geographic else 0.0,
+        )
+        hit = flat >= 0
+        j = np.full(flat.shape, -1, dtype=np.int64)
+        i = np.full(flat.shape, -1, dtype=np.int64)
+        j[hit], i[hit] = np.unravel_index(flat[hit], cell_x_min.shape)
+        return {self.Xdim: i, self.Ydim: j}
 
     def coarsen_indices(
         self,

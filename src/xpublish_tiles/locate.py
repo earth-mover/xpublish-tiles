@@ -43,6 +43,8 @@ def _locate_in_quads(
                         break
                 if out[p] >= 0:
                     break
+            if out[p] >= 0:
+                break
     return out
 
 

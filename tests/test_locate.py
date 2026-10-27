@@ -79,3 +79,11 @@ def test_locate_quads_float32():
     npt.assert_array_equal(
         locate_in_quads(np.array([3.5]), np.array([2.5]), *args, 0.0), [11]
     )
+
+
+def test_locate_quads_overlap_lowest_row_wins():
+    # rows 0 and 2 both contain the point; the lowest position must win
+    corner_x, corner_y = np.meshgrid([0.0, 1.0], [0.0, 1.0, 0.0, 1.0], indexing="xy")
+    args = (corner_x, corner_y, *_cell_bounds(corner_x, corner_y))
+    out = locate_in_quads(np.array([0.5]), np.array([0.5]), *args, 0.0)
+    npt.assert_array_equal(out, [0])
