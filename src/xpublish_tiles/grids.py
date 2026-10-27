@@ -1878,19 +1878,11 @@ class RasterAffine(RectilinearMixin, GridSystem):
 
     def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
         (index,) = self.indexes
-        affine = index.transform()
         if self.crs.is_geographic:
-            # same left break as _x_sel
-            x = normalize_longitude_deg(x, affine.c)
-        cols, rows = ~affine * (np.asarray(x), np.asarray(y))
-        indexers = {}
-        for dim, pos, size in zip(
-            (self.Xdim, self.Ydim), (cols, rows), index.xy_shape, strict=True
-        ):
-            pos = np.floor(pos).astype(np.int64)
-            pos[(pos < 0) | (pos >= size)] = -1
-            indexers[dim] = pos
-        return indexers
+            # same left break as _x_sel; regional grids have no x_period
+            x = normalize_longitude_deg(x, index.transform().c)
+        x_name, y_name = index.xy_coord_names
+        return index.get_indexer({x_name: x, y_name: y})
 
     def _get_edge_arrays(self) -> tuple[np.ndarray, np.ndarray]:
         """Return full 1D edge arrays (x_edges size nx+1, y_edges size ny+1)."""

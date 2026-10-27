@@ -2268,6 +2268,22 @@ def test_locate_cell_centres(dataset):
     assert any(idx.tolist() == [-1] for idx in outside.values())
 
 
+@pytest.mark.parametrize(
+    "dataset",
+    [GLOBAL_6KM, GLOBAL_6KM_360, ERA5, EU3035, SENTINEL2_NOCOORDS, GEOSTATIONARY],
+    ids=lambda d: d.name,
+)
+def test_locate_nonfinite_misses(dataset):
+    ds = dataset.create()
+    name = next(iter(ds.data_vars))
+    grid = guess_grid_system(ds, name)
+    da = grid.assign_index(cf_get(ds, name))
+    x = np.array([np.nan, np.inf, -np.inf])
+    y = np.full(3, da[grid.Y].values[0])
+    indexers = grid.locate(x=x, y=y)
+    assert np.logical_or.reduce([idx == -1 for idx in indexers.values()]).all()
+
+
 def test_locate_not_supported():
     ds = CURVILINEAR.create()
     grid = guess_grid_system(ds, next(iter(ds.data_vars)))

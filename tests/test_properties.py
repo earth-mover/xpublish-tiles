@@ -993,7 +993,8 @@ def test_locate_equivalent_grids(data, rect):
     offsets = st.lists(st.floats(-0.45, 0.45), min_size=n, max_size=n)
     shift = 360.0 * data.draw(st.integers(-2, 2))
     x = lons[xi] + np.array(data.draw(offsets)) * dx + shift
-    y = lats[yi] + np.array(data.draw(offsets)) * dy
+    # Features clips geometries at the poles; the other grids extend pole cells past ±90
+    y = np.clip(lats[yi] + np.array(data.draw(offsets)) * dy, -90, 90)
 
     views = {
         "rectilinear": (rect, {"longitude": xi, "latitude": yi}),

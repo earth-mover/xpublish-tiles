@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15' and platform_machine == 'ARM64' and sys_platform == 'win32'",
@@ -3133,7 +3133,7 @@ name = "pexpect"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ptyprocess", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "ptyprocess" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/92/cc564bf6381ff43ce1f4d06852fc19a2f11d180f23dc32d9588bee2f149d/pexpect-4.9.0.tar.gz", hash = "sha256:ee7d41123f3c9911050ea2c2dac107568dc43b2d3b0c7557a33212c398ead30f", size = 166450, upload-time = "2023-11-25T09:07:26.339Z" }
 wheels = [
@@ -4169,7 +4169,7 @@ wheels = [
 
 [[package]]
 name = "rasterix"
-version = "0.2.4"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "affine" },
@@ -4178,9 +4178,9 @@ dependencies = [
     { name = "xarray" },
     { name = "xproj" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5a/f1/d4858a760dbbcb5160e9ec1291ee4e49782e8fbdf785e828c83739893e73/rasterix-0.2.4.tar.gz", hash = "sha256:acbc988347a5a369c9dbacbc06df43b6f00d130df8b9b4deede74d4d10a06427", size = 116341, upload-time = "2026-10-06T16:48:51.27Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e9/bb/913d6b9b8bd1c8b53551d4a8cbe89b600f21f60d523d471f8a36b7831f6e/rasterix-0.3.0.tar.gz", hash = "sha256:8230e9ff9a484805212ff8d2b48ea25b3f9d19b3dddb5901b1c486a259dde6a5", size = 119231, upload-time = "2026-10-27T15:57:21.055Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/21/48/15e269d25e6f683289769eaf4483213d0eea78a0a4c967da38ca1586259f/rasterix-0.2.4-py3-none-any.whl", hash = "sha256:47e58f098b7270b4a1b79e0b6f2a1075c990c78f2053858441671a255ecfe2eb", size = 54901, upload-time = "2026-10-06T16:48:50.242Z" },
+    { url = "https://files.pythonhosted.org/packages/99/1f/ee27823b73bd9b28f3d11dcc8bc9718daa203d99547c15c915f288e36d14/rasterix-0.3.0-py3-none-any.whl", hash = "sha256:99e57e1f035c8ac629dcc03c09ff3fe3967dd51cbac74f0144fb930456d43a0c", size = 56353, upload-time = "2026-10-27T15:57:19.986Z" },
 ]
 
 [[package]]
@@ -4745,7 +4745,7 @@ name = "tbb"
 version = "2022.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "tcmlib", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "tcmlib" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/08/59/8d381a2cfe8d36c4f4ff9f94769ff2809bfc16014d888360b0e24c7e5c6b/tbb-2022.3.1-py2.py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:534c089eca6bcf148408684c156229d5f09c01d323b685b15739f41985b529d7", size = 4178630, upload-time = "2026-01-22T05:30:20.589Z" },
@@ -5329,7 +5329,7 @@ requires-dist = [
     { name = "pytest-randomly", marker = "extra == 'testing'", specifier = ">=3.16.0" },
     { name = "pytest-split", marker = "extra == 'testing'", specifier = ">=0.10.0" },
     { name = "pytest-xdist", marker = "extra == 'testing'", specifier = ">=3.6.1" },
-    { name = "rasterix", specifier = ">=0.2.4" },
+    { name = "rasterix", specifier = ">=0.3.0" },
     { name = "requests", specifier = ">=2.32.5" },
     { name = "scikit-image", specifier = ">=0.25.2" },
     { name = "scikit-image", marker = "extra == 'testing'", specifier = ">=0.25.2" },
