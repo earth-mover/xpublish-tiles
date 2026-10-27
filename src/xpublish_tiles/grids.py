@@ -660,7 +660,7 @@ class CellTreeIndex(xr.Index):
         X: str,
         Y: str,
         lon_spans_globe: bool,
-        geographic: bool = False,
+        geographic: bool,
     ):
         self.X = X
         self.Y = Y
@@ -1190,7 +1190,7 @@ class CurvilinearCellIndex(xr.Index):
     @cached_property
     def locate_arrays(self) -> tuple[np.ndarray, ...]:
         """``(corner_x, corner_y, cell_x_min, cell_x_max, cell_y_min, cell_y_max)`` as
-        float64 in ``(y, x)`` order, without the tripolar fold rows; built on first ``locate``."""
+        their own dtype in ``(y, x)`` order, without the tripolar fold rows; built on first ``locate``."""
         corners = (self.corner_x, self.corner_y)
         cells = (self.cell_x_min, self.cell_x_max, self.cell_y_min, self.cell_y_max)
         if self.yaxis == 1:
@@ -1199,9 +1199,7 @@ class CurvilinearCellIndex(xr.Index):
         if self.tripolar_fold_row is not None:
             corners = tuple(a[: self.tripolar_fold_row + 1] for a in corners)
             cells = tuple(a[: self.tripolar_fold_row] for a in cells)
-        return tuple(
-            np.ascontiguousarray(a, dtype=np.float64) for a in (*corners, *cells)
-        )
+        return tuple(np.ascontiguousarray(a) for a in (*corners, *cells))
 
     def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
         X, Y = self.X.data, self.Y.data
@@ -1734,6 +1732,8 @@ class GridSystem(ABC):
         node and the face dim), aligned with ``x`` and ``y``, for pointwise ``isel``.
         Index a variable with the dims in ``dims_for(da)`` only. A point outside the
         grid, or a non-finite point, is ``-1`` along at least one of those dims.
+        Some grids raise ``PointQueryNotSupportedError`` for points they cannot query
+        (for example CubedSphere polar-cap faces).
         """
         raise PointQueryNotSupportedError(
             f"Point queries are not supported on {type(self).__name__} grids."
@@ -3418,11 +3418,15 @@ class Healpix(HealpixBase):
         if self._ids_are_positions:
             return {self.dim: ids}
         sorter = self._id_sorter
+        valid = ids >= 0
+        query = ids[valid].astype(self.cell_ids.dtype)
         found = np.minimum(
-            np.searchsorted(self.cell_ids, ids, sorter=sorter), self.cell_ids.size - 1
+            np.searchsorted(self.cell_ids, query, sorter=sorter), self.cell_ids.size - 1
         )
         pos = sorter[found]
-        return {self.dim: np.where((ids >= 0) & (self.cell_ids[pos] == ids), pos, -1)}
+        out = np.full(ids.shape, -1, dtype=np.int64)
+        out[valid] = np.where(self.cell_ids[pos] == query, pos, -1)
+        return {self.dim: out}
 
     @cached_property
     def _ids_are_positions(self) -> bool:
@@ -3836,7 +3840,10 @@ class CubedSphere(FacetedGridSystem):
             face[idx] = f
             row[idx] = hit[grid.Ydim][found]
             col[idx] = hit[grid.Xdim][found]
-        if has_cap and (np.isfinite(x) & np.isfinite(y) & (face < 0)).any():
+        if (
+            has_cap
+            and (np.isfinite(x) & np.isfinite(y) & (np.abs(y) <= 90) & (face < 0)).any()
+        ):
             raise PointQueryNotSupportedError(
                 "Point queries on polar-cap faces are not supported yet."
             )

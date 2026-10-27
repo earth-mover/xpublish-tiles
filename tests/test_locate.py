@@ -1,5 +1,6 @@
 import numpy as np
 import numpy.testing as npt
+import pytest
 
 from xpublish_tiles.locate import locate_in_quads
 
@@ -88,3 +89,8 @@ def test_locate_quads_overlap_lowest_row_wins():
     args: Arrays = (corner_x, corner_y, x_min, x_max, y_min, y_max)
     out = locate_in_quads(np.array([0.5]), np.array([0.5]), *args, 0.0)
     npt.assert_array_equal(out, [0])
+
+
+def test_locate_quads_shape_mismatch_raises():
+    with pytest.raises(ValueError, match="shapes differ"):
+        locate_in_quads(np.zeros(3), np.zeros(1), *_mesh(4, 3), 0.0)

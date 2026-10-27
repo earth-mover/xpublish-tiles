@@ -67,11 +67,14 @@ def locate_in_quads(
     A linear scan per point: CellTree2d would need about 64 bytes per cell.
     """
     px = np.asarray(px, dtype=np.float64)
+    py = np.asarray(py, dtype=np.float64)
+    if px.shape != py.shape:
+        raise ValueError(f"px and py shapes differ: {px.shape} vs {py.shape}")
     out = _locate_in_quads(
         np.ravel(px),
-        np.ravel(np.asarray(py, dtype=np.float64)),
+        np.ravel(py),
         *(
-            np.asarray(a, dtype=np.float64)
+            np.ascontiguousarray(a)
             for a in (corner_x, corner_y, cell_x_min, cell_x_max, cell_y_min, cell_y_max)
         ),
         float(period),

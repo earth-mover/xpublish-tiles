@@ -2365,6 +2365,13 @@ def test_cubed_sphere_locate_nonfinite_does_not_raise():
     assert all(v.tolist() == [-1] for v in out.values())
 
 
+def test_cubed_sphere_locate_off_sphere_does_not_raise():
+    grid = guess_grid_system(CUBED_SPHERE.create(), "foo")
+    out = grid.locate(x=np.array([0.0]), y=np.array([95.0]))
+    assert len(out) == 3
+    assert all(v.tolist() == [-1] for v in out.values())
+
+
 def _polar_lonlat(grid: Polar, az_deg, rng_m):
     """Flat-earth forward of ``Polar.assign_index`` (test only)."""
     az, rng = np.broadcast_arrays(
