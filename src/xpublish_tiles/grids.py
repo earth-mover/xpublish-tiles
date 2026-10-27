@@ -1619,8 +1619,10 @@ class GridSystem(ABC):
     def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
         """Positions of the cells containing the points ``(x, y)``, in the grid CRS.
 
-        Returns one integer array per grid dim, aligned with ``x`` and ``y``, for
-        pointwise ``isel``. A point outside the grid is ``-1`` along at least one dim.
+        Returns one integer array per horizontal grid dim (for a UGRID mesh, both the
+        node and the face dim), aligned with ``x`` and ``y``, for pointwise ``isel``.
+        Index a variable with the dims in ``dims_for(da)`` only. A point outside the
+        grid, or a non-finite point, is ``-1`` along at least one of those dims.
         """
         raise PointQueryNotSupportedError(
             f"Point queries are not supported on {type(self).__name__} grids."
