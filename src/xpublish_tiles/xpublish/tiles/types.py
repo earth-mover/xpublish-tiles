@@ -1182,6 +1182,13 @@ class TilesetSummary(BaseModel):
     ] = None
 
 
+class UnavailableLayer(BaseModel):
+    """A data variable left out of the tilesets, and why"""
+
+    id: str
+    reason: str
+
+
 class TilesetsList(BaseModel):
     """List of available tilesets"""
 
@@ -1209,6 +1216,17 @@ class TilesetsList(BaseModel):
                     "Tile matrix set in the data's own CRS, so clients can skip "
                     "reprojection. Omitted when the variables use different CRSs "
                     "or no tile matrix set matches."
+                ),
+            }
+        ),
+    ] = None
+    unavailableLayers: Annotated[
+        list[UnavailableLayer] | None,
+        Field(
+            json_schema_extra={
+                "description": (
+                    "Data variables that cannot be tiled, with the reason. "
+                    "Omitted when every variable is available."
                 ),
             }
         ),

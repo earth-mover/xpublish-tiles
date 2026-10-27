@@ -1357,6 +1357,11 @@ def _overview_with_foreign_coordinates_attr(path: Path) -> xr.DataTree:
                     np.ones((2, n, 2 * n), dtype="uint8"),
                     {"grid_mapping": "spatial_ref", "coordinates": "year y x"},
                 ),
+                "ok": (
+                    ("year", y, x),
+                    np.ones((2, n, 2 * n), dtype="uint8"),
+                    {"grid_mapping": "spatial_ref", "coordinates": "spatial_ref"},
+                ),
                 "spatial_ref": (
                     (),
                     0,
@@ -1384,21 +1389,26 @@ def _overview_with_foreign_coordinates_attr(path: Path) -> xr.DataTree:
     return xr.open_datatree(path, engine="zarr", consolidated=False)
 
 
-def test_foreign_coordinates_attr_on_overview_returns_422(tmp_path):
-    """An overview whose `coordinates` attr names the root's x/y is a client error that names the attr."""
+def test_foreign_coordinates_attr_on_overview_is_reported(tmp_path):
+    """A variable whose overview `coordinates` attr names the root's x/y is listed as unavailable, not fatal."""
     tree = _overview_with_foreign_coordinates_attr(tmp_path / "tree.zarr")
     rest = xpublish.Rest({"foreign_coords": tree}, plugins={"tiles": TilesPlugin()})
     client = TestClient(rest.app)
 
     listing = client.get("/datasets/foreign_coords/tiles/")
+    assert listing.status_code == 200
+    body = listing.json()
+    assert [layer["id"] for layer in body["tilesets"][0]["layers"]] == ["ok"]
+    [unavailable] = body["unavailableLayers"]
+    assert unavailable["id"] == "mask"
+    assert "coordinates='year y x'" in unavailable["reason"]
+
     tile = client.get(
         "/datasets/foreign_coords/tiles/WebMercatorQuad/0/0/0"
         "?variables=mask&width=256&height=256&colorscalerange=0,1"
     )
-
-    for response in (listing, tile):
-        assert response.status_code == 422
-        assert "coordinates='year y x'" in response.json()["detail"]
+    assert tile.status_code == 422
+    assert "coordinates='year y x'" in tile.json()["detail"]
 
 
 def test_tilejson_minzoom_uses_coarsest_level():

@@ -4904,6 +4904,15 @@ def detect_grids(
     are skipped — their variables are not renderable as tiles and are absent
     from the returned mapping.
     """
+    return detect_grids_with_failures(ds, cf_coords=cf_coords)[0]
+
+
+def detect_grids_with_failures(
+    ds: xr.Dataset,
+    *,
+    cf_coords: dict | None = None,
+) -> tuple[dict[str, GridSystem], dict[str, str]]:
+    """``detect_grids`` plus the reason for each variable whose group has no grid."""
     if cf_coords is None:
         cf_coords = ds.cf.coordinates
 
@@ -4914,10 +4923,13 @@ def detect_grids(
         groups.setdefault(signature, []).append(str(name))
 
     grids: dict[str, GridSystem] = {}
+    failures: dict[str, str] = {}
     for names in groups.values():
         try:
             grid = guess_grid_system(ds, names[0], cf_coords=cf_coords)
-        except (UnsupportedGridError, VariableNotFoundError):
+        except (UnsupportedGridError, VariableNotFoundError) as err:
+            for name in names:
+                failures[name] = _coordinates_attr_error(ds, name) or str(err)
             continue
         for name in names:
             # Skip the grid's coordinate vars and UGRID structural vars (e.g.
@@ -4925,4 +4937,4 @@ def detect_grids(
             if grid.is_structural_variable(ds[name]):
                 continue
             grids[name] = grid
-    return grids
+    return grids, failures

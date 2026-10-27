@@ -16,7 +16,7 @@ from xpublish import Dependencies, Plugin, hookimpl
 from xarray import DataTree
 from xpublish_tiles.grids import (
     GridSystem,
-    detect_grids,
+    detect_grids_with_failures,
     guess_grid_system,
 )
 from xpublish_tiles.lib import (
@@ -82,6 +82,7 @@ from xpublish_tiles.xpublish.tiles.types import (
     TileQuery,
     TileSetMetadata,
     TilesetsList,
+    UnavailableLayer,
 )
 
 
@@ -183,7 +184,9 @@ class TilesPlugin(Plugin):
             # a grid (e.g. every GOES band) resolve to a single detection, and
             # ancillary variables with no detectable grid are excluded here
             # rather than re-attempted per variable per TMS downstream.
-            var_grids = await async_run(detect_grids, dataset, cf_coords=cf_coords)
+            var_grids, unavailable = await async_run(
+                detect_grids_with_failures, dataset, cf_coords=cf_coords
+            )
 
             # Get available styles from registered renderers
             logger.info(f"Getting available styles for dataset '{title}'")
@@ -201,14 +204,9 @@ class TilesPlugin(Plugin):
                     )
                 except Exception as e:
                     logger.info(f"Skipping non-renderable variable {var_name!r}: {e}")
+                    unavailable[var_name] = str(e)
                     continue
                 layer_extents[var_name] = extents
-
-            if not layer_extents:
-                raise HTTPException(
-                    status_code=422,
-                    detail="No renderable variables found in dataset.",
-                )
 
             # Overviews may carry fewer variables than the finest level, so each
             # variable's minzoom comes from the coarsest level that holds it.
@@ -216,7 +214,7 @@ class TilesPlugin(Plugin):
             finest = levels[0] if levels else None
             minzoom_sources: dict[str, MinZoomSource] = {}
             coarse_grids: dict[tuple, GridSystem] = {}
-            for var_name in layer_extents:
+            for var_name in list(layer_extents):
                 level = coarsest_level_holding(levels, var_name)
                 if level is None or (finest is not None and level.path == finest.path):
                     level = None
@@ -236,13 +234,21 @@ class TilesPlugin(Plugin):
                                 cf_coords=cf_coords,
                             )
                         except UnsupportedGridError as e:
-                            raise HTTPException(
-                                status_code=422,
-                                detail=f"Variable {var_name!r} cannot be tiled at overview {level.path!r}: {e}",
-                            ) from None
+                            unavailable[var_name] = (
+                                f"Cannot be tiled at overview {level.path!r}: {e}"
+                            )
+                            del layer_extents[var_name]
+                            continue
                     grid = coarse_grids[key]
                 minzoom_sources[var_name] = MinZoomSource(
                     grid, da, signature, source_ds.attrs.get("_xpublish_id")
+                )
+
+            if not layer_extents:
+                reasons = "".join(f" {k}: {v}" for k, v in sorted(unavailable.items()))
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"No renderable variables found in dataset.{reasons}",
                 )
 
             # Create one tileset entry per supported tile matrix set
@@ -274,7 +280,15 @@ class TilesPlugin(Plugin):
                 (t for t, ts in zip(supported_tms, tileset_results, strict=True) if ts),
             )
 
-            return TilesetsList(tilesets=tilesets, defaultTileMatrixSet=default_tms)
+            return TilesetsList(
+                tilesets=tilesets,
+                defaultTileMatrixSet=default_tms,
+                unavailableLayers=[
+                    UnavailableLayer(id=name, reason=reason)
+                    for name, reason in sorted(unavailable.items())
+                ]
+                or None,
+            )
 
         @router.get("/legend")
         @with_accumulated_logs(
