@@ -40,7 +40,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/CDB1GlobalGrid",
+          "href": "/tiles/tileMatrixSets/CDB1GlobalGrid",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of CDB1GlobalGrid",
           "type": "application/json"
@@ -1224,7 +1224,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/CDB1GlobalGrid",
+          "href": "/tiles/tileMatrixSets/CDB1GlobalGrid",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of CDB1GlobalGrid",
           "type": "application/json"
@@ -2406,7 +2406,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/CanadianNAD83_LCC",
+          "href": "/tiles/tileMatrixSets/CanadianNAD83_LCC",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of CanadianNAD83_LCC",
           "type": "application/json"
@@ -3548,7 +3548,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/CanadianNAD83_LCC",
+          "href": "/tiles/tileMatrixSets/CanadianNAD83_LCC",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of CanadianNAD83_LCC",
           "type": "application/json"
@@ -4688,7 +4688,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/EuropeanETRS89_LAEAQuad",
+          "href": "/tiles/tileMatrixSets/EuropeanETRS89_LAEAQuad",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of EuropeanETRS89_LAEAQuad",
           "type": "application/json"
@@ -5760,7 +5760,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/EuropeanETRS89_LAEAQuad",
+          "href": "/tiles/tileMatrixSets/EuropeanETRS89_LAEAQuad",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of EuropeanETRS89_LAEAQuad",
           "type": "application/json"
@@ -6830,7 +6830,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/GNOSISGlobalGrid",
+          "href": "/tiles/tileMatrixSets/GNOSISGlobalGrid",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of GNOSISGlobalGrid",
           "type": "application/json"
@@ -7993,7 +7993,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/GNOSISGlobalGrid",
+          "href": "/tiles/tileMatrixSets/GNOSISGlobalGrid",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of GNOSISGlobalGrid",
           "type": "application/json"
@@ -9154,7 +9154,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/LINZAntarticaMapTilegrid",
+          "href": "/tiles/tileMatrixSets/LINZAntarticaMapTilegrid",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of LINZAntarticaMapTilegrid",
           "type": "application/json"
@@ -10211,7 +10211,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/LINZAntarticaMapTilegrid",
+          "href": "/tiles/tileMatrixSets/LINZAntarticaMapTilegrid",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of LINZAntarticaMapTilegrid",
           "type": "application/json"
@@ -11266,7 +11266,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/NZTM2000Quad",
+          "href": "/tiles/tileMatrixSets/NZTM2000Quad",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of NZTM2000Quad",
           "type": "application/json"
@@ -12379,7 +12379,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/NZTM2000Quad",
+          "href": "/tiles/tileMatrixSets/NZTM2000Quad",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of NZTM2000Quad",
           "type": "application/json"
@@ -13490,7 +13490,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/UPSAntarcticWGS84Quad",
+          "href": "/tiles/tileMatrixSets/UPSAntarcticWGS84Quad",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of UPSAntarcticWGS84Quad",
           "type": "application/json"
@@ -14625,7 +14625,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/UPSAntarcticWGS84Quad",
+          "href": "/tiles/tileMatrixSets/UPSAntarcticWGS84Quad",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of UPSAntarcticWGS84Quad",
           "type": "application/json"
@@ -15758,7 +15758,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/UPSArcticWGS84Quad",
+          "href": "/tiles/tileMatrixSets/UPSArcticWGS84Quad",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of UPSArcticWGS84Quad",
           "type": "application/json"
@@ -16893,7 +16893,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/UPSArcticWGS84Quad",
+          "href": "/tiles/tileMatrixSets/UPSArcticWGS84Quad",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of UPSArcticWGS84Quad",
           "type": "application/json"
@@ -18026,7 +18026,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/UTM31WGS84Quad",
+          "href": "/tiles/tileMatrixSets/UTM31WGS84Quad",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of UTM31WGS84Quad",
           "type": "application/json"
@@ -19154,7 +19154,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/UTM31WGS84Quad",
+          "href": "/tiles/tileMatrixSets/UTM31WGS84Quad",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of UTM31WGS84Quad",
           "type": "application/json"
@@ -20280,7 +20280,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/WGS1984Quad",
+          "href": "/tiles/tileMatrixSets/WGS1984Quad",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of WGS1984Quad",
           "type": "application/json"
@@ -21408,7 +21408,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/WGS1984Quad",
+          "href": "/tiles/tileMatrixSets/WGS1984Quad",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of WGS1984Quad",
           "type": "application/json"
@@ -22534,7 +22534,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/WebMercatorQuad",
+          "href": "/tiles/tileMatrixSets/WebMercatorQuad",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of WebMercatorQuad",
           "type": "application/json"
@@ -23669,7 +23669,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/WebMercatorQuad",
+          "href": "/tiles/tileMatrixSets/WebMercatorQuad",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of WebMercatorQuad",
           "type": "application/json"
@@ -24802,7 +24802,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/WorldCRS84Quad",
+          "href": "/tiles/tileMatrixSets/WorldCRS84Quad",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of WorldCRS84Quad",
           "type": "application/json"
@@ -25930,7 +25930,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/WorldCRS84Quad",
+          "href": "/tiles/tileMatrixSets/WorldCRS84Quad",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of WorldCRS84Quad",
           "type": "application/json"
@@ -27056,7 +27056,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/WorldMercatorWGS84Quad",
+          "href": "/tiles/tileMatrixSets/WorldMercatorWGS84Quad",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of WorldMercatorWGS84Quad",
           "type": "application/json"
@@ -28191,7 +28191,7 @@
           "type": "application/json"
         },
         {
-          "href": "/tileMatrixSets/WorldMercatorWGS84Quad",
+          "href": "/tiles/tileMatrixSets/WorldMercatorWGS84Quad",
           "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
           "title": "Definition of WorldMercatorWGS84Quad",
           "type": "application/json"
