@@ -3130,7 +3130,8 @@ class Features(GridSystem1D):
         return {self.dim: [GeometryIndexer(indices)]}
 
     def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
-        """The first feature (by position) that contains each point."""
+        """For each point, the position along ``dim`` of a feature that contains it or
+        has it on its boundary. Where features overlap, the lowest position wins."""
         import shapely
 
         if self.crs.is_geographic:
