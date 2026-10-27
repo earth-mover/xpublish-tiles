@@ -89,6 +89,7 @@ from xpublish_tiles.types import (
     QueryParams,
     RGBData,
     SelectionMethod,
+    TileFormat,
     ValidatedArray,
 )
 
@@ -840,9 +841,18 @@ def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool
 
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     rgb = query.variant == "rgb"
+    mvt = query.format == TileFormat.MVT
     if query.edgecolor is not None and query.style != "polygons":
         raise UnsupportedStyleError(
             f"'edgecolor' is only supported by the 'polygons' style, not {query.style!r}."
+        )
+    if mvt and query.style != "polygons":
+        raise UnsupportedStyleError(
+            f"Vector tiles need the 'polygons' style, not {query.style!r}."
+        )
+    if mvt and (rgb or query.edgecolor is not None):
+        raise UnsupportedStyleError(
+            "Vector tiles support neither the 'rgb' variant nor 'edgecolor'."
         )
     with log_duration("apply_query", key="query"):
         validated = await async_run(

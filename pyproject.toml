@@ -88,6 +88,7 @@ testing = [
     "scikit-image>=0.25.2",
     "titiler>=0.24.0",
     "pyiceberg[sql-sqlite]>=0.12",
+    "mapbox-vector-tile>=2.1",
 ]
 
 [dependency-groups]

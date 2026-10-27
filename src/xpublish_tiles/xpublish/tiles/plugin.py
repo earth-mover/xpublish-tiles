@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 from enum import Enum
+from functools import partial
 from typing import Annotated, Any
 from urllib.parse import quote
 
@@ -46,13 +47,14 @@ from xpublish_tiles.multiscale import (
 )
 from xpublish_tiles.pipeline import _infer_datatype, pipeline
 from xpublish_tiles.tiles_lib import get_min_zoom, grid_overlaps_tms
-from xpublish_tiles.types import ImageFormat, LegendFormat, QueryParams
+from xpublish_tiles.types import ImageFormat, LegendFormat, QueryParams, TileFormat
 from xpublish_tiles.utils import (
     format_number_for_url,
     normalize_tilejson_bounds,
     xarray_object_key,
 )
 from xpublish_tiles.xpublish.tiles.metadata import (
+    MVT_DEFAULT_STYLE,
     create_tileset_for_tms,
     create_tileset_metadata,
     default_style,
@@ -72,6 +74,7 @@ from xpublish_tiles.xpublish.tiles.tile_matrix import (
 from xpublish_tiles.xpublish.tiles.types import (
     TILES_FILTERED_QUERY_PARAMS,
     ConformanceDeclaration,
+    DataType,
     LegendQuery,
     TileJSON,
     TileMatrixSet,
@@ -104,6 +107,8 @@ class TilesPlugin(Plugin):
                     "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/core",
                     "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/tileset",
                     "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/tilesets-list",
+                    "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/png",
+                    "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/mvt",
                 ]
             )
 
@@ -247,14 +252,10 @@ class TilesPlugin(Plugin):
                     for tms_id in supported_tms
                 ]
             )
-            tilesets = [ts for ts in tileset_results if ts is not None]
+            tilesets = [ts for result in tileset_results for ts in result]
             default_tms = get_default_tile_matrix_set(
                 (var_grids[name] for name in layer_extents),
-                (
-                    t
-                    for t, ts in zip(supported_tms, tileset_results, strict=True)
-                    if ts is not None
-                ),
+                (t for t, ts in zip(supported_tms, tileset_results, strict=True) if ts),
             )
 
             return TilesetsList(tilesets=tilesets, defaultTileMatrixSet=default_tms)
@@ -353,6 +354,38 @@ class TilesPlugin(Plugin):
 
             media_type = "image/png" if query.f == LegendFormat.PNG else "image/jpeg"
             return Response(buffer.getvalue(), media_type=media_type)
+
+        @router.get(
+            "/vector/{tileMatrixSetId}",
+            response_model=TileSetMetadata,
+            response_model_exclude_none=True,
+        )
+        @with_accumulated_logs(
+            log_message_fn=lambda tileMatrixSetId, datatree: (
+                f"vector_tileset_metadata {tileMatrixSetId} {getattr(datatree, '_xpublish_id', 'unknown')}"
+            ),
+            context_fn=lambda tileMatrixSetId, datatree: {
+                "tileMatrixSetId": tileMatrixSetId,
+                "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
+            },
+        )
+        async def get_dataset_vector_tileset_metadata(
+            tileMatrixSetId: str,
+            datatree: DataTree = Depends(deps.datatree),
+        ):
+            """Get vector (MVT) tileset metadata for this dataset"""
+            dataset = get_dataset(datatree)
+            try:
+                return await async_run(
+                    partial(
+                        create_tileset_metadata,
+                        dataset,
+                        tileMatrixSetId,
+                        data_type=DataType.VECTOR,
+                    )
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=404, detail=str(e)) from e
 
         @router.get(
             "/{tileMatrixSetId}",
@@ -455,7 +488,12 @@ class TilesPlugin(Plugin):
                 0
             ]  # drop 'tilejson.json'
 
-            style, variant = query.style or default_style(bounds_grid)
+            if query.style is not None:
+                style, variant = query.style
+            elif query.f == TileFormat.MVT:
+                style, variant = MVT_DEFAULT_STYLE
+            else:
+                style, variant = default_style(bounds_grid)
             if query.edgecolor is not None and style != "polygons":
                 raise HTTPException(
                     status_code=422,
@@ -586,6 +624,12 @@ class TilesPlugin(Plugin):
                 minzoom=minzoom,
                 maxzoom=maxzoom,
                 legend=legend_url,
+                vector_layers=[
+                    {"id": name, "fields": {"value": "Number", "color": "String"}}
+                    for name in query.variables
+                ]
+                if query.f == TileFormat.MVT
+                else None,
             )
 
         @router.get("/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}")
@@ -645,9 +689,12 @@ class TilesPlugin(Plugin):
                 dataset = datatree.to_dataset()
                 resolution_level = None
 
-            style, variant = await async_run(
-                resolve_style, query.style, dataset, query.variables[0]
-            )
+            if query.f == TileFormat.MVT and query.style is None:
+                style, variant = MVT_DEFAULT_STYLE
+            else:
+                style, variant = await async_run(
+                    resolve_style, query.style, dataset, query.variables[0]
+                )
 
             # Extract dimension selectors from query parameters
             selectors = {}
@@ -727,7 +774,7 @@ class TilesPlugin(Plugin):
                 detail = "Internal server error."
 
             if status_code != 200:
-                if not query.render_errors:
+                if not query.render_errors or query.f == TileFormat.MVT:
                     raise HTTPException(status_code=status_code, detail=detail)
                 else:
                     # Use renderer's render_error method for all error types
@@ -738,13 +785,15 @@ class TilesPlugin(Plugin):
                         width=query.width,
                         height=query.height,
                         message=detail,
-                        format=query.f,
+                        format=ImageFormat(query.f),
                     )
 
             headers = {}
             if resolution_level is not None:
                 headers["X-Multiscale-Level"] = resolution_level
 
-            return Response(buffer.getbuffer(), media_type="image/png", headers=headers)
+            return Response(
+                buffer.getbuffer(), media_type=query.f.media_type, headers=headers
+            )
 
         return router

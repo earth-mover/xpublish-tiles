@@ -66,7 +66,7 @@ attributes are treated as discrete categorical data by the rendering pipeline.
 > [!IMPORTANT]
 > At the moment RGBA colors are not supported in colormaps because of this [upstream datashader issue](https://github.com/holoviz/datashader/issues/1404).
 
-Custom colormaps can be provided using the `colormap` parameter. When using a custom colormap, you must set `style=raster/custom`.
+Custom colormaps can be provided using the `colormap` parameter. When using a custom colormap, you must use the `custom` style variant, e.g. `style=raster/custom` or `style=polygons/custom`. WMS still requires `styles=raster/custom`.
 
 **Continuous data**
 
