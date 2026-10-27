@@ -228,9 +228,18 @@ class TilesPlugin(Plugin):
                 else:
                     key = (level.path, signature)
                     if key not in coarse_grids:
-                        coarse_grids[key] = await async_run(
-                            guess_grid_system, source_ds, var_name, cf_coords=cf_coords
-                        )
+                        try:
+                            coarse_grids[key] = await async_run(
+                                guess_grid_system,
+                                source_ds,
+                                var_name,
+                                cf_coords=cf_coords,
+                            )
+                        except UnsupportedGridError as e:
+                            raise HTTPException(
+                                status_code=422,
+                                detail=f"Variable {var_name!r} cannot be tiled at overview {level.path!r}: {e}",
+                            ) from None
                     grid = coarse_grids[key]
                 minzoom_sources[var_name] = MinZoomSource(
                     grid, da, signature, source_ds.attrs.get("_xpublish_id")
@@ -754,6 +763,11 @@ class TilesPlugin(Plugin):
                 bound_logger.error("VariableNotFoundError", exc_info=e)
                 status_code = 422
                 detail = f"Invalid variable name(s): {query.variables!r}."
+            except UnsupportedGridError as e:
+                bound_logger = get_context_logger()
+                bound_logger.error("UnsupportedGridError", exc_info=e)
+                status_code = 422
+                detail = f"Cannot tile variable(s) {query.variables!r}: {e!s}"
             except IndexingError as e:
                 bound_logger = get_context_logger()
                 bound_logger.error("IndexingError", exc_info=e)
