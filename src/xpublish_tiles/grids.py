@@ -61,6 +61,7 @@ from xpublish_tiles.ugrid import MeshTopology, detect_mesh, load_connectivity
 from xpublish_tiles.utils import (
     NUMBA_THREADING_LOCK,
     cf_ref_attr,
+    normalize_longitude_deg,
     time_debug,
     xarray_object_key,
 )
@@ -161,11 +162,6 @@ Slicer = slice | Fill | UgridIndexer | HealpixIndexer | FacetedIndexer | Geometr
 DimSlicers = list[Slicer]
 Slicers = dict[str, DimSlicers]
 PointIndexers = dict[str, npt.NDArray[np.int64]]
-
-
-def _wrap_longitude(x: np.ndarray, west: float) -> np.ndarray:
-    """Wrap longitudes into ``[west, west + 360)``."""
-    return west + np.mod(np.asarray(x, dtype=np.float64) - west, 360.0)
 
 
 def _sync_load_coords(ds: xr.Dataset, *names: Hashable) -> None:
@@ -1310,7 +1306,7 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
 
     def get_indexer(self, x: np.ndarray) -> npt.NDArray[np.int64]:
         """Positions of the cells containing ``x``, wrapped into this index's period; -1 if none."""
-        wrapped = _wrap_longitude(x, self.left_break)
+        wrapped = normalize_longitude_deg(x, self.left_break)
         return self._interval_index.get_indexer(wrapped).astype(np.int64, copy=False)
 
     def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
@@ -1885,7 +1881,7 @@ class RasterAffine(RectilinearMixin, GridSystem):
         affine = index.transform()
         if self.crs.is_geographic:
             # same left break as _x_sel
-            x = _wrap_longitude(x, affine.c)
+            x = normalize_longitude_deg(x, affine.c)
         cols, rows = ~affine * (np.asarray(x), np.asarray(y))
         indexers = {}
         for dim, pos, size in zip(
@@ -2958,7 +2954,7 @@ class Triangular(GridSystem1D):
             f"Attempting to triangulate vertices with shape={vertices.shape}. Expected (n_points, 2)"
         )
         if crs.is_geographic:
-            vertices[:, 0] = ((vertices[:, 0] + 180) % 360) - 180
+            vertices[:, 0] = normalize_longitude_deg(vertices[:, 0])
 
         (dim_,) = ds[Xname].dims
         dim = str(dim_)
@@ -3138,7 +3134,7 @@ class Features(GridSystem1D):
         import shapely
 
         if self.crs.is_geographic:
-            x = _wrap_longitude(x, self.lon_west)
+            x = normalize_longitude_deg(x, self.lon_west)
         points, features = self.strtree.query(
             shapely.points(x, y), predicate="intersects"
         )
@@ -3345,7 +3341,7 @@ class Healpix(HealpixBase):
             bbox = BBox(west=-180, south=-90, east=180, north=90)
         else:
             lon, lat = info.cell_ids2geographic(cell_ids)
-            lon = ((lon + 180) % 360) - 180
+            lon = normalize_longitude_deg(lon)
             bbox = BBox(
                 west=float(lon.min()),
                 south=float(lat.min()),
@@ -3418,7 +3414,7 @@ class FacetedGridSystem(GridSystem, ABC):
         def intervals(west: float, east: float) -> list[tuple[float, float]]:
             if east - west >= 360:
                 return [(0.0, 360.0)]
-            w, e = west % 360, east % 360
+            w, e = normalize_longitude_deg(west, 0), normalize_longitude_deg(east, 0)
             if w == e:
                 return [(0.0, 360.0)] if east > west else []
             if w < e:

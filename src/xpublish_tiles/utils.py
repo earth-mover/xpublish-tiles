@@ -3,10 +3,11 @@ import functools
 import importlib.util
 import threading
 import time
-from typing import Any
+from typing import Any, overload
 
 import cf_xarray  # noqa: F401
 import numpy as np
+import numpy.typing as npt
 
 import xarray as xr
 from xpublish_tiles.logger import log_duration, logger
@@ -112,17 +113,20 @@ def async_time_debug(func):
     return wrapper
 
 
-def normalize_longitude_deg(lon: float) -> float:
-    """Normalize a longitude value to the [-180, 180] range.
+@overload
+def normalize_longitude_deg(lon: float, west: float = -180.0) -> float: ...
+@overload
+def normalize_longitude_deg(
+    lon: npt.NDArray[np.floating], west: float = -180.0
+) -> npt.NDArray[np.floating]: ...
+def normalize_longitude_deg(lon, west=-180.0):
+    """Wrap longitudes into ``[west, west + 360)``; arrays keep their float dtype.
 
-    Examples:
-    - 190 -> -170
-    - 360 -> 0
-    - -190 -> 170
-    - 180, -180 remain unchanged
+    With the default ``west``: 190 -> -170, 360 -> 0, 180 -> -180.
     """
-    # Use modulo arithmetic to wrap, then shift into [-180, 180]
-    return ((float(lon) + 180.0) % 360.0) - 180.0
+    if np.ndim(lon) == 0:
+        return float(west + np.mod(float(lon) - west, 360.0))
+    return west + np.mod(lon - west, 360.0)
 
 
 def normalize_tilejson_bounds(

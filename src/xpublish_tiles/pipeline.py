@@ -92,6 +92,7 @@ from xpublish_tiles.types import (
     TileFormat,
     ValidatedArray,
 )
+from xpublish_tiles.utils import normalize_longitude_deg
 
 # A dim with one of these names and size 3 holds R, G, B in that order.
 RGB_BAND_DIMS = ("band", "rgb")
@@ -773,8 +774,8 @@ def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool
             return True
 
         # Convert input bbox to -180 to 180 range
-        normalized_west = ((input_bbox.west + 180) % 360) - 180
-        normalized_east = ((input_bbox.east + 180) % 360) - 180
+        normalized_west = normalize_longitude_deg(input_bbox.west)
+        normalized_east = normalize_longitude_deg(input_bbox.east)
 
         # Handle the case where normalization creates an anti-meridian crossing
         if normalized_west > normalized_east:
@@ -805,8 +806,8 @@ def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool
                 return True
 
         # Also try converting input bbox to 0-360 range
-        wrapped_west_360 = input_bbox.west % 360
-        wrapped_east_360 = input_bbox.east % 360
+        wrapped_west_360 = normalize_longitude_deg(input_bbox.west, 0)
+        wrapped_east_360 = normalize_longitude_deg(input_bbox.east, 0)
 
         # Handle case where wrapping creates crossing at 0°/360°
         if wrapped_west_360 > wrapped_east_360:

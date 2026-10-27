@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 from pyproj.aoi import BBox
 
+from xpublish_tiles.utils import normalize_longitude_deg
+
 _INDEXING_SCHEMES = ("nested", "ring")
 
 
@@ -163,8 +165,8 @@ def bbox_cell_ids(bbox: BBox, depth: int) -> np.ndarray:
     # guarantee boundary cells are included.
     EPS = 1e-6
     MAX_LON = 360.0 - 1e-9
-    west = (bbox.west - EPS) % 360.0
-    east = (bbox.east + EPS) % 360.0
+    west = normalize_longitude_deg(bbox.west - EPS, 0)
+    east = normalize_longitude_deg(bbox.east + EPS, 0)
     if east == 0:
         east = MAX_LON
     south = max(bbox.south, -90.0)
