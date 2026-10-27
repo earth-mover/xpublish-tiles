@@ -2,6 +2,7 @@ import pathlib
 import subprocess
 import sys
 
+import healpix_geo
 import healpix_geo.nested as hpn
 import numpy as np
 import pytest
@@ -30,6 +31,7 @@ from xpublish_tiles.testing.datasets import (
     GLOBAL_HEALPIX_CUBE_L3,
     GLOBAL_HEALPIX_CUBE_L5,
     GLOBAL_HEALPIX_L3,
+    REGIONAL_HEALPIX_NA,
     _create_global_healpix,
 )
 
@@ -359,3 +361,65 @@ assert "xdggs" not in sys.modules, "xdggs was imported"
         [sys.executable, "-c", code], cwd=root, capture_output=True, text=True
     )
     assert proc.returncode == 0, proc.stderr[-2000:]
+
+
+@pytest.mark.parametrize(
+    "dataset", [GLOBAL_HEALPIX_L3, REGIONAL_HEALPIX_NA], ids=lambda d: d.name
+)
+def test_healpix_locate_cell_centres(dataset):
+    ds = dataset.create()
+    grid = guess_grid_system(ds, "foo")
+    assert isinstance(grid, Healpix)
+    lon, lat = grid.grid_info.cell_ids2geographic(grid.cell_ids)
+    (pos,) = grid.locate(x=lon, y=lat).values()
+    np.testing.assert_array_equal(pos, np.arange(grid.cell_ids.size))
+
+
+def test_healpix_locate_regional_miss():
+    grid = guess_grid_system(REGIONAL_HEALPIX_NA.create(), "foo")
+    assert isinstance(grid, Healpix)
+    (pos,) = grid.locate(x=np.array([100.0]), y=np.array([-40.0])).values()
+    assert pos.tolist() == [-1]
+
+
+def test_healpix_locate_invalid_points():
+    grid = guess_grid_system(GLOBAL_HEALPIX_L3.create(), "foo")
+    (pos,) = grid.locate(
+        x=np.array([np.nan, np.inf, 0.0, 0.0]), y=np.array([0.0, 0.0, 95.0, np.nan])
+    ).values()
+    assert pos.tolist() == [-1, -1, -1, -1]
+
+
+def test_healpix_locate_ring():
+    ds = GLOBAL_HEALPIX_L3.create()
+    nested_grid = guess_grid_system(ds, "foo")
+    assert isinstance(nested_grid, Healpix)
+    nested = nested_grid.cell_ids
+    lon, lat = nested_grid.grid_info.cell_ids2geographic(nested)
+    ring = healpix_geo.ring.lonlat_to_healpix(lon, lat, depth=3, ellipsoid="sphere")
+    name = nested_grid.cell_ids_name
+    ds = ds.assign_coords({name: (ds[name].dims, ring, ds[name].attrs)})
+    (mapping,) = (
+        v for v in ds.variables.values() if v.attrs.get("grid_mapping_name") == "healpix"
+    )
+    mapping.attrs["indexing_scheme"] = "ring"
+    ds.attrs["_xpublish_id"] = "healpix-l3-ring"
+    grid = guess_grid_system(ds, "foo")
+    assert isinstance(grid, Healpix)
+    assert grid.grid_info.indexing_scheme == "ring"
+    (pos,) = grid.locate(x=lon, y=lat).values()
+    np.testing.assert_array_equal(pos, np.arange(nested.size))
+
+
+def test_healpix_cube_locate_cell_centres():
+    ds = GLOBAL_HEALPIX_CUBE_L3.create()
+    grid = guess_grid_system(ds, "foo")
+    assert isinstance(grid, HealpixCube)
+    f, y, x = (
+        a.ravel()
+        for a in np.meshgrid(np.arange(12), np.arange(8), np.arange(8), indexing="ij")
+    )
+    lon, lat = grid.grid_info.cell_ids2geographic(fyx_to_nested(f, y, x, grid.level))
+    out = grid.locate(x=lon, y=lat)
+    for dim, expected in ((grid.face_dim, f), (grid.Ydim, y), (grid.Xdim, x)):
+        np.testing.assert_array_equal(out[dim], expected)

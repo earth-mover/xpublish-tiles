@@ -3321,6 +3321,7 @@ class Healpix(HealpixBase):
 
     cell_ids_name: str
     cell_ids: np.ndarray
+    supports_locate: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -3360,6 +3361,28 @@ class Healpix(HealpixBase):
     @property
     def dims(self) -> set[str]:
         return {self.dim}
+
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        ids = self.grid_info.geographic2cell_ids(x, y)
+        if self._ids_are_positions:
+            return {self.dim: ids}
+        sorter = self._id_sorter
+        found = np.minimum(
+            np.searchsorted(self.cell_ids, ids, sorter=sorter), self.cell_ids.size - 1
+        )
+        pos = sorter[found]
+        return {self.dim: np.where((ids >= 0) & (self.cell_ids[pos] == ids), pos, -1)}
+
+    @cached_property
+    def _ids_are_positions(self) -> bool:
+        """Full sphere in id order: the position is the id."""
+        return self.cell_ids.size == self.grid_info.ncells and bool(
+            np.all(np.diff(self.cell_ids.astype(np.int64)) > 0)
+        )
+
+    @cached_property
+    def _id_sorter(self) -> np.ndarray:
+        return np.argsort(self.cell_ids)
 
     def sel(self, *, bbox: BBox) -> Slicers:
         """Select cells within the bounding box.
@@ -3561,6 +3584,7 @@ class HealpixCube(HealpixBase):
     """
 
     face_dim: str
+    supports_locate: ClassVar[bool] = True
 
     def __init__(self, *, face_dim: str, Ydim: str, Xdim: str, level: int):
         self.crs = DEFAULT_CRS
@@ -3604,6 +3628,20 @@ class HealpixCube(HealpixBase):
         return cls(
             face_dim=face_dim, Ydim="y", Xdim="x", level=ds.sizes["x"].bit_length() - 1
         )
+
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        ids = self.grid_info.geographic2cell_ids(x, y)
+        valid = ids >= 0
+        out = {
+            d: np.full(ids.shape, -1, dtype=np.int64)
+            for d in (self.face_dim, self.Ydim, self.Xdim)
+        }
+        f, yy, xx = nested_to_fyx(ids[valid].astype(np.uint64), self.level)
+        for dim, a in zip(
+            (self.face_dim, self.Ydim, self.Xdim), (f, yy, xx), strict=True
+        ):
+            out[dim][valid] = a
+        return out
 
     def __repr__(self) -> str:
         return f"HealpixCube(face_dim={self.face_dim!r}, level={self.level}, crs={crs_repr(self.crs)})"

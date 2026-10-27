@@ -7,6 +7,7 @@ from typing import Literal
 
 import numba
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 from pyproj.aoi import BBox
 
@@ -47,6 +48,21 @@ class HealpixGridInfo:
             cell_ids, depth=self.level, ellipsoid=self.ellipsoid
         )
         return np.asarray(lon), np.asarray(lat)
+
+    def geographic2cell_ids(
+        self, lon: np.ndarray, lat: np.ndarray
+    ) -> npt.NDArray[np.int64]:
+        """Cell id containing each point; -1 for non-finite or |lat| > 90."""
+        import healpix_geo
+
+        mod = healpix_geo.nested if self.indexing_scheme == "nested" else healpix_geo.ring
+        lon, lat = np.asarray(lon, dtype=np.float64), np.asarray(lat, dtype=np.float64)
+        valid = np.isfinite(lon) & np.isfinite(lat) & (np.abs(lat) <= 90)
+        ids = np.full(lon.shape, -1, dtype=np.int64)
+        ids[valid] = mod.lonlat_to_healpix(
+            lon[valid], lat[valid], depth=self.level, ellipsoid=self.ellipsoid
+        )
+        return ids
 
 
 _M1 = np.uint64(0x5555555555555555)
