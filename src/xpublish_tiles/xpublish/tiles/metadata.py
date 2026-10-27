@@ -24,6 +24,7 @@ from xpublish_tiles.render import RGB_VARIANT, RenderRegistry
 from xpublish_tiles.tiles_lib import grid_overlaps_tms
 from xpublish_tiles.types import MVT_MEDIA_TYPE
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
+    DEFAULT_TMS_HREF,
     TILE_MATRIX_SET_SUMMARIES,
     TILE_MATRIX_SETS,
     MinZoomSource,
@@ -175,7 +176,11 @@ def _styles_for_renderer(style_id: str, include_rgb: bool) -> tuple[Style, ...]:
 
 
 def create_tileset_metadata(
-    dataset: Dataset, tile_matrix_set_id: str, *, data_type: DataType = DataType.MAP
+    dataset: Dataset,
+    tile_matrix_set_id: str,
+    *,
+    data_type: DataType = DataType.MAP,
+    tms_href: str = DEFAULT_TMS_HREF,
 ) -> TileSetMetadata:
     """Create map or vector tileset metadata for a dataset and tile matrix set"""
     # Get tile matrix set summary
@@ -220,7 +225,7 @@ def create_tileset_metadata(
         links=[
             tile_link,
             Link(
-                href=f"/tileMatrixSets/{tile_matrix_set_id}",
+                href=f"{tms_href}/{tile_matrix_set_id}",
                 rel="http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
                 type="application/json",
                 title=f"Definition of {tile_matrix_set_id}",
@@ -402,6 +407,7 @@ async def create_tileset_for_tms(
     *,
     minzoom_sources: dict[str, MinZoomSource],
     cf_coords: dict | None = None,
+    tms_href: str = DEFAULT_TMS_HREF,
 ) -> list[TilesetSummary]:
     """Create the map tileset, and a vector one if any variable has polygons, for a TMS
 
@@ -418,6 +424,7 @@ async def create_tileset_for_tms(
         var_grids: Renderable variable -> grid mapping (from ``detect_grids``)
         minzoom_sources: Variable -> grid and array that set its minzoom (from
             its coarsest overview for multiscale datasets)
+        tms_href: URL path of the ``tileMatrixSets`` collection
 
     Returns:
         The map tileset then, if any, the vector tileset; empty if this tile
@@ -509,7 +516,7 @@ async def create_tileset_for_tms(
     )
 
     tiling_scheme = Link(
-        href=f"/tileMatrixSets/{tms_id}",
+        href=f"{tms_href}/{tms_id}",
         rel="http://www.opengis.net/def/rel/ogc/1.0/tiling-scheme",
         type="application/json",
         title=f"Definition of {tms_id}",
