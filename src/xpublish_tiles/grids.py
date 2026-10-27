@@ -11,6 +11,7 @@ import cachetools
 import cf_xarray  # noqa: F401
 import numbagg
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import pyproj
 import rasterix
@@ -159,7 +160,7 @@ class FacetedIndexer:
 Slicer = slice | Fill | UgridIndexer | HealpixIndexer | FacetedIndexer | GeometryIndexer
 DimSlicers = list[Slicer]
 Slicers = dict[str, DimSlicers]
-PointIndexers = dict[str, np.ndarray]
+PointIndexers = dict[str, npt.NDArray[np.int64]]
 
 
 def _wrap_longitude(x: np.ndarray, west: float) -> np.ndarray:
@@ -1307,6 +1308,11 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         # Consider global if span is at least 359 degrees (allowing small tolerance)
         return lon_span >= 359.0
 
+    def get_indexer(self, x: np.ndarray) -> npt.NDArray[np.int64]:
+        """Positions of the cells containing ``x``, wrapped into this index's period; -1 if none."""
+        wrapped = _wrap_longitude(x, self.left_break)
+        return self._interval_index.get_indexer(wrapped).astype(np.int64, copy=False)
+
     def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
         """
         Select values from the longitude index with coordinate system conversion.
@@ -1876,14 +1882,16 @@ class RasterAffine(RectilinearMixin, GridSystem):
 
     def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
         (index,) = self.indexes
+        affine = index.transform()
         if self.crs.is_geographic:
-            x = _wrap_longitude(x, index.bbox.left)
-        cols, rows = ~index.transform() * (np.asarray(x), np.asarray(y))
+            # same left break as _x_sel
+            x = _wrap_longitude(x, affine.c)
+        cols, rows = ~affine * (np.asarray(x), np.asarray(y))
         indexers = {}
         for dim, pos, size in zip(
             (self.Xdim, self.Ydim), (cols, rows), index.xy_shape, strict=True
         ):
-            pos = np.floor(pos).astype(np.intp)
+            pos = np.floor(pos).astype(np.int64)
             pos[(pos < 0) | (pos >= size)] = -1
             indexers[dim] = pos
         return indexers
@@ -2079,11 +2087,13 @@ class Rectilinear(RectilinearMixin, GridSystem):
 
     def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
         x_index, y_index = self.indexes[0], self.indexes[-1]
-        if self.crs.is_geographic:
-            x = _wrap_longitude(x, self.left_break)
+        if isinstance(x_index, LongitudeCellIndex):
+            xpos = x_index.get_indexer(x)
+        else:
+            xpos = x_index.index.get_indexer(x).astype(np.int64, copy=False)
         return {
-            self.Xdim: x_index.index.get_indexer(x),
-            self.Ydim: y_index.index.get_indexer(y),
+            self.Xdim: xpos,
+            self.Ydim: y_index.index.get_indexer(y).astype(np.int64, copy=False),
         }
 
     def _get_edge_arrays(self) -> tuple[np.ndarray, np.ndarray]:
@@ -3025,6 +3035,8 @@ class Features(GridSystem1D):
     npoints_per_geometry: int = 1
     structural_names: frozenset[str]
     supports_locate: ClassVar[bool] = True
+    # geographic geometries lie in [lon_west, lon_west + 360], see __init__
+    lon_west: ClassVar[float] = -180.0
     dXmin: float = 0
     dYmin: float = 0
     _strtree: "shapely.STRtree" = field(repr=False)
@@ -3108,11 +3120,11 @@ class Features(GridSystem1D):
         boxes = [bbox]
         if self.crs.is_geographic:
             # the query box may extend past ±180; features lie in [-180, 180]
-            if bbox.east > 180:
+            if bbox.east > self.lon_west + 360:
                 boxes.append(
                     BBox(bbox.west - 360, bbox.south, bbox.east - 360, bbox.north)
                 )
-            if bbox.west < -180:
+            if bbox.west < self.lon_west:
                 boxes.append(
                     BBox(bbox.west + 360, bbox.south, bbox.east + 360, bbox.north)
                 )
@@ -3126,13 +3138,13 @@ class Features(GridSystem1D):
         import shapely
 
         if self.crs.is_geographic:
-            x = _wrap_longitude(x, -180)
+            x = _wrap_longitude(x, self.lon_west)
         points, features = self.strtree.query(
             shapely.points(x, y), predicate="intersects"
         )
         order = np.lexsort((features, points))
         hit_points, first = np.unique(points[order], return_index=True)
-        positions = np.full(np.shape(x), -1, dtype=np.intp)
+        positions = np.full(np.shape(x), -1, dtype=np.int64)
         positions[hit_points] = features[order][first]
         return {self.dim: positions}
 
