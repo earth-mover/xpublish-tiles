@@ -2450,6 +2450,14 @@ def test_polar_locate_jittered_full_sweep():
     npt.assert_array_equal(out[grid.Ydim], np.full(360, 10))
     lon, lat = _polar_lonlat(grid, [359.95, 0.05, 180.0], r[:3])
     assert (grid.locate(x=lon, y=lat)[grid.Xdim] >= 0).all()
+    order = np.argsort(az)
+    gaps = np.diff(np.append(az[order], az[order][0] + 360.0))
+    k = int(np.argmax(gaps))
+    lo, hi = int(order[k]), int(order[(k + 1) % 360])
+    probes = az[lo] + gaps[k] * np.array([0.45, 0.55])
+    lon, lat = _polar_lonlat(grid, probes, r[:2])
+    out = grid.locate(x=lon, y=lat)
+    npt.assert_array_equal(out[grid.Xdim], [lo, hi])
 
 
 def test_polar_locate_sector_across_north():
