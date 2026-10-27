@@ -913,6 +913,70 @@ class PolarIndex(xr.Index):
         bearing = np.degrees(np.arctan2(x, y)) % 360
         return float(distance), float(bearing)
 
+    @cached_property
+    def _range_edges(self) -> np.ndarray:
+        """Gate edges: midpoints, extended by half a gate at each end."""
+        r = self.range_m
+        if r.size == 1:
+            return np.array([r[0] - 0.5, r[0] + 0.5])
+        mid = 0.5 * (r[:-1] + r[1:])
+        return np.concatenate(
+            [[r[0] - 0.5 * (r[1] - r[0])], mid, [r[-1] + 0.5 * (r[-1] - r[-2])]]
+        )
+
+    @cached_property
+    def _azimuth_lookup(self) -> tuple[np.ndarray, np.ndarray, float, float, bool]:
+        """(order, midpoint edges, origin, half spacing, full) for sorted rays.
+
+        Edges are relative to the first sorted ray, so the wrap sits at 360.
+        """
+        order = np.argsort(self.azimuth)
+        s = self.azimuth[order]
+        origin = float(s[0])
+        rel = s - origin
+        gaps = np.diff(np.append(rel, 360.0))
+        spacing = float(np.median(gaps[:-1])) if s.size > 1 else 1.0
+        full = bool(gaps.max() <= 1.5 * spacing)
+        return order, 0.5 * (rel[:-1] + rel[1:]), origin, 0.5 * spacing, full
+
+    def get_indexer(
+        self, lon: np.ndarray, lat: np.ndarray
+    ) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]:
+        """Inverse of the flat-earth forward in ``aeqd_to_4326``; -1 on a miss."""
+        lon = np.asarray(lon, dtype=np.float64)
+        lat = np.asarray(lat, dtype=np.float64)
+        finite = np.isfinite(lon) & np.isfinite(lat)
+        with np.errstate(invalid="ignore"):
+            x = (
+                normalize_longitude_deg(lon - self.center_lon)
+                * 111320.0
+                * np.cos(np.radians(self.center_lat))
+            )
+            y = (lat - self.center_lat) * 111320.0
+            r = np.hypot(x, y)
+            az = np.degrees(np.arctan2(x, y)) % 360.0
+
+        edges = self._range_edges
+        rng = np.searchsorted(edges, r, side="right") - 1
+        rng_ok = finite & (r >= edges[0]) & (r < edges[-1])
+
+        order, mids, origin, half, full = self._azimuth_lookup
+        u = (az - origin) % 360.0
+        pos = np.searchsorted(mids, u, side="right")
+        if full:
+            wrap_mid = 0.5 * (self.azimuth[order[-1]] - origin + 360.0)
+            pos = np.where(u >= wrap_mid, 0, pos)
+            az_ok = finite
+        else:
+            end = self.azimuth[order[-1]] - origin + half
+            pos = np.where(u >= 360.0 - half, 0, pos)
+            az_ok = finite & ((u < end) | (u >= 360.0 - half))
+
+        ok = rng_ok & az_ok
+        az_idx = np.where(ok, order[np.clip(pos, 0, order.size - 1)], -1)
+        rng_idx = np.where(ok, rng, -1)
+        return az_idx.astype(np.int64), rng_idx.astype(np.int64)
+
     def equals(self, other: xr.Index, **kwargs: Any) -> bool:
         if not isinstance(other, PolarIndex):
             return False
@@ -2598,6 +2662,7 @@ class Polar(GridSystem):
     center_lat: float
     center_lon: float
     lon_spans_globe: bool = False
+    supports_locate: ClassVar[bool] = True
     npoints_per_geometry: int = field(init=False, default=5)
     dXmin: float = field(init=False)
     dYmin: float = field(init=False)
@@ -2605,6 +2670,10 @@ class Polar(GridSystem):
     def __post_init__(self):
         index = self.indexes[0]
         self.dXmin, self.dYmin = index.get_min_spacing()
+
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        az, rng = self.indexes[0].get_indexer(x, y)
+        return {self.Xdim: az, self.Ydim: rng}
 
     @classmethod
     def from_dataset(cls, ds: xr.Dataset, crs: CRS, Xname: str, Yname: str) -> Self:

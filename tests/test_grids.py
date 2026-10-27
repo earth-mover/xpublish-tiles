@@ -71,6 +71,7 @@ from xpublish_tiles.pipeline import (
     pipeline,
 )
 from xpublish_tiles.projections import (
+    aeqd_to_4326,
     transformer_from_crs,
 )
 from xpublish_tiles.testing.datasets import (
@@ -2362,3 +2363,68 @@ def test_cubed_sphere_locate_nonfinite_does_not_raise():
     grid = guess_grid_system(CUBED_SPHERE.create(), "foo")
     out = grid.locate(x=np.array([np.nan]), y=np.array([0.0]))
     assert all(v.tolist() == [-1] for v in out.values())
+
+
+def _polar_lonlat(grid: Polar, az_deg, rng_m):
+    """Flat-earth forward of ``Polar.assign_index`` (test only)."""
+    az, rng = np.broadcast_arrays(
+        np.radians(np.asarray(az_deg, dtype=np.float64)),
+        np.asarray(rng_m, dtype=np.float64),
+    )
+    return aeqd_to_4326(
+        rng * np.sin(az), rng * np.cos(az), grid.center_lat, grid.center_lon
+    )
+
+
+def _assert_polar_round_trip(ds):
+    grid = cast(Polar, guess_grid_system(ds, "foo"))
+    index = grid.indexes[0]
+    rng = np.random.default_rng(0)
+    ai = rng.integers(0, index.azimuth.size, 50)
+    ri = rng.integers(0, index.range_m.size, 50)
+    daz = np.median(np.diff(index.azimuth))
+    dr = np.median(np.diff(index.range_m))
+    sign = 1.0 if index.range_m[0] < 0.3 * dr else -1.0
+    lon, lat = _polar_lonlat(
+        grid, index.azimuth[ai] + 0.3 * daz, index.range_m[ri] + sign * 0.3 * dr
+    )
+    out = grid.locate(x=lon, y=lat)
+    npt.assert_array_equal(out[grid.Xdim], ai)
+    npt.assert_array_equal(out[grid.Ydim], ri)
+
+
+def test_polar_locate_cell_centres():
+    _assert_polar_round_trip(RADAR.create())
+
+
+def test_polar_locate_misses():
+    ds = RADAR.create()
+    grid = cast(Polar, guess_grid_system(ds, "foo"))
+    index = grid.indexes[0]
+    dr = np.median(np.diff(index.range_m))
+    lon, lat = _polar_lonlat(grid, [10.0], [index.range_m[-1] + 2 * dr])
+    out = grid.locate(
+        x=np.array([lon[0], np.nan, 0.0]), y=np.array([lat[0], 0.0, np.nan])
+    )
+    npt.assert_array_equal(out[grid.Xdim], [-1, -1, -1])
+    npt.assert_array_equal(out[grid.Ydim], [-1, -1, -1])
+
+
+def test_polar_locate_unsorted_azimuth():
+    ds = RADAR.create().roll(azimuth=137, roll_coords=True)
+    ds.attrs["_xpublish_id"] = "polar_locate_unsorted"
+    assert ds.azimuth.values[0] != ds.azimuth.values.min()
+    _assert_polar_round_trip(ds)
+
+
+def test_polar_locate_sector_gap():
+    ds = RADAR.create().isel(azimuth=slice(0, 90))
+    ds.attrs["_xpublish_id"] = "polar_locate_sector"
+    grid = cast(Polar, guess_grid_system(ds, "foo"))
+    index = grid.indexes[0]
+    r = index.range_m[10]
+    lon, lat = _polar_lonlat(grid, [180.0, index.azimuth[45]], [r, r])
+    out = grid.locate(x=lon, y=lat)
+    npt.assert_array_equal(out[grid.Xdim], [-1, 45])
+    npt.assert_array_equal(out[grid.Ydim], [-1, 10])
+    _assert_polar_round_trip(ds)
