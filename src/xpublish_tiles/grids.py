@@ -21,6 +21,7 @@ from affine import Affine
 from numba_celltree import CellTree2d
 from pyproj import CRS
 from pyproj.aoi import BBox
+from scipy.spatial import KDTree
 
 import xarray as xr
 from xarray.core.indexing import IndexSelResult
@@ -659,9 +660,11 @@ class CellTreeIndex(xr.Index):
         X: str,
         Y: str,
         lon_spans_globe: bool,
+        geographic: bool = False,
     ):
         self.X = X
         self.Y = Y
+        self.geographic = geographic
         if lon_spans_globe:
             # We want to reflect the vertices across the anti-meridian, and then run the triangulation.
             # For simplicity, we just append two copies of the convex hull the longitudes modified differently.
@@ -710,6 +713,45 @@ class CellTreeIndex(xr.Index):
                 }
         else:
             self.antimeridian_vertices = {"pos": np.array([]), "neg": np.array([])}
+
+    @staticmethod
+    def _search_coords(xy: np.ndarray, geographic: bool) -> np.ndarray:
+        if not geographic:
+            return xy
+        lon, lat = np.deg2rad(xy[:, 0]), np.deg2rad(xy[:, 1])
+        return np.column_stack(
+            [np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)]
+        )
+
+    @cached_property
+    def node_kdtree(self) -> KDTree:
+        # Original nodes only: drop the padding added for global triangulations.
+        n_nodes = (
+            len(self.tree.vertices)
+            if self.reindexer is None
+            else int(self.reindexer.max()) + 1
+        )
+        return KDTree(self._search_coords(self.tree.vertices[:n_nodes], self.geographic))
+
+    def locate(self, x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Containing face and nearest node per point; -1 where no face contains it."""
+        x, y = np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64)
+        face = np.full(x.shape, -1, dtype=np.int64)
+        node = np.full(x.shape, -1, dtype=np.int64)
+        finite = np.isfinite(x) & np.isfinite(y)
+        if finite.any():
+            if self.geographic:
+                x = np.where(finite, normalize_longitude_deg(np.where(finite, x, 0.0)), x)
+            points = np.column_stack([x[finite], y[finite]])
+            with NUMBA_THREADING_LOCK:
+                face[finite] = self.tree.locate_points(points)
+        hit = face >= 0
+        if hit.any():
+            xy = np.column_stack([x[hit], y[hit]])
+            _, node[hit] = self.node_kdtree.query(
+                self._search_coords(xy, self.geographic)
+            )
+        return face, node
 
     def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
         xidxr = labels.get(self.X)
@@ -2822,6 +2864,7 @@ class Triangular(GridSystem1D):
     dim: str
     mesh: MeshTopology | None
     lon_spans_globe: bool
+    supports_locate: ClassVar[bool] = True
     indexes: tuple[xr.Index]
     npoints_per_geometry: int = field(init=False, default=4)
 
@@ -2867,11 +2910,19 @@ class Triangular(GridSystem1D):
                 X=Xname,
                 Y=Yname,
                 lon_spans_globe=self.lon_spans_globe,
+                geographic=crs.is_geographic,
             ),
         )
         self.alternates = ()
         self.Z = None
         self._bbox_xform_cache = {}
+
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        (index,) = self.indexes
+        face, node = cast(CellTreeIndex, index).locate(x, y)
+        if self.mesh is None:
+            return {self.dim: node}
+        return {self.mesh.node_dim: node, self.mesh.face_dim: face}
 
     @property
     def face_dim(self) -> str | None:

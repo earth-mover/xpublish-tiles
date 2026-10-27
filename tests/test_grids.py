@@ -2445,3 +2445,46 @@ def test_polar_locate_jittered_full_sweep():
     lon, lat = _polar_lonlat(grid, probes, r[:2])
     out = grid.locate(x=lon, y=lat)
     npt.assert_array_equal(out[grid.Xdim], [lo, hi])
+
+
+def _unit(lonlat: np.ndarray) -> np.ndarray:
+    lon, lat = np.deg2rad(lonlat[:, 0]), np.deg2rad(lonlat[:, 1])
+    return np.column_stack(
+        [np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)]
+    )
+
+
+@pytest.mark.parametrize("dataset", [UGRID_TRIANGLES, FVCOM], ids=lambda d: d.name)
+def test_triangular_locate_ugrid(dataset):
+    ds = dataset.create()
+    grid = cast(Triangular, guess_grid_system(ds, "zeta"))
+    assert grid.mesh is not None
+    tree = cast(CellTreeIndex, grid.indexes[0]).tree
+    centroids = tree.vertices[tree.faces].mean(axis=1)
+    out = grid.locate(x=centroids[:, 0], y=centroids[:, 1])
+    assert set(out) == {grid.mesh.node_dim, grid.mesh.face_dim}
+    npt.assert_array_equal(out[grid.mesh.face_dim], np.arange(len(tree.faces)))
+    distance = np.linalg.norm(
+        _unit(tree.vertices)[None] - _unit(centroids)[:, None], axis=-1
+    )
+    npt.assert_array_equal(out[grid.mesh.node_dim], distance.argmin(1))
+
+
+def test_triangular_locate_ugrid_miss():
+    ds = UGRID_TRIANGLES.create()
+    grid = cast(Triangular, guess_grid_system(ds, "zeta"))
+    assert grid.mesh is not None
+    out = grid.locate(x=np.array([1e3, np.nan]), y=np.array([1e3, 0.0]))
+    npt.assert_array_equal(out[grid.mesh.node_dim], [-1, -1])
+    npt.assert_array_equal(out[grid.mesh.face_dim], [-1, -1])
+
+
+def test_triangular_locate_global_delaunay():
+    ds = REDGAUSS_N320.create()
+    grid = cast(Triangular, guess_grid_system(ds, "foo"))
+    rng = np.random.default_rng(0)
+    n = rng.integers(0, ds.sizes["point"], 50)
+    lon, lat = ds.longitude.values[n], ds.latitude.values[n]
+    for shift in (-360.0, 0.0, 360.0):
+        (pos,) = grid.locate(x=lon + shift, y=lat).values()
+        npt.assert_array_equal(pos, n)
