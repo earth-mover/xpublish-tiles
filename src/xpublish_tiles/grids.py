@@ -5,7 +5,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Hashable, Iterable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, NamedTuple, Self, cast
+from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, Self, cast
 
 import cachetools
 import cf_xarray  # noqa: F401
@@ -1453,6 +1453,8 @@ class GridSystem(ABC):
     Xdim: str
     Ydim: str
     npoints_per_geometry: int
+    # Set True only where ``locate`` is implemented and correct for this grid.
+    supports_locate: ClassVar[bool] = False
 
     # FIXME: do we really need these Index objects on the class?
     #   - reconsider when we do curvilinear and triangular grids
@@ -1612,10 +1614,6 @@ class GridSystem(ABC):
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("Subclasses must implement sel method")
 
-    @property
-    def supports_locate(self) -> bool:
-        return type(self).locate is not GridSystem.locate
-
     def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
         """Positions of the cells containing the points ``(x, y)``, in the grid CRS.
 
@@ -1773,6 +1771,7 @@ class RasterAffine(RectilinearMixin, GridSystem):
     indexes: tuple[rasterix.RasterIndex]
     Z: str | None = None
     drop_seam: bool = False
+    supports_locate: ClassVar[bool] = True
     lon_spans_globe: bool = field(init=False)
     npoints_per_geometry: int = field(init=False, default=5)
     dXmin: float = field(init=False)
@@ -1935,6 +1934,7 @@ class Rectilinear(RectilinearMixin, GridSystem):
     Ydim: str = field(init=False)
     indexes: tuple[xr.indexes.PandasIndex | LongitudeCellIndex, xr.indexes.PandasIndex]
     Z: str | None = None
+    supports_locate: ClassVar[bool] = True
     npoints_per_geometry: int = field(init=False, default=5)
     lon_spans_globe: bool = field(init=False)
     dXmin: float = field(init=False)
@@ -3024,6 +3024,7 @@ class Features(GridSystem1D):
     alternates: tuple[GridMetadata, ...] = ()
     npoints_per_geometry: int = 1
     structural_names: frozenset[str]
+    supports_locate: ClassVar[bool] = True
     dXmin: float = 0
     dYmin: float = 0
     _strtree: "shapely.STRtree" = field(repr=False)
