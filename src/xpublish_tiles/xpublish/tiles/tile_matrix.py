@@ -31,6 +31,9 @@ from xpublish_tiles.xpublish.tiles.types import (
     TileMatrixSetSummary,
 )
 
+# Path of the tileMatrixSets routes under the default ``app_router_prefix``
+DEFAULT_TMS_HREF = "/tiles/tileMatrixSets"
+
 
 def get_tile_matrix_set(tms_id: str) -> TileMatrixSet:
     """Get a complete tile matrix set definition for any morecantile TMS.
@@ -97,7 +100,7 @@ def get_tile_matrix_set_summary(tms_id: str) -> TileMatrixSetSummary:
         crs=tms.crs,
         links=[
             Link(
-                href=f"/tiles/tileMatrixSets/{tms_id_str}",
+                href=f"{DEFAULT_TMS_HREF}/{tms_id_str}",
                 rel="self",
                 type="application/json",
                 title=f"{tms_title} tile matrix set",

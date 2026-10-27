@@ -275,7 +275,7 @@ def test_features_locate(fixture):
     assert isinstance(grid, Features)
     inside = shapely.point_on_surface(grid.geometries)
     x, y = shapely.get_x(inside), shapely.get_y(inside)
-    (positions,) = grid.locate(x, y).values()
+    (positions,) = grid.locate(x=x, y=y).values()
     assert positions.tolist() == list(range(len(FEATURE_GEOMS)))
 
     points = {
@@ -286,7 +286,7 @@ def test_features_locate(fixture):
         "nothing": (0, -45),
     }
     x, y = np.array(list(points.values()), dtype=float).T
-    (positions,) = grid.locate(x, y).values()
+    (positions,) = grid.locate(x=x, y=y).values()
     assert dict(zip(points, positions.tolist(), strict=True)) == {
         "hole": -1,
         "east of antimeridian": 3,

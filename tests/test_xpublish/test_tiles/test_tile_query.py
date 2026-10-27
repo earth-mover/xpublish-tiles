@@ -1,6 +1,6 @@
 """Tests for TileQuery model validation."""
 
-from xpublish_tiles.types import ImageFormat
+from xpublish_tiles.types import TileFormat
 from xpublish_tiles.xpublish.tiles.types import TileQuery
 
 
@@ -17,13 +17,27 @@ class TestTileQueryColormap:
             height=256,
             colorscalerange=None,
             style="raster/custom",  # type: ignore  # Pydantic converts string to tuple
-            f=ImageFormat.PNG,
+            f=TileFormat.PNG,
             render_errors=False,
             abovemaxcolor=None,
             belowmincolor=None,
         )
         assert query.colormap == colormap
         assert query.style == ("raster", "custom")
+
+        query = TileQuery(
+            variables=["air"],
+            colormap=colormap,
+            style="polygons/custom",  # type: ignore
+            width=256,
+            height=256,
+            colorscalerange=None,
+            f=TileFormat.PNG,
+            render_errors=False,
+            abovemaxcolor=None,
+            belowmincolor=None,
+        )
+        assert query.style == ("polygons", "custom")
 
     def test_tile_query_colormap_validation_none(self):
         """Test that None colormap is handled correctly."""
@@ -34,7 +48,7 @@ class TestTileQueryColormap:
             colorscalerange=None,
             style=None,
             colormap=None,
-            f=ImageFormat.PNG,
+            f=TileFormat.PNG,
             render_errors=False,
             abovemaxcolor=None,
             belowmincolor=None,
@@ -56,7 +70,7 @@ class TestTileQueryColormap:
             width=256,
             height=256,
             colorscalerange=None,
-            f=ImageFormat.PNG,
+            f=TileFormat.PNG,
             render_errors=False,
             abovemaxcolor=None,
             belowmincolor=None,
@@ -65,7 +79,7 @@ class TestTileQueryColormap:
         assert query.style == ("raster", "custom")
 
         # Test that raster/default fails
-        with pytest.raises(ValidationError, match="must be 'raster/custom'"):
+        with pytest.raises(ValidationError, match="variant must be 'custom'"):
             TileQuery(
                 variables=["air"],
                 colormap=colormap,
@@ -73,14 +87,14 @@ class TestTileQueryColormap:
                 width=256,
                 height=256,
                 colorscalerange=None,
-                f=ImageFormat.PNG,
+                f=TileFormat.PNG,
                 render_errors=False,
                 abovemaxcolor=None,
                 belowmincolor=None,
             )
 
         # Test that raster/viridis fails
-        with pytest.raises(ValidationError, match="must be 'raster/custom'"):
+        with pytest.raises(ValidationError, match="variant must be 'custom'"):
             TileQuery(
                 variables=["air"],
                 colormap=colormap,
@@ -88,7 +102,7 @@ class TestTileQueryColormap:
                 width=256,
                 height=256,
                 colorscalerange=None,
-                f=ImageFormat.PNG,
+                f=TileFormat.PNG,
                 render_errors=False,
                 abovemaxcolor=None,
                 belowmincolor=None,

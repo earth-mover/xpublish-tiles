@@ -37,7 +37,9 @@ def locate_cells(
     """
     grid = array.grid
     gx, gy = transformer_from_crs(crs_from=crs, crs_to=grid.crs).transform(x, y)
-    indexers = grid.locate(np.asarray(gx), np.asarray(gy))
+    located = grid.locate(x=np.asarray(gx), y=np.asarray(gy))
+    # e.g. a UGRID mesh locates both nodes and faces; a variable lives on one
+    indexers = {dim: located[dim] for dim in grid.dims_for(array.da)}
     (inside,) = np.nonzero(np.logical_and.reduce([i >= 0 for i in indexers.values()]))
     return {dim: idx[inside] for dim, idx in indexers.items()}, inside
 

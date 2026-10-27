@@ -363,7 +363,7 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
             dimensions=dimensions,
             attributes=wms_attributes,
             styles=styles,
-            queryable=grid.supports_point_queries,
+            queryable=grid.supports_locate,
             opaque=False,
         )
         layers.append(layer)

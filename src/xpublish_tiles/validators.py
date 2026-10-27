@@ -5,7 +5,14 @@ from pyproj import CRS
 from pyproj.aoi import BBox
 from pyproj.exceptions import CRSError
 
-from xpublish_tiles.types import ImageFormat, OverviewSelectionStrategy
+from xpublish_tiles.types import (
+    MVT_MEDIA_TYPE,
+    ImageFormat,
+    OverviewSelectionStrategy,
+    TileFormat,
+)
+
+MVT_FORMAT_ALIASES = frozenset({"mvt", "pbf", MVT_MEDIA_TYPE, "application/x-protobuf"})
 
 
 def validate_colorscalerange(v: str | list[str] | None) -> tuple[float, float] | None:
@@ -117,6 +124,21 @@ def validate_image_format(v: str | None) -> ImageFormat | None:
         raise ValueError(
             f"image format {format_str} is not valid. Options are: {', '.join(ImageFormat.__members__.keys())}",
         ) from e
+
+
+def validate_tile_format(v: str | None) -> TileFormat | None:
+    """Accept an image format, or Mapbox Vector Tile by media type or shorthand."""
+    if v is None:
+        return None
+    if v.lower() in MVT_FORMAT_ALIASES:
+        return TileFormat.MVT
+    try:
+        image_format = validate_image_format(v)
+    except ValueError as e:
+        raise ValueError(
+            f"tile format {v} is not valid. Options are: image/png, image/jpeg, {MVT_MEDIA_TYPE}",
+        ) from e
+    return TileFormat(image_format)
 
 
 def validate_legend_format(v: str | None):

@@ -63,7 +63,7 @@
           "name": "foo",
           "no_subsets": false,
           "opaque": false,
-          "queryable": false,
+          "queryable": true,
           "styles": [
             "polygons/Accent",
             "polygons/Accent_r",

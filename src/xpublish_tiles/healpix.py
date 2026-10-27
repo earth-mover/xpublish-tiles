@@ -7,8 +7,11 @@ from typing import Literal
 
 import numba
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 from pyproj.aoi import BBox
+
+from xpublish_tiles.utils import normalize_longitude_deg
 
 _INDEXING_SCHEMES = ("nested", "ring")
 
@@ -45,6 +48,21 @@ class HealpixGridInfo:
             cell_ids, depth=self.level, ellipsoid=self.ellipsoid
         )
         return np.asarray(lon), np.asarray(lat)
+
+    def geographic2cell_ids(
+        self, lon: np.ndarray, lat: np.ndarray
+    ) -> npt.NDArray[np.int64]:
+        """Cell id containing each point; -1 for non-finite or |lat| > 90."""
+        import healpix_geo
+
+        mod = healpix_geo.nested if self.indexing_scheme == "nested" else healpix_geo.ring
+        lon, lat = np.asarray(lon, dtype=np.float64), np.asarray(lat, dtype=np.float64)
+        valid = np.isfinite(lon) & np.isfinite(lat) & (np.abs(lat) <= 90)
+        ids = np.full(lon.shape, -1, dtype=np.int64)
+        ids[valid] = mod.lonlat_to_healpix(
+            lon[valid], lat[valid], depth=self.level, ellipsoid=self.ellipsoid
+        )
+        return ids
 
 
 _M1 = np.uint64(0x5555555555555555)
@@ -163,8 +181,8 @@ def bbox_cell_ids(bbox: BBox, depth: int) -> np.ndarray:
     # guarantee boundary cells are included.
     EPS = 1e-6
     MAX_LON = 360.0 - 1e-9
-    west = (bbox.west - EPS) % 360.0
-    east = (bbox.east + EPS) % 360.0
+    west = normalize_longitude_deg(bbox.west - EPS, 0)
+    east = normalize_longitude_deg(bbox.east + EPS, 0)
     if east == 0:
         east = MAX_LON
     south = max(bbox.south, -90.0)

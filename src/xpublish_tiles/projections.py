@@ -13,6 +13,8 @@ import numpy as np
 import pyproj
 from pyproj import CRS
 
+from xpublish_tiles.utils import normalize_longitude_deg
+
 _XY = tuple[np.ndarray, np.ndarray]
 
 WGS84_SEMI_MAJOR_AXIS = np.float64(6378137.0)  # from proj
@@ -73,7 +75,7 @@ def has_null_datum_shift(crs: CRS) -> bool:
     if not finite.any():
         return False
     dlon = (x - lon)[finite]
-    dlon = (dlon + 180.0) % 360.0 - 180.0
+    dlon = normalize_longitude_deg(dlon)
     shift = np.hypot(dlon * np.cos(np.deg2rad(lat[finite])), (y - lat)[finite]) * 111320
     return bool(shift.max() < MAX_DATUM_SHIFT_METERS)
 

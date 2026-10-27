@@ -1,11 +1,14 @@
 import io
 import json
 import urllib.parse
+from pathlib import Path
 from unittest.mock import patch
 
+import mapbox_vector_tile
 import morecantile
 import numpy as np
 import pandas as pd
+import pyproj
 import pytest
 import xpublish
 from fastapi.testclient import TestClient
@@ -23,12 +26,14 @@ from xpublish_tiles.testing.datasets import (
     GLOBAL_HEALPIX_L3,
     IFS,
     NATIVE_AT_ROOT_MULTISCALE,
+    RADAR,
     REDGAUSS_N320,
     RGB,
     create_global_dataset,
     create_rotated_pole_dataset,
 )
 from xpublish_tiles.tiles_lib import _MIN_ZOOM_CACHE
+from xpublish_tiles.types import MVT_MEDIA_TYPE
 from xpublish_tiles.xpublish.tiles import TilesPlugin
 from xpublish_tiles.xpublish.tiles.tile_matrix import extract_dimension_extents
 
@@ -1339,6 +1344,63 @@ def test_native_at_root_multiscale_tiles():
     assert response.headers["X-Multiscale-Level"] == "1"
 
 
+def _overview_with_foreign_coordinates_attr(path: Path) -> xr.DataTree:
+    wkt = pyproj.CRS.from_epsg(4326).to_wkt()
+
+    def level(n: int, suffix: str) -> xr.Dataset:
+        res = 180 / n
+        y, x = f"y{suffix}", f"x{suffix}"
+        return xr.Dataset(
+            {
+                "mask": (
+                    ("year", y, x),
+                    np.ones((2, n, 2 * n), dtype="uint8"),
+                    {"grid_mapping": "spatial_ref", "coordinates": "year y x"},
+                ),
+                "spatial_ref": (
+                    (),
+                    0,
+                    {
+                        "crs_wkt": wkt,
+                        "GeoTransform": f"-180.0 {res} 0.0 90.0 0.0 {-res}",
+                    },
+                ),
+            },
+            coords={
+                y: (y, 90 - (np.arange(n) + 0.5) * res, {"standard_name": "latitude"}),
+                x: (
+                    x,
+                    -180 + (np.arange(2 * n) + 0.5) * res,
+                    {"standard_name": "longitude"},
+                ),
+            },
+            attrs={"spatial:transform": [res, 0.0, -180.0, 0.0, -res, 90.0]},
+        )
+
+    root = level(64, "").assign_coords(year=("year", [2020, 2021]))
+    xr.DataTree.from_dict({"/": root, "4x": level(16, "_4x")}).to_zarr(
+        path, mode="w", consolidated=False
+    )
+    return xr.open_datatree(path, engine="zarr", consolidated=False)
+
+
+def test_foreign_coordinates_attr_on_overview_returns_422(tmp_path):
+    """An overview whose `coordinates` attr names the root's x/y is a client error that names the attr."""
+    tree = _overview_with_foreign_coordinates_attr(tmp_path / "tree.zarr")
+    rest = xpublish.Rest({"foreign_coords": tree}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    listing = client.get("/datasets/foreign_coords/tiles/")
+    tile = client.get(
+        "/datasets/foreign_coords/tiles/WebMercatorQuad/0/0/0"
+        "?variables=mask&width=256&height=256&colorscalerange=0,1"
+    )
+
+    for response in (listing, tile):
+        assert response.status_code == 422
+        assert "coordinates='year y x'" in response.json()["detail"]
+
+
 def test_tilejson_minzoom_uses_coarsest_level():
     """Test that tilejson minzoom is calculated from the coarsest overview level.
 
@@ -1676,3 +1738,103 @@ def test_tilejson_edgecolor_raster_is_422(xpublish_client):
     )
     assert r.status_code == 422, r.text
     assert "edgecolor" in r.text
+
+
+def test_polygons_only_grid_mvt(polygons_only_client):
+    r = polygons_only_client.get(f"{POLYS_TILE}&f=mvt")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == MVT_MEDIA_TYPE
+    features = mapbox_vector_tile.decode(r.content)["foo"]["features"]
+    assert features
+    assert all(set(f["properties"]) == {"value", "color"} for f in features)
+
+
+def test_mvt_defaults_to_polygons_style(xpublish_client):
+    tile = "/datasets/air/tiles/WebMercatorQuad/2/1/1?variables=air&width=256&height=256"
+    r = xpublish_client.get(f"{tile}&f={MVT_MEDIA_TYPE}")
+    assert r.status_code == 200, r.text
+    assert mapbox_vector_tile.decode(r.content)["air"]["features"]
+
+    r = xpublish_client.get(f"{tile}&f=mvt&style=raster/default")
+    assert r.status_code == 422, r.text
+    assert "polygons" in r.json()["detail"]
+
+
+def test_mvt_errors_are_not_rendered(xpublish_client):
+    r = xpublish_client.get(
+        "/datasets/air/tiles/WebMercatorQuad/0/0/0"
+        "?variables=nope&width=256&height=256&f=mvt&render_errors=true"
+    )
+    assert r.status_code == 422, r.text
+    assert r.headers["content-type"] == "application/json"
+
+
+def test_tilejson_mvt(xpublish_client):
+    # air defaults to raster; vector tiles default to polygons
+    r = xpublish_client.get(
+        "/datasets/air/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=air&width=256&height=256&f=mvt"
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    (url,) = body["tiles"]
+    assert "f=mvt" in url and "style=polygons/default" in url
+    assert body["vector_layers"] == [
+        {"id": "air", "fields": {"value": "Number", "color": "String"}}
+    ]
+
+
+def test_polygons_custom_colormap_png(polygons_only_client):
+    r = polygons_only_client.get(
+        f"{POLYS_TILE}&style=polygons/custom&colormap={CUSTOM_COLORMAP}"
+    )
+    assert r.status_code == 200, r.text
+    rgba = np.asarray(Image.open(io.BytesIO(r.content)).convert("RGBA"))
+    painted = rgba[rgba[..., 3] == 255][:, :3]
+    assert painted.size
+    assert (painted == painted[:, :1]).all()
+
+
+def test_polygons_custom_colormap_mvt(polygons_only_client):
+    r = polygons_only_client.get(
+        f"{POLYS_TILE}&style=polygons/custom&colormap={CUSTOM_COLORMAP}&f=mvt"
+    )
+    assert r.status_code == 200, r.text
+    features = mapbox_vector_tile.decode(r.content)["foo"]["features"]
+    colors = {f["properties"]["color"] for f in features}
+    assert colors
+    assert all(c[1:3] == c[3:5] == c[5:7] for c in colors)
+
+
+def test_vector_tileset_links_resolve(polygons_only_client):
+    base = "http://testserver/datasets/polys/tiles/"
+    tilesets = polygons_only_client.get(base).json()["tilesets"]
+    vector = next(
+        t
+        for t in tilesets
+        if t["dataType"] == "vector" and "WebMercatorQuad" in t["title"]
+    )
+    (self_link,) = (link for link in vector["links"] if link["rel"] == "self")
+    metadata_url = urllib.parse.urljoin(base, self_link["href"])
+    metadata = polygons_only_client.get(metadata_url).json()
+    assert metadata["dataType"] == "vector"
+    (item,) = (link for link in metadata["links"] if link["rel"] == "item")
+    assert item["type"] == MVT_MEDIA_TYPE
+
+    tile_url = urllib.parse.urljoin(metadata_url, item["href"]).format(
+        tileMatrix=0, tileRow=0, tileCol=0
+    )
+    r = polygons_only_client.get(f"{tile_url}&variables=foo&width=256&height=256")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == MVT_MEDIA_TYPE
+
+
+def test_vector_tileset_404_without_polygons():
+    rest = xpublish.Rest({"radar": RADAR.create()}, plugins={"tiles": TilesPlugin()})
+    r = TestClient(rest.app).get("/datasets/radar/tiles/vector/WebMercatorQuad")
+    assert r.status_code == 404, r.text
+
+
+def test_conformance_declares_mvt(xpublish_client):
+    conforms = xpublish_client.get("/tiles/conformance").json()["conformsTo"]
+    assert "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/mvt" in conforms

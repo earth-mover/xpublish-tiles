@@ -51,6 +51,7 @@ from xpublish_tiles.grids import (
 )
 from xpublish_tiles.lib import (
     InvalidCoordinateValues,
+    PointQueryNotSupportedError,
     TileTooBigError,
     UnsupportedGridError,
     VariableNotFoundError,
@@ -70,6 +71,7 @@ from xpublish_tiles.pipeline import (
     pipeline,
 )
 from xpublish_tiles.projections import (
+    aeqd_to_4326,
     transformer_from_crs,
 )
 from xpublish_tiles.testing.datasets import (
@@ -82,6 +84,8 @@ from xpublish_tiles.testing.datasets import (
     FVCOM,
     FVCOM_MACHIAS_BAY,
     GEOSTATIONARY,
+    GLOBAL_6KM,
+    GLOBAL_6KM_360,
     GLOBAL_HEALPIX_CUBE_L3,
     GLOBAL_HEALPIX_L3,
     HRRR,
@@ -93,6 +97,9 @@ from xpublish_tiles.testing.datasets import (
     RADAR,
     REDGAUSS_N320,
     REGIONAL_HEALPIX_NA,
+    SENTINEL2_NOCOORDS,
+    TRIPOLE_ANTIMERIDIAN,
+    TRIPOLE_GLOBAL_UNWRAPPED,
     UGRID_TRIANGLES,
     UTM33S_HIRES,
     UTM50S_HIRES,
@@ -2235,3 +2242,256 @@ def test_raster_affine_sel_across_antimeridian(west, east, expected):
     )
     slicers = grid.sel(bbox=BBox(west=west, east=east, south=-10.0, north=10.0))
     assert slicers["x"] == expected
+
+
+@pytest.mark.parametrize(
+    "dataset",
+    [GLOBAL_6KM, GLOBAL_6KM_360, ERA5, EU3035, SENTINEL2_NOCOORDS, GEOSTATIONARY],
+    ids=lambda d: d.name,
+)
+def test_locate_cell_centres(dataset):
+    ds = dataset.create()
+    name = next(iter(ds.data_vars))
+    grid = guess_grid_system(ds, name)
+    assert grid.supports_locate
+    da = grid.assign_index(cf_get(ds, name))
+    rng = np.random.default_rng(0)
+    xi = rng.integers(0, da.sizes[grid.Xdim], 20)
+    yi = rng.integers(0, da.sizes[grid.Ydim], 20)
+    x, y = da[grid.X].values[xi], da[grid.Y].values[yi]
+
+    shifts = (-360, 0, 360) if grid.crs.is_geographic else (0,)
+    for shift in shifts:
+        indexers = grid.locate(x=x + shift, y=y)
+        npt.assert_array_equal(indexers[grid.Xdim], xi)
+        npt.assert_array_equal(indexers[grid.Ydim], yi)
+
+    far = 95.0 if grid.crs.is_geographic else 1e9
+    outside = grid.locate(x=x[:1], y=np.array([far]))
+    assert any(idx.tolist() == [-1] for idx in outside.values())
+
+
+@pytest.mark.parametrize(
+    "dataset",
+    [GLOBAL_6KM, GLOBAL_6KM_360, ERA5, EU3035, SENTINEL2_NOCOORDS, GEOSTATIONARY],
+    ids=lambda d: d.name,
+)
+def test_locate_nonfinite_misses(dataset):
+    ds = dataset.create()
+    name = next(iter(ds.data_vars))
+    grid = guess_grid_system(ds, name)
+    da = grid.assign_index(cf_get(ds, name))
+    x = np.array([np.nan, np.inf, -np.inf])
+    y = np.full(3, da[grid.Y].values[0])
+    indexers = grid.locate(x=x, y=y)
+    assert np.logical_or.reduce([idx == -1 for idx in indexers.values()]).all()
+
+
+def test_locate_not_supported():
+    grid = guess_grid_system(CURVILINEAR.create(), "foo")
+    assert GridSystem.supports_locate is False
+    with pytest.raises(PointQueryNotSupportedError):
+        GridSystem.locate(grid, x=np.array([0.0]), y=np.array([0.0]))
+
+
+def test_curvilinear_locate_cell_centres():
+    ds = CURVILINEAR.create()
+    grid = guess_grid_system(ds, "foo")
+    lon = ds.lon.transpose(grid.Ydim, grid.Xdim).values
+    lat = ds.lat.transpose(grid.Ydim, grid.Xdim).values
+    rng = np.random.default_rng(0)
+    j, i = rng.integers(0, lon.shape[0], 50), rng.integers(0, lon.shape[1], 50)
+    out = grid.locate(x=lon[j, i], y=lat[j, i])
+    npt.assert_array_equal(out[grid.Ydim], j)
+    npt.assert_array_equal(out[grid.Xdim], i)
+    far = grid.locate(
+        x=np.array([lon[0, 0] + 180.0, np.nan]), y=np.array([lat[0, 0], 0.0])
+    )
+    assert (far[grid.Xdim] == -1).all()
+
+
+@pytest.mark.parametrize(
+    "dataset", [TRIPOLE_ANTIMERIDIAN, TRIPOLE_GLOBAL_UNWRAPPED], ids=lambda d: d.name
+)
+def test_curvilinear_locate_tripole(dataset):
+    ds = dataset.create()
+    grid = guess_grid_system(ds, "foo")
+    index = grid.indexes[0]
+    assert isinstance(index, CurvilinearCellIndex)
+    # cells of the Arctic cap overlap, so a centre may lie in a lower-numbered cell
+    nrows = index.tripolar_fold_row or int(0.9 * ds.sizes[grid.Ydim])
+    lon = ds.lon.transpose(grid.Ydim, grid.Xdim).values[:nrows]
+    lat = ds.lat.transpose(grid.Ydim, grid.Xdim).values[:nrows]
+    rng = np.random.default_rng(0)
+    j, i = rng.integers(0, lon.shape[0], 50), rng.integers(0, lon.shape[1], 50)
+    for shift in (-360.0, 0.0, 360.0):
+        out = grid.locate(x=lon[j, i] + shift, y=lat[j, i])
+        npt.assert_array_equal(out[grid.Ydim], j)
+        npt.assert_array_equal(out[grid.Xdim], i)
+
+
+def test_curvilinear_locate_polar_cap_raises():
+    grid = guess_grid_system(CUBED_SPHERE.create(), "foo")
+    assert isinstance(grid, CubedSphere)
+    cap = next(f for f in grid.faces if f.is_polar_cap)
+    with pytest.raises(PointQueryNotSupportedError, match="polar-cap"):
+        cap.locate(x=np.array([0.0]), y=np.array([89.0]))
+
+
+def test_cubed_sphere_locate_cell_centres():
+    ds = CUBED_SPHERE.create()
+    grid = guess_grid_system(ds, "foo")
+    assert isinstance(grid, CubedSphere)
+    caps = {f for f, face in enumerate(grid.faces) if face.is_polar_cap}
+    lons = ds.lons.transpose(grid.face_dim, grid.Ydim, grid.Xdim).values
+    lats = ds.lats.transpose(grid.face_dim, grid.Ydim, grid.Xdim).values
+    f, j, i = np.meshgrid(*(np.arange(n) for n in lons.shape), indexing="ij")
+    keep = ~np.isin(f, list(caps))
+    out = grid.locate(x=lons[keep], y=lats[keep])
+    npt.assert_array_equal(out[grid.face_dim], f[keep])
+    npt.assert_array_equal(out[grid.Ydim], j[keep])
+    npt.assert_array_equal(out[grid.Xdim], i[keep])
+
+
+def test_cubed_sphere_locate_polar_point_raises():
+    grid = guess_grid_system(CUBED_SPHERE.create(), "foo")
+    with pytest.raises(PointQueryNotSupportedError, match="polar-cap"):
+        grid.locate(x=np.array([0.0]), y=np.array([89.9]))
+
+
+def test_cubed_sphere_locate_nonfinite_does_not_raise():
+    grid = guess_grid_system(CUBED_SPHERE.create(), "foo")
+    out = grid.locate(x=np.array([np.nan]), y=np.array([0.0]))
+    assert all(v.tolist() == [-1] for v in out.values())
+
+
+def test_cubed_sphere_locate_off_sphere_does_not_raise():
+    grid = guess_grid_system(CUBED_SPHERE.create(), "foo")
+    out = grid.locate(x=np.array([0.0]), y=np.array([95.0]))
+    assert len(out) == 3
+    assert all(v.tolist() == [-1] for v in out.values())
+
+
+def _polar_lonlat(grid: Polar, az_deg, rng_m):
+    """Flat-earth forward of ``Polar.assign_index`` (test only)."""
+    az, rng = np.broadcast_arrays(
+        np.radians(np.asarray(az_deg, dtype=np.float64)),
+        np.asarray(rng_m, dtype=np.float64),
+    )
+    return aeqd_to_4326(
+        rng * np.sin(az), rng * np.cos(az), grid.center_lat, grid.center_lon
+    )
+
+
+def _assert_polar_round_trip(ds):
+    grid = cast(Polar, guess_grid_system(ds, "foo"))
+    index = grid.indexes[0]
+    rng = np.random.default_rng(0)
+    ai = rng.integers(0, index.azimuth.size, 50)
+    ri = rng.integers(0, index.range_m.size, 50)
+    daz = np.median(np.diff(index.azimuth))
+    dr = np.median(np.diff(index.range_m))
+    sign = 1.0 if index.range_m[0] < 0.3 * dr else -1.0
+    lon, lat = _polar_lonlat(
+        grid, index.azimuth[ai] + 0.3 * daz, index.range_m[ri] + sign * 0.3 * dr
+    )
+    out = grid.locate(x=lon, y=lat)
+    npt.assert_array_equal(out[grid.Xdim], ai)
+    npt.assert_array_equal(out[grid.Ydim], ri)
+
+
+def test_polar_locate_cell_centres():
+    _assert_polar_round_trip(RADAR.create())
+
+
+def test_polar_locate_misses():
+    ds = RADAR.create()
+    grid = cast(Polar, guess_grid_system(ds, "foo"))
+    index = grid.indexes[0]
+    dr = np.median(np.diff(index.range_m))
+    lon, lat = _polar_lonlat(grid, [10.0], [index.range_m[-1] + 2 * dr])
+    out = grid.locate(
+        x=np.array([lon[0], np.nan, 0.0]), y=np.array([lat[0], 0.0, np.nan])
+    )
+    npt.assert_array_equal(out[grid.Xdim], [-1, -1, -1])
+    npt.assert_array_equal(out[grid.Ydim], [-1, -1, -1])
+
+
+def test_polar_locate_unsorted_azimuth():
+    ds = RADAR.create().roll(azimuth=137, roll_coords=True)
+    ds.attrs["_xpublish_id"] = "polar_locate_unsorted"
+    assert ds.azimuth.values[0] != ds.azimuth.values.min()
+    _assert_polar_round_trip(ds)
+
+
+def _polar_ds_with_azimuth(azimuth, xpublish_id):
+    ds = RADAR.create().isel(azimuth=slice(0, azimuth.size))
+    ds = ds.assign_coords(azimuth=("azimuth", azimuth, ds.azimuth.attrs))
+    ds.attrs["_xpublish_id"] = xpublish_id
+    return ds
+
+
+def test_polar_locate_jittered_full_sweep():
+    jitter = np.random.default_rng(0).uniform(-0.3, 0.3, 360)
+    az = (np.arange(360) + jitter) % 360.0
+    ds = _polar_ds_with_azimuth(az, "polar_locate_jitter")
+    grid = cast(Polar, guess_grid_system(ds, "foo"))
+    index = grid.indexes[0]
+    r = np.full(360, index.range_m[10])
+    lon, lat = _polar_lonlat(grid, index.azimuth, r)
+    out = grid.locate(x=lon, y=lat)
+    npt.assert_array_equal(out[grid.Xdim], np.arange(360))
+    npt.assert_array_equal(out[grid.Ydim], np.full(360, 10))
+    lon, lat = _polar_lonlat(grid, [359.95, 0.05, 180.0], r[:3])
+    assert (grid.locate(x=lon, y=lat)[grid.Xdim] >= 0).all()
+    order = np.argsort(az)
+    gaps = np.diff(np.append(az[order], az[order][0] + 360.0))
+    k = int(np.argmax(gaps))
+    lo, hi = int(order[k]), int(order[(k + 1) % 360])
+    probes = az[lo] + gaps[k] * np.array([0.45, 0.55])
+    lon, lat = _polar_lonlat(grid, probes, r[:2])
+    out = grid.locate(x=lon, y=lat)
+    npt.assert_array_equal(out[grid.Xdim], [lo, hi])
+
+
+def _unit(lonlat: np.ndarray) -> np.ndarray:
+    lon, lat = np.deg2rad(lonlat[:, 0]), np.deg2rad(lonlat[:, 1])
+    return np.column_stack(
+        [np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)]
+    )
+
+
+@pytest.mark.parametrize("dataset", [UGRID_TRIANGLES, FVCOM], ids=lambda d: d.name)
+def test_triangular_locate_ugrid(dataset):
+    ds = dataset.create()
+    grid = cast(Triangular, guess_grid_system(ds, "zeta"))
+    assert grid.mesh is not None
+    tree = cast(CellTreeIndex, grid.indexes[0]).tree
+    centroids = tree.vertices[tree.faces].mean(axis=1)
+    out = grid.locate(x=centroids[:, 0], y=centroids[:, 1])
+    assert set(out) == {grid.mesh.node_dim, grid.mesh.face_dim}
+    npt.assert_array_equal(out[grid.mesh.face_dim], np.arange(len(tree.faces)))
+    distance = np.linalg.norm(
+        _unit(tree.vertices)[None] - _unit(centroids)[:, None], axis=-1
+    )
+    npt.assert_array_equal(out[grid.mesh.node_dim], distance.argmin(1))
+
+
+def test_triangular_locate_ugrid_miss():
+    ds = UGRID_TRIANGLES.create()
+    grid = cast(Triangular, guess_grid_system(ds, "zeta"))
+    assert grid.mesh is not None
+    out = grid.locate(x=np.array([1e3, np.nan]), y=np.array([1e3, 0.0]))
+    npt.assert_array_equal(out[grid.mesh.node_dim], [-1, -1])
+    npt.assert_array_equal(out[grid.mesh.face_dim], [-1, -1])
+
+
+def test_triangular_locate_global_delaunay():
+    ds = REDGAUSS_N320.create()
+    grid = cast(Triangular, guess_grid_system(ds, "foo"))
+    rng = np.random.default_rng(0)
+    n = rng.integers(0, ds.sizes["point"], 50)
+    lon, lat = ds.longitude.values[n], ds.latitude.values[n]
+    for shift in (-360.0, 0.0, 360.0):
+        (pos,) = grid.locate(x=lon + shift, y=lat).values()
+        npt.assert_array_equal(pos, n)

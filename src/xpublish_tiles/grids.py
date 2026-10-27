@@ -5,12 +5,14 @@ import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Hashable, Iterable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, NamedTuple, Self, cast
+from functools import cached_property
+from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, Self, cast
 
 import cachetools
 import cf_xarray  # noqa: F401
 import numbagg
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import pyproj
 import rasterix
@@ -19,6 +21,7 @@ from affine import Affine
 from numba_celltree import CellTree2d
 from pyproj import CRS
 from pyproj.aoi import BBox
+from scipy.spatial import KDTree
 
 import xarray as xr
 from xarray.core.indexing import IndexSelResult
@@ -50,6 +53,7 @@ from xpublish_tiles.lib import (
     sync_load_async,
     unwrap,
 )
+from xpublish_tiles.locate import locate_in_quads
 from xpublish_tiles.logger import get_context_logger, log_duration, logger
 from xpublish_tiles.projections import (
     aeqd_to_4326,
@@ -60,6 +64,7 @@ from xpublish_tiles.ugrid import MeshTopology, detect_mesh, load_connectivity
 from xpublish_tiles.utils import (
     NUMBA_THREADING_LOCK,
     cf_ref_attr,
+    normalize_longitude_deg,
     time_debug,
     xarray_object_key,
 )
@@ -159,12 +164,7 @@ class FacetedIndexer:
 Slicer = slice | Fill | UgridIndexer | HealpixIndexer | FacetedIndexer | GeometryIndexer
 DimSlicers = list[Slicer]
 Slicers = dict[str, DimSlicers]
-PointIndexers = dict[str, np.ndarray]
-
-
-def _wrap_longitude(x: np.ndarray, west: float) -> np.ndarray:
-    """Wrap longitudes into ``[west, west + 360)``."""
-    return west + np.mod(np.asarray(x, dtype=np.float64) - west, 360.0)
+PointIndexers = dict[str, npt.NDArray[np.int64]]
 
 
 def _sync_load_coords(ds: xr.Dataset, *names: Hashable) -> None:
@@ -284,9 +284,12 @@ def match_coord_dim(pattern: re.Pattern, dims: Iterable[Hashable]) -> str | None
 
 _GRID_CACHE = cachetools.LRUCache(maxsize=config["grid_cache_max_size"])
 
+
 # Sentinel cached when detection fails, so a repeat lookup for the same
 # (xpublish_id, dim-signature) fails immediately.
-_GRID_DETECTION_FAILED = object()
+@dataclass(frozen=True)
+class _DetectionFailure:
+    reason: str
 
 
 def _cell_min_max(
@@ -660,9 +663,11 @@ class CellTreeIndex(xr.Index):
         X: str,
         Y: str,
         lon_spans_globe: bool,
+        geographic: bool,
     ):
         self.X = X
         self.Y = Y
+        self.geographic = geographic
         if lon_spans_globe:
             # We want to reflect the vertices across the anti-meridian, and then run the triangulation.
             # For simplicity, we just append two copies of the convex hull the longitudes modified differently.
@@ -711,6 +716,45 @@ class CellTreeIndex(xr.Index):
                 }
         else:
             self.antimeridian_vertices = {"pos": np.array([]), "neg": np.array([])}
+
+    @staticmethod
+    def _search_coords(xy: np.ndarray, geographic: bool) -> np.ndarray:
+        if not geographic:
+            return xy
+        lon, lat = np.deg2rad(xy[:, 0]), np.deg2rad(xy[:, 1])
+        return np.column_stack(
+            [np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)]
+        )
+
+    @cached_property
+    def node_kdtree(self) -> KDTree:
+        # Original nodes only: drop the padding added for global triangulations.
+        n_nodes = (
+            len(self.tree.vertices)
+            if self.reindexer is None
+            else int(self.reindexer.max()) + 1
+        )
+        return KDTree(self._search_coords(self.tree.vertices[:n_nodes], self.geographic))
+
+    def locate(self, x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Containing face and nearest node per point; -1 where no face contains it."""
+        x, y = np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64)
+        face = np.full(x.shape, -1, dtype=np.int64)
+        node = np.full(x.shape, -1, dtype=np.int64)
+        finite = np.isfinite(x) & np.isfinite(y)
+        if finite.any():
+            if self.geographic:
+                x = np.where(finite, normalize_longitude_deg(np.where(finite, x, 0.0)), x)
+            points = np.column_stack([x[finite], y[finite]])
+            with NUMBA_THREADING_LOCK:
+                face[finite] = self.tree.locate_points(points)
+        hit = face >= 0
+        if hit.any():
+            xy = np.column_stack([x[hit], y[hit]])
+            _, node[hit] = self.node_kdtree.query(
+                self._search_coords(xy, self.geographic)
+            )
+        return face, node
 
     def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
         xidxr = labels.get(self.X)
@@ -914,6 +958,57 @@ class PolarIndex(xr.Index):
         bearing = np.degrees(np.arctan2(x, y)) % 360
         return float(distance), float(bearing)
 
+    @cached_property
+    def _range_edges(self) -> np.ndarray:
+        """Gate edges: midpoints, extended by half a gate at each end."""
+        r = self.range_m
+        if r.size == 1:
+            return np.array([r[0] - 0.5, r[0] + 0.5])
+        mid = 0.5 * (r[:-1] + r[1:])
+        return np.concatenate(
+            [[r[0] - 0.5 * (r[1] - r[0])], mid, [r[-1] + 0.5 * (r[-1] - r[-2])]]
+        )
+
+    @cached_property
+    def _azimuth_lookup(self) -> tuple[np.ndarray, np.ndarray, float, float]:
+        """(order, midpoint edges relative to the first sorted ray, origin, wrap edge).
+
+        Bins are circular: the last cell wraps across 0 deg to the first ray.
+        """
+        order = np.argsort(self.azimuth)
+        s = self.azimuth[order]
+        rel = s - s[0]
+        return order, 0.5 * (rel[:-1] + rel[1:]), float(s[0]), 0.5 * (rel[-1] + 360.0)
+
+    def get_indexer(
+        self, lon: np.ndarray, lat: np.ndarray
+    ) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]:
+        """Inverse of the flat-earth forward in ``aeqd_to_4326``; -1 on a miss."""
+        lon = np.asarray(lon, dtype=np.float64)
+        lat = np.asarray(lat, dtype=np.float64)
+        finite = np.isfinite(lon) & np.isfinite(lat)
+        with np.errstate(invalid="ignore"):
+            x = (
+                normalize_longitude_deg(lon - self.center_lon)
+                * 111320.0
+                * np.cos(np.radians(self.center_lat))
+            )
+            y = (lat - self.center_lat) * 111320.0
+            r = np.hypot(x, y)
+            az = np.degrees(np.arctan2(x, y)) % 360.0
+
+        edges = self._range_edges
+        rng = np.searchsorted(edges, r, side="right") - 1
+        rng_ok = finite & (r >= edges[0]) & (r < edges[-1])
+
+        order, mids, origin, wrap_edge = self._azimuth_lookup
+        u = (az - origin) % 360.0
+        pos = np.where(u >= wrap_edge, 0, np.searchsorted(mids, u, side="right"))
+
+        az_idx = np.where(rng_ok, order[pos], -1)
+        rng_idx = np.where(rng_ok, rng, -1)
+        return az_idx.astype(np.int64), rng_idx.astype(np.int64)
+
     def equals(self, other: xr.Index, **kwargs: Any) -> bool:
         if not isinstance(other, PolarIndex):
             return False
@@ -1094,6 +1189,20 @@ class CurvilinearCellIndex(xr.Index):
     def get_min_spacing(self) -> tuple[float, float]:
         """Get minimum spacing in X and Y directions."""
         return self._dXmin, self._dYmin
+
+    @cached_property
+    def locate_arrays(self) -> tuple[np.ndarray, ...]:
+        """``(corner_x, corner_y, cell_x_min, cell_x_max, cell_y_min, cell_y_max)`` as
+        their own dtype in ``(y, x)`` order, without the tripolar fold rows; built on first ``locate``."""
+        corners = (self.corner_x, self.corner_y)
+        cells = (self.cell_x_min, self.cell_x_max, self.cell_y_min, self.cell_y_max)
+        if self.yaxis == 1:
+            corners = tuple(a.T for a in corners)
+            cells = tuple(a.T for a in cells)
+        if self.tripolar_fold_row is not None:
+            corners = tuple(a[: self.tripolar_fold_row + 1] for a in corners)
+            cells = tuple(a[: self.tripolar_fold_row] for a in cells)
+        return tuple(np.ascontiguousarray(a) for a in (*corners, *cells))
 
     def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
         X, Y = self.X.data, self.Y.data
@@ -1307,6 +1416,11 @@ class LongitudeCellIndex(xr.indexes.PandasIndex):
         # Consider global if span is at least 359 degrees (allowing small tolerance)
         return lon_span >= 359.0
 
+    def get_indexer(self, x: np.ndarray) -> npt.NDArray[np.int64]:
+        """Positions of the cells containing ``x``, wrapped into this index's period; -1 if none."""
+        wrapped = normalize_longitude_deg(x, self.left_break)
+        return self._interval_index.get_indexer(wrapped).astype(np.int64, copy=False)
+
     def sel(self, labels, method=None, tolerance=None) -> IndexSelResult:
         """
         Select values from the longitude index with coordinate system conversion.
@@ -1453,6 +1567,8 @@ class GridSystem(ABC):
     Xdim: str
     Ydim: str
     npoints_per_geometry: int
+    # Set True only where ``locate`` is implemented and correct for this grid.
+    supports_locate: ClassVar[bool] = False
 
     # FIXME: do we really need these Index objects on the class?
     #   - reconsider when we do curvilinear and triangular grids
@@ -1612,15 +1728,15 @@ class GridSystem(ABC):
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("Subclasses must implement sel method")
 
-    @property
-    def supports_point_queries(self) -> bool:
-        return type(self).locate is not GridSystem.locate
-
-    def locate(self, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
         """Positions of the cells containing the points ``(x, y)``, in the grid CRS.
 
-        Returns one integer array per grid dim, aligned with ``x`` and ``y``, for
-        pointwise ``isel``. A point outside the grid is ``-1`` along at least one dim.
+        Returns one integer array per horizontal grid dim (for a UGRID mesh, both the
+        node and the face dim), aligned with ``x`` and ``y``, for pointwise ``isel``.
+        Index a variable with the dims in ``dims_for(da)`` only. A point outside the
+        grid, or a non-finite point, is ``-1`` along at least one of those dims.
+        Some grids raise ``PointQueryNotSupportedError`` for points they cannot query
+        (for example CubedSphere polar-cap faces).
         """
         raise PointQueryNotSupportedError(
             f"Point queries are not supported on {type(self).__name__} grids."
@@ -1773,6 +1889,7 @@ class RasterAffine(RectilinearMixin, GridSystem):
     indexes: tuple[rasterix.RasterIndex]
     Z: str | None = None
     drop_seam: bool = False
+    supports_locate: ClassVar[bool] = True
     lon_spans_globe: bool = field(init=False)
     npoints_per_geometry: int = field(init=False, default=5)
     dXmin: float = field(init=False)
@@ -1875,19 +1992,13 @@ class RasterAffine(RectilinearMixin, GridSystem):
             y_size=index.xy_shape[1],
         )
 
-    def locate(self, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
         (index,) = self.indexes
         if self.crs.is_geographic:
-            x = _wrap_longitude(x, index.bbox.left)
-        cols, rows = ~index.transform() * (np.asarray(x), np.asarray(y))
-        indexers = {}
-        for dim, pos, size in zip(
-            (self.Xdim, self.Ydim), (cols, rows), index.xy_shape, strict=True
-        ):
-            pos = np.floor(pos).astype(np.intp)
-            pos[(pos < 0) | (pos >= size)] = -1
-            indexers[dim] = pos
-        return indexers
+            # same left break as _x_sel; regional grids have no x_period
+            x = normalize_longitude_deg(x, index.transform().c)
+        x_name, y_name = index.xy_coord_names
+        return index.get_indexer({x_name: x, y_name: y})
 
     def _get_edge_arrays(self) -> tuple[np.ndarray, np.ndarray]:
         """Return full 1D edge arrays (x_edges size nx+1, y_edges size ny+1)."""
@@ -1935,6 +2046,7 @@ class Rectilinear(RectilinearMixin, GridSystem):
     Ydim: str = field(init=False)
     indexes: tuple[xr.indexes.PandasIndex | LongitudeCellIndex, xr.indexes.PandasIndex]
     Z: str | None = None
+    supports_locate: ClassVar[bool] = True
     npoints_per_geometry: int = field(init=False, default=5)
     lon_spans_globe: bool = field(init=False)
     dXmin: float = field(init=False)
@@ -2077,13 +2189,15 @@ class Rectilinear(RectilinearMixin, GridSystem):
             y_size=y_size,
         )
 
-    def locate(self, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
         x_index, y_index = self.indexes[0], self.indexes[-1]
-        if self.crs.is_geographic:
-            x = _wrap_longitude(x, self.left_break)
+        if isinstance(x_index, LongitudeCellIndex):
+            xpos = x_index.get_indexer(x)
+        else:
+            xpos = x_index.index.get_indexer(x).astype(np.int64, copy=False)
         return {
-            self.Xdim: x_index.index.get_indexer(x),
-            self.Ydim: y_index.index.get_indexer(y),
+            self.Xdim: xpos,
+            self.Ydim: y_index.index.get_indexer(y).astype(np.int64, copy=False),
         }
 
     def _get_edge_arrays(self) -> tuple[np.ndarray, np.ndarray]:
@@ -2260,6 +2374,7 @@ class Curvilinear(GridSystem):
     Ydim: str
     indexes: tuple[xr.Index, ...]
     Z: str | None = None
+    supports_locate: ClassVar[bool] = True
     lon_spans_globe: bool = field(init=False)
     dXmin: float = field(init=False)
     dYmin: float = field(init=False)
@@ -2483,6 +2598,38 @@ class Curvilinear(GridSystem):
 
         return {self.Xdim: xslicers, self.Ydim: yslicers}
 
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        index = next(iter(self.indexes))
+        assert isinstance(index, CurvilinearCellIndex)
+        if index.is_polar_cap:
+            # TODO: test cap cells in the face's gnomonic tangent plane
+            raise PointQueryNotSupportedError(
+                "Point queries on polar-cap faces are not supported yet."
+            )
+        x = np.asarray(x, dtype=np.float64)
+        geographic = self.crs.is_geographic
+        if geographic:
+            x = normalize_longitude_deg(x, index.left_break)
+        corner_x, corner_y, cell_x_min, cell_x_max, cell_y_min, cell_y_max = (
+            index.locate_arrays
+        )
+        flat = locate_in_quads(
+            x,
+            y,
+            corner_x,
+            corner_y,
+            cell_x_min,
+            cell_x_max,
+            cell_y_min,
+            cell_y_max,
+            360.0 if geographic else 0.0,
+        )
+        hit = flat >= 0
+        j = np.full(flat.shape, -1, dtype=np.int64)
+        i = np.full(flat.shape, -1, dtype=np.int64)
+        j[hit], i[hit] = np.unravel_index(flat[hit], cell_x_min.shape)
+        return {self.Xdim: i, self.Ydim: j}
+
     def coarsen_indices(
         self,
         *,
@@ -2547,6 +2694,7 @@ class Polar(GridSystem):
     center_lat: float
     center_lon: float
     lon_spans_globe: bool = False
+    supports_locate: ClassVar[bool] = True
     npoints_per_geometry: int = field(init=False, default=5)
     dXmin: float = field(init=False)
     dYmin: float = field(init=False)
@@ -2554,6 +2702,10 @@ class Polar(GridSystem):
     def __post_init__(self):
         index = self.indexes[0]
         self.dXmin, self.dYmin = index.get_min_spacing()
+
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        az, rng = self.indexes[0].get_indexer(x, y)
+        return {self.Xdim: az, self.Ydim: rng}
 
     @classmethod
     def from_dataset(cls, ds: xr.Dataset, crs: CRS, Xname: str, Yname: str) -> Self:
@@ -2715,6 +2867,7 @@ class Triangular(GridSystem1D):
     dim: str
     mesh: MeshTopology | None
     lon_spans_globe: bool
+    supports_locate: ClassVar[bool] = True
     indexes: tuple[xr.Index]
     npoints_per_geometry: int = field(init=False, default=4)
 
@@ -2760,11 +2913,19 @@ class Triangular(GridSystem1D):
                 X=Xname,
                 Y=Yname,
                 lon_spans_globe=self.lon_spans_globe,
+                geographic=crs.is_geographic,
             ),
         )
         self.alternates = ()
         self.Z = None
         self._bbox_xform_cache = {}
+
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        (index,) = self.indexes
+        face, node = cast(CellTreeIndex, index).locate(x, y)
+        if self.mesh is None:
+            return {self.dim: node}
+        return {self.mesh.node_dim: node, self.mesh.face_dim: face}
 
     @property
     def face_dim(self) -> str | None:
@@ -2948,7 +3109,7 @@ class Triangular(GridSystem1D):
             f"Attempting to triangulate vertices with shape={vertices.shape}. Expected (n_points, 2)"
         )
         if crs.is_geographic:
-            vertices[:, 0] = ((vertices[:, 0] + 180) % 360) - 180
+            vertices[:, 0] = normalize_longitude_deg(vertices[:, 0])
 
         (dim_,) = ds[Xname].dims
         dim = str(dim_)
@@ -3024,6 +3185,9 @@ class Features(GridSystem1D):
     alternates: tuple[GridMetadata, ...] = ()
     npoints_per_geometry: int = 1
     structural_names: frozenset[str]
+    supports_locate: ClassVar[bool] = True
+    # geographic geometries lie in [lon_west, lon_west + 360], see __init__
+    lon_west: ClassVar[float] = -180.0
     dXmin: float = 0
     dYmin: float = 0
     _strtree: "shapely.STRtree" = field(repr=False)
@@ -3107,11 +3271,11 @@ class Features(GridSystem1D):
         boxes = [bbox]
         if self.crs.is_geographic:
             # the query box may extend past ±180; features lie in [-180, 180]
-            if bbox.east > 180:
+            if bbox.east > self.lon_west + 360:
                 boxes.append(
                     BBox(bbox.west - 360, bbox.south, bbox.east - 360, bbox.north)
                 )
-            if bbox.west < -180:
+            if bbox.west < self.lon_west:
                 boxes.append(
                     BBox(bbox.west + 360, bbox.south, bbox.east + 360, bbox.north)
                 )
@@ -3120,18 +3284,19 @@ class Features(GridSystem1D):
         indices = np.unique(hits[1]).astype(np.intp)
         return {self.dim: [GeometryIndexer(indices)]}
 
-    def locate(self, x: np.ndarray, y: np.ndarray) -> PointIndexers:
-        """The first feature (by position) that contains each point."""
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        """For each point, the position along ``dim`` of a feature that contains it or
+        has it on its boundary. Where features overlap, the lowest position wins."""
         import shapely
 
         if self.crs.is_geographic:
-            x = _wrap_longitude(x, -180)
+            x = normalize_longitude_deg(x, self.lon_west)
         points, features = self.strtree.query(
             shapely.points(x, y), predicate="intersects"
         )
         order = np.lexsort((features, points))
         hit_points, first = np.unique(points[order], return_index=True)
-        positions = np.full(np.shape(x), -1, dtype=np.intp)
+        positions = np.full(np.shape(x), -1, dtype=np.int64)
         positions[hit_points] = features[order][first]
         return {self.dim: positions}
 
@@ -3210,6 +3375,7 @@ class Healpix(HealpixBase):
 
     cell_ids_name: str
     cell_ids: np.ndarray
+    supports_locate: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -3249,6 +3415,32 @@ class Healpix(HealpixBase):
     @property
     def dims(self) -> set[str]:
         return {self.dim}
+
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        ids = self.grid_info.geographic2cell_ids(x, y)
+        if self._ids_are_positions:
+            return {self.dim: ids}
+        sorter = self._id_sorter
+        valid = ids >= 0
+        query = ids[valid].astype(self.cell_ids.dtype)
+        found = np.minimum(
+            np.searchsorted(self.cell_ids, query, sorter=sorter), self.cell_ids.size - 1
+        )
+        pos = sorter[found]
+        out = np.full(ids.shape, -1, dtype=np.int64)
+        out[valid] = np.where(self.cell_ids[pos] == query, pos, -1)
+        return {self.dim: out}
+
+    @cached_property
+    def _ids_are_positions(self) -> bool:
+        """Full sphere in id order: the position is the id."""
+        return self.cell_ids.size == self.grid_info.ncells and bool(
+            np.all(np.diff(self.cell_ids.astype(np.int64)) > 0)
+        )
+
+    @cached_property
+    def _id_sorter(self) -> np.ndarray:
+        return np.argsort(self.cell_ids)
 
     def sel(self, *, bbox: BBox) -> Slicers:
         """Select cells within the bounding box.
@@ -3332,7 +3524,7 @@ class Healpix(HealpixBase):
             bbox = BBox(west=-180, south=-90, east=180, north=90)
         else:
             lon, lat = info.cell_ids2geographic(cell_ids)
-            lon = ((lon + 180) % 360) - 180
+            lon = normalize_longitude_deg(lon)
             bbox = BBox(
                 west=float(lon.min()),
                 south=float(lat.min()),
@@ -3405,7 +3597,7 @@ class FacetedGridSystem(GridSystem, ABC):
         def intervals(west: float, east: float) -> list[tuple[float, float]]:
             if east - west >= 360:
                 return [(0.0, 360.0)]
-            w, e = west % 360, east % 360
+            w, e = normalize_longitude_deg(west, 0), normalize_longitude_deg(east, 0)
             if w == e:
                 return [(0.0, 360.0)] if east > west else []
             if w < e:
@@ -3450,6 +3642,7 @@ class HealpixCube(HealpixBase):
     """
 
     face_dim: str
+    supports_locate: ClassVar[bool] = True
 
     def __init__(self, *, face_dim: str, Ydim: str, Xdim: str, level: int):
         self.crs = DEFAULT_CRS
@@ -3493,6 +3686,20 @@ class HealpixCube(HealpixBase):
         return cls(
             face_dim=face_dim, Ydim="y", Xdim="x", level=ds.sizes["x"].bit_length() - 1
         )
+
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        ids = self.grid_info.geographic2cell_ids(x, y)
+        valid = ids >= 0
+        out = {
+            d: np.full(ids.shape, -1, dtype=np.int64)
+            for d in (self.face_dim, self.Ydim, self.Xdim)
+        }
+        f, yy, xx = nested_to_fyx(ids[valid].astype(np.uint64), self.level)
+        for dim, a in zip(
+            (self.face_dim, self.Ydim, self.Xdim), (f, yy, xx), strict=True
+        ):
+            out[dim][valid] = a
+        return out
 
     def __repr__(self) -> str:
         return f"HealpixCube(face_dim={self.face_dim!r}, level={self.level}, crs={crs_repr(self.crs)})"
@@ -3610,6 +3817,44 @@ class CubedSphere(FacetedGridSystem):
 
     At the moment, detection is deliberately narrow — see ``find_cubed_sphere_face_dim``.
     """
+
+    supports_locate: ClassVar[bool] = True
+
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        """Lowest-numbered non-cap face containing each point; -1 on a miss.
+        A finite miss with a polar-cap face present raises, as caps are unsupported."""
+        x, y = np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64)
+        shape = x.shape
+        x, y = x.ravel(), y.ravel()
+        face = np.full(x.shape, -1, dtype=np.int64)
+        row = np.full(x.shape, -1, dtype=np.int64)
+        col = np.full(x.shape, -1, dtype=np.int64)
+        has_cap = False
+        for f, grid in enumerate(self.faces):
+            if grid.is_polar_cap:
+                has_cap = True
+                continue
+            todo = np.flatnonzero(face < 0)
+            if todo.size == 0:
+                break
+            hit = grid.locate(x=x[todo], y=y[todo])
+            found = hit[grid.Xdim] >= 0
+            idx = todo[found]
+            face[idx] = f
+            row[idx] = hit[grid.Ydim][found]
+            col[idx] = hit[grid.Xdim][found]
+        if (
+            has_cap
+            and (np.isfinite(x) & np.isfinite(y) & (np.abs(y) <= 90) & (face < 0)).any()
+        ):
+            raise PointQueryNotSupportedError(
+                "Point queries on polar-cap faces are not supported yet."
+            )
+        return {
+            self.face_dim: face.reshape(shape),
+            self.Ydim: row.reshape(shape),
+            self.Xdim: col.reshape(shape),
+        }
 
     @classmethod
     def from_dataset(
@@ -4437,15 +4682,36 @@ def _lookup_cached_grid(cache_key: tuple | None, name: Hashable) -> GridSystem |
     """Return a cached grid for ``cache_key``, or ``None`` if absent.
 
     Raises ``UnsupportedGridError`` if a previous detection failure was cached for
-    this key (see ``_GRID_DETECTION_FAILED``).
+    this key (see ``_DetectionFailure``).
     """
     if cache_key is None or cache_key not in _GRID_CACHE:
         return None
-    if (cached := _GRID_CACHE[cache_key]) is _GRID_DETECTION_FAILED:
+    if isinstance(cached := _GRID_CACHE[cache_key], _DetectionFailure):
         raise UnsupportedGridError(
-            f"No grid system detected for {name!r} (cached failure)."
+            f"No grid system detected for {name!r} (cached failure): {cached.reason}"
         )
     return cached
+
+
+def _coordinates_attr_error(ds: xr.Dataset, name: Hashable) -> str | None:
+    """CF requires each ``coordinates`` entry to use only the variable's dims; xarray decoding moves the attr into ``encoding``."""
+    var = ds[name]
+    attr = var.attrs.get("coordinates", var.encoding.get("coordinates"))
+    if not isinstance(attr, str):
+        return None
+    foreign = {
+        coord: ds[coord].dims
+        for coord in attr.split()
+        if coord in ds.variables and not set(ds[coord].dims) <= set(var.dims)
+    }
+    if not foreign:
+        return None
+    listed = ", ".join(f"{coord!r} (dims {dims!r})" for coord, dims in foreign.items())
+    return (
+        f"Variable {name!r} (dims {var.dims!r}) has coordinates={attr!r}, but "
+        f"{listed} use dims the variable does not have. Point the `coordinates` "
+        "attribute at coordinates on the variable's own dims, or remove it."
+    )
 
 
 def guess_grid_system(
@@ -4495,12 +4761,15 @@ def guess_grid_system(
 
         try:
             grid = _detect_grid_system(ds, name)
-        except UnsupportedGridError:
+        except UnsupportedGridError as err:
+            hint = _coordinates_attr_error(ds, name)
             # Cache the failure so callers sharing this dim-signature don't
             # repeat the (sometimes multi-second) fallback chain.
             if cache_key is not None:
-                _GRID_CACHE[cache_key] = _GRID_DETECTION_FAILED
-            raise
+                _GRID_CACHE[cache_key] = _DetectionFailure(hint or str(err))
+            if hint is None:
+                raise
+            raise UnsupportedGridError(hint) from err
 
         if cache_key is not None:
             _GRID_CACHE[cache_key] = grid

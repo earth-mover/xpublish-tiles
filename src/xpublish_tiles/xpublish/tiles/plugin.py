@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 from enum import Enum
+from functools import partial
 from typing import Annotated, Any
 from urllib.parse import quote
 
@@ -46,13 +47,14 @@ from xpublish_tiles.multiscale import (
 )
 from xpublish_tiles.pipeline import _infer_datatype, pipeline
 from xpublish_tiles.tiles_lib import get_min_zoom, grid_overlaps_tms
-from xpublish_tiles.types import ImageFormat, LegendFormat, QueryParams
+from xpublish_tiles.types import ImageFormat, LegendFormat, QueryParams, TileFormat
 from xpublish_tiles.utils import (
     format_number_for_url,
     normalize_tilejson_bounds,
     xarray_object_key,
 )
 from xpublish_tiles.xpublish.tiles.metadata import (
+    MVT_DEFAULT_STYLE,
     create_tileset_for_tms,
     create_tileset_metadata,
     default_style,
@@ -72,6 +74,7 @@ from xpublish_tiles.xpublish.tiles.tile_matrix import (
 from xpublish_tiles.xpublish.tiles.types import (
     TILES_FILTERED_QUERY_PARAMS,
     ConformanceDeclaration,
+    DataType,
     LegendQuery,
     TileJSON,
     TileMatrixSet,
@@ -91,6 +94,11 @@ class TilesPlugin(Plugin):
     dataset_router_prefix: str = "/tiles"
     dataset_router_tags: list[str | Enum] = ["tiles"]
 
+    def _tms_href(self, request: Request) -> str:
+        """Absolute path of the app-level tileMatrixSets routes, as the client sees it."""
+        root_path = request.scope.get("root_path", "")
+        return f"{root_path}{self.app_router_prefix}/tileMatrixSets"
+
     @hookimpl
     def app_router(self, deps: Dependencies):
         """Global tiles endpoints"""
@@ -104,6 +112,8 @@ class TilesPlugin(Plugin):
                     "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/core",
                     "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/tileset",
                     "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/tilesets-list",
+                    "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/png",
+                    "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/mvt",
                 ]
             )
 
@@ -137,15 +147,16 @@ class TilesPlugin(Plugin):
 
         @router.get("/", response_model=TilesetsList, response_model_exclude_none=True)
         @with_accumulated_logs(
-            log_message_fn=lambda datatree: (
+            log_message_fn=lambda request, datatree: (
                 f"tiles_list {getattr(datatree, '_xpublish_id', 'unknown')}"
             ),
-            context_fn=lambda datatree: {
+            context_fn=lambda request, datatree: {
                 "endpoint": "tiles_list",
                 "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
             },
         )
         async def get_dataset_tiles_list(
+            request: Request,
             datatree: DataTree = Depends(deps.datatree),
         ):
             """List of available tilesets for this dataset"""
@@ -217,9 +228,18 @@ class TilesPlugin(Plugin):
                 else:
                     key = (level.path, signature)
                     if key not in coarse_grids:
-                        coarse_grids[key] = await async_run(
-                            guess_grid_system, source_ds, var_name, cf_coords=cf_coords
-                        )
+                        try:
+                            coarse_grids[key] = await async_run(
+                                guess_grid_system,
+                                source_ds,
+                                var_name,
+                                cf_coords=cf_coords,
+                            )
+                        except UnsupportedGridError as e:
+                            raise HTTPException(
+                                status_code=422,
+                                detail=f"Variable {var_name!r} cannot be tiled at overview {level.path!r}: {e}",
+                            ) from None
                     grid = coarse_grids[key]
                 minzoom_sources[var_name] = MinZoomSource(
                     grid, da, signature, source_ds.attrs.get("_xpublish_id")
@@ -243,18 +263,15 @@ class TilesPlugin(Plugin):
                         var_grids,
                         minzoom_sources=minzoom_sources,
                         cf_coords=cf_coords,
+                        tms_href=self._tms_href(request),
                     )
                     for tms_id in supported_tms
                 ]
             )
-            tilesets = [ts for ts in tileset_results if ts is not None]
+            tilesets = [ts for result in tileset_results for ts in result]
             default_tms = get_default_tile_matrix_set(
                 (var_grids[name] for name in layer_extents),
-                (
-                    t
-                    for t, ts in zip(supported_tms, tileset_results, strict=True)
-                    if ts is not None
-                ),
+                (t for t, ts in zip(supported_tms, tileset_results, strict=True) if ts),
             )
 
             return TilesetsList(tilesets=tilesets, defaultTileMatrixSet=default_tms)
@@ -355,20 +372,55 @@ class TilesPlugin(Plugin):
             return Response(buffer.getvalue(), media_type=media_type)
 
         @router.get(
+            "/vector/{tileMatrixSetId}",
+            response_model=TileSetMetadata,
+            response_model_exclude_none=True,
+        )
+        @with_accumulated_logs(
+            log_message_fn=lambda request, tileMatrixSetId, datatree: (
+                f"vector_tileset_metadata {tileMatrixSetId} {getattr(datatree, '_xpublish_id', 'unknown')}"
+            ),
+            context_fn=lambda request, tileMatrixSetId, datatree: {
+                "tileMatrixSetId": tileMatrixSetId,
+                "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
+            },
+        )
+        async def get_dataset_vector_tileset_metadata(
+            request: Request,
+            tileMatrixSetId: str,
+            datatree: DataTree = Depends(deps.datatree),
+        ):
+            """Get vector (MVT) tileset metadata for this dataset"""
+            dataset = get_dataset(datatree)
+            try:
+                return await async_run(
+                    partial(
+                        create_tileset_metadata,
+                        dataset,
+                        tileMatrixSetId,
+                        data_type=DataType.VECTOR,
+                        tms_href=self._tms_href(request),
+                    )
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=404, detail=str(e)) from e
+
+        @router.get(
             "/{tileMatrixSetId}",
             response_model=TileSetMetadata,
             response_model_exclude_none=True,
         )
         @with_accumulated_logs(
-            log_message_fn=lambda tileMatrixSetId, datatree: (
+            log_message_fn=lambda request, tileMatrixSetId, datatree: (
                 f"tileset_metadata {tileMatrixSetId} {getattr(datatree, '_xpublish_id', 'unknown')}"
             ),
-            context_fn=lambda tileMatrixSetId, datatree: {
+            context_fn=lambda request, tileMatrixSetId, datatree: {
                 "tileMatrixSetId": tileMatrixSetId,
                 "dataset_id": getattr(datatree, "_xpublish_id", "unknown"),
             },
         )
         async def get_dataset_tileset_metadata(
+            request: Request,
             tileMatrixSetId: str,
             datatree: DataTree = Depends(deps.datatree),
         ):
@@ -377,7 +429,14 @@ class TilesPlugin(Plugin):
             # If multiscale, returns finest (highest resolution) level available
             dataset = get_dataset(datatree)
             try:
-                return await async_run(create_tileset_metadata, dataset, tileMatrixSetId)
+                return await async_run(
+                    partial(
+                        create_tileset_metadata,
+                        dataset,
+                        tileMatrixSetId,
+                        tms_href=self._tms_href(request),
+                    )
+                )
             except ValueError as e:
                 raise HTTPException(status_code=404, detail=str(e)) from e
 
@@ -455,7 +514,12 @@ class TilesPlugin(Plugin):
                 0
             ]  # drop 'tilejson.json'
 
-            style, variant = query.style or default_style(bounds_grid)
+            if query.style is not None:
+                style, variant = query.style
+            elif query.f == TileFormat.MVT:
+                style, variant = MVT_DEFAULT_STYLE
+            else:
+                style, variant = default_style(bounds_grid)
             if query.edgecolor is not None and style != "polygons":
                 raise HTTPException(
                     status_code=422,
@@ -586,6 +650,12 @@ class TilesPlugin(Plugin):
                 minzoom=minzoom,
                 maxzoom=maxzoom,
                 legend=legend_url,
+                vector_layers=[
+                    {"id": name, "fields": {"value": "Number", "color": "String"}}
+                    for name in query.variables
+                ]
+                if query.f == TileFormat.MVT
+                else None,
             )
 
         @router.get("/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}")
@@ -645,9 +715,12 @@ class TilesPlugin(Plugin):
                 dataset = datatree.to_dataset()
                 resolution_level = None
 
-            style, variant = await async_run(
-                resolve_style, query.style, dataset, query.variables[0]
-            )
+            if query.f == TileFormat.MVT and query.style is None:
+                style, variant = MVT_DEFAULT_STYLE
+            else:
+                style, variant = await async_run(
+                    resolve_style, query.style, dataset, query.variables[0]
+                )
 
             # Extract dimension selectors from query parameters
             selectors = {}
@@ -690,6 +763,11 @@ class TilesPlugin(Plugin):
                 bound_logger.error("VariableNotFoundError", exc_info=e)
                 status_code = 422
                 detail = f"Invalid variable name(s): {query.variables!r}."
+            except UnsupportedGridError as e:
+                bound_logger = get_context_logger()
+                bound_logger.error("UnsupportedGridError", exc_info=e)
+                status_code = 422
+                detail = f"Cannot tile variable(s) {query.variables!r}: {e!s}"
             except IndexingError as e:
                 bound_logger = get_context_logger()
                 bound_logger.error("IndexingError", exc_info=e)
@@ -727,7 +805,7 @@ class TilesPlugin(Plugin):
                 detail = "Internal server error."
 
             if status_code != 200:
-                if not query.render_errors:
+                if not query.render_errors or query.f == TileFormat.MVT:
                     raise HTTPException(status_code=status_code, detail=detail)
                 else:
                     # Use renderer's render_error method for all error types
@@ -738,13 +816,15 @@ class TilesPlugin(Plugin):
                         width=query.width,
                         height=query.height,
                         message=detail,
-                        format=query.f,
+                        format=ImageFormat(query.f),
                     )
 
             headers = {}
             if resolution_level is not None:
                 headers["X-Multiscale-Level"] = resolution_level
 
-            return Response(buffer.getbuffer(), media_type="image/png", headers=headers)
+            return Response(
+                buffer.getbuffer(), media_type=query.f.media_type, headers=headers
+            )
 
         return router

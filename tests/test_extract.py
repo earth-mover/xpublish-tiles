@@ -7,45 +7,12 @@ import xarray as xr
 from xpublish_tiles.config import config
 from xpublish_tiles.extract import POINT_DIM, decompressed_bytes, extract_points
 from xpublish_tiles.grids import guess_grid_system
-from xpublish_tiles.lib import PointQueryNotSupportedError, RequestTooBigError, cf_get
+from xpublish_tiles.lib import PointQueryNotSupportedError, RequestTooBigError
 from xpublish_tiles.projections import transformer_from_crs
-from xpublish_tiles.testing.datasets import (
-    CURVILINEAR,
-    ERA5,
-    EU3035,
-    GLOBAL_6KM,
-    GLOBAL_6KM_360,
-    SENTINEL2_NOCOORDS,
-)
+from xpublish_tiles.testing.datasets import CUBED_SPHERE, FVCOM
 from xpublish_tiles.types import ContinuousData, ValidatedArray
 
 WGS84 = CRS.from_epsg(4326)
-
-
-@pytest.mark.parametrize(
-    "dataset",
-    [GLOBAL_6KM, GLOBAL_6KM_360, ERA5, EU3035, SENTINEL2_NOCOORDS],
-    ids=lambda d: d.name,
-)
-def test_locate_cell_centres(dataset):
-    ds = dataset.create()
-    name = next(iter(ds.data_vars))
-    grid = guess_grid_system(ds, name)
-    da = grid.assign_index(cf_get(ds, name))
-    rng = np.random.default_rng(0)
-    xi = rng.integers(0, da.sizes[grid.Xdim], 20)
-    yi = rng.integers(0, da.sizes[grid.Ydim], 20)
-    x, y = da[grid.X].values[xi], da[grid.Y].values[yi]
-
-    shifts = (-360, 0, 360) if grid.crs.is_geographic else (0,)
-    for shift in shifts:
-        indexers = grid.locate(x + shift, y)
-        npt.assert_array_equal(indexers[grid.Xdim], xi)
-        npt.assert_array_equal(indexers[grid.Ydim], yi)
-
-    far = 95.0 if grid.crs.is_geographic else 1e9
-    outside = grid.locate(x[:1], np.array([far]))
-    assert any(idx.tolist() == [-1] for idx in outside.values())
 
 
 async def test_extract_points_matches_sel(air_dataset):
@@ -80,16 +47,28 @@ async def test_extract_points_reprojects_query(air_dataset):
     npt.assert_array_equal(in_4326.air.values, in_3857.air.values)
 
 
-async def test_extract_points_unsupported_grid():
-    ds = CURVILINEAR.create()
-    with pytest.raises(PointQueryNotSupportedError, match="Curvilinear"):
+async def test_extract_points_ugrid_node_and_face_variables():
+    """A mesh locates both a node and a face; each variable takes its own."""
+    ds = FVCOM.create()
+    x, y = np.array([-74.0]), np.array([41.0])
+    result = await extract_points(
+        ds, variables=["zeta", "u"], selectors={}, crs=WGS84, x=x, y=y
+    )
+    located = guess_grid_system(ds, "zeta").locate(x=x, y=y)
+    assert result.zeta.item() == ds.zeta.isel(node=located["node"][0]).item()
+    assert result.u.item() == ds.u.isel(nele=located["nele"][0]).item()
+
+
+async def test_extract_points_unsupported_point():
+    ds = CUBED_SPHERE.create()
+    with pytest.raises(PointQueryNotSupportedError, match="polar-cap"):
         await extract_points(
             ds,
-            variables=[next(iter(ds.data_vars))],
+            variables=["foo"],
             selectors={},
             crs=WGS84,
             x=np.array([0.0]),
-            y=np.array([0.0]),
+            y=np.array([89.9]),
         )
 
 

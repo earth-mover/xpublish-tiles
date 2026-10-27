@@ -35,7 +35,11 @@ from xpublish_tiles.lib import (
 from xpublish_tiles.projections import (
     transformer_from_crs,
 )
-from xpublish_tiles.utils import time_debug, xarray_object_key
+from xpublish_tiles.utils import (
+    normalize_longitude_deg,
+    time_debug,
+    xarray_object_key,
+)
 
 _MIN_ZOOM_CACHE = cachetools.LRUCache(maxsize=8192)
 _MIN_ZOOM_LOCK = threading.Lock()
@@ -49,8 +53,8 @@ def _lon_ranges(west: float, east: float) -> list[tuple[float, float]]:
     """``[west, east]`` as one or two ranges inside [-180, 180]."""
     if east - west >= 360 - 1e-9:
         return [(-180.0, 180.0)]
-    west = ((west + 180) % 360) - 180
-    east = ((east + 180) % 360) - 180
+    west = normalize_longitude_deg(west)
+    east = normalize_longitude_deg(east)
     if west <= east:
         return [(west, east)]
     return [(west, 180.0), (-180.0, east)]

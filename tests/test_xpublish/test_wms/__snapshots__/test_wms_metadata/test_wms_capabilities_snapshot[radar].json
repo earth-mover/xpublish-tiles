@@ -51,7 +51,7 @@
           "name": "foo",
           "no_subsets": false,
           "opaque": false,
-          "queryable": false,
+          "queryable": true,
           "styles": [
             "raster/Accent",
             "raster/Accent_r",

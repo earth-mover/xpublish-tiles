@@ -28,7 +28,7 @@ from xpublish_tiles.features import (
     split_at_antimeridian,
     wrap_longitude,
 )
-from xpublish_tiles.grids import Rectilinear
+from xpublish_tiles.grids import Rectilinear, guess_grid_system
 from xpublish_tiles.lib import (
     TileTooBigError,
     check_transparent_pixels,
@@ -143,6 +143,40 @@ def global_rectilinear_datasets(
     return ds
 
 
+def curvilinear_from_rectilinear(rect: xr.Dataset) -> xr.Dataset:
+    """(test only) ``rect`` with its 1D lat/lon broadcast to 2D coordinates."""
+    curvi = rect.rename(latitude="nlat", longitude="nlon")
+    newlat, newlon = np.meshgrid(curvi.nlat.data, curvi.nlon.data, indexing="ij")
+    curvi = curvi.assign_coords(
+        longitude=(("nlon", "nlat"), newlon.T, {"standard_name": "longitude"}),
+        latitude=(("nlon", "nlat"), newlat.T, {"standard_name": "latitude"}),
+    )
+    curvi["foo"].attrs["coordinates"] = "longitude latitude"
+    return curvi
+
+
+def raster_from_rectilinear(rect: xr.Dataset) -> xr.Dataset:
+    """(test only) ``rect`` as a RasterAffine grid with a GeoTransform from its cell centres."""
+    lons, lats = rect.longitude.data, rect.latitude.data
+    dx, dy = lons[1] - lons[0], lats[1] - lats[0]
+    raster = xr.Dataset(
+        {
+            "foo": (
+                ("y", "x"),
+                rect.foo.transpose("latitude", "longitude").data,
+                rect.foo.attrs | {"grid_mapping": "spatial_ref"},
+            )
+        }
+    )
+    raster.coords["spatial_ref"] = (
+        (),
+        0,
+        CRS.from_epsg(4326).to_cf()
+        | {"GeoTransform": f"{lons[0] - dx / 2} {dx} 0.0 {lats[0] - dy / 2} 0.0 {dy}"},
+    )
+    return raster
+
+
 @st.composite
 def global_curvilinear_datasets(
     draw: DrawFn,
@@ -161,14 +195,7 @@ def global_curvilinear_datasets(
         )
     )
 
-    curvi = rect.rename(latitude="nlat", longitude="nlon")
-    newlat, newlon = np.meshgrid(curvi.nlat.data, curvi.nlon.data, indexing="ij")
-    curvi = curvi.assign_coords(
-        longitude=(("nlon", "nlat"), newlon.T, {"standard_name": "longitude"}),
-        latitude=(("nlon", "nlat"), newlat.T, {"standard_name": "latitude"}),
-    )
-    curvi["foo"].attrs["coordinates"] = "longitude latitude"
-    return curvi
+    return curvilinear_from_rectilinear(rect)
 
 
 @st.composite
@@ -385,13 +412,7 @@ async def test_property_equivalent_grids_render_equivalently(
     so we run that comparison in a different test with fewer datasets, and more tiles per dataset.
     """
 
-    curvi = rect.rename(latitude="nlat", longitude="nlon")
-    newlat, newlon = np.meshgrid(curvi.nlat.data, curvi.nlon.data, indexing="ij")
-    curvi = curvi.assign_coords(
-        longitude=(("nlon", "nlat"), newlon.T, {"standard_name": "longitude"}),
-        latitude=(("nlon", "nlat"), newlat.T, {"standard_name": "latitude"}),
-    )
-    curvi["foo"].attrs["coordinates"] = "longitude latitude"
+    curvi = curvilinear_from_rectilinear(rect)
 
     # rectilinear = guess_grid_system(ds, "foo")
     # curvilinear = guess_grid_system(ds, "foo")
@@ -409,24 +430,7 @@ async def test_property_equivalent_grids_render_equivalently(
     # )
 
     lon, lat = curvi.longitude, curvi.latitude
-
-    lons, lats = rect.longitude.data, rect.latitude.data
-    dx, dy = lons[1] - lons[0], lats[1] - lats[0]
-    raster = xr.Dataset(
-        {
-            "foo": (
-                ("y", "x"),
-                rect.foo.transpose("latitude", "longitude").data,
-                rect.foo.attrs | {"grid_mapping": "spatial_ref"},
-            )
-        }
-    )
-    raster.coords["spatial_ref"] = (
-        (),
-        0,
-        CRS.from_epsg(4326).to_cf()
-        | {"GeoTransform": f"{lons[0] - dx / 2} {dx} 0.0 {lats[0] - dy / 2} 0.0 {dy}"},
-    )
+    raster = raster_from_rectilinear(rect)
     transposed = curvi.assign_coords(
         longitude=lon.transpose() if data.draw(st.booleans()) else curvi.longitude,
         latitude=lat.transpose() if data.draw(st.booleans()) else curvi.latitude,
@@ -966,3 +970,42 @@ def test_split_at_antimeridian_properties(boxes):
             npt.assert_allclose(shapely.area(out), area, rtol=1e-9)
         else:
             assert shapely.equals(out, box)
+
+
+@given(
+    data=st.data(),
+    rect=global_rectilinear_datasets(allow_categorical=False, maxsize=128, perturb=False),
+)
+@settings(max_examples=25, deadline=None)
+def test_locate_equivalent_grids(data, rect):
+    """Rectilinear, RasterAffine and Features views of one grid locate a point in the
+    same cell, for any longitude shift by a multiple of 360."""
+    lons, lats = rect.longitude.values, rect.latitude.values
+    dx, dy = lons[1] - lons[0], lats[1] - lats[0]
+    n = data.draw(st.integers(1, 20))
+    xi = np.array(
+        data.draw(st.lists(st.integers(0, lons.size - 1), min_size=n, max_size=n))
+    )
+    yi = np.array(
+        data.draw(st.lists(st.integers(0, lats.size - 1), min_size=n, max_size=n))
+    )
+    # stay clear of cell edges, where the grids may round differently
+    offsets = st.lists(st.floats(-0.45, 0.45), min_size=n, max_size=n)
+    shift = 360.0 * data.draw(st.integers(-2, 2))
+    x = lons[xi] + np.array(data.draw(offsets)) * dx + shift
+    # Features clips geometries at the poles; the other grids extend pole cells past ±90
+    y = np.clip(lats[yi] + np.array(data.draw(offsets)) * dy, -90, 90)
+
+    views = {
+        "rectilinear": (rect, {"longitude": xi, "latitude": yi}),
+        "raster": (raster_from_rectilinear(rect), {"x": xi, "y": yi}),
+        "features": (features_from_rectilinear(rect), {"cell": yi * lons.size + xi}),
+        "curvilinear": (curvilinear_from_rectilinear(rect), {"nlon": xi, "nlat": yi}),
+    }
+    for name, (ds, expected) in views.items():
+        grid = guess_grid_system(ds, "foo")
+        assert grid.supports_locate, name
+        actual = grid.locate(x=x, y=y)
+        assert actual.keys() == expected.keys(), name
+        for dim, positions in expected.items():
+            npt.assert_array_equal(actual[dim], positions, err_msg=f"{name} {dim}")
