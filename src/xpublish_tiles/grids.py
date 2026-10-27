@@ -925,31 +925,15 @@ class PolarIndex(xr.Index):
         )
 
     @cached_property
-    def _azimuth_lookup(self) -> tuple[np.ndarray, np.ndarray, float, float, float, bool]:
-        """(order, midpoint edges, origin, half spacing, last ray, full).
+    def _azimuth_lookup(self) -> tuple[np.ndarray, np.ndarray, float, float]:
+        """(order, midpoint edges relative to the first sorted ray, origin, wrap edge).
 
-        ``order`` sorts the rays circularly from the ray after the largest gap;
-        edges and ``last`` are relative to that origin ray.
+        Bins are circular: the last cell wraps across 0 deg to the first ray.
         """
         order = np.argsort(self.azimuth)
         s = self.azimuth[order]
-        n = s.size
-        gaps = np.diff(np.append(s, s[0] + 360.0))
-        k = int(np.argmax(gaps))
-        spacing = float(np.median(np.delete(gaps, k))) if n > 1 else 1.0
-        full = bool(gaps[k] <= 3.0 * spacing)
-        if not full:
-            order = np.roll(order, -(k + 1))
-        origin = float(self.azimuth[order[0]])
-        rel = (self.azimuth[order] - origin) % 360.0
-        return (
-            order,
-            0.5 * (rel[:-1] + rel[1:]),
-            origin,
-            0.5 * spacing,
-            float(rel[-1]),
-            full,
-        )
+        rel = s - s[0]
+        return order, 0.5 * (rel[:-1] + rel[1:]), float(s[0]), 0.5 * (rel[-1] + 360.0)
 
     def get_indexer(
         self, lon: np.ndarray, lat: np.ndarray
@@ -972,21 +956,12 @@ class PolarIndex(xr.Index):
         rng = np.searchsorted(edges, r, side="right") - 1
         rng_ok = finite & (r >= edges[0]) & (r < edges[-1])
 
-        order, mids, origin, half, last, full = self._azimuth_lookup
+        order, mids, origin, wrap_edge = self._azimuth_lookup
         u = (az - origin) % 360.0
-        pos = np.searchsorted(mids, u, side="right")
-        if full:
-            wrap_mid = 0.5 * (last + 360.0)
-            pos = np.where(u >= wrap_mid, 0, pos)
-            az_ok = finite
-        else:
-            end = last + half
-            pos = np.where(u >= 360.0 - half, 0, pos)
-            az_ok = finite & ((u < end) | (u >= 360.0 - half))
+        pos = np.where(u >= wrap_edge, 0, np.searchsorted(mids, u, side="right"))
 
-        ok = rng_ok & az_ok
-        az_idx = np.where(ok, order[np.clip(pos, 0, order.size - 1)], -1)
-        rng_idx = np.where(ok, rng, -1)
+        az_idx = np.where(rng_ok, order[pos], -1)
+        rng_idx = np.where(rng_ok, rng, -1)
         return az_idx.astype(np.int64), rng_idx.astype(np.int64)
 
     def equals(self, other: xr.Index, **kwargs: Any) -> bool:
