@@ -2335,3 +2335,30 @@ def test_curvilinear_locate_polar_cap_raises():
     cap = next(f for f in grid.faces if f.is_polar_cap)
     with pytest.raises(PointQueryNotSupportedError, match="polar-cap"):
         cap.locate(x=np.array([0.0]), y=np.array([89.0]))
+
+
+def test_cubed_sphere_locate_cell_centres():
+    ds = CUBED_SPHERE.create()
+    grid = guess_grid_system(ds, "foo")
+    assert isinstance(grid, CubedSphere)
+    caps = {f for f, face in enumerate(grid.faces) if face.is_polar_cap}
+    lons = ds.lons.transpose(grid.face_dim, grid.Ydim, grid.Xdim).values
+    lats = ds.lats.transpose(grid.face_dim, grid.Ydim, grid.Xdim).values
+    f, j, i = np.meshgrid(*(np.arange(n) for n in lons.shape), indexing="ij")
+    keep = ~np.isin(f, list(caps))
+    out = grid.locate(x=lons[keep], y=lats[keep])
+    npt.assert_array_equal(out[grid.face_dim], f[keep])
+    npt.assert_array_equal(out[grid.Ydim], j[keep])
+    npt.assert_array_equal(out[grid.Xdim], i[keep])
+
+
+def test_cubed_sphere_locate_polar_point_raises():
+    grid = guess_grid_system(CUBED_SPHERE.create(), "foo")
+    with pytest.raises(PointQueryNotSupportedError, match="polar-cap"):
+        grid.locate(x=np.array([0.0]), y=np.array([89.9]))
+
+
+def test_cubed_sphere_locate_nonfinite_does_not_raise():
+    grid = guess_grid_system(CUBED_SPHERE.create(), "foo")
+    out = grid.locate(x=np.array([np.nan]), y=np.array([0.0]))
+    assert all(v.tolist() == [-1] for v in out.values())

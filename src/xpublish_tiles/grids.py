@@ -3666,6 +3666,41 @@ class CubedSphere(FacetedGridSystem):
     At the moment, detection is deliberately narrow — see ``find_cubed_sphere_face_dim``.
     """
 
+    supports_locate: ClassVar[bool] = True
+
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        """Lowest-numbered non-cap face containing each point; -1 on a miss.
+        A finite miss with a polar-cap face present raises, as caps are unsupported."""
+        x, y = np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64)
+        shape = x.shape
+        x, y = x.ravel(), y.ravel()
+        face = np.full(x.shape, -1, dtype=np.int64)
+        row = np.full(x.shape, -1, dtype=np.int64)
+        col = np.full(x.shape, -1, dtype=np.int64)
+        has_cap = False
+        for f, grid in enumerate(self.faces):
+            if grid.is_polar_cap:
+                has_cap = True
+                continue
+            todo = np.flatnonzero(face < 0)
+            if todo.size == 0:
+                break
+            hit = grid.locate(x=x[todo], y=y[todo])
+            found = hit[grid.Xdim] >= 0
+            idx = todo[found]
+            face[idx] = f
+            row[idx] = hit[grid.Ydim][found]
+            col[idx] = hit[grid.Xdim][found]
+        if has_cap and (np.isfinite(x) & np.isfinite(y) & (face < 0)).any():
+            raise PointQueryNotSupportedError(
+                "Point queries on polar-cap faces are not supported yet."
+            )
+        return {
+            self.face_dim: face.reshape(shape),
+            self.Ydim: row.reshape(shape),
+            self.Xdim: col.reshape(shape),
+        }
+
     @classmethod
     def from_dataset(
         cls,
