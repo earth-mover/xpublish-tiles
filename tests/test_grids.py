@@ -51,6 +51,7 @@ from xpublish_tiles.grids import (
 )
 from xpublish_tiles.lib import (
     InvalidCoordinateValues,
+    PointQueryNotSupportedError,
     TileTooBigError,
     UnsupportedGridError,
     VariableNotFoundError,
@@ -82,6 +83,8 @@ from xpublish_tiles.testing.datasets import (
     FVCOM,
     FVCOM_MACHIAS_BAY,
     GEOSTATIONARY,
+    GLOBAL_6KM,
+    GLOBAL_6KM_360,
     GLOBAL_HEALPIX_CUBE_L3,
     GLOBAL_HEALPIX_L3,
     HRRR,
@@ -93,6 +96,7 @@ from xpublish_tiles.testing.datasets import (
     RADAR,
     REDGAUSS_N320,
     REGIONAL_HEALPIX_NA,
+    SENTINEL2_NOCOORDS,
     UGRID_TRIANGLES,
     UTM33S_HIRES,
     UTM50S_HIRES,
@@ -2235,3 +2239,38 @@ def test_raster_affine_sel_across_antimeridian(west, east, expected):
     )
     slicers = grid.sel(bbox=BBox(west=west, east=east, south=-10.0, north=10.0))
     assert slicers["x"] == expected
+
+
+@pytest.mark.parametrize(
+    "dataset",
+    [GLOBAL_6KM, GLOBAL_6KM_360, ERA5, EU3035, SENTINEL2_NOCOORDS, GEOSTATIONARY],
+    ids=lambda d: d.name,
+)
+def test_locate_cell_centres(dataset):
+    ds = dataset.create()
+    name = next(iter(ds.data_vars))
+    grid = guess_grid_system(ds, name)
+    assert grid.supports_locate
+    da = grid.assign_index(cf_get(ds, name))
+    rng = np.random.default_rng(0)
+    xi = rng.integers(0, da.sizes[grid.Xdim], 20)
+    yi = rng.integers(0, da.sizes[grid.Ydim], 20)
+    x, y = da[grid.X].values[xi], da[grid.Y].values[yi]
+
+    shifts = (-360, 0, 360) if grid.crs.is_geographic else (0,)
+    for shift in shifts:
+        indexers = grid.locate(x=x + shift, y=y)
+        npt.assert_array_equal(indexers[grid.Xdim], xi)
+        npt.assert_array_equal(indexers[grid.Ydim], yi)
+
+    far = 95.0 if grid.crs.is_geographic else 1e9
+    outside = grid.locate(x=x[:1], y=np.array([far]))
+    assert any(idx.tolist() == [-1] for idx in outside.values())
+
+
+def test_locate_not_supported():
+    ds = CURVILINEAR.create()
+    grid = guess_grid_system(ds, next(iter(ds.data_vars)))
+    assert not grid.supports_locate
+    with pytest.raises(PointQueryNotSupportedError):
+        grid.locate(x=np.array([0.0]), y=np.array([0.0]))

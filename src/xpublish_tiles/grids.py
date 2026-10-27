@@ -33,6 +33,7 @@ from xpublish_tiles.healpix import (
 from xpublish_tiles.lib import (
     Fill,
     InvalidCoordinateValues,
+    PointQueryNotSupportedError,
     UnsupportedGridError,
     VariableNotFoundError,
     _coarsen_indices_impl,
@@ -158,6 +159,12 @@ class FacetedIndexer:
 Slicer = slice | Fill | UgridIndexer | HealpixIndexer | FacetedIndexer | GeometryIndexer
 DimSlicers = list[Slicer]
 Slicers = dict[str, DimSlicers]
+PointIndexers = dict[str, np.ndarray]
+
+
+def _wrap_longitude(x: np.ndarray, west: float) -> np.ndarray:
+    """Wrap longitudes into ``[west, west + 360)``."""
+    return west + np.mod(np.asarray(x, dtype=np.float64) - west, 360.0)
 
 
 def _sync_load_coords(ds: xr.Dataset, *names: Hashable) -> None:
@@ -1605,6 +1612,20 @@ class GridSystem(ABC):
         """Select a subset of the data array using a bounding box."""
         raise NotImplementedError("Subclasses must implement sel method")
 
+    @property
+    def supports_locate(self) -> bool:
+        return type(self).locate is not GridSystem.locate
+
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        """Positions of the cells containing the points ``(x, y)``, in the grid CRS.
+
+        Returns one integer array per grid dim, aligned with ``x`` and ``y``, for
+        pointwise ``isel``. A point outside the grid is ``-1`` along at least one dim.
+        """
+        raise PointQueryNotSupportedError(
+            f"Point queries are not supported on {type(self).__name__} grids."
+        )
+
     def pick_alternate_grid(self, crs: CRS, *, coarsen_factors) -> GridMetadata:
         """Pick an alternate grid system based on the target CRS.
 
@@ -1854,6 +1875,20 @@ class RasterAffine(RectilinearMixin, GridSystem):
             y_size=index.xy_shape[1],
         )
 
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        (index,) = self.indexes
+        if self.crs.is_geographic:
+            x = _wrap_longitude(x, index.bbox.left)
+        cols, rows = ~index.transform() * (np.asarray(x), np.asarray(y))
+        indexers = {}
+        for dim, pos, size in zip(
+            (self.Xdim, self.Ydim), (cols, rows), index.xy_shape, strict=True
+        ):
+            pos = np.floor(pos).astype(np.intp)
+            pos[(pos < 0) | (pos >= size)] = -1
+            indexers[dim] = pos
+        return indexers
+
     def _get_edge_arrays(self) -> tuple[np.ndarray, np.ndarray]:
         """Return full 1D edge arrays (x_edges size nx+1, y_edges size ny+1)."""
         (index,) = self.indexes
@@ -2041,6 +2076,15 @@ class Rectilinear(RectilinearMixin, GridSystem):
             x_size=x_size,
             y_size=y_size,
         )
+
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        x_index, y_index = self.indexes[0], self.indexes[-1]
+        if self.crs.is_geographic:
+            x = _wrap_longitude(x, self.left_break)
+        return {
+            self.Xdim: x_index.index.get_indexer(x),
+            self.Ydim: y_index.index.get_indexer(y),
+        }
 
     def _get_edge_arrays(self) -> tuple[np.ndarray, np.ndarray]:
         """Return full 1D edge arrays (x_edges size nx+1, y_edges size ny+1)."""
@@ -3075,6 +3119,21 @@ class Features(GridSystem1D):
         hits = self.strtree.query(query, predicate="intersects")
         indices = np.unique(hits[1]).astype(np.intp)
         return {self.dim: [GeometryIndexer(indices)]}
+
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        """The first feature (by position) that contains each point."""
+        import shapely
+
+        if self.crs.is_geographic:
+            x = _wrap_longitude(x, -180)
+        points, features = self.strtree.query(
+            shapely.points(x, y), predicate="intersects"
+        )
+        order = np.lexsort((features, points))
+        hit_points, first = np.unique(points[order], return_index=True)
+        positions = np.full(np.shape(x), -1, dtype=np.intp)
+        positions[hit_points] = features[order][first]
+        return {self.dim: positions}
 
     @classmethod
     def from_dataset(cls, ds: xr.Dataset, crs: CRS, Xname: str, Yname: str) -> Self:
