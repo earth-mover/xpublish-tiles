@@ -284,9 +284,12 @@ def match_coord_dim(pattern: re.Pattern, dims: Iterable[Hashable]) -> str | None
 
 _GRID_CACHE = cachetools.LRUCache(maxsize=config["grid_cache_max_size"])
 
+
 # Sentinel cached when detection fails, so a repeat lookup for the same
 # (xpublish_id, dim-signature) fails immediately.
-_GRID_DETECTION_FAILED = object()
+@dataclass(frozen=True)
+class _DetectionFailure:
+    reason: str
 
 
 def _cell_min_max(
@@ -4679,15 +4682,36 @@ def _lookup_cached_grid(cache_key: tuple | None, name: Hashable) -> GridSystem |
     """Return a cached grid for ``cache_key``, or ``None`` if absent.
 
     Raises ``UnsupportedGridError`` if a previous detection failure was cached for
-    this key (see ``_GRID_DETECTION_FAILED``).
+    this key (see ``_DetectionFailure``).
     """
     if cache_key is None or cache_key not in _GRID_CACHE:
         return None
-    if (cached := _GRID_CACHE[cache_key]) is _GRID_DETECTION_FAILED:
+    if isinstance(cached := _GRID_CACHE[cache_key], _DetectionFailure):
         raise UnsupportedGridError(
-            f"No grid system detected for {name!r} (cached failure)."
+            f"No grid system detected for {name!r} (cached failure): {cached.reason}"
         )
     return cached
+
+
+def _coordinates_attr_error(ds: xr.Dataset, name: Hashable) -> str | None:
+    """CF requires each ``coordinates`` entry to use only the variable's dims; xarray decoding moves the attr into ``encoding``."""
+    var = ds[name]
+    attr = var.attrs.get("coordinates", var.encoding.get("coordinates"))
+    if not isinstance(attr, str):
+        return None
+    foreign = {
+        coord: ds[coord].dims
+        for coord in attr.split()
+        if coord in ds.variables and not set(ds[coord].dims) <= set(var.dims)
+    }
+    if not foreign:
+        return None
+    listed = ", ".join(f"{coord!r} (dims {dims!r})" for coord, dims in foreign.items())
+    return (
+        f"Variable {name!r} (dims {var.dims!r}) has coordinates={attr!r}, but "
+        f"{listed} use dims the variable does not have. Point the `coordinates` "
+        "attribute at coordinates on the variable's own dims, or remove it."
+    )
 
 
 def guess_grid_system(
@@ -4737,12 +4761,15 @@ def guess_grid_system(
 
         try:
             grid = _detect_grid_system(ds, name)
-        except UnsupportedGridError:
+        except UnsupportedGridError as err:
+            hint = _coordinates_attr_error(ds, name)
             # Cache the failure so callers sharing this dim-signature don't
             # repeat the (sometimes multi-second) fallback chain.
             if cache_key is not None:
-                _GRID_CACHE[cache_key] = _GRID_DETECTION_FAILED
-            raise
+                _GRID_CACHE[cache_key] = _DetectionFailure(hint or str(err))
+            if hint is None:
+                raise
+            raise UnsupportedGridError(hint) from err
 
         if cache_key is not None:
             _GRID_CACHE[cache_key] = grid

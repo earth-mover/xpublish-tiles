@@ -1,12 +1,14 @@
 import io
 import json
 import urllib.parse
+from pathlib import Path
 from unittest.mock import patch
 
 import mapbox_vector_tile
 import morecantile
 import numpy as np
 import pandas as pd
+import pyproj
 import pytest
 import xpublish
 from fastapi.testclient import TestClient
@@ -1340,6 +1342,63 @@ def test_native_at_root_multiscale_tiles():
     )
     assert response.status_code == 200
     assert response.headers["X-Multiscale-Level"] == "1"
+
+
+def _overview_with_foreign_coordinates_attr(path: Path) -> xr.DataTree:
+    wkt = pyproj.CRS.from_epsg(4326).to_wkt()
+
+    def level(n: int, suffix: str) -> xr.Dataset:
+        res = 180 / n
+        y, x = f"y{suffix}", f"x{suffix}"
+        return xr.Dataset(
+            {
+                "mask": (
+                    ("year", y, x),
+                    np.ones((2, n, 2 * n), dtype="uint8"),
+                    {"grid_mapping": "spatial_ref", "coordinates": "year y x"},
+                ),
+                "spatial_ref": (
+                    (),
+                    0,
+                    {
+                        "crs_wkt": wkt,
+                        "GeoTransform": f"-180.0 {res} 0.0 90.0 0.0 {-res}",
+                    },
+                ),
+            },
+            coords={
+                y: (y, 90 - (np.arange(n) + 0.5) * res, {"standard_name": "latitude"}),
+                x: (
+                    x,
+                    -180 + (np.arange(2 * n) + 0.5) * res,
+                    {"standard_name": "longitude"},
+                ),
+            },
+            attrs={"spatial:transform": [res, 0.0, -180.0, 0.0, -res, 90.0]},
+        )
+
+    root = level(64, "").assign_coords(year=("year", [2020, 2021]))
+    xr.DataTree.from_dict({"/": root, "4x": level(16, "_4x")}).to_zarr(
+        path, mode="w", consolidated=False
+    )
+    return xr.open_datatree(path, engine="zarr", consolidated=False)
+
+
+def test_foreign_coordinates_attr_on_overview_returns_422(tmp_path):
+    """An overview whose `coordinates` attr names the root's x/y is a client error that names the attr."""
+    tree = _overview_with_foreign_coordinates_attr(tmp_path / "tree.zarr")
+    rest = xpublish.Rest({"foreign_coords": tree}, plugins={"tiles": TilesPlugin()})
+    client = TestClient(rest.app)
+
+    listing = client.get("/datasets/foreign_coords/tiles/")
+    tile = client.get(
+        "/datasets/foreign_coords/tiles/WebMercatorQuad/0/0/0"
+        "?variables=mask&width=256&height=256&colorscalerange=0,1"
+    )
+
+    for response in (listing, tile):
+        assert response.status_code == 422
+        assert "coordinates='year y x'" in response.json()["detail"]
 
 
 def test_tilejson_minzoom_uses_coarsest_level():
