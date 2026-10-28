@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import xarray as xr
+from xpublish_tiles.config import config
 from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
     EU3035,
@@ -303,7 +304,7 @@ def test_get_legend_graphic_missing_colorscalerange():
 
 def test_get_capabilities_bounds_and_legends(xpublish_client):
     """Layers carry EX_GeographicBoundingBox, axis-order-correct BoundingBoxes,
-    per-layer styles with legend URLs, and are not queryable."""
+    per-layer styles with legend URLs, and are queryable."""
     response = xpublish_client.get(
         "/datasets/air/wms",
         params={
@@ -318,7 +319,7 @@ def test_get_capabilities_bounds_and_legends(xpublish_client):
     child_layers = response.json()["capability"]["layer"]["layers"]
     air_layer = next(layer for layer in child_layers if layer.get("name") == "air")
 
-    assert air_layer["queryable"] is False
+    assert air_layer["queryable"] is True
 
     ex_bbox = air_layer["ex_geographic_bounding_box"]
     assert ex_bbox["west_bound_longitude"] == pytest.approx(-161.25)
@@ -418,25 +419,166 @@ def test_get_map_exception_formats(xpublish_client):
     assert blank.getchannel("A").getextrema() == (0, 0)
 
 
-def test_get_feature_info_not_implemented(xpublish_client):
-    response = xpublish_client.get(
-        "/datasets/air/wms",
-        params={
-            "service": "WMS",
-            "version": "1.3.0",
-            "request": "GetFeatureInfo",
-            "query_layers": "air",
-            "crs": "EPSG:4326",
-            "bbox": "15,-160,75,-30",
-            "width": 256,
-            "height": 256,
-            "x": 128,
-            "y": 128,
-        },
+GET_FEATURE_INFO_PARAMS = {
+    "service": "WMS",
+    "version": "1.3.0",
+    "request": "GetFeatureInfo",
+    "query_layers": "air",
+    "crs": "EPSG:4326",
+    # lat,lon order: EPSG:4326 is north-first in WMS 1.3.0
+    "bbox": "15,-160,75,-30",
+    "width": 256,
+    "height": 256,
+    "i": 128,
+    "j": 128,
+    "time": "2013-01-01T00:00:00",
+}
+
+
+def get_feature_info(client, **overrides):
+    """GetFeatureInfo at pixel (128, 128) of the ``air`` map; ``None`` drops a param."""
+    params = {**GET_FEATURE_INFO_PARAMS, **overrides}
+    return client.get(
+        "/datasets/air/wms", params={k: v for k, v in params.items() if v is not None}
     )
-    assert response.status_code == 501
+
+
+def test_get_feature_info(xpublish_client, air_dataset):
+    response = get_feature_info(xpublish_client)
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/json"
+    (feature,) = response.json()["features"]
+
+    # centre of pixel (128, 128) in a 256x256 map of lon -160..-30, lat 15..75
+    lon, lat = feature["geometry"]["coordinates"]
+    assert lon == pytest.approx(-95 + 130 / 512)
+    assert lat == pytest.approx(45 - 60 / 512)
+    expected = air_dataset.air.sel(time="2013-01-01T00:00:00", lon=265.0, lat=45.0)
+    assert feature["properties"] == {
+        "air": pytest.approx(expected.item()),
+        "lon": 265.0,
+        "lat": 45.0,
+        "time": "2013-01-01T00:00:00",
+    }
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        # CRS:84 is east-first, so the same map sends lon,lat
+        pytest.param({"crs": "CRS:84", "bbox": "-160,15,-30,75"}, id="crs84"),
+        # clients send the map's LAYERS too; QUERY_LAYERS picks from them
+        pytest.param({"layers": "air,nope"}, id="layers-superset"),
+    ],
+)
+def test_get_feature_info_same_point(xpublish_client, overrides):
+    response = get_feature_info(xpublish_client, **overrides)
+    assert response.status_code == 200
+    assert response.json() == get_feature_info(xpublish_client).json()
+
+
+def test_get_feature_info_outside_data(xpublish_client):
+    response = get_feature_info(xpublish_client, bbox="-10,0,10,20")
+    assert response.status_code == 200
+    assert response.json() == {"type": "FeatureCollection", "features": []}
+
+
+@pytest.mark.parametrize(
+    "overrides, status, code",
+    [
+        pytest.param({"i": 256}, 422, "InvalidPoint", id="pixel-outside-map"),
+        pytest.param({"j": None}, 422, "InvalidPoint", id="missing-j"),
+        pytest.param({"info_format": "text/html"}, 422, "InvalidFormat", id="format"),
+        pytest.param({"crs": "EPSG:999999"}, 422, "InvalidCRS", id="crs"),
+        pytest.param(
+            {"request": "GetLegend"}, 422, "OperationNotSupported", id="request"
+        ),
+        pytest.param({"query_layers": "nope"}, 422, "LayerNotDefined", id="layer"),
+        pytest.param(
+            {"time": "2014-12-31T00:00/.."},
+            422,
+            "InvalidDimensionValue",
+            id="geojson-range",
+        ),
+        pytest.param(
+            {"request": "GetTimeseries", "info_format": "application/json"},
+            422,
+            "InvalidFormat",
+            id="geojson-timeseries",
+        ),
+        pytest.param(
+            {"request": "GetVerticalProfile"},
+            400,
+            "InvalidDimensionValue",
+            id="profile-without-z",
+        ),
+    ],
+)
+def test_get_feature_info_errors(xpublish_client, overrides, status, code):
+    response = get_feature_info(xpublish_client, **overrides)
+    assert response.status_code == status
     assert "ServiceExceptionReport" in response.text
-    assert "OperationNotSupported" in response.text
+    assert f'code="{code}"' in response.text
+
+
+@pytest.mark.parametrize(
+    "overrides, start, stop",
+    [
+        pytest.param(
+            {"request": "GetTimeseries", "time": None}, None, None, id="timeseries-all"
+        ),
+        pytest.param(
+            {"request": "GetTimeseries", "time": "2013-01-01T00:00/2013-01-02T00:00"},
+            "2013-01-01T00:00",
+            "2013-01-02T00:00",
+            id="timeseries-range",
+        ),
+        pytest.param(
+            {
+                "info_format": "application/prs.coverage+json",
+                "time": "2014-12-31T00:00/..",
+            },
+            "2014-12-31T00:00",
+            None,
+            id="featureinfo-range",
+        ),
+    ],
+)
+def test_get_feature_info_time_series(
+    xpublish_client, air_dataset, overrides, start, stop
+):
+    response = get_feature_info(xpublish_client, **overrides)
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/prs.coverage+json"
+    covjson = response.json()
+    assert covjson["domain"]["domainType"] == "PointSeries"
+    expected = air_dataset.air.sel(lon=265.0, lat=45.0, time=slice(start, stop))
+    assert covjson["ranges"]["air"]["values"] == pytest.approx(expected.values.tolist())
+
+
+def test_get_timeseries_too_big(xpublish_client):
+    with config.set({"max_renderable_size": 1024}):
+        response = get_feature_info(xpublish_client, request="GetTimeseries", time=None)
+    assert response.status_code == 413
+
+
+@pytest.mark.parametrize(
+    "elevation, levels",
+    [
+        (None, [1000.0, 850.0, 500.0]),
+        ("all", [1000.0, 850.0, 500.0]),
+        ("500/850", [850.0, 500.0]),
+    ],
+)
+def test_get_vertical_profile(air_dataset, elevation, levels):
+    ds = air_dataset.expand_dims(level=[1000.0, 850.0, 500.0])
+    ds.level.attrs.update(axis="Z", positive="down", units="hPa")
+    client = TestClient(xpublish.Rest({"air": ds}, plugins={"wms": WMSPlugin()}).app)
+    response = get_feature_info(client, request="GetVerticalProfile", elevation=elevation)
+    assert response.status_code == 200
+    domain = response.json()["domain"]
+    assert domain["domainType"] == "VerticalProfile"
+    assert domain["axes"]["z"] == {"values": levels}
 
 
 def test_get_map_jpeg(xpublish_client):

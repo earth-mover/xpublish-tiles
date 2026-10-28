@@ -8,6 +8,7 @@ import numpy as np
 from pyproj import CRS
 
 import xarray as xr
+from xpublish_tiles.formats import COVJSON_MEDIA_TYPE
 from xpublish_tiles.grids import GridSystem, detect_grids
 from xpublish_tiles.utils import normalize_tilejson_bounds
 from xpublish_tiles.xpublish.wms.types import (
@@ -20,6 +21,7 @@ from xpublish_tiles.xpublish.wms.types import (
     WMSFormatResponse,
     WMSGeographicBoundingBoxResponse,
     WMSGetCapabilitiesOperationResponse,
+    WMSGetFeatureInfoOperationResponse,
     WMSGetMapOperationResponse,
     WMSHTTPResponse,
     WMSLayerResponse,
@@ -361,7 +363,7 @@ def extract_layers(dataset: xr.Dataset, base_url: str) -> list[WMSLayerResponse]
             dimensions=dimensions,
             attributes=wms_attributes,
             styles=styles,
-            queryable=False,  # GetFeatureInfo is not implemented yet
+            queryable=grid.supports_locate,
             opaque=False,
         )
         layers.append(layer)
@@ -418,6 +420,13 @@ def create_capabilities_response(
             formats=[
                 WMSFormatResponse(format="image/png"),
                 WMSFormatResponse(format="image/jpeg"),
+            ],
+            dcp_type=dcp_type,
+        ),
+        get_feature_info=WMSGetFeatureInfoOperationResponse(
+            formats=[
+                WMSFormatResponse(format="application/json"),
+                WMSFormatResponse(format=COVJSON_MEDIA_TYPE),
             ],
             dcp_type=dcp_type,
         ),

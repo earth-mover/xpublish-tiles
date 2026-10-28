@@ -51,7 +51,7 @@
           "name": "foo",
           "no_subsets": false,
           "opaque": false,
-          "queryable": false,
+          "queryable": true,
           "styles": [
             "raster/Accent",
             "raster/Accent_r",
@@ -261,6 +261,24 @@
           },
           {
             "format": "application/json"
+          }
+        ]
+      },
+      "get_feature_info": {
+        "dcp_type": {
+          "http": {
+            "get": {
+              "href": "http://testserver/datasets/radar/wms",
+              "type": "simple"
+            }
+          }
+        },
+        "formats": [
+          {
+            "format": "application/json"
+          },
+          {
+            "format": "application/prs.coverage+json"
           }
         ]
       },

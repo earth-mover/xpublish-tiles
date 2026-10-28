@@ -259,6 +259,12 @@ class AsyncLoadTimeoutError(Exception):
     pass
 
 
+class RequestTooBigError(Exception):
+    """Raised when a data request would decompress too much data."""
+
+    pass
+
+
 class PointQueryNotSupportedError(Exception):
     """Raised when the variable's grid cannot locate points."""
 

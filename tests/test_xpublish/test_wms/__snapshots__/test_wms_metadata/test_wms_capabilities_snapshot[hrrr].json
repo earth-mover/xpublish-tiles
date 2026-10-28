@@ -66,7 +66,7 @@
           "name": "foo",
           "no_subsets": false,
           "opaque": false,
-          "queryable": false,
+          "queryable": true,
           "styles": [
             "polygons/Accent",
             "polygons/Accent_r",
@@ -458,6 +458,24 @@
           },
           {
             "format": "application/json"
+          }
+        ]
+      },
+      "get_feature_info": {
+        "dcp_type": {
+          "http": {
+            "get": {
+              "href": "http://testserver/datasets/hrrr/wms",
+              "type": "simple"
+            }
+          }
+        },
+        "formats": [
+          {
+            "format": "application/json"
+          },
+          {
+            "format": "application/prs.coverage+json"
           }
         ]
       },
