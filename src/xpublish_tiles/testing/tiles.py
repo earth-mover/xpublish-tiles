@@ -481,6 +481,24 @@ FEATURES_TILES = [
     ),
 ]
 
+FEATURES_POINTS_TILES = [
+    TileTestParam(tile=Tile(x=0, y=0, z=0), tms=WEBMERC_TMS, name="points_webmerc_z0"),
+    TileTestParam(
+        tile=Tile(x=2, y=3, z=3), tms=WEBMERC_TMS, name="points_webmerc_overlap"
+    ),
+    TileTestParam(tile=Tile(x=3, y=3, z=3), tms=WEBMERC_TMS, name="points_webmerc_edges"),
+    TileTestParam(
+        tile=Tile(x=7, y=2, z=3), tms=WEBMERC_TMS, name="points_webmerc_am_east"
+    ),
+    TileTestParam(
+        tile=Tile(x=0, y=2, z=3), tms=WEBMERC_TMS, name="points_webmerc_am_west"
+    ),
+    TileTestParam(tile=Tile(x=0, y=0, z=0), tms=CRS84_TMS, name="points_crs84_z0_west"),
+    TileTestParam(tile=Tile(x=1, y=0, z=0), tms=CRS84_TMS, name="points_crs84_z0_east"),
+    TileTestParam(tile=Tile(x=15, y=1, z=3), tms=CRS84_TMS, name="points_crs84_am_east"),
+    TileTestParam(tile=Tile(x=0, y=1, z=3), tms=CRS84_TMS, name="points_crs84_am_west"),
+]
+
 # (tile, id) pairs; wrapped in pytest.param by the tests (no runtime pytest dep)
 HEALPIX_CUBE_TILES = [
     (Tile(x=0, y=0, z=0), "0/0/0"),

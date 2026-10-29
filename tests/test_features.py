@@ -56,6 +56,7 @@ from xpublish_tiles.testing.datasets import (
     FEATURES_POLYGONS_XVEC,
     GLOBAL_6KM,
     POINT_GEOMS,
+    create_global_dataset,
 )
 from xpublish_tiles.testing.tiles import WEBMERC_TMS
 from xpublish_tiles.tiles_lib import get_min_zoom
@@ -543,3 +544,72 @@ async def test_point_features_style_mismatch(ds, style, match):
     query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style=style)
     with pytest.raises(UnsupportedStyleError, match=match):
         await pipeline(ds.create(), query)
+
+
+async def test_points_style_needs_point_features():
+    ds = create_global_dataset(nlat=19, nlon=37)
+    query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style="points")
+    with pytest.raises(UnsupportedStyleError, match="needs point features"):
+        await pipeline(ds, query)
+
+
+def _alpha(buffer: io.BytesIO) -> np.ndarray:
+    return np.asarray(Image.open(io.BytesIO(buffer.getvalue())).convert("RGBA"))[..., 3]
+
+
+def _xvec_points(points: list, values, xpublish_id: str, **attrs) -> xr.Dataset:
+    ds = xr.Dataset(coords={"feature": points}).xvec.set_geom_indexes("feature", crs=4326)
+    ds["foo"] = ("feature", np.asarray(values), attrs)
+    ds.attrs["_xpublish_id"] = xpublish_id
+    return ds
+
+
+async def test_point_marker_reaches_across_tile_edges():
+    ds = _xvec_points([shapely.Point(0, 0)], [1.0], "point-on-tile-corner")
+    # each z1 tile holds a quarter of the marker, in the corner at (0, 0)
+    corners = {(0, 0): (255, 255), (1, 0): (255, 0), (0, 1): (0, 255), (1, 1): (0, 0)}
+    for (x, y), (row, col) in corners.items():
+        query = create_query_params(
+            Tile(x=x, y=y, z=1), WEBMERC_TMS, style="points", colorscalerange=(0, 2)
+        )
+        rows, cols = np.nonzero(_alpha(await pipeline(ds, query)))
+        assert rows.size
+        assert (np.abs(rows - row) <= 3).all() and (np.abs(cols - col) <= 3).all()
+
+
+async def test_point_marker_wraps_at_antimeridian_on_world_tile():
+    ds = _xvec_points([shapely.Point(179.9, 0)], [1.0], "point-by-antimeridian")
+    query = create_query_params(
+        Tile(x=0, y=0, z=0), WEBMERC_TMS, style="points", colorscalerange=(0, 2)
+    )
+    _, cols = np.nonzero(_alpha(await pipeline(ds, query)))
+    assert cols.min() == 0 and cols.max() == 255
+
+
+async def test_point_discrete_render_keeps_flag_values():
+    # one lone point, and two in one pixel whose flags 0 and 2 would average to 1
+    points = [shapely.Point(-40, 0), shapely.Point(40, 0), shapely.Point(40.01, 0)]
+    ds = _xvec_points(
+        points,
+        np.array([0, 2, 0], dtype=np.uint8),
+        "point-features-discrete",
+        flag_values=[0, 1, 2],
+        flag_meanings="a b c",
+    )
+    query = create_query_params(
+        Tile(x=0, y=0, z=0),
+        WEBMERC_TMS,
+        style="points",
+        variant="custom",
+        colormap={"0": "#ff0000", "1": "#00ff00", "2": "#0000ff"},
+    )
+    result = await pipeline(ds, query)
+    rgba = np.asarray(Image.open(io.BytesIO(result.getvalue())).convert("RGBA"))
+    colors = {tuple(c) for c in rgba[rgba[..., 3] > 0][:, :3].tolist()}
+    assert colors == {(255, 0, 0), (0, 0, 255)}
+
+
+async def test_point_features_vertex_limit_raises():
+    query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style="points")
+    with config.set({"max_renderable_vertices": 5}), pytest.raises(TileTooBigError):
+        await pipeline(FEATURES_POINTS.create(), query)

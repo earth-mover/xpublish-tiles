@@ -462,6 +462,21 @@ async def test_features_data(
 
 
 @pytest.mark.asyncio
+async def test_features_points_data(
+    features_points_dataset_and_tile, png_snapshot, pytestconfig
+):
+    ds, tile, tms = features_points_dataset_and_tile
+    ds = ds.isel(time=[0])
+    query = create_query_params(tile, tms, style="points", colorscalerange=(10, 62))
+    result = await pipeline(ds, query)
+    if pytestconfig.getoption("--visualize"):
+        visualize_tile(result, tile)
+    assert_render_matches_snapshot(
+        result, png_snapshot, tile=tile, tms=tms, skip_transparency_check=True
+    )
+
+
+@pytest.mark.asyncio
 async def test_radar_data(radar_dataset_and_tile, png_snapshot, pytestconfig):
     ds, tile, tms = radar_dataset_and_tile
     query_params = create_query_params(tile, tms)

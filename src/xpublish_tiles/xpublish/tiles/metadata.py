@@ -13,6 +13,7 @@ from xpublish_tiles.grids import (
     Features,
     GridSystem,
     HealpixBase,
+    PointFeatures,
     Polar,
     detect_grids,
     guess_grid_system,
@@ -50,6 +51,8 @@ _ALLOWED_STYLES_CACHE: dict[str, list[str]] = {}
 
 def grid_styles(grid: GridSystem) -> list[str]:
     """Style IDs that can render ``grid``; the first is the default."""
+    if isinstance(grid, PointFeatures):
+        return ["points"]
     if isinstance(grid, (HealpixBase, CubedSphere, Features)):
         return ["polygons"]
     if isinstance(grid, Polar):
@@ -99,7 +102,9 @@ def allowed_styles(
         var_grids = detect_grids(dataset)
 
     per_grid = [grid_styles(grid) for grid in var_grids.values()]
-    if ["polygons"] in per_grid:
+    if ["points"] in per_grid:
+        result = ["points"]
+    elif ["polygons"] in per_grid:
         result = ["polygons"]
     elif ["raster"] in per_grid:
         result = ["raster"]
