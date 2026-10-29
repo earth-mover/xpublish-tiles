@@ -3215,17 +3215,26 @@ class Features(GridSystem1D):
 
         geometries = np.array(geometries, dtype=object, copy=True)
         if crs.is_geographic:
-            from xpublish_tiles.features import split_at_antimeridian, wrap_longitude
+            from xpublish_tiles.features import wrap_longitude
 
             geometries = shapely.transform(geometries, wrap_longitude)
-            geometries = split_at_antimeridian(geometries)
+        geometries = self._prepare_geometries(geometries)
         xmin, ymin, xmax, ymax = shapely.total_bounds(geometries)
         self.lon_spans_globe = bool(crs.is_geographic and (xmax - xmin) > 350)
         self.bbox = BBox(west=xmin, east=xmax, south=ymin, north=ymax)
-        # datashader fills by nonzero winding: holes must turn against the shell.
-        self.geometries = shapely.orient_polygons(geometries)
+        self.geometries = geometries
         self.counts = shapely.get_num_coordinates(geometries)
         self._strtree = shapely.STRtree(self.geometries)
+
+    def _prepare_geometries(self, geometries: np.ndarray) -> np.ndarray:
+        import shapely
+
+        if self.crs.is_geographic:
+            from xpublish_tiles.features import split_at_antimeridian
+
+            geometries = split_at_antimeridian(geometries)
+        # datashader fills by nonzero winding: holes must turn against the shell.
+        return shapely.orient_polygons(geometries)
 
     def vertex_count(self, indices: np.ndarray) -> int:
         return int(self.counts[indices].sum())
@@ -3239,8 +3248,14 @@ class Features(GridSystem1D):
         """Geometry dim of an xvec coordinate or a CF geometry container."""
         var = ds[name]
         if "geometry_type" in var.attrs:
-            # CF point containers may omit node_count: one node per feature.
-            ref = cf_ref_attr(var, "node_count") or cf_ref_attr(var, "node_coordinates")
+            # CF point containers may omit node_count: one node per feature. The
+            # representative `coordinates` lie on the feature dim even when the
+            # node coordinates got a dim of their own (as cf_xarray writes them).
+            ref = (
+                cf_ref_attr(var, "node_count")
+                or cf_ref_attr(var, "coordinates")
+                or cf_ref_attr(var, "node_coordinates")
+            )
             if ref is None:
                 raise ValueError(
                     f"CF geometry container {name!r} has neither node_count nor node_coordinates."
@@ -3316,6 +3331,24 @@ class Features(GridSystem1D):
             dim=cls.dim_of(ds, Xname),
             geometries=geometries,
             structural_names=cls.structural_names_of(ds, Xname),
+        )
+
+
+@dataclass(init=False, kw_only=True, eq=False)
+class PointFeatures(Features):
+    """Vector data cube: point (or multipoint) features along one dimension.
+
+    Geographic longitudes are wrapped to [-180, 180].
+    """
+
+    supports_locate: ClassVar[bool] = False
+
+    def _prepare_geometries(self, geometries: np.ndarray) -> np.ndarray:
+        return geometries
+
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        raise PointQueryNotSupportedError(
+            "Point queries on point features need a search radius; not supported yet."
         )
 
 
@@ -4437,8 +4470,9 @@ def find_geometry(ds: xr.Dataset) -> str | None:
 def detect_features(ds: xr.Dataset) -> GridMetadata | None:
     """Detect a vector data cube: an xvec geometry coordinate or a CF geometry container.
 
-    Raises ``UnsupportedGridError`` for a non-polygonal or CRS-less xvec coordinate.
-    A CF container that is not polygonal or has no CRS is not ``Features``.
+    Raises ``UnsupportedGridError`` for an xvec coordinate that has no CRS or is not
+    all polygons or all points. A CF container that is neither polygon nor point, or
+    has no CRS, is not ``Features``.
     """
     name = find_geometry(ds)
     if name is None:
@@ -4452,9 +4486,10 @@ def detect_features(ds: xr.Dataset) -> GridMetadata | None:
 
 
 def features_metadata(ds: xr.Dataset, name: str) -> GridMetadata:
-    """``Features`` metadata for the geometry ``name``.
+    """``Features`` or ``PointFeatures`` metadata for the geometry ``name``.
 
-    Raises ``UnsupportedGridError`` for non-polygonal geometries or no CRS.
+    Raises ``UnsupportedGridError`` for geometries that are not all polygons or all
+    points, or no CRS.
     """
     container = ds[name]
     if "geometry_type" not in container.attrs:
@@ -4465,23 +4500,35 @@ def features_metadata(ds: xr.Dataset, name: str) -> GridMetadata:
 
 def _features_metadata_from_xvec(ds: xr.Dataset, name: str, index: Any) -> GridMetadata:
     import shapely
+    from shapely import GeometryType
 
     if index.crs is None:
         raise UnsupportedGridError(f"Geometry coordinate {name!r} has no CRS.")
-    if not np.isin(shapely.get_type_id(ds[name].values), (3, 6)).all():
+    type_ids = shapely.get_type_id(ds[name].values)
+    if np.isin(type_ids, (GeometryType.POLYGON, GeometryType.MULTIPOLYGON)).all():
+        grid_cls = Features
+    elif np.isin(type_ids, (GeometryType.POINT, GeometryType.MULTIPOINT)).all():
+        grid_cls = PointFeatures
+    else:
         raise UnsupportedGridError(
-            f"Geometry coordinate {name!r} has non-polygonal geometries."
+            f"Geometry coordinate {name!r} must hold only polygons or only points."
         )
-    return GridMetadata(X=name, Y=name, crs=index.crs, grid_cls=Features)
+    return GridMetadata(X=name, Y=name, crs=index.crs, grid_cls=grid_cls)
+
+
+CF_GEOMETRY_GRIDS: dict[str, type[Features]] = {
+    "polygon": Features,
+    "point": PointFeatures,
+}
 
 
 def _features_metadata_from_cf(ds: xr.Dataset, name: str) -> GridMetadata:
     container = ds[name]
     geometry_type = container.attrs["geometry_type"]
-    if geometry_type != "polygon":
+    if geometry_type not in CF_GEOMETRY_GRIDS:
         raise UnsupportedGridError(
             f"CF geometry container {name!r} has unsupported geometry_type "
-            f"{geometry_type!r}; only 'polygon' is supported."
+            f"{geometry_type!r}; only {sorted(CF_GEOMETRY_GRIDS)} are supported."
         )
     mappings = _guess_grid_mappings_and_crs(ds)
     grid_mapping = cf_ref_attr(container, "grid_mapping")
@@ -4491,7 +4538,9 @@ def _features_metadata_from_cf(ds: xr.Dataset, name: str) -> GridMetadata:
     )
     if mapping is None or mapping.crs is None:
         raise UnsupportedGridError(f"CF geometry container {name!r} has no CRS.")
-    return GridMetadata(X=name, Y=name, crs=mapping.crs, grid_cls=Features)
+    return GridMetadata(
+        X=name, Y=name, crs=mapping.crs, grid_cls=CF_GEOMETRY_GRIDS[geometry_type]
+    )
 
 
 def guess_grid_metadata(
@@ -4806,7 +4855,7 @@ def _detect_grid_system(ds: xr.Dataset, name: Hashable) -> GridSystem:
     geometry = find_geometry(ds)
     if geometry is not None and Features.dim_of(ds, geometry) in ds[name].dims:
         features_meta = features_metadata(ds, geometry)
-        grid = Features.from_dataset(
+        grid = features_meta.grid_cls.from_dataset(
             ds, features_meta.crs, features_meta.X, features_meta.Y
         )
         var = cf_get(ds, name)

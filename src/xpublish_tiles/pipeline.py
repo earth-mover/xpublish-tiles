@@ -31,6 +31,7 @@ from xpublish_tiles.grids import (
     HealpixCube,
     HealpixCubeIndexer,
     HealpixIndexer,
+    PointFeatures,
     Polar,
     RasterAffine,
     Rectilinear,
@@ -1399,7 +1400,12 @@ async def subset_to_bbox(
                 for ix in indexers
             )
         else:
-            if isinstance(grid, Healpix | Features) and style != "polygons":
+            if isinstance(grid, PointFeatures):
+                if style != "points":
+                    raise UnsupportedStyleError(
+                        f"PointFeatures only supports style='points'; got {style!r}."
+                    )
+            elif isinstance(grid, Healpix | Features) and style != "polygons":
                 raise UnsupportedStyleError(
                     f"{type(grid).__name__} only supports style='polygons'; got {style!r}."
                 )
