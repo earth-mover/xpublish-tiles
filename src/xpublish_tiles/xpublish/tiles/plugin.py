@@ -556,6 +556,9 @@ class TilesPlugin(Plugin):
             if query.edgecolor:
                 url_template = f"{url_template}&edgecolor={quote(query.edgecolor)}&edgewidth={query.edgewidth}"
 
+            if style == "points":
+                url_template = f"{url_template}&markersize={query.markersize}"
+
             # Append selectors
             if selectors:
                 selector_qs = "&".join(f"{k}={quote(v)}" for k, v in selectors.items())
@@ -747,6 +750,7 @@ class TilesPlugin(Plugin):
                 belowmincolor=query.belowmincolor,
                 edgecolor=query.edgecolor,
                 edgewidth=query.edgewidth,
+                markersize=query.markersize,
             )
 
             try:

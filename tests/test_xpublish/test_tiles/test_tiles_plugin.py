@@ -1889,3 +1889,27 @@ def test_points_grid_other_style_is_422(points_client, style):
     r = points_client.get(f"{POINTS_TILE}&style={style}")
     assert r.status_code == 422, r.text
     assert "only supports style='points'" in r.json()["detail"]
+
+
+def test_points_markersize(points_client):
+    small = points_client.get(f"{POINTS_TILE}&markersize=3")
+    large = points_client.get(f"{POINTS_TILE}&markersize=15")
+    assert small.status_code == large.status_code == 200
+    assert _opaque_pixels(small.content) < _opaque_pixels(large.content)
+
+
+@pytest.mark.parametrize("markersize", [0, 65])
+def test_points_markersize_out_of_range_is_422(points_client, markersize):
+    r = points_client.get(f"{POINTS_TILE}&markersize={markersize}")
+    assert r.status_code == 422, r.text
+    assert "markersize" in r.text
+
+
+def test_tilejson_markersize(points_client):
+    r = points_client.get(
+        "/datasets/points/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=foo&width=256&height=256&markersize=9"
+    )
+    assert r.status_code == 200, r.text
+    (url,) = r.json()["tiles"]
+    assert "markersize=9" in url
