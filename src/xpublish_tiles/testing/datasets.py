@@ -2635,10 +2635,30 @@ def _feature_geoms() -> list:
     ]
 
 
+@cache
+def _point_geoms() -> list:
+    import shapely
+
+    return [
+        shapely.Point(-95, 35),
+        # two points 0.5° apart, whose markers overlap at low zoom
+        shapely.Point(-70, 40),
+        shapely.Point(-69.5, 40),
+        # the middle point lies on the WebMercatorQuad z3 tile edge at -45°
+        shapely.MultiPoint([(-50, 30), (-45, 35), (-40, 30)]),
+        # just west of the antimeridian
+        shapely.Point(179.9, 55),
+        # on the corner shared by four tiles from z1
+        shapely.Point(0, 0),
+    ]
+
+
 def __getattr__(name: str) -> Any:
-    # (test only) FEATURE_GEOMS is built lazily: shapely is an optional dependency.
+    # (test only) FEATURE_GEOMS / POINT_GEOMS are built lazily: shapely is an optional dependency.
     if name == "FEATURE_GEOMS":
         return _feature_geoms()
+    if name == "POINT_GEOMS":
+        return _point_geoms()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -2651,6 +2671,33 @@ def features_polygons(
 ) -> xr.Dataset:
     """Polygon features along one dim: square, hole, multipolygon, antimeridian
     crosser, and two neighbours sharing a curved edge."""
+    return _features_dataset(
+        geoms=_feature_geoms(), dims=dims, dtype=dtype, attrs=attrs, encoding=encoding
+    )
+
+
+def features_points(
+    *,
+    dims: tuple[Dim, ...],
+    dtype: npt.DTypeLike,
+    attrs: dict[str, Any],
+    encoding: Literal["cf", "xvec"] = "cf",
+) -> xr.Dataset:
+    """Point features along one dim: lone points, two whose markers overlap, a
+    multipoint on a tile edge, a point by the antimeridian, and one on tile corners."""
+    return _features_dataset(
+        geoms=_point_geoms(), dims=dims, dtype=dtype, attrs=attrs, encoding=encoding
+    )
+
+
+def _features_dataset(
+    *,
+    geoms: list,
+    dims: tuple[Dim, ...],
+    dtype: npt.DTypeLike,
+    attrs: dict[str, Any],
+    encoding: Literal["cf", "xvec"],
+) -> xr.Dataset:
     time_dim, feature_dim = dims
     n_time, n_feature = time_dim.size, feature_dim.size
     time = pd.date_range("2000-01-01", periods=n_time)
@@ -2665,7 +2712,6 @@ def features_polygons(
         },
         coords={time_dim.name: time},
     )
-    geoms = _feature_geoms()
     if encoding == "xvec":
         import xvec  # noqa: F401
 
@@ -2720,6 +2766,20 @@ FEATURES_POLYGONS_XVEC = Dataset(
     setup=partial(features_polygons, encoding="xvec"),
 )
 
+FEATURES_POINTS = Dataset(
+    name="features_points",
+    dims=FEATURES_POLYGONS.dims,
+    dtype=np.float32,
+    setup=features_points,
+)
+
+FEATURES_POINTS_XVEC = Dataset(
+    name="features_points_xvec",
+    dims=FEATURES_POLYGONS.dims,
+    dtype=np.float32,
+    setup=partial(features_points, encoding="xvec"),
+)
+
 
 # Lookup dictionary for all available datasets
 DATASET_LOOKUP = {
@@ -2756,6 +2816,8 @@ DATASET_LOOKUP = {
     "native_at_root_multiscale": NATIVE_AT_ROOT_MULTISCALE,
     "features_polygons": FEATURES_POLYGONS,
     "features_polygons_xvec": FEATURES_POLYGONS_XVEC,
+    "features_points": FEATURES_POINTS,
+    "features_points_xvec": FEATURES_POINTS_XVEC,
 }
 
 

@@ -2,6 +2,7 @@ import io
 import json
 import sys
 
+import cf_xarray.geometry
 import datashader as dsh
 import morecantile
 import numpy as np
@@ -32,23 +33,29 @@ from xpublish_tiles.features import features_to_multipolygons, split_at_antimeri
 from xpublish_tiles.grids import (
     Features,
     GeometryIndexer,
+    PointFeatures,
     Rectilinear,
     detect_grids,
     guess_grid_metadata,
     guess_grid_system,
 )
 from xpublish_tiles.lib import (
+    PointQueryNotSupportedError,
     TileTooBigError,
     UnsupportedGridError,
+    UnsupportedStyleError,
     unwrap_seam_vertices,
 )
 from xpublish_tiles.pipeline import bbox_overlap, pipeline
 from xpublish_tiles.projections import transformer_from_crs
 from xpublish_tiles.testing.datasets import (
     FEATURE_GEOMS,
+    FEATURES_POINTS,
+    FEATURES_POINTS_XVEC,
     FEATURES_POLYGONS,
     FEATURES_POLYGONS_XVEC,
     GLOBAL_6KM,
+    POINT_GEOMS,
 )
 from xpublish_tiles.testing.tiles import WEBMERC_TMS
 from xpublish_tiles.tiles_lib import get_min_zoom
@@ -187,15 +194,20 @@ def test_features_crossing_ignores_wide_feature():
     _assert_split(grid.geometries[1])
 
 
-def test_features_point_geometry_unsupported():
-    ds = xr.Dataset(coords={"feature": [shapely.Point(0, 0)]}).xvec.set_geom_indexes(
-        "feature", crs=4326
-    )
-    ds["foo"] = ("feature", [1.0])
-    ds.attrs["_xpublish_id"] = "features-point"
+@pytest.mark.parametrize(
+    "geoms",
+    [
+        pytest.param([shapely.LineString([(0, 0), (1, 1)])], id="line"),
+        pytest.param([shapely.Point(0, 0), shapely.box(0, 0, 1, 1)], id="mixed"),
+    ],
+)
+def test_features_unsupported_geometry(geoms):
+    ds = xr.Dataset(coords={"feature": geoms}).xvec.set_geom_indexes("feature", crs=4326)
+    ds["foo"] = ("feature", np.ones(len(geoms)))
+    ds.attrs["_xpublish_id"] = f"features-unsupported-{len(geoms)}"
     with pytest.raises(UnsupportedGridError):
         guess_grid_metadata(ds)
-    with pytest.raises(UnsupportedGridError, match="non-polygonal geometries"):
+    with pytest.raises(UnsupportedGridError, match="only polygons or only points"):
         guess_grid_system(ds, "foo")
 
 
@@ -223,9 +235,9 @@ def test_features_cf_without_shapely(monkeypatch):
         guess_grid_system(ds, "foo")
 
 
-def test_features_cf_point_container_without_shapely(monkeypatch):
-    ds = _features_and_gridded("features-cf-point")
-    ds["geometry_container"].attrs["geometry_type"] = "point"
+def test_features_cf_line_container_without_shapely(monkeypatch):
+    ds = _features_and_gridded("features-cf-line")
+    ds["geometry_container"].attrs["geometry_type"] = "line"
     _block_shapely(monkeypatch)
     with pytest.raises(UnsupportedGridError, match="unsupported geometry_type"):
         guess_grid_system(ds, "foo")
@@ -456,3 +468,78 @@ async def test_features_discrete_render_keeps_flag_values():
     rgba = np.asarray(Image.open(io.BytesIO(result.getvalue())).convert("RGBA"))
     colors = {tuple(c) for c in rgba[rgba[..., 3] > 0][:, :3].tolist()}
     assert colors == {(255, 0, 0), (0, 0, 255)}
+
+
+@pytest.mark.parametrize("fixture", [FEATURES_POINTS, FEATURES_POINTS_XVEC])
+def test_detect_point_features(fixture):
+    ds = fixture.create()
+    meta = guess_grid_metadata(ds)
+    assert meta is not None
+    assert meta.grid_cls is PointFeatures
+    grid = guess_grid_system(ds, "foo")
+    assert isinstance(grid, PointFeatures)
+    assert grid.dim == "feature"
+    assert shapely.equals(grid.geometries, np.array(POINT_GEOMS)).all()
+    assert grid.counts.tolist() == [1, 1, 1, 3, 1, 1]
+    assert grid.bbox == BBox(west=-95, east=179.9, south=0, north=55)
+    assert set(detect_grids(ds)) == {"foo", "bar"}
+
+
+def test_detect_point_features_cf_without_node_count():
+    points = [shapely.Point(10, 5), shapely.Point(370, 6)]
+    ds = cf_xarray.geometry.shapely_to_cf(
+        xr.DataArray(np.array(points, dtype=object), dims="feature")
+    )
+    # cf_xarray puts the node coordinates on a dim of their own
+    assert "node_count" not in ds and ds["x"].dims == ("node",)
+    crs = CRS.from_epsg(4326)
+    ds = ds.assign_coords(spatial_ref=xr.DataArray(0, attrs=crs.to_cf()))
+    ds["geometry_container"].attrs["grid_mapping"] = "spatial_ref"
+    ds["foo"] = ("feature", [1.0, 2.0])
+    ds = ds.set_coords(["x", "y", "crd_x", "crd_y"])
+    ds.attrs["_xpublish_id"] = "point-features-no-node-count"
+    grid = guess_grid_system(ds, "foo")
+    assert isinstance(grid, PointFeatures)
+    assert grid.dim == "feature"
+    assert shapely.get_x(grid.geometries).tolist() == [10, 10]
+
+
+@pytest.mark.parametrize(
+    "bbox,expected",
+    [
+        (BBox(west=-71, south=39, east=-69, north=41), [1, 2]),
+        (BBox(west=-46, south=34, east=-44, north=36), [3]),
+        (BBox(west=170, south=50, east=190, north=60), [4]),
+        (BBox(west=-185, south=50, east=-170, north=60), [4]),
+        (BBox(west=-30, south=-10, east=-20, north=-5), []),
+    ],
+)
+def test_point_features_sel(bbox, expected):
+    grid = guess_grid_system(FEATURES_POINTS.create(), "foo")
+    (indexer,) = grid.sel(bbox=bbox)["feature"]
+    assert isinstance(indexer, GeometryIndexer)
+    assert indexer.indices.tolist() == expected
+
+
+def test_point_features_locate_unsupported():
+    grid = guess_grid_system(FEATURES_POINTS.create(), "foo")
+    assert not grid.supports_locate
+    with pytest.raises(PointQueryNotSupportedError):
+        grid.locate(x=np.array([-95.0]), y=np.array([35.0]))
+
+
+@pytest.mark.parametrize(
+    "ds,style,match",
+    [
+        pytest.param(
+            FEATURES_POINTS, "polygons", "only supports style='points'", id="points"
+        ),
+        pytest.param(
+            FEATURES_POLYGONS, "points", "only supports style='polygons'", id="polygons"
+        ),
+    ],
+)
+async def test_point_features_style_mismatch(ds, style, match):
+    query = create_query_params(Tile(x=0, y=0, z=0), WEBMERC_TMS, style=style)
+    with pytest.raises(UnsupportedStyleError, match=match):
+        await pipeline(ds.create(), query)
