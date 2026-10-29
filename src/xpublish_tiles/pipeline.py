@@ -845,6 +845,10 @@ def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool
     return False
 
 
+# Styles whose geometry a vector tile can carry.
+VECTOR_TILE_STYLES = ("polygons", "points")
+
+
 def pad_bbox(bbox: OutputBBox, *, width: int, height: int, px: int) -> OutputBBox:
     """``bbox`` grown by ``px`` pixels of a ``width`` x ``height`` image on each side."""
     dx = px * (bbox.east - bbox.west) / width
@@ -866,9 +870,9 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
         raise UnsupportedStyleError(
             f"'edgecolor' is only supported by the 'polygons' style, not {query.style!r}."
         )
-    if mvt and query.style != "polygons":
+    if mvt and query.style not in VECTOR_TILE_STYLES:
         raise UnsupportedStyleError(
-            f"Vector tiles need the 'polygons' style, not {query.style!r}."
+            f"Vector tiles need the 'polygons' or 'points' style, not {query.style!r}."
         )
     if mvt and (rgb or query.edgecolor is not None):
         raise UnsupportedStyleError(
@@ -896,7 +900,7 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     context_logger = get_context_logger()
 
     select_bbox = query.bbox
-    if query.style == "points":
+    if query.style == "points" and not mvt:
         select_bbox = pad_bbox(
             query.bbox, width=query.width, height=query.height, px=query.markersize // 2
         )
@@ -911,7 +915,7 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     # Transform coordinates to output CRS
     renderer = query.get_renderer()
     subsets = await transform_for_render(
-        subsets, bbox=query.bbox, crs=query.crs, style=renderer.style_id()
+        subsets, bbox=query.bbox, crs=query.crs, style=query.style
     )
 
     tasks = [
