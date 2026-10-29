@@ -1829,6 +1829,72 @@ def test_vector_tileset_links_resolve(polygons_only_client):
     assert r.headers["content-type"] == MVT_MEDIA_TYPE
 
 
+def test_advertised_mvt_links_resolve_without_size(polygons_only_client):
+    base = "http://testserver/datasets/polys/tiles/"
+    tilesets = polygons_only_client.get(base).json()["tilesets"]
+    vector = next(
+        t
+        for t in tilesets
+        if t["dataType"] == "vector" and "WebMercatorQuad" in t["title"]
+    )
+    (self_link,) = (link for link in vector["links"] if link["rel"] == "self")
+    metadata_url = urllib.parse.urljoin(base, self_link["href"])
+    metadata = polygons_only_client.get(metadata_url).json()
+    (tileset_item,) = (link for link in metadata["links"] if link["rel"] == "item")
+    layer_items = [
+        link
+        for layer in vector["layers"]
+        for link in layer["links"]
+        if link["rel"] == "item"
+    ]
+    assert layer_items
+
+    # the tileset-level link carries no variables, so the client must add them
+    urls = [urllib.parse.urljoin(metadata_url, tileset_item["href"]) + "&variables=foo"]
+    urls += [urllib.parse.urljoin(base, link["href"]) for link in layer_items]
+    for template in urls:
+        assert "width" not in template and "height" not in template
+        url = template.format(tileMatrix=0, tileRow=0, tileCol=0)
+        r = polygons_only_client.get(url)
+        assert r.status_code == 200, (url, r.text)
+        assert r.headers["content-type"] == MVT_MEDIA_TYPE
+
+
+@pytest.mark.parametrize("f", ["mvt", MVT_MEDIA_TYPE])
+def test_mvt_without_width_height(xpublish_client, f):
+    r = xpublish_client.get(
+        f"/datasets/air/tiles/WebMercatorQuad/2/1/1?variables=air&f={f}"
+    )
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == MVT_MEDIA_TYPE
+    assert mapbox_vector_tile.decode(r.content)["air"]["features"]
+
+
+def test_tilejson_mvt_without_width_height(xpublish_client):
+    r = xpublish_client.get(
+        "/datasets/air/tiles/WebMercatorQuad/tilejson.json?variables=air&f=mvt"
+    )
+    assert r.status_code == 200, r.text
+    (url,) = r.json()["tiles"]
+    assert "width=512&height=512" in url
+    path = urllib.parse.urlsplit(url.format(z=2, y=1, x=1))
+    r = xpublish_client.get(f"{path.path}?{path.query}")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == MVT_MEDIA_TYPE
+
+
+@pytest.mark.parametrize("endpoint", ["0/0/0", "tilejson.json"])
+def test_image_tiles_require_width_height(xpublish_client, endpoint):
+    r = xpublish_client.get(
+        f"/datasets/air/tiles/WebMercatorQuad/{endpoint}?variables=air"
+    )
+    assert r.status_code == 422, r.text
+    assert {tuple(e["loc"]) for e in r.json()["detail"]} == {
+        ("query", "width"),
+        ("query", "height"),
+    }
+
+
 def test_vector_tileset_404_without_polygons():
     rest = xpublish.Rest({"radar": RADAR.create()}, plugins={"tiles": TilesPlugin()})
     r = TestClient(rest.app).get("/datasets/radar/tiles/vector/WebMercatorQuad")

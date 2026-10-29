@@ -37,6 +37,8 @@ class ImageFormat(enum.StrEnum):
 
 
 MVT_MEDIA_TYPE = "application/vnd.mapbox-vector-tile"
+# Vector tiles are encoded at a fixed extent; this only sizes the data load.
+MVT_TILE_SIZE = 512
 
 
 class TileFormat(enum.StrEnum):
