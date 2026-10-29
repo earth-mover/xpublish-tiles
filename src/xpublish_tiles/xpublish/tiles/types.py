@@ -1301,7 +1301,7 @@ class TileQuery(BaseModel):
         Field(
             default="image/png",
             json_schema_extra={
-                "description": "Format of the tile: `image/{png|jpeg}`, or `application/vnd.mapbox-vector-tile` (shorthand `mvt`) for a Mapbox Vector Tile with one layer per variable whose features carry the data `value` and, when a colour scale is known, its `color`. Vector tiles use the `polygons` style, which is the default for them.",
+                "description": "Format of the tile: `image/{png|jpeg}`, or `application/vnd.mapbox-vector-tile` (shorthand `mvt`) for a Mapbox Vector Tile with one layer per variable whose features carry the data `value` and, when a colour scale is known, its `color`. Vector tiles use the `polygons` style, or `points` for point features, which is the default for them.",
             },
         ),
     ]

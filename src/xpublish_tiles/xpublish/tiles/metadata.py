@@ -20,7 +20,7 @@ from xpublish_tiles.grids import (
 )
 from xpublish_tiles.lib import UnsupportedGridError, VariableNotFoundError
 from xpublish_tiles.logger import logger
-from xpublish_tiles.pipeline import has_rgb_bands
+from xpublish_tiles.pipeline import VECTOR_TILE_STYLES, has_rgb_bands
 from xpublish_tiles.render import RGB_VARIANT, RenderRegistry
 from xpublish_tiles.tiles_lib import grid_overlaps_tms
 from xpublish_tiles.types import MVT_MEDIA_TYPE
@@ -60,7 +60,7 @@ def grid_styles(grid: GridSystem) -> list[str]:
     return ["raster", "polygons"]
 
 
-# Vector tiles carry the polygons-style geometry, whatever the grid's default.
+# Vector tiles carry the polygons-style geometry, unless the grid has points.
 MVT_DEFAULT_STYLE = ("polygons", "default")
 
 
@@ -68,17 +68,30 @@ def default_style(grid: GridSystem) -> tuple[str, str]:
     return (grid_styles(grid)[0], "default")
 
 
+def vector_tile_style(grid: GridSystem) -> tuple[str, str]:
+    """The style of ``grid``'s vector tiles."""
+    if isinstance(grid, PointFeatures):
+        return ("points", "default")
+    return MVT_DEFAULT_STYLE
+
+
 def resolve_style(
-    style: tuple[str, str] | None, dataset: Dataset, name: str
+    style: tuple[str, str] | None,
+    dataset: Dataset,
+    name: str,
+    *,
+    vector: bool = False,
 ) -> tuple[str, str]:
-    """Explicit style, else the grid's default. Detection errors fall back to raster; the pipeline reports them."""
+    """Explicit style, else the grid's default, or its vector-tile style with
+    ``vector``. Detection errors fall back to raster (polygons for vector tiles);
+    the pipeline reports them."""
     if style is not None:
         return style
     try:
         grid = guess_grid_system(dataset, name)
     except (VariableNotFoundError, UnsupportedGridError):
-        return ("raster", "default")
-    return default_style(grid)
+        return MVT_DEFAULT_STYLE if vector else ("raster", "default")
+    return vector_tile_style(grid) if vector else default_style(grid)
 
 
 def allowed_styles(
@@ -133,12 +146,11 @@ def get_styles(
 
 
 def vector_styles(styles: list[Style]) -> list[Style]:
-    """The styles vector tiles can carry: the polygons style's, which has colormaps."""
-    style = MVT_DEFAULT_STYLE[0]
+    """The styles vector tiles can carry: the polygons and points styles', which have colormaps."""
     return [
         s
         for s in styles
-        if s.id.startswith(f"{style}/") and s.id != f"{style}/{RGB_VARIANT}"
+        if s.id.split("/")[0] in VECTOR_TILE_STYLES and s.id.split("/")[1] != RGB_VARIANT
     ]
 
 
@@ -498,7 +510,7 @@ async def create_tileset_for_tms(
             minTileMatrix=str(min_zooms[var_name]),
         )
         layers.append(layer)
-        if MVT_DEFAULT_STYLE[0] in grid_styles(var_grids[var_name]):
+        if set(VECTOR_TILE_STYLES) & set(grid_styles(var_grids[var_name])):
             mvt_link = Link(
                 href=f"{tiles_href}&f=mvt",
                 rel="item",

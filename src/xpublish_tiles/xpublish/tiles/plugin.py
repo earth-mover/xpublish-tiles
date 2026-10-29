@@ -54,7 +54,6 @@ from xpublish_tiles.utils import (
     xarray_object_key,
 )
 from xpublish_tiles.xpublish.tiles.metadata import (
-    MVT_DEFAULT_STYLE,
     create_tileset_for_tms,
     create_tileset_metadata,
     default_style,
@@ -62,6 +61,7 @@ from xpublish_tiles.xpublish.tiles.metadata import (
     extract_variable_bounding_box,
     get_styles,
     resolve_style,
+    vector_tile_style,
 )
 from xpublish_tiles.xpublish.tiles.tile_matrix import (
     TILE_MATRIX_SET_SUMMARIES,
@@ -517,7 +517,7 @@ class TilesPlugin(Plugin):
             if query.style is not None:
                 style, variant = query.style
             elif query.f == TileFormat.MVT:
-                style, variant = MVT_DEFAULT_STYLE
+                style, variant = vector_tile_style(bounds_grid)
             else:
                 style, variant = default_style(bounds_grid)
             if query.edgecolor is not None and style != "polygons":
@@ -556,7 +556,7 @@ class TilesPlugin(Plugin):
             if query.edgecolor:
                 url_template = f"{url_template}&edgecolor={quote(query.edgecolor)}&edgewidth={query.edgewidth}"
 
-            if style == "points":
+            if style == "points" and query.f != TileFormat.MVT:
                 url_template = f"{url_template}&markersize={query.markersize}"
 
             # Append selectors
@@ -718,12 +718,13 @@ class TilesPlugin(Plugin):
                 dataset = datatree.to_dataset()
                 resolution_level = None
 
-            if query.f == TileFormat.MVT and query.style is None:
-                style, variant = MVT_DEFAULT_STYLE
-            else:
-                style, variant = await async_run(
-                    resolve_style, query.style, dataset, query.variables[0]
-                )
+            style, variant = await async_run(
+                resolve_style,
+                query.style,
+                dataset,
+                query.variables[0],
+                vector=query.f == TileFormat.MVT,
+            )
 
             # Extract dimension selectors from query parameters
             selectors = {}
