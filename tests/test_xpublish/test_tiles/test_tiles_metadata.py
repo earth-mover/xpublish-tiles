@@ -18,6 +18,8 @@ from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
     ERA5,
     EU3035,
+    FEATURES_POINTS,
+    FEATURES_POINTS_XVEC,
     FEATURES_POLYGONS,
     FEATURES_POLYGONS_XVEC,
     FVCOM,
@@ -1122,6 +1124,8 @@ def _normalize_for_snapshot(obj):
         pytest.param(RGB, id="rgb"),
         pytest.param(FEATURES_POLYGONS, id="features_polygons"),
         pytest.param(FEATURES_POLYGONS_XVEC, id="features_polygons_xvec"),
+        pytest.param(FEATURES_POINTS, id="features_points"),
+        pytest.param(FEATURES_POINTS_XVEC, id="features_points_xvec"),
     ],
 )
 def test_tiles_endpoint_snapshot(fixture, snapshot):
@@ -1157,6 +1161,8 @@ def test_tiles_endpoint_snapshot(fixture, snapshot):
         pytest.param(RGB, id="rgb"),
         pytest.param(FEATURES_POLYGONS, id="features_polygons"),
         pytest.param(FEATURES_POLYGONS_XVEC, id="features_polygons_xvec"),
+        pytest.param(FEATURES_POINTS, id="features_points"),
+        pytest.param(FEATURES_POINTS_XVEC, id="features_points_xvec"),
     ],
 )
 def test_tilejson_endpoint_snapshot(fixture, snapshot):

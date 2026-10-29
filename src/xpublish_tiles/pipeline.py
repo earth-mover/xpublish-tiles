@@ -13,7 +13,7 @@ import pandas as pd
 import pydantic
 import pyproj
 from pyproj.aoi import BBox
-from spatialpandas.geometry import MultiPolygonArray
+from spatialpandas.geometry import MultiPointArray, MultiPolygonArray
 
 import xarray as xr
 from xpublish_tiles.config import config
@@ -78,6 +78,7 @@ from xpublish_tiles.projections import (
     transformer_from_crs,
 )
 from xpublish_tiles.types import (
+    DEFAULT_MARKERSIZE,
     ContinuousData,
     DataType,
     DiscreteData,
@@ -845,6 +846,20 @@ def bbox_overlap(input_bbox: BBox, grid_bbox: BBox, is_geographic: bool) -> bool
     return False
 
 
+def pad_bbox(bbox: OutputBBox, *, width: int, height: int, px: int) -> OutputBBox:
+    """``bbox`` grown by ``px`` pixels of a ``width`` x ``height`` image on each side."""
+    dx = px * (bbox.east - bbox.west) / width
+    dy = px * (bbox.north - bbox.south) / height
+    return OutputBBox(
+        BBox(
+            west=bbox.west - dx,
+            south=bbox.south - dy,
+            east=bbox.east + dx,
+            north=bbox.north + dy,
+        )
+    )
+
+
 async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     rgb = query.variant == "rgb"
     mvt = query.format == TileFormat.MVT
@@ -881,9 +896,17 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     # Capture the context logger before entering thread pool
     context_logger = get_context_logger()
 
+    select_bbox = query.bbox
+    if query.style == "points":
+        select_bbox = pad_bbox(
+            query.bbox,
+            width=query.width,
+            height=query.height,
+            px=DEFAULT_MARKERSIZE // 2,
+        )
     subsets = await subset_to_bbox(
         validated,
-        bbox=query.bbox,
+        bbox=select_bbox,
         crs=query.crs,
         max_shape=max_shape,
         style=query.style,
@@ -1409,6 +1432,10 @@ async def subset_to_bbox(
                 raise UnsupportedStyleError(
                     f"{type(grid).__name__} only supports style='polygons'; got {style!r}."
                 )
+            elif style == "points":
+                raise UnsupportedStyleError(
+                    f"style='points' needs point features; got a {type(grid).__name__} grid."
+                )
             array.datatype.validate_ndim(array.da)
             if not isinstance(grid, Features) and min(array.da.shape) < 2:
                 raise ValueError(f"Data too small for rendering: {array.da.sizes!r}.")
@@ -1481,7 +1508,7 @@ async def subset_to_bbox(
                 alternate=patch.alternate or patch.grid.to_metadata(),
                 slicers=patch.slicers,
                 datatype=array.datatype,
-                min_dim_size=1 if style == "polygons" else 2,
+                min_dim_size=1 if style in ("polygons", "points") else 2,
                 style=style,
                 chunks=array.chunks,
             )
@@ -1704,6 +1731,38 @@ async def _transform_features_patch(
     return polys, values
 
 
+async def _transform_points_patch(
+    patch: Patch, *, bbox: OutputBBox, output_crs: OutputCRS
+) -> tuple[MultiPointArray, np.ndarray]:
+    """Transform one PointFeatures patch into ``(points, values)``."""
+    grid = patch.grid
+    assert isinstance(grid, PointFeatures) and isinstance(patch.indexer, GeometryIndexer)
+    idx = patch.indexer.indices
+    nverts = grid.vertex_count(idx)
+    limit = config.get("max_renderable_vertices")
+    if nverts > limit:
+        raise TileTooBigError(
+            f"Tile needs {nverts} points, over max_renderable_vertices {limit}."
+        )
+    from xpublish_tiles.features import features_to_multipoints
+
+    transformer = transformer_from_crs(grid.crs, output_crs)
+    period = None
+    if grid.crs.is_geographic:
+        # The output-CRS width of the globe; zero where ±180° meet (e.g. polar LAEA).
+        left, _, right, _ = transformer.transform_bounds(-180, -90, 180, 90)
+        period = abs(right - left) if np.isfinite(right - left) else None
+    points = await async_run(
+        features_to_multipoints,
+        grid.geometries[idx],
+        transformer,
+        period=period,
+        west=bbox.west,
+        east=bbox.east,
+    )
+    return points, np.asarray(patch.da.values)
+
+
 async def _transform_polygon_patch(
     patch: Patch,
     *,
@@ -1883,6 +1942,7 @@ async def transform_for_render(
 
     For raster style: transform X/Y center coordinates to output CRS.
     For polygons style: transform cell corner coordinates, then assemble polygons.
+    For points style: transform point features.
 
     Iterates over ``context.patches`` uniformly: a non-faceted grid carries one
     patch, a FacetedGridSystem carries one per overlapping face. The polygons
@@ -1900,6 +1960,22 @@ async def transform_for_render(
             continue
 
         grid = context.grid
+        if style == "points":
+            (patch,) = context.patches
+            # context.bbox is the selection bbox, which the points style pads
+            points, values = await _transform_points_patch(
+                patch, bbox=context.bbox, output_crs=crs
+            )
+            result[var_name] = PopulatedRenderContext(
+                grid=grid,
+                datatype=context.datatype,
+                bbox=bbox,
+                patches=context.patches,
+                da=xr.DataArray(values, dims=["cell"]),
+                points=points,
+            )
+            continue
+
         if style == "polygons":
             # Faceted grids need the output-CRS width for face seam handling
             # (polar caps and antimeridian-straddling faces) regardless of how

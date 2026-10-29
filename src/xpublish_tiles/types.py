@@ -8,7 +8,7 @@ import numba
 import numpy as np
 import pyproj
 import pyproj.aoi
-from spatialpandas.geometry import MultiPolygonArray, PolygonArray
+from spatialpandas.geometry import MultiPointArray, MultiPolygonArray, PolygonArray
 
 import xarray as xr
 from xpublish_tiles.config import config
@@ -29,6 +29,9 @@ OutputCRS = NewType("OutputCRS", pyproj.CRS)
 InputBBox = NewType("InputBBox", pyproj.aoi.BBox)
 OutputBBox = NewType("OutputBBox", pyproj.aoi.BBox)
 GeometryArray = PolygonArray | MultiPolygonArray
+
+# Diameter of a ``points`` style marker, in pixels.
+DEFAULT_MARKERSIZE = 7
 
 
 class ImageFormat(enum.StrEnum):
@@ -247,6 +250,7 @@ class PopulatedRenderContext(RenderContext):
     # Set by transform_for_render for the renderer:
     da: xr.DataArray | None = None
     polygons: GeometryArray | None = None
+    points: MultiPointArray | None = None
 
     @property
     def ugrid_indexer(self) -> UgridIndexer | None:

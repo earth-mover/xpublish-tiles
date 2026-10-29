@@ -20,6 +20,7 @@ from xpublish_tiles.lib import TileTooBigError
 from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
     EU3035,
+    FEATURES_POINTS,
     FEATURES_POLYGONS,
     GEOZARR_MULTISCALE,
     GLOBAL_HEALPIX_CUBE_L3,
@@ -1838,3 +1839,53 @@ def test_vector_tileset_404_without_polygons():
 def test_conformance_declares_mvt(xpublish_client):
     conforms = xpublish_client.get("/tiles/conformance").json()["conformsTo"]
     assert "http://www.opengis.net/spec/ogcapi-tiles-1/1.0/conf/mvt" in conforms
+
+
+@pytest.fixture
+def points_client():
+    rest = xpublish.Rest(
+        {"points": FEATURES_POINTS.create()}, plugins={"tiles": TilesPlugin()}
+    )
+    return TestClient(rest.app)
+
+
+POINTS_TILE = (
+    "/datasets/points/tiles/WebMercatorQuad/0/0/0"
+    "?variables=foo&width=256&height=256&colorscalerange=0,100"
+)
+
+
+def _opaque_pixels(content: bytes) -> int:
+    return int(
+        (np.asarray(Image.open(io.BytesIO(content)).convert("RGBA"))[..., 3] > 0).sum()
+    )
+
+
+def test_points_grid_default_style(points_client):
+    r = points_client.get(POINTS_TILE)
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "image/png"
+    assert _opaque_pixels(r.content)
+
+    r = points_client.get(
+        "/datasets/points/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=foo&width=256&height=256"
+    )
+    assert r.status_code == 200, r.text
+    (url,) = r.json()["tiles"]
+    assert "style=points/default" in url
+
+    r = points_client.get(
+        "/datasets/points/tiles/legend?variables=foo&colorscalerange=0,100"
+    )
+    assert r.status_code == 200, r.text
+
+    styles = points_client.get("/datasets/points/tiles/WebMercatorQuad").json()["styles"]
+    assert {s["id"].split("/")[0] for s in styles} == {"points"}
+
+
+@pytest.mark.parametrize("style", ["raster/default", "polygons/default"])
+def test_points_grid_other_style_is_422(points_client, style):
+    r = points_client.get(f"{POINTS_TILE}&style={style}")
+    assert r.status_code == 422, r.text
+    assert "only supports style='points'" in r.json()["detail"]
