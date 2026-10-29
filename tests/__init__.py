@@ -5,6 +5,7 @@ from pyproj import CRS
 from pyproj.aoi import BBox
 
 from xpublish_tiles.types import (
+    DEFAULT_MARKERSIZE,
     ImageFormat,
     OutputBBox,
     OutputCRS,
@@ -40,6 +41,7 @@ def create_query_params(
     belowmincolor=None,
     edgecolor=None,
     edgewidth=1,
+    markersize=DEFAULT_MARKERSIZE,
     format: ImageFormat | TileFormat = ImageFormat.PNG,
     variables=("foo",),
 ):
@@ -73,5 +75,6 @@ def create_query_params(
         belowmincolor=belowmincolor,
         edgecolor=edgecolor,
         edgewidth=edgewidth,
+        markersize=markersize,
         format=format,
     )

@@ -442,6 +442,7 @@ async def handle_get_map(
         belowmincolor=query.belowmincolor,
         edgecolor=query.edgecolor,
         edgewidth=query.edgewidth,
+        markersize=query.markersize,
     )
 
     status_code = 200

@@ -21,6 +21,7 @@ from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import DatashaderRenderer, register_renderer
 from xpublish_tiles.render.kernels import footprint_mode, offdisk_quad_mask
 from xpublish_tiles.types import (
+    DEFAULT_MARKERSIZE,
     ContinuousData,
     DiscreteData,
     ImageFormat,
@@ -278,6 +279,7 @@ class DatashaderRasterRenderer(DatashaderRenderer):
         belowmincolor: str | None = None,
         edgecolor: str | None = None,
         edgewidth: int = 1,
+        markersize: int = DEFAULT_MARKERSIZE,
     ):
         prepared = self._prepare_render(
             contexts,

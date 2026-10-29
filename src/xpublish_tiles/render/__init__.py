@@ -24,6 +24,7 @@ from xpublish_tiles.lib import (
 )
 from xpublish_tiles.logger import get_context_logger
 from xpublish_tiles.types import (
+    DEFAULT_MARKERSIZE,
     ContinuousData,
     DataType,
     DiscreteData,
@@ -132,6 +133,7 @@ class Renderer(ABC):
         belowmincolor: str | None = None,
         edgecolor: str | None = None,
         edgewidth: int = 1,
+        markersize: int = DEFAULT_MARKERSIZE,
     ):
         pass
 
