@@ -66,7 +66,7 @@ def test_tilesets_list_endpoint(xpublish_client):
     assert "title" in tileset
     assert "crs" in tileset
     assert "dataType" in tileset
-    assert tileset["dataType"] in ["map", "vector", "coverage"]
+    assert tileset["dataType"] == "map"
     assert "links" in tileset
     assert len(tileset["links"]) >= 2  # self and tiling-scheme links
 
@@ -173,7 +173,7 @@ def test_tilesets_list_with_metadata():
     assert tileset["license"] == "CC-BY-4.0"
     assert tileset["version"] == "1.0.0"
     assert tileset["pointOfContact"] == "data@example.com"
-    assert tileset["mediaTypes"] == ["image/png", "image/jpeg"]
+    assert tileset["mediaTypes"] == ["image/png", "image/jpeg", MVT_MEDIA_TYPE]
 
     # Check layers
     assert "layers" in tileset
@@ -1806,33 +1806,103 @@ def test_polygons_custom_colormap_mvt(polygons_only_client):
     assert all(c[1:3] == c[3:5] == c[5:7] for c in colors)
 
 
-def test_vector_tileset_links_resolve(polygons_only_client):
+def mvt_links(layer):
+    return [link for link in layer["links"] if link["type"] == MVT_MEDIA_TYPE]
+
+
+def test_advertised_mvt_links_resolve_without_size(polygons_only_client):
     base = "http://testserver/datasets/polys/tiles/"
     tilesets = polygons_only_client.get(base).json()["tilesets"]
-    vector = next(
-        t
-        for t in tilesets
-        if t["dataType"] == "vector" and "WebMercatorQuad" in t["title"]
-    )
-    (self_link,) = (link for link in vector["links"] if link["rel"] == "self")
-    metadata_url = urllib.parse.urljoin(base, self_link["href"])
-    metadata = polygons_only_client.get(metadata_url).json()
-    assert metadata["dataType"] == "vector"
-    (item,) = (link for link in metadata["links"] if link["rel"] == "item")
-    assert item["type"] == MVT_MEDIA_TYPE
+    tileset = next(t for t in tilesets if "WebMercatorQuad" in t["title"])
+    assert MVT_MEDIA_TYPE in tileset["mediaTypes"]
+    links = [link for layer in tileset["layers"] for link in mvt_links(layer)]
+    assert links
 
-    tile_url = urllib.parse.urljoin(metadata_url, item["href"]).format(
-        tileMatrix=0, tileRow=0, tileCol=0
+    for link in links:
+        assert link["rel"] == "item" and link["templated"]
+        assert "width" not in link["href"] and "height" not in link["href"]
+        url = urllib.parse.urljoin(base, link["href"]).format(
+            tileMatrix=0, tileRow=0, tileCol=0
+        )
+        r = polygons_only_client.get(url)
+        assert r.status_code == 200, (url, r.text)
+        assert r.headers["content-type"] == MVT_MEDIA_TYPE
+
+
+def test_tilesets_have_no_vector_twin(xpublish_client):
+    tilesets = xpublish_client.get("/datasets/air/tiles/").json()["tilesets"]
+    assert tilesets
+    assert {t["dataType"] for t in tilesets} == {"map"}
+    tms_ids = [t["title"].rsplit(" - ", 1)[-1] for t in tilesets]
+    assert len(tms_ids) == len(set(tms_ids))
+    for tileset in tilesets:
+        (self_link,) = (link for link in tileset["links"] if link["rel"] == "self")
+        assert not self_link["href"].startswith("./vector/")
+
+
+def test_vector_tileset_endpoint_removed(xpublish_client):
+    r = xpublish_client.get("/datasets/air/tiles/vector/WebMercatorQuad")
+    assert r.status_code == 404, r.text
+
+
+def test_layers_link_mvt_only_when_polygon_capable(xpublish_client):
+    (tileset, *_) = xpublish_client.get("/datasets/air/tiles/").json()["tilesets"]
+    assert MVT_MEDIA_TYPE in tileset["mediaTypes"]
+    (layer,) = tileset["layers"]
+    rels = [(link["rel"], link["type"]) for link in layer["links"]]
+    assert rels == [
+        ("item", "image/png"),
+        ("ogc-rel:legend", "image/png"),
+        ("item", MVT_MEDIA_TYPE),
+    ]
+    (mvt,) = mvt_links(layer)
+    png = layer["links"][0]
+    assert mvt["href"] == f"{png['href']}&f=mvt"
+
+
+def test_polar_layers_have_no_mvt_link():
+    rest = xpublish.Rest({"radar": RADAR.create()}, plugins={"tiles": TilesPlugin()})
+    tilesets = TestClient(rest.app).get("/datasets/radar/tiles/").json()["tilesets"]
+    assert tilesets
+    for tileset in tilesets:
+        assert MVT_MEDIA_TYPE not in tileset["mediaTypes"]
+        for layer in tileset["layers"]:
+            assert not mvt_links(layer)
+
+
+@pytest.mark.parametrize("f", ["mvt", MVT_MEDIA_TYPE])
+def test_mvt_without_width_height(xpublish_client, f):
+    r = xpublish_client.get(
+        f"/datasets/air/tiles/WebMercatorQuad/2/1/1?variables=air&f={f}"
     )
-    r = polygons_only_client.get(f"{tile_url}&variables=foo&width=256&height=256")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == MVT_MEDIA_TYPE
+    assert mapbox_vector_tile.decode(r.content)["air"]["features"]
+
+
+def test_tilejson_mvt_without_width_height(xpublish_client):
+    r = xpublish_client.get(
+        "/datasets/air/tiles/WebMercatorQuad/tilejson.json?variables=air&f=mvt"
+    )
+    assert r.status_code == 200, r.text
+    (url,) = r.json()["tiles"]
+    assert "width=512&height=512" in url
+    path = urllib.parse.urlsplit(url.format(z=2, y=1, x=1))
+    r = xpublish_client.get(f"{path.path}?{path.query}")
     assert r.status_code == 200, r.text
     assert r.headers["content-type"] == MVT_MEDIA_TYPE
 
 
-def test_vector_tileset_404_without_polygons():
-    rest = xpublish.Rest({"radar": RADAR.create()}, plugins={"tiles": TilesPlugin()})
-    r = TestClient(rest.app).get("/datasets/radar/tiles/vector/WebMercatorQuad")
-    assert r.status_code == 404, r.text
+@pytest.mark.parametrize("endpoint", ["0/0/0", "tilejson.json"])
+def test_image_tiles_require_width_height(xpublish_client, endpoint):
+    r = xpublish_client.get(
+        f"/datasets/air/tiles/WebMercatorQuad/{endpoint}?variables=air"
+    )
+    assert r.status_code == 422, r.text
+    assert {tuple(e["loc"]) for e in r.json()["detail"]} == {
+        ("query", "width"),
+        ("query", "height"),
+    }
 
 
 def test_conformance_declares_mvt(xpublish_client):
