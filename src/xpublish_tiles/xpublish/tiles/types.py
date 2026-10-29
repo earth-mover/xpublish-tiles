@@ -6,7 +6,12 @@ from typing import Annotated, Any, Union
 import morecantile.models
 from pydantic import BaseModel, Field, field_validator
 
-from xpublish_tiles.types import LegendFormat, OverviewSelectionStrategy, TileFormat
+from xpublish_tiles.types import (
+    DEFAULT_MARKERSIZE,
+    LegendFormat,
+    OverviewSelectionStrategy,
+    TileFormat,
+)
 from xpublish_tiles.validators import (
     validate_color,
     validate_colormap,
@@ -1356,6 +1361,17 @@ class TileQuery(BaseModel):
             },
         ),
     ] = 1
+    markersize: Annotated[
+        int,
+        Field(
+            default=DEFAULT_MARKERSIZE,
+            ge=1,
+            le=64,
+            json_schema_extra={
+                "description": f"Diameter of point markers in pixels, 1 to 64 (default {DEFAULT_MARKERSIZE}). Only for the `points` style.",
+            },
+        ),
+    ] = DEFAULT_MARKERSIZE
     overview_selection_strategy: Annotated[
         OverviewSelectionStrategy | None,
         Field(
@@ -1600,6 +1616,7 @@ TILES_FILTERED_QUERY_PARAMS: list[str] = [
     "belowmincolor",
     "edgecolor",
     "edgewidth",
+    "markersize",
     "render_errors",
     "overview_selection_strategy",
 ]

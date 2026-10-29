@@ -586,6 +586,20 @@ async def test_point_marker_wraps_at_antimeridian_on_world_tile():
     assert cols.min() == 0 and cols.max() == 255
 
 
+@pytest.mark.parametrize("markersize", [1, 7, 15])
+async def test_point_markersize(markersize):
+    ds = _xvec_points([shapely.Point(10, 10)], [1.0], "point-markersize")
+    query = create_query_params(
+        Tile(x=0, y=0, z=0),
+        WEBMERC_TMS,
+        style="points",
+        colorscalerange=(0, 2),
+        markersize=markersize,
+    )
+    rows, cols = np.nonzero(_alpha(await pipeline(ds, query)))
+    assert np.ptp(rows) + 1 == np.ptp(cols) + 1 == markersize
+
+
 async def test_point_discrete_render_keeps_flag_values():
     # one lone point, and two in one pixel whose flags 0 and 2 would average to 1
     points = [shapely.Point(-40, 0), shapely.Point(40, 0), shapely.Point(40.01, 0)]

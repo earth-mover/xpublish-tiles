@@ -24,6 +24,7 @@ from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.render import discrete_color_key
 from xpublish_tiles.render.polygons import PolygonsRenderer
 from xpublish_tiles.types import (
+    DEFAULT_MARKERSIZE,
     ContinuousData,
     DataType,
     DiscreteData,
@@ -328,6 +329,7 @@ class MVTRenderer(PolygonsRenderer):
         belowmincolor: str | None = None,
         edgecolor: str | None = None,
         edgewidth: int = 1,
+        markersize: int = DEFAULT_MARKERSIZE,
     ) -> None:
         """Write one MVT layer per variable with polygons in the tile to ``buffer``."""
         logger = context_logger if context_logger is not None else get_context_logger()

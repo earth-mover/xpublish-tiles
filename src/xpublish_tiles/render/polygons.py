@@ -15,6 +15,7 @@ from xpublish_tiles.render.raster import (
     _range_color_to_rgba,
 )
 from xpublish_tiles.types import (
+    DEFAULT_MARKERSIZE,
     ContinuousData,
     DiscreteData,
     ImageFormat,
@@ -79,6 +80,7 @@ class PolygonsRenderer(DatashaderRenderer):
         belowmincolor: str | None = None,
         edgecolor: str | None = None,
         edgewidth: int = 1,
+        markersize: int = DEFAULT_MARKERSIZE,
     ):
         prepared = self._prepare_render(
             contexts,

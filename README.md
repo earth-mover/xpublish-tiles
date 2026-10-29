@@ -56,7 +56,7 @@ Three rendering styles are supported:
 
 - `raster` — cells are rasterized onto the output grid using [datashader's mesh rasterizers](https://datashader.org/api.html#datashader.Canvas.quadmesh) (`quadmesh` for rectilinear/curvilinear, `trimesh` for unstructured). Used for raster, rectilinear, curvilinear, and unstructured grids.
 - `polygons` — the mesh is passed to [datashader's polygon rasterizer](https://datashader.org/api.html#datashader.Canvas.polygons) as explicit polygon geometries, which rasterizes them onto the tile. This is the only style supported for HEALPix, cubed sphere, and polygon vector data cubes.
-- `points` — each point feature is drawn as a filled circle 7 pixels across using [datashader's point aggregation](https://datashader.org/api.html#datashader.Canvas.points); where markers overlap, the larger value wins. This is the only style supported for point vector data cubes.
+- `points` — each point feature is drawn as a filled circle `markersize` pixels across (default 7) using [datashader's point aggregation](https://datashader.org/api.html#datashader.Canvas.points); where markers overlap, the larger value wins. This is the only style supported for point vector data cubes.
 
 ### Categorical Data support
 
