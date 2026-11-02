@@ -1,4 +1,4 @@
-"""Helpers for the ``Features`` grid: vector data cubes of polygon features.
+"""Helpers for the ``Features`` grids: vector data cubes of polygon or point features.
 
 Needs the ``[vector]`` extra; import this module lazily from core code.
 """
@@ -6,7 +6,7 @@ Needs the ``[vector]`` extra; import this module lazily from core code.
 import numpy as np
 import pyarrow as pa
 import pyproj
-from spatialpandas.geometry import MultiPolygonArray
+from spatialpandas.geometry import MultiPointArray, MultiPolygonArray
 
 import xarray as xr
 from xpublish_tiles.grids import CF_GEOMETRY_REF_ATTRS
@@ -122,3 +122,55 @@ def features_to_multipolygons(
         pa.array(np.asarray(geom_offsets, dtype=np.int32)), parts_arr
     )
     return MultiPolygonArray(multis)
+
+
+def features_to_multipoints(
+    geoms: np.ndarray,
+    transformer: pyproj.Transformer,
+    *,
+    period: float | None = None,
+    west: float = -np.inf,
+    east: float = np.inf,
+) -> MultiPointArray:
+    """Transform source-CRS point geometries to a MultiPointArray.
+
+    With ``period``, a point also appears a period to either side where that lands
+    in ``[west, east]``, so markers across the antimeridian reach the tile.
+    """
+    # new writable array: to_ragged_array fails on read-only mixed-type input
+    geoms = np.array(geoms, dtype=object, copy=True)
+
+    geom_type, coords, offsets = shapely.to_ragged_array(geoms)
+    if geom_type == GeometryType.POINT:
+        geom_offsets = np.arange(len(geoms) + 1)
+    elif geom_type == GeometryType.MULTIPOINT:
+        (geom_offsets,) = offsets
+    else:
+        raise ValueError(f"Expected point geometries; got {geom_type!r}.")
+
+    x, y = transformer.transform(coords[:, 0], coords[:, 1])
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    if period:
+        feature = np.repeat(np.arange(len(geoms)), np.diff(geom_offsets))
+        xs, ys, features = [x], [y], [feature]
+        for shift in (-period, period):
+            near = (x + shift >= west) & (x + shift <= east)
+            xs.append(x[near] + shift)
+            ys.append(y[near])
+            features.append(feature[near])
+        feature = np.concatenate(features)
+        order = np.argsort(feature, kind="stable")
+        x, y = np.concatenate(xs)[order], np.concatenate(ys)[order]
+        geom_offsets = np.concatenate(
+            [[0], np.cumsum(np.bincount(feature, minlength=len(geoms)))]
+        )
+
+    flat = np.empty(2 * x.size, dtype=np.float64)
+    flat[0::2], flat[1::2] = x, y
+    inner = pa.Array.from_buffers(pa.float64(), flat.size, [None, pa.py_buffer(flat)], 0)
+    return MultiPointArray(
+        pa.ListArray.from_arrays(
+            pa.array(2 * np.asarray(geom_offsets, dtype=np.int32)), inner
+        )
+    )

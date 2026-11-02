@@ -13,6 +13,7 @@ from xpublish_tiles.config import config
 from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
     EU3035,
+    FEATURES_POINTS,
     GEOZARR_MULTISCALE,
     GLOBAL_HEALPIX_CUBE_L3,
     GLOBAL_HEALPIX_L3,
@@ -852,3 +853,40 @@ def test_wms_edgecolor_422(xpublish_client, extra, match):
     response = xpublish_client.get("/datasets/air/wms", params={**AIR_GETMAP, **extra})
     assert response.status_code == 422, response.text
     assert match in response.text
+
+
+@pytest.fixture
+def points_wms_client():
+    rest = xpublish.Rest(
+        {"points": FEATURES_POINTS.create()}, plugins={"wms": WMSPlugin()}
+    )
+    return TestClient(rest.app)
+
+
+def test_points_wms(points_wms_client):
+    client = points_wms_client
+    response = client.get("/datasets/points/wms", params=POLYGONS_ONLY_GETMAP)
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "image/png"
+
+    response = client.get(
+        "/datasets/points/wms",
+        params={**POLYGONS_ONLY_GETMAP, "styles": "raster/default"},
+    )
+    assert response.status_code == 422, response.text
+    assert "only supports style=" in response.text
+
+    response = client.get(
+        "/datasets/points/wms",
+        params={
+            "service": "WMS",
+            "version": "1.3.0",
+            "request": "GetCapabilities",
+            "format": "json",
+        },
+    )
+    assert response.status_code == 200, response.text
+    layers = response.json()["capability"]["layer"]["layers"]
+    foo = next(layer for layer in layers if layer.get("name") == "foo")
+    assert foo["queryable"] is False
+    assert {s["name"].split("/")[0] for s in foo["styles"]} == {"points"}

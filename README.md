@@ -34,6 +34,7 @@ The goal of this project is to transform xarray datasets to raster, vector and o
 | Polar        | `azimuth[azimuth], range[range]`   | Radar sweeps ([WMO FM-301](https://community.wmo.int/activity-areas/wis/wmo-cf-extensions)), detected via `ray_azimuth_angle` / `projection_range_coordinate` standard names. | `raster` only    |
 | Geostationary | `x[x], y[y]` (scan angles, radians) | Fixed-grid scan angles with a CF `geostationary` grid mapping; `perspective_point_height` is required to convert scan angles to metres. | All              |
 | Vector data cube | `geometry[feature]`             | Polygon/MultiPolygon features along one dimension: an [xvec](https://xvec.readthedocs.io) `GeometryIndex`, or a CF geometry container (`geometry_type: polygon`). | `polygons` only  |
+| Point vector data cube | `geometry[feature]`       | Point/MultiPoint features along one dimension: an [xvec](https://xvec.readthedocs.io) `GeometryIndex`, or a CF geometry container (`geometry_type: point`). | `points` only    |
 
 Here `lat[lat]` means a coordinate variable named `lat` with one dimension named `lat`.
 
@@ -51,10 +52,11 @@ When serving a `DataTree` with multiple resolution levels, the appropriate level
 
 ### Styles
 
-Two rendering styles are supported:
+Three rendering styles are supported:
 
 - `raster` — cells are rasterized onto the output grid using [datashader's mesh rasterizers](https://datashader.org/api.html#datashader.Canvas.quadmesh) (`quadmesh` for rectilinear/curvilinear, `trimesh` for unstructured). Used for raster, rectilinear, curvilinear, and unstructured grids.
-- `polygons` — the mesh is passed to [datashader's polygon rasterizer](https://datashader.org/api.html#datashader.Canvas.polygons) as explicit polygon geometries, which rasterizes them onto the tile. This is the only style supported for HEALPix, cubed sphere, and vector data cubes.
+- `polygons` — the mesh is passed to [datashader's polygon rasterizer](https://datashader.org/api.html#datashader.Canvas.polygons) as explicit polygon geometries, which rasterizes them onto the tile. This is the only style supported for HEALPix, cubed sphere, and polygon vector data cubes.
+- `points` — each point feature is drawn as a filled circle 7 pixels across using [datashader's point aggregation](https://datashader.org/api.html#datashader.Canvas.points); where markers overlap, the larger value wins. This is the only style supported for point vector data cubes.
 
 ### Categorical Data support
 

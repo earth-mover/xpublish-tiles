@@ -10,6 +10,7 @@ from xpublish_tiles import telemetry
 from xpublish_tiles.testing.datasets import (
     EU3035,
     EU3035_HIRES,
+    FEATURES_POINTS,
     FEATURES_POLYGONS,
     HRRR,
     RADAR,
@@ -18,7 +19,11 @@ from xpublish_tiles.testing.datasets import (
     create_global_dataset,
 )
 from xpublish_tiles.testing.lib import compare_image_buffers, png_snapshot  # noqa: F401
-from xpublish_tiles.testing.tiles import FEATURES_TILES, RADAR_TILES
+from xpublish_tiles.testing.tiles import (
+    FEATURES_POINTS_TILES,
+    FEATURES_TILES,
+    RADAR_TILES,
+)
 
 # Disable numba, datashader, and PIL debug logs
 logging.getLogger("numba").setLevel(logging.WARNING)
@@ -193,3 +198,9 @@ def radar_dataset_and_tile(request):
 def features_dataset_and_tile(request):
     param = request.param
     return (FEATURES_POLYGONS.create(), param.tile, param.tms)
+
+
+@pytest.fixture(params=FEATURES_POINTS_TILES, ids=lambda t: t.name)
+def features_points_dataset_and_tile(request):
+    param = request.param
+    return (FEATURES_POINTS.create(), param.tile, param.tms)

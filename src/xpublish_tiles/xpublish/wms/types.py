@@ -160,7 +160,7 @@ class WMSGetMapQuery(WMSBaseQuery):
     )
     styles: tuple[str, str] | None = Field(
         None,
-        description="Style to use for the query, as `{style}/{variant}`. Defaults to `polygons/default` for HEALPix and cubed-sphere grids, and `raster/default` otherwise. The variant may be the name of any matplotlib colormap.",
+        description="Style to use for the query, as `{style}/{variant}`. Defaults to `points/default` for point features, `polygons/default` for HEALPix, cubed-sphere and polygon vector data cube grids, and `raster/default` otherwise. The variant may be the name of any matplotlib colormap.",
     )
     crs: CRSParam = Field(
         "EPSG:4326",
@@ -414,7 +414,7 @@ class WMSGetLegendGraphicQuery(WMSBaseQuery):
     )
     styles: tuple[str, str] | None = Field(
         None,
-        description="Style to use for the query, as `{style}/{variant}`. Defaults to `polygons/default` for HEALPix and cubed-sphere grids, and `raster/default` otherwise. The variant may be the name of any matplotlib colormap.",
+        description="Style to use for the query, as `{style}/{variant}`. Defaults to `points/default` for point features, `polygons/default` for HEALPix, cubed-sphere and polygon vector data cube grids, and `raster/default` otherwise. The variant may be the name of any matplotlib colormap.",
     )
     format: ImageFormat = Field(
         ImageFormat.PNG,
