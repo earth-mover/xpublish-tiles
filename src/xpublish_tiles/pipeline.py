@@ -33,6 +33,7 @@ from xpublish_tiles.grids import (
     HealpixIndexer,
     PointFeatures,
     Polar,
+    PolygonFeatures,
     RasterAffine,
     Rectilinear,
     Slicers,
@@ -1400,12 +1401,11 @@ async def subset_to_bbox(
                 for ix in indexers
             )
         else:
-            if isinstance(grid, PointFeatures):
-                if style != "points":
-                    raise UnsupportedStyleError(
-                        f"PointFeatures only supports style='points'; got {style!r}."
-                    )
-            elif isinstance(grid, Healpix | Features) and style != "polygons":
+            if isinstance(grid, PointFeatures) and style != "points":
+                raise UnsupportedStyleError(
+                    f"PointFeatures only supports style='points'; got {style!r}."
+                )
+            elif isinstance(grid, Healpix | PolygonFeatures) and style != "polygons":
                 raise UnsupportedStyleError(
                     f"{type(grid).__name__} only supports style='polygons'; got {style!r}."
                 )
@@ -1683,9 +1683,11 @@ async def _transform_one_grid_polygons(
 async def _transform_features_patch(
     patch: Patch, *, output_crs: OutputCRS
 ) -> tuple[MultiPolygonArray, np.ndarray]:
-    """Transform one Features patch into ``(polygons, values)``."""
+    """Transform one PolygonFeatures patch into ``(polygons, values)``."""
     grid = patch.grid
-    assert isinstance(grid, Features) and isinstance(patch.indexer, GeometryIndexer)
+    assert isinstance(grid, PolygonFeatures) and isinstance(
+        patch.indexer, GeometryIndexer
+    )
     idx = patch.indexer.indices
     nverts = grid.vertex_count(idx)
     limit = config.get("max_renderable_vertices")
@@ -1725,7 +1727,7 @@ async def _transform_polygon_patch(
     subset = patch.da
     source_crs = patch.source_crs
 
-    if isinstance(grid, Features):
+    if isinstance(grid, PolygonFeatures):
         return await _transform_features_patch(patch, output_crs=output_crs)
 
     if isinstance(grid, GridSystem2D):
