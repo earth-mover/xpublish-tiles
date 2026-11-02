@@ -18,6 +18,8 @@ from xpublish_tiles.testing.datasets import (
     CUBED_SPHERE,
     ERA5,
     EU3035,
+    FEATURES_POINTS,
+    FEATURES_POINTS_XVEC,
     FEATURES_POLYGONS,
     FEATURES_POLYGONS_XVEC,
     FVCOM,
@@ -1018,6 +1020,19 @@ def test_allowed_styles_healpix_only_polygons():
         assert allowed_styles(ds) == ["polygons"]
         style_ids = {s.id.split("/")[0] for s in get_styles(ds)}
         assert style_ids == {"polygons"}
+
+
+@pytest.mark.parametrize(
+    "fixture,expected",
+    [
+        (FEATURES_POLYGONS, ["polygons"]),
+        (FEATURES_POLYGONS_XVEC, ["polygons"]),
+        (FEATURES_POINTS, ["points"]),
+        (FEATURES_POINTS_XVEC, ["points"]),
+    ],
+)
+def test_allowed_styles_features(fixture, expected):
+    assert allowed_styles(fixture.create()) == expected
 
 
 def test_cube_dims_not_advertised():
