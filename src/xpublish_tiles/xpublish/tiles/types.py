@@ -4,15 +4,17 @@ from enum import Enum
 from typing import Annotated, Any, Union
 
 import morecantile.models
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from xpublish_tiles.types import (
     DEFAULT_MARKERSIZE,
+    MVT_TILE_SIZE,
     LegendFormat,
     OverviewSelectionStrategy,
     TileFormat,
 )
 from xpublish_tiles.validators import (
+    MVT_FORMAT_ALIASES,
     validate_color,
     validate_colormap,
     validate_colorscalerange,
@@ -1282,7 +1284,7 @@ class TileQuery(BaseModel):
             default=...,
             multiple_of=256,
             json_schema_extra={
-                "description": "Width of the tile in pixels, 256 or 512",
+                "description": "Width of the tile in pixels, 256 or 512. Optional for vector tiles, where it defaults to 512",
             },
         ),
     ]
@@ -1292,7 +1294,7 @@ class TileQuery(BaseModel):
             default=...,
             multiple_of=256,
             json_schema_extra={
-                "description": "Height of the tile in pixels, 256 or 512",
+                "description": "Height of the tile in pixels, 256 or 512. Optional for vector tiles, where it defaults to 512",
             },
         ),
     ]
@@ -1381,6 +1383,16 @@ class TileQuery(BaseModel):
             },
         ),
     ] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_mvt_size(cls, data: Any) -> Any:
+        if (
+            isinstance(data, dict)
+            and str(data.get("f", "")).lower() in MVT_FORMAT_ALIASES
+        ):
+            data = {"width": MVT_TILE_SIZE, "height": MVT_TILE_SIZE, **data}
+        return data
 
     @field_validator("overview_selection_strategy", mode="before")
     @classmethod

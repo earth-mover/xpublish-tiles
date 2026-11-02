@@ -1022,6 +1022,19 @@ def test_allowed_styles_healpix_only_polygons():
         assert style_ids == {"polygons"}
 
 
+@pytest.mark.parametrize(
+    "fixture,expected",
+    [
+        (FEATURES_POLYGONS, ["polygons"]),
+        (FEATURES_POLYGONS_XVEC, ["polygons"]),
+        (FEATURES_POINTS, ["points"]),
+        (FEATURES_POINTS_XVEC, ["points"]),
+    ],
+)
+def test_allowed_styles_features(fixture, expected):
+    assert allowed_styles(fixture.create()) == expected
+
+
 def test_cube_dims_not_advertised():
     """face/y/x belong to the grid; only time is a selectable dimension."""
     fixture = GLOBAL_HEALPIX_CUBE_L3
