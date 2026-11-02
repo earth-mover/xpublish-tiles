@@ -3,7 +3,7 @@ from numbers import Number
 from typing import TYPE_CHECKING
 
 from xpublish_tiles.render import Renderer, register_renderer
-from xpublish_tiles.types import ImageFormat
+from xpublish_tiles.types import DEFAULT_MARKERSIZE, ImageFormat
 
 if TYPE_CHECKING:
     from xpublish_tiles.types import RenderContext
@@ -31,6 +31,7 @@ class QuiverRenderer(Renderer):
         belowmincolor: str | None = None,
         edgecolor: str | None = None,
         edgewidth: int = 1,
+        markersize: int = DEFAULT_MARKERSIZE,
     ) -> None:
         # Handle "default" alias
         if variant == "default":

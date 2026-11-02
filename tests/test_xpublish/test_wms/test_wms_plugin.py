@@ -890,3 +890,15 @@ def test_points_wms(points_wms_client):
     foo = next(layer for layer in layers if layer.get("name") == "foo")
     assert foo["queryable"] is False
     assert {s["name"].split("/")[0] for s in foo["styles"]} == {"points"}
+
+
+def test_points_wms_markersize(points_wms_client):
+    small, large = (
+        points_wms_client.get(
+            "/datasets/points/wms",
+            params={**POLYGONS_ONLY_GETMAP, "markersize": markersize},
+        )
+        for markersize in (3, 15)
+    )
+    assert small.status_code == large.status_code == 200, small.text
+    assert small.content != large.content

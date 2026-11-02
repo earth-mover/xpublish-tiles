@@ -79,7 +79,6 @@ from xpublish_tiles.projections import (
     transformer_from_crs,
 )
 from xpublish_tiles.types import (
-    DEFAULT_MARKERSIZE,
     ContinuousData,
     DataType,
     DiscreteData,
@@ -900,10 +899,7 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     select_bbox = query.bbox
     if query.style == "points":
         select_bbox = pad_bbox(
-            query.bbox,
-            width=query.width,
-            height=query.height,
-            px=DEFAULT_MARKERSIZE // 2,
+            query.bbox, width=query.width, height=query.height, px=query.markersize // 2
         )
     subsets = await subset_to_bbox(
         validated,
@@ -949,6 +945,7 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
             belowmincolor=query.belowmincolor,
             edgecolor=query.edgecolor,
             edgewidth=query.edgewidth,
+            markersize=query.markersize,
         ),
     )
     buffer.seek(0)

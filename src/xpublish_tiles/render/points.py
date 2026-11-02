@@ -20,7 +20,7 @@ from xpublish_tiles.types import (
 
 @register_renderer
 class PointsRenderer(DatashaderRenderer):
-    """Renderer for point features: a filled circle ``DEFAULT_MARKERSIZE`` pixels across per point.
+    """Renderer for point features: a filled circle of ``markersize`` pixels per point.
 
     Points in one pixel average; where markers overlap, the larger value wins.
     """
@@ -43,6 +43,7 @@ class PointsRenderer(DatashaderRenderer):
         belowmincolor: str | None = None,
         edgecolor: str | None = None,
         edgewidth: int = 1,
+        markersize: int = DEFAULT_MARKERSIZE,
     ):
         prepared = self._prepare_render(
             contexts,
@@ -72,7 +73,7 @@ class PointsRenderer(DatashaderRenderer):
         data = context.da
         # Draw on a canvas `pad` pixels wider on each side, so markers centred
         # just outside the tile still reach into it.
-        pad = DEFAULT_MARKERSIZE // 2
+        pad = markersize // 2
         bbox = context.bbox
         dx = (bbox.east - bbox.west) / width
         dy = (bbox.north - bbox.south) / height

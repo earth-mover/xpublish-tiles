@@ -8,7 +8,7 @@
     "scheme": "xyz",
     "tilejson": "3.0.0",
     "tiles": [
-      "http://testserver/datasets/features_points_xvec/tiles/WebMercatorQuad/{z}/{y}/{x}?variables=bar&style=points/default&width=256&height=256&f=png&render_errors=false"
+      "http://testserver/datasets/features_points_xvec/tiles/WebMercatorQuad/{z}/{y}/{x}?variables=bar&style=points/default&width=256&height=256&f=png&render_errors=false&markersize=7"
     ]
   },
   "foo": {
@@ -20,7 +20,7 @@
     "scheme": "xyz",
     "tilejson": "3.0.0",
     "tiles": [
-      "http://testserver/datasets/features_points_xvec/tiles/WebMercatorQuad/{z}/{y}/{x}?variables=foo&style=points/default&width=256&height=256&f=png&render_errors=false"
+      "http://testserver/datasets/features_points_xvec/tiles/WebMercatorQuad/{z}/{y}/{x}?variables=foo&style=points/default&width=256&height=256&f=png&render_errors=false&markersize=7"
     ]
   }
 }

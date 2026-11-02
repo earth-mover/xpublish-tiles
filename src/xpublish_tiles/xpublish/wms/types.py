@@ -15,7 +15,7 @@ from pydantic_xml import BaseXmlModel, attr, element
 from pyproj import CRS
 from pyproj.aoi import BBox
 
-from xpublish_tiles.types import ImageFormat
+from xpublish_tiles.types import DEFAULT_MARKERSIZE, ImageFormat
 from xpublish_tiles.validators import (
     validate_bbox,
     validate_bgcolor,
@@ -212,6 +212,12 @@ class WMSGetMapQuery(WMSBaseQuery):
         ge=1,
         le=5,
         description="Width of polygon edges in pixels, 1 to 5. Only used with `edgecolor`.",
+    )
+    markersize: int = Field(
+        DEFAULT_MARKERSIZE,
+        ge=1,
+        le=64,
+        description=f"Diameter of point markers in pixels, 1 to 64 (default {DEFAULT_MARKERSIZE}). Only for the `points` style.",
     )
     format: ImageFormat = Field(
         ImageFormat.PNG,
@@ -585,6 +591,7 @@ WMS_FILTERED_QUERY_PARAMS = {
     "belowmincolor",
     "edgecolor",
     "edgewidth",
+    "markersize",
     "autoscale",
     "vertical",
     "item",
