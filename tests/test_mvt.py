@@ -22,7 +22,7 @@ from xpublish_tiles.render.mvt import (
     prepare_geometries,
 )
 from xpublish_tiles.render.polygons import PolygonsRenderer
-from xpublish_tiles.testing.datasets import FEATURES_POLYGONS
+from xpublish_tiles.testing.datasets import FEATURES_POINTS, FEATURES_POLYGONS
 from xpublish_tiles.testing.tiles import WEBMERC_TMS
 from xpublish_tiles.types import TileFormat
 
@@ -217,8 +217,47 @@ async def test_mvt_layer_per_variable(features):
         pytest.param({"style": "raster"}, id="raster"),
         pytest.param({"variant": "rgb"}, id="rgb"),
         pytest.param({"edgecolor": "red"}, id="edgecolor"),
+        pytest.param({"style": "points"}, id="points-on-polygons"),
     ],
 )
 async def test_mvt_unsupported_styles(features, kwargs):
     with pytest.raises(UnsupportedStyleError):
         await render(features, **kwargs)
+
+
+@pytest.fixture(scope="module")
+def points() -> xr.Dataset:
+    return FEATURES_POINTS.create().isel(time=0)
+
+
+async def test_points_mvt(points):
+    feats = (await render(points, style="points"))["foo"]["features"]
+    assert [f["id"] for f in feats] == list(range(6))
+    assert [f["properties"]["value"] for f in feats] == points.foo.values.tolist()
+    assert [f["geometry"]["type"] for f in feats] == [
+        "Point",
+        "Point",
+        "Point",
+        "MultiPoint",
+        "Point",
+        "Point",
+    ]
+    assert feats[5]["geometry"]["coordinates"] == [EXTENT // 2, EXTENT // 2]
+
+
+async def test_points_mvt_keeps_points_in_buffered_tile(points):
+    # lon -45..0, lat 0..41: two of the multipoint's points, and (0, 0) on the corner
+    feats = (await render(points, tile=Tile(x=3, y=3, z=3), style="points"))["foo"][
+        "features"
+    ]
+    geoms = {f["id"]: f["geometry"] for f in feats}
+    assert set(geoms) == {3, 5}
+    assert geoms[3]["type"] == "MultiPoint"
+    assert [x for x, _ in geoms[3]["coordinates"]] == [0, round(EXTENT / 9)]
+    assert geoms[5]["coordinates"] == [EXTENT, EXTENT]
+
+
+async def test_points_mvt_drops_nan_features():
+    ds = xvec_dataset([shapely.Point(0, 0), shapely.Point(10, 10)], [np.nan, 1.0])
+    feats = (await render(ds, style="points"))["foo"]["features"]
+    assert [(f["id"], f["properties"]["value"]) for f in feats] == [(1, 1.0)]

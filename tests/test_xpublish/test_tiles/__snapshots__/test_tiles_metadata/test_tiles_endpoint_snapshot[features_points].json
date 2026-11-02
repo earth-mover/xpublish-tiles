@@ -26,6 +26,13 @@
               "rel": "ogc-rel:legend",
               "title": "Legend for bar",
               "type": "image/png"
+            },
+            {
+              "href": "./CDB1GlobalGrid/{tileMatrix}/{tileRow}/{tileCol}?variables=bar&f=mvt",
+              "rel": "item",
+              "templated": true,
+              "title": "Vector tiles for bar",
+              "type": "application/vnd.mapbox-vector-tile"
             }
           ],
           "minTileMatrix": "-10",
@@ -65,6 +72,13 @@
               "rel": "ogc-rel:legend",
               "title": "Legend for foo",
               "type": "image/png"
+            },
+            {
+              "href": "./CDB1GlobalGrid/{tileMatrix}/{tileRow}/{tileCol}?variables=foo&f=mvt",
+              "rel": "item",
+              "templated": true,
+              "title": "Vector tiles for foo",
+              "type": "application/vnd.mapbox-vector-tile"
             }
           ],
           "minTileMatrix": "-10",
@@ -87,7 +101,8 @@
       ],
       "mediaTypes": [
         "image/png",
-        "image/jpeg"
+        "image/jpeg",
+        "application/vnd.mapbox-vector-tile"
       ],
       "styles": [
         {
@@ -1248,6 +1263,13 @@
               "rel": "ogc-rel:legend",
               "title": "Legend for bar",
               "type": "image/png"
+            },
+            {
+              "href": "./CanadianNAD83_LCC/{tileMatrix}/{tileRow}/{tileCol}?variables=bar&f=mvt",
+              "rel": "item",
+              "templated": true,
+              "title": "Vector tiles for bar",
+              "type": "application/vnd.mapbox-vector-tile"
             }
           ],
           "minTileMatrix": "0",
@@ -1287,6 +1309,13 @@
               "rel": "ogc-rel:legend",
               "title": "Legend for foo",
               "type": "image/png"
+            },
+            {
+              "href": "./CanadianNAD83_LCC/{tileMatrix}/{tileRow}/{tileCol}?variables=foo&f=mvt",
+              "rel": "item",
+              "templated": true,
+              "title": "Vector tiles for foo",
+              "type": "application/vnd.mapbox-vector-tile"
             }
           ],
           "minTileMatrix": "0",
@@ -1309,7 +1338,8 @@
       ],
       "mediaTypes": [
         "image/png",
-        "image/jpeg"
+        "image/jpeg",
+        "application/vnd.mapbox-vector-tile"
       ],
       "styles": [
         {
@@ -2428,6 +2458,13 @@
               "rel": "ogc-rel:legend",
               "title": "Legend for bar",
               "type": "image/png"
+            },
+            {
+              "href": "./EuropeanETRS89_LAEAQuad/{tileMatrix}/{tileRow}/{tileCol}?variables=bar&f=mvt",
+              "rel": "item",
+              "templated": true,
+              "title": "Vector tiles for bar",
+              "type": "application/vnd.mapbox-vector-tile"
             }
           ],
           "minTileMatrix": "0",
@@ -2467,6 +2504,13 @@
               "rel": "ogc-rel:legend",
               "title": "Legend for foo",
               "type": "image/png"
+            },
+            {
+              "href": "./EuropeanETRS89_LAEAQuad/{tileMatrix}/{tileRow}/{tileCol}?variables=foo&f=mvt",
+              "rel": "item",
+              "templated": true,
+              "title": "Vector tiles for foo",
+              "type": "application/vnd.mapbox-vector-tile"
             }
           ],
           "minTileMatrix": "0",
@@ -2489,7 +2533,8 @@
       ],
       "mediaTypes": [
         "image/png",
-        "image/jpeg"
+        "image/jpeg",
+        "application/vnd.mapbox-vector-tile"
       ],
       "styles": [
         {
@@ -3538,6 +3583,13 @@
               "rel": "ogc-rel:legend",
               "title": "Legend for bar",
               "type": "image/png"
+            },
+            {
+              "href": "./GNOSISGlobalGrid/{tileMatrix}/{tileRow}/{tileCol}?variables=bar&f=mvt",
+              "rel": "item",
+              "templated": true,
+              "title": "Vector tiles for bar",
+              "type": "application/vnd.mapbox-vector-tile"
             }
           ],
           "minTileMatrix": "0",
@@ -3577,6 +3629,13 @@
               "rel": "ogc-rel:legend",
               "title": "Legend for foo",
               "type": "image/png"
+            },
+            {
+              "href": "./GNOSISGlobalGrid/{tileMatrix}/{tileRow}/{tileCol}?variables=foo&f=mvt",
+              "rel": "item",
+              "templated": true,
+              "title": "Vector tiles for foo",
+              "type": "application/vnd.mapbox-vector-tile"
             }
           ],
           "minTileMatrix": "0",
@@ -3599,7 +3658,8 @@
       ],
       "mediaTypes": [
         "image/png",
-        "image/jpeg"
+        "image/jpeg",
+        "application/vnd.mapbox-vector-tile"
       ],
       "styles": [
         {
@@ -4739,6 +4799,13 @@
               "rel": "ogc-rel:legend",
               "title": "Legend for bar",
               "type": "image/png"
+            },
+            {
+              "href": "./UTM31WGS84Quad/{tileMatrix}/{tileRow}/{tileCol}?variables=bar&f=mvt",
+              "rel": "item",
+              "templated": true,
+              "title": "Vector tiles for bar",
+              "type": "application/vnd.mapbox-vector-tile"
             }
           ],
           "minTileMatrix": "1",
@@ -4778,6 +4845,13 @@
               "rel": "ogc-rel:legend",
               "title": "Legend for foo",
               "type": "image/png"
+            },
+            {
+              "href": "./UTM31WGS84Quad/{tileMatrix}/{tileRow}/{tileCol}?variables=foo&f=mvt",
+              "rel": "item",
+              "templated": true,
+              "title": "Vector tiles for foo",
+              "type": "application/vnd.mapbox-vector-tile"
             }
           ],
           "minTileMatrix": "1",
@@ -4800,7 +4874,8 @@
       ],
       "mediaTypes": [
         "image/png",
-        "image/jpeg"
+        "image/jpeg",
+        "application/vnd.mapbox-vector-tile"
       ],
       "styles": [
         {
@@ -5905,6 +5980,13 @@
               "rel": "ogc-rel:legend",
               "title": "Legend for bar",
               "type": "image/png"
+            },
+            {
+              "href": "./WGS1984Quad/{tileMatrix}/{tileRow}/{tileCol}?variables=bar&f=mvt",
+              "rel": "item",
+              "templated": true,
+              "title": "Vector tiles for bar",
+              "type": "application/vnd.mapbox-vector-tile"
             }
           ],
           "minTileMatrix": "0",
@@ -5944,6 +6026,13 @@
               "rel": "ogc-rel:legend",
               "title": "Legend for foo",
               "type": "image/png"
+            },
+            {
+              "href": "./WGS1984Quad/{tileMatrix}/{tileRow}/{tileCol}?variables=foo&f=mvt",
+              "rel": "item",
+              "templated": true,
+              "title": "Vector tiles for foo",
+              "type": "application/vnd.mapbox-vector-tile"
             }
           ],
           "minTileMatrix": "0",
@@ -5966,7 +6055,8 @@
       ],
       "mediaTypes": [
         "image/png",
-        "image/jpeg"
+        "image/jpeg",
+        "application/vnd.mapbox-vector-tile"
       ],
       "styles": [
         {
@@ -7071,6 +7161,13 @@
               "rel": "ogc-rel:legend",
               "title": "Legend for bar",
               "type": "image/png"
+            },
+            {
+              "href": "./WebMercatorQuad/{tileMatrix}/{tileRow}/{tileCol}?variables=bar&f=mvt",
+              "rel": "item",
+              "templated": true,
+              "title": "Vector tiles for bar",
+              "type": "application/vnd.mapbox-vector-tile"
             }
           ],
           "minTileMatrix": "0",
@@ -7110,6 +7207,13 @@
               "rel": "ogc-rel:legend",
               "title": "Legend for foo",
               "type": "image/png"
+            },
+            {
+              "href": "./WebMercatorQuad/{tileMatrix}/{tileRow}/{tileCol}?variables=foo&f=mvt",
+              "rel": "item",
+              "templated": true,
+              "title": "Vector tiles for foo",
+              "type": "application/vnd.mapbox-vector-tile"
             }
           ],
           "minTileMatrix": "0",
@@ -7132,7 +7236,8 @@
       ],
       "mediaTypes": [
         "image/png",
-        "image/jpeg"
+        "image/jpeg",
+        "application/vnd.mapbox-vector-tile"
       ],
       "styles": [
         {
@@ -8244,6 +8349,13 @@
               "rel": "ogc-rel:legend",
               "title": "Legend for bar",
               "type": "image/png"
+            },
+            {
+              "href": "./WorldCRS84Quad/{tileMatrix}/{tileRow}/{tileCol}?variables=bar&f=mvt",
+              "rel": "item",
+              "templated": true,
+              "title": "Vector tiles for bar",
+              "type": "application/vnd.mapbox-vector-tile"
             }
           ],
           "minTileMatrix": "0",
@@ -8283,6 +8395,13 @@
               "rel": "ogc-rel:legend",
               "title": "Legend for foo",
               "type": "image/png"
+            },
+            {
+              "href": "./WorldCRS84Quad/{tileMatrix}/{tileRow}/{tileCol}?variables=foo&f=mvt",
+              "rel": "item",
+              "templated": true,
+              "title": "Vector tiles for foo",
+              "type": "application/vnd.mapbox-vector-tile"
             }
           ],
           "minTileMatrix": "0",
@@ -8305,7 +8424,8 @@
       ],
       "mediaTypes": [
         "image/png",
-        "image/jpeg"
+        "image/jpeg",
+        "application/vnd.mapbox-vector-tile"
       ],
       "styles": [
         {
@@ -9410,6 +9530,13 @@
               "rel": "ogc-rel:legend",
               "title": "Legend for bar",
               "type": "image/png"
+            },
+            {
+              "href": "./WorldMercatorWGS84Quad/{tileMatrix}/{tileRow}/{tileCol}?variables=bar&f=mvt",
+              "rel": "item",
+              "templated": true,
+              "title": "Vector tiles for bar",
+              "type": "application/vnd.mapbox-vector-tile"
             }
           ],
           "minTileMatrix": "0",
@@ -9449,6 +9576,13 @@
               "rel": "ogc-rel:legend",
               "title": "Legend for foo",
               "type": "image/png"
+            },
+            {
+              "href": "./WorldMercatorWGS84Quad/{tileMatrix}/{tileRow}/{tileCol}?variables=foo&f=mvt",
+              "rel": "item",
+              "templated": true,
+              "title": "Vector tiles for foo",
+              "type": "application/vnd.mapbox-vector-tile"
             }
           ],
           "minTileMatrix": "0",
@@ -9471,7 +9605,8 @@
       ],
       "mediaTypes": [
         "image/png",
-        "image/jpeg"
+        "image/jpeg",
+        "application/vnd.mapbox-vector-tile"
       ],
       "styles": [
         {

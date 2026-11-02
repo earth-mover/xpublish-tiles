@@ -1,22 +1,23 @@
-"""Mapbox Vector Tile (MVT 2.1) encoding of polygon render contexts.
+"""Mapbox Vector Tile (MVT 2.1) encoding of polygon and point render contexts.
 
 Each variable becomes one layer named after it. Each feature carries the data
-``value`` and, when a colour scale is known, the ``color`` the polygons style
-would paint it, so a client may style by either. ``Features`` grids also set
-the feature ``id`` to its position along the feature dim.
+``value`` and, when a colour scale is known, the ``color`` the polygons or
+points style would paint it, so a client may style by either. ``Features``
+grids also set the feature ``id`` to its position along the feature dim.
 
 Needs the ``[vector]`` extra; import this module lazily from core code.
 """
 
 import io
 import struct
+from collections.abc import Callable
 from itertools import pairwise
 from numbers import Number
 
 import matplotlib as mpl
 import matplotlib.colors as mcolors
 import numpy as np
-from spatialpandas.geometry import MultiPolygonArray
+from spatialpandas.geometry import MultiPointArray, MultiPolygonArray
 
 from xpublish_tiles.grids import Features, GeometryIndexer
 from xpublish_tiles.lib import apply_range_colors, create_colormap_from_dict
@@ -54,6 +55,7 @@ SIMPLIFY_TOLERANCE = 1.0
 _MOVE_TO = 1 | (1 << 3)
 _LINE_TO = 2
 _CLOSE_PATH = 7 | (1 << 3)
+_POINT = 1
 _POLYGON = 3
 
 _POLYGONAL = (GeometryType.POLYGON, GeometryType.MULTIPOLYGON)
@@ -95,15 +97,23 @@ def _zigzag(v: np.ndarray) -> np.ndarray:
     return ((v << 1) ^ (v >> 63)).astype(np.uint64)
 
 
-def _to_tile_geometries(polygons: GeometryArray, bbox: OutputBBox) -> np.ndarray:
-    """Output-CRS polygons as shapely geometries in tile units (y down)."""
+def _to_tile_units(
+    geoms: GeometryArray | MultiPointArray, bbox: OutputBBox
+) -> tuple[np.ndarray, list[np.ndarray]]:
+    """Output-CRS coordinates in tile units (y down), and the offsets into them."""
     # spatialpandas offsets run outermost first; coordinate offsets count floats.
-    offsets = [np.asarray(o, dtype=np.int64) for o in polygons.buffer_offsets]
+    offsets = [np.asarray(o, dtype=np.int64) for o in geoms.buffer_offsets]
     offsets[-1] = offsets[-1] // 2
-    xy = np.asarray(polygons.buffer_values, dtype=np.float64).reshape(-1, 2)
+    xy = np.asarray(geoms.buffer_values, dtype=np.float64).reshape(-1, 2)
     coords = np.empty_like(xy)
     coords[:, 0] = (xy[:, 0] - bbox.west) * (EXTENT / (bbox.east - bbox.west))
     coords[:, 1] = (bbox.north - xy[:, 1]) * (EXTENT / (bbox.north - bbox.south))
+    return coords, offsets
+
+
+def _to_tile_geometries(polygons: GeometryArray, bbox: OutputBBox) -> np.ndarray:
+    """Output-CRS polygons as shapely geometries in tile units (y down)."""
+    coords, offsets = _to_tile_units(polygons, bbox)
     kind = (
         GeometryType.MULTIPOLYGON
         if isinstance(polygons, MultiPolygonArray)
@@ -188,6 +198,38 @@ def encode_geometries(geoms: np.ndarray) -> list[bytes]:
     return [packed[a:b] for a, b in pairwise(byte_offsets)]
 
 
+def prepare_points(
+    points: MultiPointArray, bbox: OutputBBox
+) -> tuple[np.ndarray, np.ndarray]:
+    """Points inside the buffered tile, snapped to the integer grid, and the
+    position in ``points`` of the feature each belongs to."""
+    coords, (offsets,) = _to_tile_units(points, bbox)
+    feature = np.repeat(np.arange(len(points)), np.diff(offsets))
+    inside = ((coords >= -BUFFER) & (coords <= EXTENT + BUFFER)).all(axis=1)
+    return np.rint(coords[inside]).astype(np.int64), feature[inside]
+
+
+def encode_points(points: np.ndarray, counts: np.ndarray) -> list[bytes]:
+    """Packed MVT point command streams: one MoveTo of ``counts[i]`` points per
+    feature, taking consecutive rows of ``points``. Every count must be positive."""
+    point_starts = np.concatenate([[0], np.cumsum(counts)])
+    # The cursor restarts at (0, 0) per feature.
+    deltas = np.diff(points, axis=0, prepend=np.zeros((1, 2), dtype=np.int64))
+    deltas[point_starts[:-1]] = points[point_starts[:-1]]
+
+    # Feature i: its MoveTo command, then an (x, y) pair per point.
+    feature_starts = np.arange(len(counts) + 1) + 2 * point_starts
+    stream = np.empty(int(feature_starts[-1]), dtype=np.uint64)
+    stream[feature_starts[:-1]] = 1 | (np.asarray(counts, dtype=np.uint64) << 3)
+    xpos = np.repeat(np.arange(len(counts)), counts) + 2 * np.arange(len(points)) + 1
+    stream[xpos] = _zigzag(deltas[:, 0])
+    stream[xpos + 1] = _zigzag(deltas[:, 1])
+
+    packed, ends = _varints(stream)
+    byte_offsets = np.concatenate([[0], ends])[feature_starts]
+    return [packed[a:b] for a, b in pairwise(byte_offsets)]
+
+
 def feature_colors(
     values: np.ndarray,
     datatype: DataType,
@@ -198,7 +240,7 @@ def feature_colors(
     abovemaxcolor: str | None = None,
     belowmincolor: str | None = None,
 ) -> np.ndarray | None:
-    """``(N, 4)`` RGBA bytes the polygons style would paint ``values``.
+    """``(N, 4)`` RGBA bytes the polygons or points style would paint ``values``.
 
     ``None`` when continuous data has no colour scale: neither a
     ``colorscalerange`` nor ``valid_min``/``valid_max``.
@@ -264,8 +306,9 @@ def encode_layer(
     *,
     colors: np.ndarray | None = None,
     ids: np.ndarray | None = None,
+    geom_type: int = _POLYGON,
 ) -> bytes:
-    """One MVT layer of polygon features with ``value`` and optional ``color``."""
+    """One MVT layer of ``geom_type`` features with ``value`` and optional ``color``."""
     keys = ["value"]
     value_messages, value_index = _value_messages(values)
     tag_columns = [np.zeros_like(value_index), value_index]
@@ -287,7 +330,7 @@ def encode_layer(
         if ids is not None:
             feature += b"\x08" + _varint(int(ids[i]))
         feature += _field(2, packed_tags[tag_offsets[i] : tag_offsets[i + 1]])
-        feature += b"\x18" + _varint(_POLYGON)
+        feature += b"\x18" + _varint(geom_type)
         feature += _field(4, geometry)
         layer += _field(2, bytes(feature))
     for key in keys:
@@ -306,11 +349,34 @@ def _feature_ids(context: PopulatedRenderContext) -> np.ndarray | None:
     return patch.indexer.indices
 
 
+# (features with geometry left in the tile, encoder of a kept subset, MVT geometry type)
+LayerGeometry = tuple[np.ndarray, Callable[[np.ndarray], list[bytes]], int]
+
+
+def _polygon_features(context: PopulatedRenderContext) -> LayerGeometry:
+    assert context.polygons is not None
+    geoms = prepare_geometries(_to_tile_geometries(context.polygons, context.bbox))
+    return ~shapely.is_empty(geoms), lambda keep: encode_geometries(geoms[keep]), _POLYGON
+
+
+def _point_features(context: PopulatedRenderContext) -> LayerGeometry:
+    assert context.points is not None
+    n = len(context.points)
+    points, feature = prepare_points(context.points, context.bbox)
+
+    def encode(keep: np.ndarray) -> list[bytes]:
+        kept = keep[feature]
+        counts = np.bincount(feature[kept], minlength=n)[keep]
+        return encode_points(points[kept], counts)
+
+    return np.bincount(feature, minlength=n) > 0, encode, _POINT
+
+
 class MVTRenderer(PolygonsRenderer):
-    """The polygons style's features, encoded as a Mapbox Vector Tile.
+    """The polygons or points style's features, encoded as a Mapbox Vector Tile.
 
     Chosen by ``f=mvt`` rather than by style, so it is not in the renderer
-    registry; its ``polygons`` style id selects the polygon geometry path.
+    registry; the query's style selects the geometry path.
     """
 
     def render(
@@ -331,7 +397,7 @@ class MVTRenderer(PolygonsRenderer):
         edgewidth: int = 1,
         markersize: int = DEFAULT_MARKERSIZE,
     ) -> None:
-        """Write one MVT layer per variable with polygons in the tile to ``buffer``."""
+        """Write one MVT layer per variable with features in the tile to ``buffer``."""
         logger = context_logger if context_logger is not None else get_context_logger()
         if variant == "default":
             variant = self.default_variant()
@@ -339,19 +405,16 @@ class MVTRenderer(PolygonsRenderer):
         for name, context in contexts.items():
             if isinstance(context, NullRenderContext):
                 continue
-            assert isinstance(context, PopulatedRenderContext)
-            assert context.polygons is not None and context.da is not None
-            if len(context.polygons) == 0:
+            assert isinstance(context, PopulatedRenderContext) and context.da is not None
+            values = np.asarray(context.da.values)
+            if values.size == 0:
                 continue
 
-            with log_duration(
-                f"mvt geometry {len(context.polygons)}", logger, key="mvt_geometry"
-            ):
-                geoms = prepare_geometries(
-                    _to_tile_geometries(context.polygons, context.bbox)
+            with log_duration(f"mvt geometry {values.size}", logger, key="mvt_geometry"):
+                features = (
+                    _point_features if context.points is not None else _polygon_features
                 )
-            values = np.asarray(context.da.values)
-            keep = ~shapely.is_empty(geoms)
+                keep, encode, geom_type = features(context)
             if values.dtype.kind == "f":
                 keep &= np.isfinite(values)
             if not keep.any():
@@ -371,10 +434,11 @@ class MVTRenderer(PolygonsRenderer):
             with log_duration(f"encode mvt {keep.sum()}", logger, key="encode"):
                 layer = encode_layer(
                     str(name),
-                    encode_geometries(geoms[keep]),
+                    encode(keep),
                     values,
                     colors=colors,
                     ids=None if ids is None else ids[keep],
+                    geom_type=geom_type,
                 )
                 buffer.write(_field(3, layer))
 

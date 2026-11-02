@@ -1983,3 +1983,34 @@ def test_tilejson_markersize(points_client):
     assert r.status_code == 200, r.text
     (url,) = r.json()["tiles"]
     assert "markersize=9" in url
+
+
+def test_points_grid_mvt(points_client):
+    r = points_client.get(f"{POINTS_TILE}&f=mvt")
+    assert r.status_code == 200, r.text
+    features = mapbox_vector_tile.decode(r.content)["foo"]["features"]
+    assert {f["geometry"]["type"] for f in features} == {"Point", "MultiPoint"}
+
+    r = points_client.get(
+        "/datasets/points/tiles/WebMercatorQuad/tilejson.json"
+        "?variables=foo&width=256&height=256&f=mvt"
+    )
+    assert r.status_code == 200, r.text
+    (url,) = r.json()["tiles"]
+    assert "f=mvt" in url and "style=points/default" in url
+    assert "markersize" not in url
+
+
+def test_points_layers_link_mvt(points_client):
+    base = "http://testserver/datasets/points/tiles/"
+    (tileset, *_) = points_client.get(base).json()["tilesets"]
+    assert MVT_MEDIA_TYPE in tileset["mediaTypes"]
+    assert {s["id"].split("/")[0] for s in tileset["styles"]} == {"points"}
+    for layer in tileset["layers"]:
+        (link,) = mvt_links(layer)
+        url = urllib.parse.urljoin(base, link["href"]).format(
+            tileMatrix=0, tileRow=0, tileCol=0
+        )
+        r = points_client.get(url)
+        assert r.status_code == 200, (url, r.text)
+        assert r.headers["content-type"] == MVT_MEDIA_TYPE
