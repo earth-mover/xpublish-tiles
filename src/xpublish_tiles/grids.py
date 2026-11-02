@@ -3164,13 +3164,10 @@ CF_GEOMETRY_REF_ATTRS = (
 
 @dataclass(init=False, kw_only=True, eq=False)
 class Features(GridSystem1D):
-    """Vector data cube: polygon features along one dimension.
+    """Vector data cube: features of one geometry type along one dimension.
 
-    Geographic longitudes are wrapped to [-180, 180], and a feature that crosses
-    the antimeridian is split at 180° into parts on both sides.
-
-    A ring edge longer than 180° in longitude counts as an antimeridian crossing,
-    so densify a sparse polygon wider than 180° (e.g. a 4-vertex box from -100° to +100°).
+    Geographic longitudes are wrapped to [-180, 180]. Base of ``PolygonFeatures``
+    and ``PointFeatures``; check for those where the geometry type matters.
     """
 
     crs: CRS
@@ -3185,7 +3182,6 @@ class Features(GridSystem1D):
     alternates: tuple[GridMetadata, ...] = ()
     npoints_per_geometry: int = 1
     structural_names: frozenset[str]
-    supports_locate: ClassVar[bool] = True
     # geographic geometries lie in [lon_west, lon_west + 360], see __init__
     lon_west: ClassVar[float] = -180.0
     dXmin: float = 0
@@ -3226,15 +3222,9 @@ class Features(GridSystem1D):
         self.counts = shapely.get_num_coordinates(geometries)
         self._strtree = shapely.STRtree(self.geometries)
 
+    @abstractmethod
     def _prepare_geometries(self, geometries: np.ndarray) -> np.ndarray:
-        import shapely
-
-        if self.crs.is_geographic:
-            from xpublish_tiles.features import split_at_antimeridian
-
-            geometries = split_at_antimeridian(geometries)
-        # datashader fills by nonzero winding: holes must turn against the shell.
-        return shapely.orient_polygons(geometries)
+        """Normalize the longitude-wrapped geometries for rendering."""
 
     def vertex_count(self, indices: np.ndarray) -> int:
         return int(self.counts[indices].sum())
@@ -3299,22 +3289,6 @@ class Features(GridSystem1D):
         indices = np.unique(hits[1]).astype(np.intp)
         return {self.dim: [GeometryIndexer(indices)]}
 
-    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
-        """For each point, the position along ``dim`` of a feature that contains it or
-        has it on its boundary. Where features overlap, the lowest position wins."""
-        import shapely
-
-        if self.crs.is_geographic:
-            x = normalize_longitude_deg(x, self.lon_west)
-        points, features = self.strtree.query(
-            shapely.points(x, y), predicate="intersects"
-        )
-        order = np.lexsort((features, points))
-        hit_points, first = np.unique(points[order], return_index=True)
-        positions = np.full(np.shape(x), -1, dtype=np.int64)
-        positions[hit_points] = features[order][first]
-        return {self.dim: positions}
-
     @classmethod
     def from_dataset(cls, ds: xr.Dataset, crs: CRS, Xname: str, Yname: str) -> Self:
         container = ds[Xname]
@@ -3335,13 +3309,51 @@ class Features(GridSystem1D):
 
 
 @dataclass(init=False, kw_only=True, eq=False)
+class PolygonFeatures(Features):
+    """Vector data cube: polygon (or multipolygon) features along one dimension.
+
+    Geographic longitudes are wrapped to [-180, 180], and a feature that crosses
+    the antimeridian is split at 180° into parts on both sides.
+
+    A ring edge longer than 180° in longitude counts as an antimeridian crossing,
+    so densify a sparse polygon wider than 180° (e.g. a 4-vertex box from -100° to +100°).
+    """
+
+    supports_locate: ClassVar[bool] = True
+
+    def _prepare_geometries(self, geometries: np.ndarray) -> np.ndarray:
+        import shapely
+
+        if self.crs.is_geographic:
+            from xpublish_tiles.features import split_at_antimeridian
+
+            geometries = split_at_antimeridian(geometries)
+        # datashader fills by nonzero winding: holes must turn against the shell.
+        return shapely.orient_polygons(geometries)
+
+    def locate(self, *, x: np.ndarray, y: np.ndarray) -> PointIndexers:
+        """For each point, the position along ``dim`` of a feature that contains it or
+        has it on its boundary. Where features overlap, the lowest position wins."""
+        import shapely
+
+        if self.crs.is_geographic:
+            x = normalize_longitude_deg(x, self.lon_west)
+        points, features = self.strtree.query(
+            shapely.points(x, y), predicate="intersects"
+        )
+        order = np.lexsort((features, points))
+        hit_points, first = np.unique(points[order], return_index=True)
+        positions = np.full(np.shape(x), -1, dtype=np.int64)
+        positions[hit_points] = features[order][first]
+        return {self.dim: positions}
+
+
+@dataclass(init=False, kw_only=True, eq=False)
 class PointFeatures(Features):
     """Vector data cube: point (or multipoint) features along one dimension.
 
     Geographic longitudes are wrapped to [-180, 180].
     """
-
-    supports_locate: ClassVar[bool] = False
 
     def _prepare_geometries(self, geometries: np.ndarray) -> np.ndarray:
         return geometries
@@ -4486,7 +4498,7 @@ def detect_features(ds: xr.Dataset) -> GridMetadata | None:
 
 
 def features_metadata(ds: xr.Dataset, name: str) -> GridMetadata:
-    """``Features`` or ``PointFeatures`` metadata for the geometry ``name``.
+    """``PolygonFeatures`` or ``PointFeatures`` metadata for the geometry ``name``.
 
     Raises ``UnsupportedGridError`` for geometries that are not all polygons or all
     points, or no CRS.
@@ -4506,7 +4518,7 @@ def _features_metadata_from_xvec(ds: xr.Dataset, name: str, index: Any) -> GridM
         raise UnsupportedGridError(f"Geometry coordinate {name!r} has no CRS.")
     type_ids = shapely.get_type_id(ds[name].values)
     if np.isin(type_ids, (GeometryType.POLYGON, GeometryType.MULTIPOLYGON)).all():
-        grid_cls = Features
+        grid_cls = PolygonFeatures
     elif np.isin(type_ids, (GeometryType.POINT, GeometryType.MULTIPOINT)).all():
         grid_cls = PointFeatures
     else:
@@ -4517,7 +4529,7 @@ def _features_metadata_from_xvec(ds: xr.Dataset, name: str, index: Any) -> GridM
 
 
 CF_GEOMETRY_GRIDS: dict[str, type[Features]] = {
-    "polygon": Features,
+    "polygon": PolygonFeatures,
     "point": PointFeatures,
 }
 

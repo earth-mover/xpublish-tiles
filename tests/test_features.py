@@ -34,6 +34,7 @@ from xpublish_tiles.grids import (
     Features,
     GeometryIndexer,
     PointFeatures,
+    PolygonFeatures,
     Rectilinear,
     detect_grids,
     guess_grid_metadata,
@@ -89,7 +90,7 @@ def _check_feature_dataset(ds: xr.Dataset) -> None:
     assert set(ds.data_vars) == {"value", "count"}
     assert ds["name"].dims == ("feature",)
     grid = guess_grid_system(ds, "value")
-    assert isinstance(grid, Features)
+    assert isinstance(grid, PolygonFeatures)
     assert grid.crs == CRS("OGC:CRS84")
     assert grid.bbox == BBox(west=-180, east=180, south=0, north=60)
 
@@ -143,9 +144,9 @@ def test_detect_features(fixture):
     ds = fixture.create()
     meta = guess_grid_metadata(ds)
     assert meta is not None
-    assert meta.grid_cls is Features
+    assert meta.grid_cls is PolygonFeatures
     grid = guess_grid_system(ds, "foo")
-    assert isinstance(grid, Features)
+    assert isinstance(grid, PolygonFeatures)
     assert grid.dim == "feature"
     _assert_split(grid.geometries[3])
     assert (shapely.get_num_geometries(grid.geometries[[0, 1, 4, 5]]) == 1).all()
@@ -166,7 +167,7 @@ def test_detect_features_cf_without_geometry_attr():
     ds = FEATURES_POLYGONS.create()
     del ds["foo"].attrs["geometry"]
     ds.attrs["_xpublish_id"] = "features-no-geometry-attr"
-    assert isinstance(guess_grid_system(ds, "foo"), Features)
+    assert isinstance(guess_grid_system(ds, "foo"), PolygonFeatures)
 
 
 def test_features_structural_variables_not_layers():
@@ -180,7 +181,7 @@ def test_features_and_gridded_variable_in_one_dataset():
         join="outer",
     )
     grids = detect_grids(ds)
-    assert isinstance(grids["foo"], Features)
+    assert isinstance(grids["foo"], PolygonFeatures)
     assert not isinstance(grids["t2m"], Features)
 
 
@@ -190,7 +191,7 @@ def test_features_crossing_ignores_wide_feature():
     ds["foo"] = ("feature", [1.0, 2.0])
     ds.attrs["_xpublish_id"] = "features-wide"
     grid = guess_grid_system(ds, "foo")
-    assert isinstance(grid, Features)
+    assert isinstance(grid, PolygonFeatures)
     assert shapely.get_num_geometries(grid.geometries[0]) == 1
     _assert_split(grid.geometries[1])
 
@@ -257,7 +258,7 @@ def test_features_presplit_multipolygon_not_crossing():
     ds["foo"] = ("feature", [1.0])
     ds.attrs["_xpublish_id"] = "features-presplit"
     grid = guess_grid_system(ds, "foo")
-    assert isinstance(grid, Features)
+    assert isinstance(grid, PolygonFeatures)
     assert shapely.get_num_geometries(grid.geometries[0]) == 2
     assert grid.bbox == BBox(west=-180, east=180, south=50, north=55)
     assert shapely.total_bounds(grid.geometries).tolist() == [-180, 50, 180, 55]
@@ -285,7 +286,7 @@ def test_features_sel(bbox, expected):
 @pytest.mark.parametrize("fixture", [FEATURES_POLYGONS, FEATURES_POLYGONS_XVEC])
 def test_features_locate(fixture):
     grid = guess_grid_system(fixture.create(), "foo")
-    assert isinstance(grid, Features)
+    assert isinstance(grid, PolygonFeatures)
     inside = shapely.point_on_surface(grid.geometries)
     x, y = shapely.get_x(inside), shapely.get_y(inside)
     (positions,) = grid.locate(x=x, y=y).values()
@@ -372,7 +373,7 @@ async def test_features_vertex_limit_raises():
 def test_features_min_zoom_uses_vertex_limit():
     ds = FEATURES_POLYGONS.create()
     grid = guess_grid_system(ds, "foo")
-    assert isinstance(grid, Features)
+    assert isinstance(grid, PolygonFeatures)
     tms = morecantile.tms.get("WebMercatorQuad")
     limit = grid.vertex_count(np.arange(6)) - 1
     with config.set({"max_renderable_vertices": limit}):
@@ -404,7 +405,7 @@ def test_features_crossing_hole_oriented_and_empty():
     ds["foo"] = ("feature", [1.0])
     ds.attrs["_xpublish_id"] = "features-crossing-hole"
     grid = guess_grid_system(ds, "foo")
-    assert isinstance(grid, Features)
+    assert isinstance(grid, PolygonFeatures)
     (geom,) = grid.geometries
     _assert_split(geom)
     for part in shapely.get_parts(geom):
@@ -431,7 +432,7 @@ def test_detect_features_with_latlon_coords():
         lon=("feature", np.linspace(-170, 170, n), {"standard_name": "longitude"}),
     )
     ds.attrs["_xpublish_id"] = "features-latlon-coords"
-    assert isinstance(guess_grid_system(ds, "foo"), Features)
+    assert isinstance(guess_grid_system(ds, "foo"), PolygonFeatures)
 
 
 def test_detect_features_cf_decode_coords_all():
@@ -442,7 +443,7 @@ def test_detect_features_cf_decode_coords_all():
     opened.attrs["_xpublish_id"] = "features-decode-coords-all"
     grid = guess_grid_system(opened, "foo")
     expected = guess_grid_system(ds, "foo")
-    assert isinstance(grid, Features) and isinstance(expected, Features)
+    assert isinstance(grid, PolygonFeatures) and isinstance(expected, PolygonFeatures)
     assert shapely.equals(grid.geometries, expected.geometries).all()
     assert grid.structural_names == expected.structural_names
 
