@@ -26,7 +26,7 @@ repos:
         files: ".github/workflows/"
         args: ["-ignore", "SC1090", "-ignore", "SC2046", "-ignore", "SC2086", "-ignore", "SC2129", "-ignore", "SC2155"]
   - repo: https://github.com/zizmorcore/zizmor-pre-commit
-    rev: v1.24.1
+    rev: v1.32.0
     hooks:
       - id: zizmor
   - repo: https://github.com/codespell-project/codespell
