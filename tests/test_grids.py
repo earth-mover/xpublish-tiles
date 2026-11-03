@@ -384,6 +384,15 @@ def test_grid_detection(ds: xr.Dataset, array_name, expected: GridSystem) -> Non
         assert expected == actual
 
 
+def test_grid_detection_ignores_unhashable_attrs():
+    expected = guess_grid_system(EU3035.create(), "foo")
+    ds = EU3035.create()
+    del ds.attrs["_xpublish_id"]
+    for var in ds.variables.values():
+        var.attrs["_zarrs"] = {"description": "This array was created with zarrs"}
+    assert guess_grid_system(ds, "foo") == expected
+
+
 def test_polar_grid_detection():
     """Polar is detected for datasets with azimuth/range standard_names."""
     ds = RADAR.create()
