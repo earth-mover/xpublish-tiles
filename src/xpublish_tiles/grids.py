@@ -4088,6 +4088,10 @@ def _guess_grid_mappings_and_crs(
     list[GridMappingInfo]
         List of (grid_mapping variable, CRS, (coordinates...)) tuples
     """
+    # cf_xarray hashes grid mapping attrs, so drop nested dicts (e.g. zarrs' `_zarrs`)
+    ds = ds.copy(deep=False)
+    for var in ds.variables.values():
+        var.attrs = {k: v for k, v in var.attrs.items() if not isinstance(v, dict)}
     grid_mappings = ds.cf.grid_mappings
     if grid_mappings:
         result = []
