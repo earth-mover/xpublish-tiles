@@ -206,7 +206,11 @@ class TilesPlugin(Plugin):
             if not layer_extents:
                 raise HTTPException(
                     status_code=422,
-                    detail="No renderable variables found in dataset.",
+                    detail=(
+                        "No variables in this dataset can be drawn on a map. "
+                        "A variable needs spatial coordinates, such as latitude "
+                        "and longitude, on a supported grid."
+                    ),
                 )
 
             # Overviews may carry fewer variables than the finest level, so each
