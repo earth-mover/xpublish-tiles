@@ -1577,7 +1577,9 @@ def test_rotated_pole_dataset_is_reported_as_not_tileable():
 
     response = client.get("/datasets/rotated/tiles/")
     assert response.status_code == 422
-    assert "No renderable variables" in response.json()["detail"]
+    assert (
+        "No variables in this dataset can be drawn on a map" in response.json()["detail"]
+    )
 
 
 @pytest.fixture(scope="module")

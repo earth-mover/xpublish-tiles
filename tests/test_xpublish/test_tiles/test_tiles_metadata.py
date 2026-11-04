@@ -1270,7 +1270,9 @@ def test_tiles_endpoint_no_renderable_vars_returns_422():
     client = TestClient(rest.app)
     response = client.get("/datasets/ds/tiles/")
     assert response.status_code == 422
-    assert "No renderable variables" in response.json()["detail"]
+    assert (
+        "No variables in this dataset can be drawn on a map" in response.json()["detail"]
+    )
 
 
 def test_multiscale_uses_coarsest_level_for_minzoom():
