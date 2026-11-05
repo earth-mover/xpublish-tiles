@@ -2,7 +2,7 @@ import asyncio
 import contextlib
 import datetime
 import io
-from collections.abc import Hashable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Hashable, Iterable, Mapping
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, cast
@@ -96,8 +96,10 @@ from xpublish_tiles.types import (
 )
 from xpublish_tiles.utils import normalize_longitude_deg
 
-# A dim with one of these names and size 3 holds R, G, B in that order.
+# A dim with one of these names, size 3, and no labels, numeric labels or one of
+# RGB_BAND_LABELS holds R, G, B in that order.
 RGB_BAND_DIMS = ("band", "rgb")
+RGB_BAND_LABELS = (("r", "g", "b"), ("red", "green", "blue"))
 
 RANGE_SEPARATOR = "/"
 OPEN_RANGE_END = ".."
@@ -425,7 +427,10 @@ def apply_slicers(
     # total_size = sum(
     #     sum([var.size for var in subset.data_vars.values()]) for subset in subsets
     # )
-    total_bytes = decompressed_size_bytes(slicers, da, grid, style=style, chunks=chunks)
+    whole_dims = [datatype.band_dim] if isinstance(datatype, RGBData) else []
+    total_bytes = decompressed_size_bytes(
+        slicers, da, grid, style=style, chunks=chunks, whole_dims=whole_dims
+    )
 
     nvars = sum(len(subset.data_vars) for subset in subsets)
     if any(dim_total < min_dim_size * nvars for dim_total in total_shape):
@@ -444,9 +449,15 @@ def apply_slicers(
     )
 
 
-async def load_plans(plans: list[SubsetPlan]) -> list[xr.DataArray]:
+async def load_plans(
+    plans: list[SubsetPlan],
+    *,
+    post_load: Callable[[int, xr.DataArray], Awaitable[xr.DataArray]] | None = None,
+) -> list[xr.DataArray]:
     """Aggregate TileTooBigError budget across ``plans`` and load everything
     in one TaskGroup; returns one xr.DataArray per plan, same order.
+
+    ``post_load(i, array)`` runs on each plan's array inside the data load slot.
     """
     # Slight slack so subsets at the advertised minzoom that are just barely
     # over the limit are still served.
@@ -509,11 +520,17 @@ async def load_plans(plans: list[SubsetPlan]) -> list[xr.DataArray]:
             with log_duration("load data subsets", key="load"):
                 loaded_flat = [s.load() for s in subsets]
 
-    results: list[xr.DataArray] = []
-    for i, plan in enumerate(plans):
-        chunk = loaded_flat[offsets[i] : offsets[i + 1]]
-        merged = xr.concat(chunk, dim=plan.concat_dim) if len(chunk) > 1 else chunk[0]
-        results.append(merged.set_coords(plan.pick)[plan.da_name])
+        results: list[xr.DataArray] = []
+        for i, plan in enumerate(plans):
+            chunk = loaded_flat[offsets[i] : offsets[i + 1]]
+            merged = xr.concat(chunk, dim=plan.concat_dim) if len(chunk) > 1 else chunk[0]
+            results.append(merged.set_coords(plan.pick)[plan.da_name])
+        if post_load is not None:
+            # Keep the load slot through post_load: the full-size arrays stay in
+            # memory until post_load makes them smaller.
+            results = list(
+                await asyncio.gather(*(post_load(i, r) for i, r in enumerate(results)))
+            )
     return results
 
 
@@ -971,10 +988,23 @@ def _rgb_valid_range(array: xr.DataArray) -> tuple[float, float]:
     )
 
 
+def _band_labels_are_rgb(array: xr.DataArray, dim: Hashable) -> bool:
+    if dim not in array.coords:
+        return True
+    labels = array[dim].values
+    if labels.dtype.kind in "iuf":
+        return True
+    return tuple(str(label).lower() for label in labels) in RGB_BAND_LABELS
+
+
 def find_rgb_band_dim(array: xr.DataArray) -> str | None:
-    """The dim named ``band`` or ``rgb`` with size 3, if any."""
+    """The dim named ``band`` or ``rgb`` with size 3 and R, G, B or positional labels, if any."""
     for dim in array.dims:
-        if dim in RGB_BAND_DIMS and array.sizes[dim] == 3:
+        if (
+            dim in RGB_BAND_DIMS
+            and array.sizes[dim] == 3
+            and _band_labels_are_rgb(array, dim)
+        ):
             return str(dim)
     return None
 
@@ -1300,7 +1330,7 @@ def apply_query(
             if band_dim is None:
                 raise MissingParameterError(
                     f"The 'rgb' variant needs a dimension named {RGB_BAND_DIMS!r} "
-                    f"of size 3 on {name!r}."
+                    f"of size 3, labelled R, G, B or positionally, on {name!r}."
                 )
             # No attribute convention records band order; assume the GDAL/satpy
             # positional R, G, B and say so.
@@ -1520,9 +1550,8 @@ async def subset_to_bbox(
         plan_datatypes.extend([array.datatype] * len(patches))
         pending.append((var_name, grid, array.datatype, patches))
 
-    loaded = await load_plans(plans) if plans else []
-
-    async def _post_load(patch: Patch, datatype: DataType, ld: xr.DataArray) -> None:
+    async def _post_load(i: int, ld: xr.DataArray) -> xr.DataArray:
+        patch, datatype = plan_patches[i], plan_datatypes[i]
         if isinstance(datatype, RGBData):
             # Downstream expects the band dim to lead; cheap on loaded data.
             ld = ld.transpose(datatype.band_dim, ...)
@@ -1535,14 +1564,12 @@ async def subset_to_bbox(
             ld = await async_run(
                 partial(coarsen, ld, patch.coarsen_factors, grid=patch.grid)
             )
-        patch.da = ld
+        return ld
 
-    await asyncio.gather(
-        *(
-            _post_load(p, dt, ld)
-            for p, dt, ld in zip(plan_patches, plan_datatypes, loaded, strict=True)
-        )
-    )
+    if plans:
+        finished = await load_plans(plans, post_load=_post_load)
+        for patch, da in zip(plan_patches, finished, strict=True):
+            patch.da = da
 
     for var_name, grid, datatype, patches in pending:
         result[var_name] = PopulatedRenderContext(

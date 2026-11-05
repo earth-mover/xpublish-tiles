@@ -41,12 +41,18 @@ from xpublish_tiles.lib import (
     async_run,
     check_transparent_pixels,
     decompressed_size_bytes,
+    get_data_load_semaphore,
     max_render_shape,
+    normalize_slicers,
 )
 from xpublish_tiles.logger import with_accumulated_logs
 from xpublish_tiles.pipeline import (
     apply_query,
+    apply_slicers,
     bbox_overlap,
+    find_rgb_band_dim,
+    has_rgb_bands,
+    load_plans,
     pipeline,
     subset_to_bbox,
 )
@@ -95,6 +101,8 @@ from xpublish_tiles.testing.tiles import (
     TileTestParam,
 )
 from xpublish_tiles.types import (
+    ContinuousData,
+    DataType,
     ImageFormat,
     OutputBBox,
     OutputCRS,
@@ -1583,6 +1591,73 @@ async def test_rgb_data(tile, tms, style, png_snapshot, pytestconfig):
     if pytestconfig.getoption("--visualize"):
         visualize_tile(result, tile)
     assert_render_matches_snapshot(result, png_snapshot, tile=tile, tms=tms)
+
+
+@pytest.mark.parametrize(
+    "labels, expected",
+    [
+        pytest.param(["red", "green", "blue"], "rgb", id="colour-names"),
+        pytest.param(["R", "G", "B"], "rgb", id="colour-letters"),
+        pytest.param([1, 2, 3], "rgb", id="positional"),
+        pytest.param(None, "rgb", id="no-coordinate"),
+        pytest.param(["mean", "q05", "q95"], None, id="statistics"),
+        pytest.param(["blue", "green", "red"], None, id="bgr-order"),
+    ],
+)
+def test_find_rgb_band_dim_labels(labels, expected):
+    ds = RGB.create()
+    ds = ds.drop_vars("rgb") if labels is None else ds.assign_coords(rgb=labels)
+    assert find_rgb_band_dim(ds.foo) == expected
+    assert has_rgb_bands(ds) is (expected is not None)
+
+
+def test_rgb_plan_size_counts_every_band():
+    ds = RGB.create()
+    grid = guess_grid_system(ds, "foo")
+    slicers = normalize_slicers(
+        {grid.Ydim: [slice(0, 10)], grid.Xdim: [slice(0, 10)]}, dict(ds.foo.sizes)
+    )
+    chunks = {grid.Ydim: 10, grid.Xdim: 10, "rgb": 1}
+
+    def size_bytes(datatype: DataType) -> int:
+        return apply_slicers(
+            ds.foo,
+            grid=grid,
+            alternate=grid.to_metadata(),
+            slicers=slicers,
+            datatype=datatype,
+            chunks=chunks,
+        ).size_bytes
+
+    rgb = size_bytes(RGBData(band_dim="rgb", valid_range=(0, 1)))
+    assert rgb == 3 * size_bytes(ContinuousData(valid_min=0, valid_max=1))
+
+
+@pytest.mark.asyncio
+async def test_post_load_runs_inside_the_data_load_slot():
+    ds = IFS.create()
+    grid = guess_grid_system(ds, "foo")
+    da = ds["foo"].isel(time=-1, step=-1)
+    slicers = normalize_slicers(
+        {grid.Ydim: [slice(0, 4)], grid.Xdim: [slice(0, 4)]}, dict(da.sizes)
+    )
+    plan = apply_slicers(
+        da,
+        grid=grid,
+        alternate=grid.to_metadata(),
+        slicers=slicers,
+        datatype=ContinuousData(valid_min=0, valid_max=1),
+    )
+    slot_held = []
+
+    async def post_load(i: int, array: xr.DataArray) -> xr.DataArray:
+        slot_held.append(get_data_load_semaphore().locked())
+        return array
+
+    with config.set(num_concurrent_data_loads=1):
+        (loaded,) = await load_plans([plan], post_load=post_load)
+    assert slot_held == [True]
+    assert loaded.shape == (4, 4)
 
 
 @pytest.mark.asyncio
