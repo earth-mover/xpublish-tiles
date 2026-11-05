@@ -524,6 +524,26 @@ def test_decompressed_size_bytes():
         == ny * nx * da.dtype.itemsize
     )
 
+    # an uncovered dim costs one chunk; one read whole (the rgb band dim) costs
+    # every chunk along it
+    kept = ds["foo"].isel(time=-1)
+    kept.encoding.clear()
+    nstep = kept.sizes["step"]
+    chunks = {grid.Ydim: 10, grid.Xdim: 10, "step": 1}
+    assert (
+        decompressed_size_bytes(slicers, kept, grid, chunks=chunks)
+        == 100 * kept.dtype.itemsize
+    )
+    assert (
+        decompressed_size_bytes(slicers, kept, grid, chunks=chunks, whole_dims=["step"])
+        == nstep * 100 * kept.dtype.itemsize
+    )
+    chunks = {grid.Ydim: 10, grid.Xdim: 10, "step": 10}
+    assert (
+        decompressed_size_bytes(slicers, kept, grid, chunks=chunks, whole_dims=["step"])
+        == math.ceil(nstep / 10) * 10 * 100 * kept.dtype.itemsize
+    )
+
 
 @pytest.mark.parametrize(
     "tms_id, tropical",
