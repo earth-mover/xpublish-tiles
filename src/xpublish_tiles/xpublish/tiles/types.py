@@ -1302,6 +1302,7 @@ class TileQuery(BaseModel):
         TileFormat,
         Field(
             default="image/png",
+            validate_default=True,
             json_schema_extra={
                 "description": "Format of the tile: `image/{png|jpeg}`, or `application/vnd.mapbox-vector-tile` (shorthand `mvt`) for a Mapbox Vector Tile with one layer per variable whose features carry the data `value` and, when a colour scale is known, its `color`. Vector tiles use the `polygons` style, or `points` for point features, which is the default for them.",
             },
@@ -1696,6 +1697,7 @@ class LegendQuery(BaseModel):
         LegendFormat,
         Field(
             default="image/png",
+            validate_default=True,
             json_schema_extra={
                 "description": "Output format. `image/png` or `image/jpeg` for a rendered colorbar; `application/json` for a JSON description of the color stops so clients can build their own legend.",
             },
