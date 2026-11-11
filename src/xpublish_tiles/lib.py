@@ -9,7 +9,7 @@ import math
 import operator
 import time
 import warnings
-from collections.abc import Hashable, Mapping, Sequence
+from collections.abc import Collection, Hashable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import partial
@@ -1352,6 +1352,7 @@ def decompressed_size_bytes(
     *,
     style: str = "raster",
     chunks: Mapping[str, int] | None = None,
+    whole_dims: Collection[str] = (),
 ) -> int:
     """Bytes that must be decompressed to satisfy ``slicers``.
 
@@ -1361,6 +1362,8 @@ def decompressed_size_bytes(
     therefore be captured before those dims are dropped (see
     ``ValidatedArray.chunks``); without it we fall back to reading whatever the
     array can still tell us, which is exact only while its dims are intact.
+    Any other uncovered dim costs one chunk, except ``whole_dims``, which are read
+    in full (the rgb band dim).
     """
     from xpublish_tiles.grids import FacetedGridSystem, HealpixCube
 
@@ -1378,6 +1381,9 @@ def decompressed_size_bytes(
         covered |= {grid.Ydim, grid.Xdim}
     for dim, chunk in chunks.items():
         if dim in covered:
+            continue
+        if dim in whole_dims:
+            total *= math.ceil(da.sizes[dim] / chunk) * chunk
             continue
         # a dim already collapsed by isel is gone from da.sizes, but reading one
         # element of it still decompresses its whole chunk
