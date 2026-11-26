@@ -9,7 +9,7 @@ from PIL import Image
 
 import xarray as xr
 from xpublish_tiles.logger import get_context_logger, log_duration
-from xpublish_tiles.render import DatashaderRenderer, register_renderer
+from xpublish_tiles.render import DatashaderRenderer, encode_image, register_renderer
 from xpublish_tiles.render.raster import (
     _apply_out_of_range_colors,
     _range_color_to_rgba,
@@ -192,7 +192,7 @@ class PolygonsRenderer(DatashaderRenderer):
             if edges is not None:
                 im = Image.alpha_composite(im.convert("RGBA"), edges)
         with log_duration(f"encode {format}", logger, key="encode"):
-            im.save(buffer, format=str(format))
+            encode_image(im, buffer, format)
 
     @staticmethod
     def style_id() -> str:

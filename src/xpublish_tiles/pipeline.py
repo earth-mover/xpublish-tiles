@@ -23,6 +23,7 @@ from xpublish_tiles.grids import (
     FacetedIndexer,
     Features,
     GeometryIndexer,
+    Geostationary,
     GridMetadata,
     GridSystem,
     GridSystem2D,
@@ -76,6 +77,7 @@ from xpublish_tiles.lib import (
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.projections import (
     is_mercator_like,
+    pixel_lattice,
     transformer_from_crs,
 )
 from xpublish_tiles.types import (
@@ -916,7 +918,12 @@ async def pipeline(ds, query: QueryParams) -> io.BytesIO:
     # Transform coordinates to output CRS
     renderer = query.get_renderer()
     subsets = await transform_for_render(
-        subsets, bbox=query.bbox, crs=query.crs, style=query.style
+        subsets,
+        bbox=query.bbox,
+        crs=query.crs,
+        style=query.style,
+        width=query.width,
+        height=query.height,
     )
 
     tasks = [
@@ -1335,6 +1342,18 @@ def apply_query(
 
 
 @log_duration("select subsets", key="select")
+def gathers_in_source_crs(grid: GridSystem, datatype: DataType, style: str) -> bool:
+    """True when raster tiles sample the source grid from each output pixel instead of reprojecting every cell into quads."""
+    return (
+        style == "raster"
+        and isinstance(grid, Rectilinear | RasterAffine)
+        # The quad path masks geostationary cells at the disk limb.
+        and not isinstance(grid, Geostationary)
+        and grid.crs.is_projected
+        and not isinstance(datatype, DiscreteData)
+    )
+
+
 async def subset_to_bbox(
     validated: dict[str, ValidatedArray],
     *,
@@ -1477,7 +1496,11 @@ async def subset_to_bbox(
                 datatype=array.datatype,
             )
             new_slicers = normalize_slicers(new_slicers, dict(da.sizes))
-            alternate = grid.pick_alternate_grid(crs, coarsen_factors=coarsen_factors)
+            alternate = (
+                grid.to_metadata()
+                if gathers_in_source_crs(grid, array.datatype, style)
+                else grid.pick_alternate_grid(crs, coarsen_factors=coarsen_factors)
+            )
 
             # Note: These are handled specially inside apply_slicers.
             patch_indexer: UgridIndexer | HealpixIndexer | GeometryIndexer | None = None
@@ -1941,6 +1964,8 @@ async def transform_for_render(
     bbox: OutputBBox,
     crs: OutputCRS,
     style: str,
+    width: int,
+    height: int,
 ) -> dict[str, PopulatedRenderContext | NullRenderContext]:
     """Transform coordinates to output CRS.
 
@@ -2033,6 +2058,28 @@ async def transform_for_render(
             f"raster style requires a single patch; got {len(context.patches)}"
         )
         (patch,) = context.patches
+        if gathers_in_source_crs(grid, context.datatype, style):
+            with log_duration("pixel lattice", key="transform"):
+                lattice = await async_run(
+                    partial(
+                        pixel_lattice,
+                        transformer_from_crs(crs, grid.crs),
+                        bbox,
+                        width=width,
+                        height=height,
+                        x=np.asarray(patch.da[grid.X].values, dtype=np.float64),
+                        y=np.asarray(patch.da[grid.Y].values, dtype=np.float64),
+                    )
+                )
+            result[var_name] = PopulatedRenderContext(
+                grid=grid,
+                datatype=context.datatype,
+                bbox=bbox,
+                patches=context.patches,
+                da=patch.da,
+                lattice=lattice,
+            )
+            continue
         da = await _transform_raster_patch(patch, bbox=bbox, output_crs=crs)
         result[var_name] = PopulatedRenderContext(
             grid=grid,

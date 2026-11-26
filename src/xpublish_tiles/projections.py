@@ -518,3 +518,127 @@ def geos_to_cylindrical(source_crs: CRS, target_crs: CRS) -> GeosToCylindrical |
         mercator=mercator,
         scale=scale,
     )
+
+
+LATTICE_STEP = 16
+# Source cells: the most a linearly interpolated position may drift from the exact one.
+MAX_LATTICE_ERROR = 0.1
+
+
+@dataclass(frozen=True, kw_only=True)
+class PixelLattice:
+    """Fractional source indices of output pixel centres at lattice nodes; rows count from the south, NaN where unprojectable."""
+
+    fi: np.ndarray
+    fj: np.ndarray
+    cols: np.ndarray
+    rows: np.ndarray
+
+    def cells_per_pixel(self) -> tuple[float, float]:
+        """Most source cells one output pixel step crosses, along x and along y."""
+        du = np.diff(self.cols)[None, :]
+        dv = np.diff(self.rows)[:, None]
+        with np.errstate(invalid="ignore"):
+            along_x = np.hypot(
+                np.diff(self.fi, axis=1) / du, np.diff(self.fj, axis=1) / du
+            )
+            along_y = np.hypot(
+                np.diff(self.fi, axis=0) / dv, np.diff(self.fj, axis=0) / dv
+            )
+        if not (np.isfinite(along_x).any() and np.isfinite(along_y).any()):
+            return 1.0, 1.0
+        return float(np.nanmax(along_x)), float(np.nanmax(along_y))
+
+
+def fractional_index(values: np.ndarray, coord: np.ndarray) -> np.ndarray:
+    """Position of ``values`` along a monotonic 1D ``coord`` in index units, extrapolated past its ends."""
+    index = np.arange(coord.size, dtype=np.float64)
+    if coord[-1] < coord[0]:
+        coord, index = coord[::-1], index[::-1]
+    out = np.interp(values, coord, index)
+    below, above = values < coord[0], values > coord[-1]
+    out[below] = index[0] + (values[below] - coord[0]) * (index[1] - index[0]) / (
+        coord[1] - coord[0]
+    )
+    out[above] = index[-1] + (values[above] - coord[-1]) * (index[-1] - index[-2]) / (
+        coord[-1] - coord[-2]
+    )
+    return out
+
+
+def _lattice_nodes(n: int, step: int) -> np.ndarray:
+    return np.unique(np.r_[np.arange(0, n, step), max(n - 1, 1)]).astype(np.float64)
+
+
+def _source_positions(
+    transformer: pyproj.Transformer,
+    bbox,
+    width: int,
+    height: int,
+    cols: np.ndarray,
+    rows: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    tx = bbox.west + (cols + 0.5) * (bbox.east - bbox.west) / width
+    ty = bbox.south + (rows + 0.5) * (bbox.north - bbox.south) / height
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        sx, sy = transformer.transform(*np.meshgrid(tx, ty), errcheck=False)
+    sx = np.where(np.isfinite(sx), sx, np.nan)
+    sy = np.where(np.isfinite(sy), sy, np.nan)
+    shape = sx.shape
+    return (
+        fractional_index(sx.ravel(), x).reshape(shape),
+        fractional_index(sy.ravel(), y).reshape(shape),
+    )
+
+
+def bilinear(
+    lattice: np.ndarray,
+    nodes_x: np.ndarray,
+    nodes_y: np.ndarray,
+    cols: np.ndarray,
+    rows: np.ndarray,
+) -> np.ndarray:
+    kx = np.clip(np.searchsorted(nodes_x, cols) - 1, 0, nodes_x.size - 2)
+    ky = np.clip(np.searchsorted(nodes_y, rows) - 1, 0, nodes_y.size - 2)
+    wx = ((cols - nodes_x[kx]) / (nodes_x[kx + 1] - nodes_x[kx]))[None, :]
+    wy = ((rows - nodes_y[ky]) / (nodes_y[ky + 1] - nodes_y[ky]))[:, None]
+    top = lattice[ky][:, kx] * (1 - wx) + lattice[ky][:, kx + 1] * wx
+    bottom = lattice[ky + 1][:, kx] * (1 - wx) + lattice[ky + 1][:, kx + 1] * wx
+    return top * (1 - wy) + bottom * wy
+
+
+def pixel_lattice(
+    transformer: pyproj.Transformer,
+    bbox,
+    *,
+    width: int,
+    height: int,
+    x: np.ndarray,
+    y: np.ndarray,
+) -> PixelLattice:
+    """Exact source positions on a pixel lattice whose step halves until interpolation stays within MAX_LATTICE_ERROR at every cell centre and edge midpoint (GDAL's approximate transformer)."""
+    step = LATTICE_STEP
+    while True:
+        cols, rows = _lattice_nodes(width, step), _lattice_nodes(height, step)
+        fi, fj = _source_positions(transformer, bbox, width, height, cols, rows, x, y)
+        if step == 1:
+            return PixelLattice(fi=fi, fj=fj, cols=cols, rows=rows)
+        if not (np.isfinite(fi).all() and np.isfinite(fj).all()):
+            # An unprojectable node would blank a whole lattice cell.
+            step = 1
+            continue
+        check_x = np.sort(np.r_[cols, 0.5 * (cols[:-1] + cols[1:])])
+        check_y = np.sort(np.r_[rows, 0.5 * (rows[:-1] + rows[1:])])
+        exact_i, exact_j = _source_positions(
+            transformer, bbox, width, height, check_x, check_y, x, y
+        )
+        error = np.hypot(
+            bilinear(fi, cols, rows, check_x, check_y) - exact_i,
+            bilinear(fj, cols, rows, check_x, check_y) - exact_j,
+        )
+        if not (np.nanmax(error) > MAX_LATTICE_ERROR):
+            return PixelLattice(fi=fi, fj=fj, cols=cols, rows=rows)
+        step //= 2

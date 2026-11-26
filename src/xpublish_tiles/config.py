@@ -22,6 +22,8 @@ config = donfig.Config(
             # vertices summed over the features of one Features tile (provisional)
             "max_renderable_vertices": 5_000_000,
             "max_pixel_factor": 3,  # coarsen down to this many input grid cells per output pixel
+            # zlib level for PNG tiles: 1-2 encode about twice as fast as 6 for 5-25% more bytes
+            "png_compress_level": 6,
             "async_load": True,
             "async_load_timeout_per_tile": 20,  # seconds; None to disable
             "num_concurrent_data_loads": 4,  # max concurrent tile data loads; None to disable

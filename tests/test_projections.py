@@ -1,18 +1,24 @@
 import asyncio
 
+import morecantile
 import numpy as np
 import pyproj
 import pytest
+from pyproj.aoi import BBox
 
 import xarray as xr
 from xpublish_tiles.lib import transform_coordinates
 from xpublish_tiles.projections import (
     CONIC_ALLOWLIST,
     CONIC_TOLERANCE_METERS,
+    MAX_LATTICE_ERROR,
+    bilinear,
     conic_to_cylindrical,
+    fractional_index,
     geos_to_cylindrical,
     has_null_datum_shift,
     is_mercator_like,
+    pixel_lattice,
     transformer_from_crs,
 )
 
@@ -260,3 +266,49 @@ def test_transform_coordinates_geos(target):
         expected_y[off_disk] = np.nan
     np.testing.assert_allclose(out_x.data, expected_x, rtol=0, atol=GEOS_TARGETS[target])
     np.testing.assert_allclose(out_y.data, expected_y, rtol=0, atol=GEOS_TARGETS[target])
+
+
+@pytest.mark.parametrize("descending", [False, True])
+def test_fractional_index(descending):
+    coord = np.array([10.0, 20.0, 30.0, 40.0])
+    values = np.array([5.0, 10.0, 25.0, 40.0, 60.0, np.nan])
+    expected = np.array([-0.5, 0.0, 1.5, 3.0, 5.0, np.nan])
+    if descending:
+        coord = coord[::-1]
+        expected = 3 - expected
+    np.testing.assert_allclose(fractional_index(values, coord), expected)
+
+
+HRRR_LCC = pyproj.CRS.from_proj4(
+    "+proj=lcc +lat_0=38.5 +lon_0=-97.5 +lat_1=38.5 +lat_2=38.5 +R=6371229 +units=m"
+)
+
+
+@pytest.mark.parametrize(
+    "crs,tile",
+    [
+        (HRRR_LCC, (2, 0, 1)),
+        (HRRR_LCC, (3, 1, 3)),
+        (HRRR_LCC, (7, 36, 48)),
+        (pyproj.CRS.from_epsg(32733), (3, 4, 4)),
+        (pyproj.CRS.from_epsg(3035), (2, 1, 1)),
+    ],
+)
+def test_pixel_lattice_matches_exact_positions(crs, tile):
+    z, x, y = tile
+    b = morecantile.tms.get("WebMercatorQuad").xy_bounds(morecantile.Tile(x=x, y=y, z=z))
+    bbox = BBox(b.left, b.bottom, b.right, b.top)
+    transformer = transformer_from_crs(WEB_MERCATOR, crs)
+    axis = -3e6 + 3000.0 * np.arange(2000)
+    lattice = pixel_lattice(transformer, bbox, width=512, height=512, x=axis, y=axis)
+    pixels = np.arange(512.0)
+    centres_x = bbox.west + (pixels + 0.5) * (bbox.east - bbox.west) / 512
+    centres_y = bbox.south + (pixels + 0.5) * (bbox.north - bbox.south) / 512
+    exact_x, exact_y = transformer.transform(*np.meshgrid(centres_x, centres_y))
+    error = np.hypot(
+        bilinear(lattice.fi, lattice.cols, lattice.rows, pixels, pixels)
+        - fractional_index(exact_x.ravel(), axis).reshape(512, 512),
+        bilinear(lattice.fj, lattice.cols, lattice.rows, pixels, pixels)
+        - fractional_index(exact_y.ravel(), axis).reshape(512, 512),
+    )
+    assert error.max() < 2 * MAX_LATTICE_ERROR
