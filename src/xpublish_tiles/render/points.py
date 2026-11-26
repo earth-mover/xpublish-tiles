@@ -8,7 +8,7 @@ import spatialpandas
 from PIL import Image
 
 from xpublish_tiles.logger import get_context_logger, log_duration
-from xpublish_tiles.render import DatashaderRenderer, register_renderer
+from xpublish_tiles.render import DatashaderRenderer, encode_image, register_renderer
 from xpublish_tiles.render.raster import _apply_out_of_range_colors
 from xpublish_tiles.types import (
     DEFAULT_MARKERSIZE,
@@ -114,7 +114,7 @@ class PointsRenderer(DatashaderRenderer):
                 belowmincolor,
             )
         with log_duration(f"encode {format}", logger, key="encode"):
-            im.save(buffer, format=str(format))
+            encode_image(im, buffer, format)
 
     @staticmethod
     def style_id() -> str:

@@ -1633,6 +1633,19 @@ async def test_projected_rgb_matches_greyscale(tile):
     assert np.abs(a[..., :3] - b[..., :3])[opaque].max() <= 2
 
 
+@pytest.mark.asyncio
+async def test_png_compress_level_keeps_pixels():
+    ds = HRRR.create()
+    query_params = create_query_params(Tile(x=7, y=11, z=5), WEBMERC_TMS)
+    default = await pipeline(ds, query_params)
+    with config.set(png_compress_level=1):
+        fast = await pipeline(ds, query_params)
+    assert default.getvalue() != fast.getvalue()
+    np.testing.assert_array_equal(
+        np.asarray(Image.open(default)), np.asarray(Image.open(fast))
+    )
+
+
 def test_apply_query_rgb_keeps_band_dim():
     ds = RGB.create()
     validated = apply_query(ds, variables=["foo"], selectors={}, rgb=True)

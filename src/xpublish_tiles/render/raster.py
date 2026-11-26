@@ -21,7 +21,7 @@ from xpublish_tiles.lib import (
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
 from xpublish_tiles.projections import PixelLattice
-from xpublish_tiles.render import DatashaderRenderer, register_renderer
+from xpublish_tiles.render import DatashaderRenderer, encode_image, register_renderer
 from xpublish_tiles.render.kernels import footprint_mode, lattice_mean, offdisk_quad_mask
 from xpublish_tiles.types import (
     DEFAULT_MARKERSIZE,
@@ -480,7 +480,7 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                     )
 
         with log_duration(f"encode {format}", logger, key="encode"):
-            im.save(buffer, format=str(format))
+            encode_image(im, buffer, format)
 
     @staticmethod
     def style_id() -> str:

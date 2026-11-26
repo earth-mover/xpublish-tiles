@@ -15,6 +15,7 @@ from matplotlib.figure import Figure
 from PIL import Image, ImageDraw
 
 import xarray as xr
+from xpublish_tiles.config import config
 from xpublish_tiles.lib import (
     ColormapError,
     MissingParameterError,
@@ -67,6 +68,13 @@ def discrete_color_key(
     maxv = max(flag_values)
     cmap = mpl.colormaps.get_cmap(variant)
     return {v: mcolors.to_hex(cmap((v - minv) / maxv)) for v in flag_values}
+
+
+def encode_image(im: Image.Image, buffer: io.BytesIO, format) -> None:
+    if str(format) == "png":
+        im.save(buffer, format="png", compress_level=config.get("png_compress_level"))
+    else:
+        im.save(buffer, format=str(format))
 
 
 class RenderRegistry:
