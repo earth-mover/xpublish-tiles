@@ -71,3 +71,48 @@ def offdisk_quad_mask(xc, yc):
                     break
             bad[j, i] = found
     return bad
+
+
+@numba.njit(inline="always")
+def _lattice_segment(nodes, v, k):
+    last = nodes.size - 2
+    while k < last and nodes[k + 1] < v:
+        k += 1
+    return k, (v - nodes[k]) / (nodes[k + 1] - nodes[k])
+
+
+@numba.njit(parallel=NUMBA_PARALLEL, nogil=True, cache=True, boundscheck=False)
+def lattice_mean(source, fi, fj, cols, rows, sx, sy, out):
+    """Per band, mean of the nearest (band, y, x) ``source`` cells under sx * sy samples of each output pixel; NaN with none."""
+    nb, ny, nx = source.shape
+    height, width = out.shape[1], out.shape[2]
+    for i in numba.prange(height):  # ty: ignore[not-iterable]
+        fi_row = np.empty(cols.size)
+        fj_row = np.empty(cols.size)
+        acc = np.zeros((nb, width))
+        cnt = np.zeros((nb, width), dtype=np.int64)
+        for si in range(sy):
+            ky, wy = _lattice_segment(rows, i + (si + 0.5) / sy - 0.5, 0)
+            for c in range(cols.size):
+                fi_row[c] = fi[ky, c] + wy * (fi[ky + 1, c] - fi[ky, c])
+                fj_row[c] = fj[ky, c] + wy * (fj[ky + 1, c] - fj[ky, c])
+            kx = 0
+            for j in range(width):
+                for sk in range(sx):
+                    kx, wx = _lattice_segment(cols, j + (sk + 0.5) / sx - 0.5, kx)
+                    a = fi_row[kx] + wx * (fi_row[kx + 1] - fi_row[kx])
+                    b = fj_row[kx] + wx * (fj_row[kx + 1] - fj_row[kx])
+                    # NaN fails these comparisons, so unprojectable samples drop out
+                    if not (a > -0.5 and a < nx - 0.5 and b > -0.5 and b < ny - 0.5):
+                        continue
+                    ci = int(a + 0.5)
+                    cj = int(b + 0.5)
+                    for band in range(nb):
+                        value = source[band, cj, ci]
+                        if value == value:
+                            acc[band, j] += value
+                            cnt[band, j] += 1
+        for band in range(nb):
+            for j in range(width):
+                n = cnt[band, j]
+                out[band, i, j] = acc[band, j] / n if n > 0 else np.nan

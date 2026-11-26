@@ -1,4 +1,5 @@
 import io
+import math
 from numbers import Number
 from typing import cast
 
@@ -12,14 +13,16 @@ from PIL import Image
 from scipy.interpolate import NearestNDInterpolator
 
 import xarray as xr
+from xpublish_tiles.config import config
 from xpublish_tiles.grids import Curvilinear, Geostationary, GridSystem2D, Triangular
 from xpublish_tiles.lib import (
     MissingParameterError,
     maybe_cast_data,
 )
 from xpublish_tiles.logger import get_context_logger, log_duration
+from xpublish_tiles.projections import PixelLattice
 from xpublish_tiles.render import DatashaderRenderer, register_renderer
-from xpublish_tiles.render.kernels import footprint_mode, offdisk_quad_mask
+from xpublish_tiles.render.kernels import footprint_mode, lattice_mean, offdisk_quad_mask
 from xpublish_tiles.types import (
     DEFAULT_MARKERSIZE,
     ContinuousData,
@@ -258,6 +261,53 @@ def rasterize_categorical_rectilinear(
     )
 
 
+def _samples(cells: float) -> int:
+    # Coarsening keeps a tile under 2 * max_pixel_factor cells per pixel per axis.
+    cap = 2 * config.get("max_pixel_factor")
+    return int(min(cap, max(1, math.ceil(cells - 0.25))))
+
+
+def rasterize_from_lattice(
+    da: xr.DataArray,
+    grid: GridSystem2D,
+    *,
+    datatype: ContinuousData | RGBData,
+    lattice: PixelLattice,
+    bbox,
+    width: int,
+    height: int,
+) -> xr.DataArray:
+    """Mean of the source cells under each output pixel, found through ``lattice``; NaN where none."""
+    band_dims = (datatype.band_dim,) if isinstance(datatype, RGBData) else ()
+    source = np.asarray(da.transpose(*band_dims, grid.Ydim, grid.Xdim).data)
+    if not band_dims:
+        source = source[np.newaxis]
+    cells_x, cells_y = lattice.cells_per_pixel()
+    out = np.empty((source.shape[0], height, width), dtype=np.float64)
+    lattice_mean(
+        np.ascontiguousarray(source),
+        np.ascontiguousarray(lattice.fi),
+        np.ascontiguousarray(lattice.fj),
+        lattice.cols,
+        lattice.rows,
+        _samples(cells_x),
+        _samples(cells_y),
+        out,
+    )
+    xc = bbox.west + (bbox.east - bbox.west) * (np.arange(width) + 0.5) / width
+    yc = bbox.south + (bbox.north - bbox.south) * (np.arange(height) + 0.5) / height
+    return xr.DataArray(
+        out if band_dims else out[0],
+        dims=(*band_dims, grid.Ydim, grid.Xdim),
+        coords={grid.Xdim: xc, grid.Ydim: yc},
+        attrs={
+            "res": (xc[1] - xc[0], yc[0] - yc[1]),
+            "x_range": (bbox.west, bbox.east),
+            "y_range": (bbox.south, bbox.north),
+        },
+    )
+
+
 @register_renderer
 class DatashaderRasterRenderer(DatashaderRenderer):
     def validate(self, context: dict[str, "RenderContext"]):
@@ -324,6 +374,22 @@ class DatashaderRasterRenderer(DatashaderRenderer):
                             width=width,
                             height=height,
                         )
+            elif context.lattice is not None:
+                with (
+                    log_duration(
+                        f"render (continuous) {data.shape} lattice", logger, key="render"
+                    ),
+                    NUMBA_THREADING_LOCK,
+                ):
+                    mesh = rasterize_from_lattice(
+                        data,
+                        grid,
+                        datatype=context.datatype,
+                        lattice=context.lattice,
+                        bbox=context.bbox,
+                        width=width,
+                        height=height,
+                    )
             else:
                 data = maybe_cast_data(context.da)
                 if isinstance(grid, Geostationary):

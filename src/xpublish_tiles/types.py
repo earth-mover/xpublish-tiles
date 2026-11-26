@@ -23,6 +23,7 @@ from xpublish_tiles.grids import (
     UgridIndexer,
 )
 from xpublish_tiles.logger import get_context_logger
+from xpublish_tiles.projections import PixelLattice
 
 InputCRS = NewType("InputCRS", pyproj.CRS)
 OutputCRS = NewType("OutputCRS", pyproj.CRS)
@@ -254,6 +255,8 @@ class PopulatedRenderContext(RenderContext):
     da: xr.DataArray | None = None
     polygons: GeometryArray | None = None
     points: MultiPointArray | None = None
+    # Set instead of transformed coords when the raster renderer gathers in the source CRS.
+    lattice: PixelLattice | None = None
 
     @property
     def ugrid_indexer(self) -> UgridIndexer | None:

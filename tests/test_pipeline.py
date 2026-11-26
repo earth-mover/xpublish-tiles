@@ -1611,6 +1611,28 @@ async def test_rgb_colorscalerange_stretch():
     np.testing.assert_array_equal(a[..., 3], b[..., 3])
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tile", [Tile(x=1, y=3, z=3), Tile(x=7, y=11, z=5)])
+async def test_projected_rgb_matches_greyscale(tile):
+    """Equal bands on a projected grid draw the field as the ``gray`` colormap does."""
+    ds = HRRR.create().isel(time=0, step=0, drop=True).load()
+    span = (float(ds.foo.min()), float(ds.foo.max()))
+    rgb = ds.assign(foo=ds.foo.expand_dims(rgb=["red", "green", "blue"]))
+    rgb.attrs["_xpublish_id"] = "hrrr_rgb"
+    grey = await pipeline(
+        ds, create_query_params(tile, WEBMERC_TMS, variant="gray", colorscalerange=span)
+    )
+    colour = await pipeline(
+        rgb, create_query_params(tile, WEBMERC_TMS, variant="rgb", colorscalerange=span)
+    )
+    a = np.asarray(Image.open(grey).convert("RGBA")).astype(int)
+    b = np.asarray(Image.open(colour).convert("RGBA")).astype(int)
+    opaque = b[..., 3] > 0
+    assert opaque.any()
+    np.testing.assert_array_equal(a[..., 3] > 0, opaque)
+    assert np.abs(a[..., :3] - b[..., :3])[opaque].max() <= 2
+
+
 def test_apply_query_rgb_keeps_band_dim():
     ds = RGB.create()
     validated = apply_query(ds, variables=["foo"], selectors={}, rgb=True)
